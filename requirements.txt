@@ -1,7 +1,11 @@
 torch
+torchvision
 pytorch-lightning
 segmentation-models-pytorch
 hydra-core
+albumentations
+pandas
+tensorboardX
 pillow
 matplotlib
 numpy
