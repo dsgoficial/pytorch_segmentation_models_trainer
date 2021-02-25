@@ -1,6 +1,7 @@
 torch
+pytorch-lightning
 segmentation-models-pytorch
-hydra
+hydra-core
 pillow
 matplotlib
 numpy
