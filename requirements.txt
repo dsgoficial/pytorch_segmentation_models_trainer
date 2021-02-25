@@ -1,0 +1,7 @@
+torch
+segmentation-models-pytorch
+hydra
+pillow
+matplotlib
+numpy
+dataclasses-jsonschema
