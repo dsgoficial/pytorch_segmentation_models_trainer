@@ -25,6 +25,7 @@ import hydra
 import os
 import numpy as np
 import shutil
+from hydra.experimental import initialize, compose
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import SegmentationDataset
 
 def get_file_list(dir_path, extension):
