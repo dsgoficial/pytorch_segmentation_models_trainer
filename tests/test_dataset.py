@@ -25,10 +25,6 @@ import hydra
 import os
 import numpy as np
 import shutil
-from omegaconf import DictConfig, OmegaConf
-from hydra.core.config_store import ConfigStore
-from hydra.experimental import initialize, compose, initialize_config_module
-import pytorch_segmentation_models_trainer as ptsmt
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import SegmentationDataset
 
 def get_file_list(dir_path, extension):
