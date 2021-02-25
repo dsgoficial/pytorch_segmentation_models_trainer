@@ -20,10 +20,13 @@
 """
 import numpy as np
 import pandas as pd
+from dataclasses import dataclass, field
+from dataclasses_jsonschema import JsonSchemaMixin
+from omegaconf import MISSING
 from PIL import Image
 from torch.utils.data import Dataset
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 class SegmentationDataset(Dataset):
     def __init__(
@@ -74,6 +77,34 @@ class SegmentationDataset(Dataset):
             )
 
         return result
+
+@dataclass
+class ImageAugumentation(JsonSchemaMixin):
+    name: str
+    parameters: dict
+
+@dataclass
+class DS:
+    _target_: str = "pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset"
+    input_csv_path: str = MISSING
+    # n_classes: int
+    # dataset_size: int
+    # augmentation_list: List[ImageAugumentation]
+    # file_path: str
+    # base_path: str = ''
+    # cache: Any = True
+    # shuffle: bool = True
+    # shuffle_buffer_size: int = 10000
+    # shuffle_csv: bool = True
+    # ignore_errors: bool = True
+    # num_paralel_reads: int = 1
+    # img_dtype: str = 'float32'
+    # img_format: str = 'png'
+    # img_width: int = 512
+    # img_length: int = 512
+    # img_bands: int = 3
+    # mask_bands: int = 1
+    # use_ds_width_len: bool = False
 
 if __name__ == '__main__':
     pass

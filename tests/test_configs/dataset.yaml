@@ -1,0 +1,2 @@
+_target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+input_csv_path: teste

@@ -1,0 +1,7 @@
+app:
+  user: lol
+  attr: haha
+db:
+  driver: mysql
+  pass: secret
+  user: omry
