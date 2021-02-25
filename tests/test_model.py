@@ -25,5 +25,8 @@ import numpy as np
 
 class Test_TestSegmentationModel(unittest.TestCase):
 
-    def test_get_model(self):
+    def test_get_model(self) -> None:
+        return True
+    
+    def test_create_instance(self) -> None:
         return True
