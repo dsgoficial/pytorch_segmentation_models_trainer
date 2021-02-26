@@ -3,9 +3,10 @@
 /***************************************************************************
  segmentation_models_trainer
                               -------------------
-        begin                : 2020-09-14
+        begin                : 2021-02-25
         git sha              : $Format:%H$
-        copyright            : (C) 2020 by Philipe Borba - Cartographic Engineer @ Brazilian Army
+        copyright            : (C) 2021 by Philipe Borba - 
+                                    Cartographic Engineer @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
 
@@ -21,12 +22,14 @@
 
 import unittest
 import numpy as np
-
+import hydra
+import segmentation_models_pytorch as smp
+from hydra.experimental import initialize, compose
 
 class Test_TestSegmentationModel(unittest.TestCase):
-
-    def test_get_model(self) -> None:
-        return True
     
     def test_create_instance(self) -> None:
-        return True
+        with initialize(config_path="./test_configs"):
+            cfg = compose(config_name="model.yaml")
+            model_obj = hydra.utils.instantiate(cfg)
+            assert isinstance(model_obj, smp.Unet)

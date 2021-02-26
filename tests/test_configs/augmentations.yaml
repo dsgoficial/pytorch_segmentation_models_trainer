@@ -1,0 +1,18 @@
+augmentation_list:
+  - _target_: albumentations.HueSaturationValue
+    always_apply: false
+    hue_shift_limit: 0.2
+    p: 0.5
+  - _target_: albumentations.RandomBrightnessContrast
+    brightness_limit: 0.2
+    contrast_limit: 0.2
+    p: 0.5
+  - _target_: albumentations.RandomCrop
+    always_apply: true
+    height: 256
+    width: 256
+    p: 1.0
+  - _target_: albumentations.Flip
+    always_apply: true
+  - _target_: albumentations.pytorch.transforms.ToTensorV2
+    always_apply: true
