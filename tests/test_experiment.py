@@ -29,13 +29,13 @@ from tests.utils import CustomTestCase
 
 class Test_TestExperiment(CustomTestCase):
     def test_run_experiment_from_object(self) -> None:
-        initialize(config_path="./test_configs")
-        cfg = compose(
-            config_name="experiment",
-            overrides=[
-                'train_dataset.input_csv_path='+self.csv_ds_file,
-                'val_dataset.input_csv_path='+self.csv_ds_file,
-            ]
-        )
-        train_obj = train(cfg)
-        assert isinstance(train_obj, pl.Trainer)
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment.yaml",
+                overrides=[
+                    'train_dataset.input_csv_path='+self.csv_ds_file,
+                    'val_dataset.input_csv_path='+self.csv_ds_file,
+                ]
+            )
+            train_obj = train(cfg)
+            assert isinstance(train_obj, pl.Trainer)
