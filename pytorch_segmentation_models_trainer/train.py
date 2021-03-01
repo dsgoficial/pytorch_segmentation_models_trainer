@@ -44,6 +44,7 @@ def train(cfg: DictConfig) -> Trainer:
     )
     model = Model(cfg)
     trainer_logger = instantiate(cfg.logger) if "logger" in cfg else True
-    trainer = Trainer(**cfg.pl_trainer, logger=trainer_logger)
+    callback_list = [instantiate(i) for i in cfg.callbacks] if "callbacks" in cfg else []
+    trainer = Trainer(**cfg.pl_trainer, logger=trainer_logger, callbacks=callback_list)
     trainer.fit(model)
     return trainer
