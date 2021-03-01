@@ -40,7 +40,7 @@ class Model(pl.LightningModule):
         return instantiate(self.cfg.loss)
 
     def get_optimizer(self):
-        return instantiate(self.cfg.optimizer)
+        return instantiate(self.cfg.optimizer, params=self.parameters())
 
     def get_scheduler(self, optimizer):
         return torch.optim.lr_scheduler.OneCycleLR(
@@ -69,32 +69,32 @@ class Model(pl.LightningModule):
         train_dl = DataLoader(
             train_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
-            shuffle=self.cfg.train_dataloader.shuffle,
-            num_workers=self.cfg.train_dataloader.num_workers,
-            pin_memory=self.cfg.train_dataloader.pin_memory \
-                if 'pin_memory' in self.cfg.train_dataloader else True,
-            drop_last=self.cfg.train_dataloader.drop_last \
-                if 'drop_last' in self.cfg.train_dataloader else True,
-            prefetch_factor=self.cfg.train_dataloader.prefetch_factor \
-                if 'prefetch_factor' in self.cfg.train_dataloader \
+            shuffle=self.cfg.train_dataset.data_loader.shuffle,
+            num_workers=self.cfg.train_dataset.data_loader.num_workers,
+            pin_memory=self.cfg.train_dataset.data_loader.pin_memory \
+                if 'pin_memory' in self.cfg.train_dataset.data_loader else True,
+            drop_last=self.cfg.train_dataset.data_loader.drop_last \
+                if 'drop_last' in self.cfg.train_dataset.data_loader else True,
+            prefetch_factor=self.cfg.train_dataset.data_loader.prefetch_factor \
+                if 'prefetch_factor' in self.cfg.train_dataset.data_loader \
                     else 4*self.hyperparameters.batch_size
         )
         return train_dl
-    
+
     def val_dataloader(self):
-        val_ds = instantiate(self.cfg.val_dataloader)
+        val_ds = instantiate(self.cfg.val_dataset)
         val_dl = DataLoader(
             val_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
-            shuffle=self.cfg.val_dataloader.shuffle if 'shuffle' \
-                in self.cfg.val_dataloader else False,
-            num_workers=self.cfg.val_dataloader.num_workers,
-            pin_memory=self.cfg.val_dataloader.pin_memory \
-                if 'pin_memory' in self.cfg.val_dataloader else True,
-            drop_last=self.cfg.val_dataloader.drop_last \
-                if 'drop_last' in self.cfg.val_dataloader else True,
-            prefetch_factor=self.cfg.val_dataloader.prefetch_factor \
-                if 'prefetch_factor' in self.cfg.val_dataloader \
+            shuffle=self.cfg.val_dataset.data_loader.shuffle if 'shuffle' \
+                in self.cfg.val_dataset.data_loader else False,
+            num_workers=self.cfg.val_dataset.data_loader.num_workers,
+            pin_memory=self.cfg.val_dataset.data_loader.pin_memory \
+                if 'pin_memory' in self.cfg.val_dataset.data_loader else True,
+            drop_last=self.cfg.val_dataset.data_loader.drop_last \
+                if 'drop_last' in self.cfg.val_dataset.data_loader else True,
+            prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor \
+                if 'prefetch_factor' in self.cfg.val_dataset.data_loader \
                     else 4*self.hyperparameters.batch_size
         )
         return val_dl

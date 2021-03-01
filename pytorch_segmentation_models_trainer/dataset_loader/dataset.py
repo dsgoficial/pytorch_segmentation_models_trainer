@@ -30,10 +30,12 @@ from torch.utils.data import Dataset
 
 
 def load_augmentation_object(input_list):
-    aug_list = [
-        instantiate(i) for i in input_list
-    ]
-    return A.Compose(aug_list)
+    try:
+        return A.Compose(input_list)
+    except:
+        aug_list = [
+            instantiate(i) for i in input_list
+        ]
 
 class SegmentationDataset(Dataset):
     """[summary]
@@ -46,12 +48,14 @@ class SegmentationDataset(Dataset):
         input_csv_path: Path,
         root_dir=None,
         augmentation_list=None,
+        data_loader=None,
     ) -> None:
         self.input_csv_path = input_csv_path
         self.df = pd.read_csv(input_csv_path)
         self.root_dir = root_dir
         self.transform = None if augmentation_list is None \
             else load_augmentation_object(augmentation_list)
+        self.data_loader = data_loader
         self.len = len(self.df)
 
     def __len__(self) -> int:

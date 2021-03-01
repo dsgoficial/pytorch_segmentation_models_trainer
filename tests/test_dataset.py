@@ -20,10 +20,6 @@
  ****
 """
 
-import os
-import shutil
-import unittest
-
 import albumentations as A
 import hydra
 import numpy as np
@@ -31,54 +27,9 @@ from hydra.experimental import compose, initialize
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     SegmentationDataset, load_augmentation_object)
 
+from tests.utils import CustomTestCase
 
-def get_file_list(dir_path, extension):
-    output_list = []
-    for root, dirs, files in os.walk(dir_path):
-        output_list += [os.path.join(root,f) for f in files if f.endswith(extension)]
-    return sorted(output_list)
-
-def create_csv_file(file_path, image_list, label_list):
-    csv_text = 'id,image_path,label_path,rows,columns\n'
-    for idx, i in enumerate(image_list):
-        csv_text += f"{idx},{i},{label_list[idx]},512,512\n"
-    with open(file_path, 'w') as csv_file:
-        csv_file.write(csv_text)
-    return file_path
-
-class Test_TestDataset(unittest.TestCase):
-    # cs = ConfigStore.instance()
-    # cs.store(name="dataset", node=DS)
-
-    def setUp(self):
-        current_dir = os.path.dirname(__file__)
-        image_list = get_file_list(
-            os.path.join(current_dir, 'testing_data', 'data', 'images'),
-            '.png'
-        )
-        label_list = get_file_list(
-            os.path.join(current_dir, 'testing_data', 'data', 'labels'),
-            '.png'
-        )
-        label_list = get_file_list(
-            os.path.join(current_dir, 'testing_data', 'data', 'labels'),
-            '.png'
-        )
-        self.csv_ds_file = create_csv_file(
-            os.path.join(current_dir, 'testing_data', 'csv_train_ds.csv'),
-            image_list[0:5],
-            label_list[0:5]
-        )
-
-    def tearDown(self):
-        os.remove(self.csv_ds_file)
-        outputs_path = os.path.join(
-                os.path.dirname(__file__),
-                '..',
-                'outputs'
-            )
-        if os.path.exists(outputs_path):
-            shutil.rmtree(outputs_path)
+class Test_TestDataset(CustomTestCase):
     
     def test_create_instance(self) -> None:
         with initialize(config_path="./test_configs"):

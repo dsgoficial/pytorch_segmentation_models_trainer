@@ -43,6 +43,7 @@ def train(cfg: DictConfig) -> Trainer:
         OmegaConf.to_yaml(cfg)
     )
     model = Model(cfg)
-    trainer = instantiate(cfg.trainer)
+    trainer_logger = instantiate(cfg.logger) if "logger" in cfg else True
+    trainer = Trainer(**cfg.pl_trainer, logger=trainer_logger)
     trainer.fit(model)
     return trainer
