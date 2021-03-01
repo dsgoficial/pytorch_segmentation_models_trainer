@@ -36,6 +36,7 @@ def load_augmentation_object(input_list):
         aug_list = [
             instantiate(i) for i in input_list
         ]
+        return A.Compose(aug_list)
 
 class SegmentationDataset(Dataset):
     """[summary]
