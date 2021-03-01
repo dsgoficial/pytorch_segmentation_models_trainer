@@ -18,17 +18,16 @@
  *                                                                         *
  ****
 """
-import numpy as np
-import pandas as pd
-import albumentations as A
-from dataclasses import dataclass, field
-from dataclasses_jsonschema import JsonSchemaMixin
-from hydra.utils import instantiate
-from omegaconf import MISSING
-from PIL import Image
-from torch.utils.data import Dataset
 from pathlib import Path
 from typing import Any, Dict, List
+
+import albumentations as A
+import numpy as np
+import pandas as pd
+from hydra.utils import instantiate
+from PIL import Image
+from torch.utils.data import Dataset
+
 
 def load_augmentation_object(input_list):
     aug_list = [
@@ -37,16 +36,22 @@ def load_augmentation_object(input_list):
     return A.Compose(aug_list)
 
 class SegmentationDataset(Dataset):
+    """[summary]
+
+    Args:
+        Dataset ([type]): [description]
+    """
     def __init__(
         self,
         input_csv_path: Path,
-        root_dir=None, 
-        transform=None,
+        root_dir=None,
+        augmentation_list=None,
     ) -> None:
         self.input_csv_path = input_csv_path
         self.df = pd.read_csv(input_csv_path)
         self.root_dir = root_dir
-        self.transform = transform
+        self.transform = None if augmentation_list is None \
+            else load_augmentation_object(augmentation_list)
         self.len = len(self.df)
 
     def __len__(self) -> int:
@@ -61,7 +66,7 @@ class SegmentationDataset(Dataset):
         mask_path = str(
             self.df.iloc[idx]['label_path']
         )
-        
+
         if self.root_dir is not None:
             image_path = image_path.replace(
                 '/data', str(self.root_dir)
@@ -77,7 +82,7 @@ class SegmentationDataset(Dataset):
             'image': image,
             'mask': mask
         }
-        
+
         if self.transform is not None:
             result = self.transform(
                 image=image,
