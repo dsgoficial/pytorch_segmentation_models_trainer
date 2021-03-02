@@ -17,7 +17,7 @@ DESCRIPTION = 'Image segmentation models training of popular architectures.'
 URL = 'https://github.com/phborba/pytorch_segmentation_models_trainer'
 EMAIL = 'philipeborba@gmail.com'
 AUTHOR = 'Philipe Borba'
-REQUIRES_PYTHON = '>=3.6.0'
+REQUIRES_PYTHON = '>=3.8.0'
 VERSION = '0.1'
 
 # The rest you shouldn't have to touch too much :)
@@ -137,7 +137,7 @@ setup(
         'Programming Language :: Python :: Implementation :: CPython',
         'Programming Language :: Python :: Implementation :: PyPy'
     ],
-    keywords='pytorch hydra semantic-segmentation deep learning',
+    keywords='pytorch hydra semantic-segmentation deep-learning deep learning',
     # $ setup.py publish support.
     cmdclass={
         'upload': UploadCommand,
