@@ -17,8 +17,8 @@ DESCRIPTION = 'Image segmentation models training of popular architectures.'
 URL = 'https://github.com/phborba/pytorch_segmentation_models_trainer'
 EMAIL = 'philipeborba@gmail.com'
 AUTHOR = 'Philipe Borba'
-REQUIRES_PYTHON = '>=3.8.0'
-VERSION = '0.1.1'
+REQUIRES_PYTHON = '>=3.6.0'
+VERSION = '0.1.2'
 
 # The rest you shouldn't have to touch too much :)
 # ------------------------------------------------
