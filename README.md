@@ -2,7 +2,8 @@
 
 [![Python application](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-app.yml/badge.svg)](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-app.yml)
 [![Upload Python Package](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-publish.yml/badge.svg)](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-publish.yml)
-[![maintainer](https://img.shields.io/badge/maintainer-phborba-blue.svg)](https://github.com/phborba)
+![PyPI](https://img.shields.io/pypi/v/pytorch-segmentation-models-trainer)
+[![DOI](https://zenodo.org/badge/341245871.svg)](https://zenodo.org/badge/latestdoi/341245871)
 
 Framework based on Pytorch, Pytorch Lightning,  segmentation_models.pytorch and hydra to train semantic segmentation models using yaml config files as follows:
 
@@ -91,3 +92,21 @@ pytorch-segmentation-models-trainer --config-path /path/to/config/folder --confi
 The mode can be stored in configuration yaml as well. In this case, do not pass the +mode= argument. If the mode is stored in the yaml and you want to overwrite the value, do not use the + clause, just mode= .
 
 This module suports hydra features such as configuration composition. For further information, please visit https://hydra.cc/docs/intro
+
+Citing:
+
+```
+
+@software{philipe_borba_2021_4573997,
+  author       = {Philipe Borba},
+  title        = {{phborba/pytorch\_segmentation\_models\_trainer: Minor 
+                   bug fix}},
+  month        = mar,
+  year         = 2021,
+  publisher    = {Zenodo},
+  version      = {v0.1.1},
+  doi          = {10.5281/zenodo.4573997},
+  url          = {https://doi.org/10.5281/zenodo.4573997}
+}
+```
+    prefetch_factor: 1
