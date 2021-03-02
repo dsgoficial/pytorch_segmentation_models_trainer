@@ -31,12 +31,12 @@ from torch.utils.data import Dataset
 
 def load_augmentation_object(input_list):
     try:
-        return A.Compose(input_list)
-    except:
         aug_list = [
             instantiate(i) for i in input_list
         ]
-        return A.Compose(aug_list)
+    except:
+        aug_list = input_list
+    return A.Compose(aug_list)
 
 class SegmentationDataset(Dataset):
     """[summary]
