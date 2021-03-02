@@ -18,16 +18,10 @@
  *                                                                         *
  ****
 """
-import logging
-
 import hydra
-from hydra.utils import instantiate
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from pytorch_lightning import Trainer
 
-from pytorch_segmentation_models_trainer.model_loader.model import Model
-
-logger = logging.getLogger(__name__)
 
 @hydra.main(config_path="conf", config_name="config")
 def predict(cfg: DictConfig) -> Trainer:
