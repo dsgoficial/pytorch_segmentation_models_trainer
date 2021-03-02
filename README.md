@@ -109,4 +109,3 @@ Citing:
   url          = {https://doi.org/10.5281/zenodo.4573997}
 }
 ```
-    prefetch_factor: 1
