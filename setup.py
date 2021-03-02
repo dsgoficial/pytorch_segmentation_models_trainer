@@ -113,6 +113,9 @@ setup(
     python_requires=REQUIRES_PYTHON,
     url=URL,
     packages=find_packages(exclude=('tests', 'docs', 'images', 'examples')),
+    entry_points={
+        "console_scripts": ["pytorch-segmentation-models-trainer=pytorch_segmentation_models_trainer.main:main"]
+    },
     # If your package is a single module, use this instead of 'packages':
     # py_modules=['mypackage'],
 

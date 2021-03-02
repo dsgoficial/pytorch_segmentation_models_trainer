@@ -82,9 +82,12 @@ val_dataset:
       always_apply: true
 ```
 
-Usage in command line:
+To train a model with configuration path ```/path/to/config/folder``` and name ```test.yaml```:
 
 ```
-python3 train.py --config-path /path/to/config/folder --config-name yaml_config_name
+pytorch-segmentation-models-trainer --config-path /path/to/config/folder --config-name test +mode=train
 ```
 
+The mode can be stored in configuration yaml as well. In this case, do not pass the +mode= argument. If the mode is stored in the yaml and you want to overwrite the value, do not use the + clause, just mode= .
+
+This module suports hydra features such as configuration composition. For further information, please visit https://hydra.cc/docs/intro
