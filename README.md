@@ -2,9 +2,9 @@
 
 [![Python application](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-app.yml/badge.svg)](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-app.yml)
 [![Upload Python Package](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-publish.yml/badge.svg)](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-publish.yml)
-![PyPI](https://img.shields.io/pypi/v/pytorch-segmentation-models-trainer)
+[![PyPI](https://img.shields.io/pypi/v/pytorch-segmentation-models-trainer)](https://pypi.org/project/pytorch-segmentation-models-trainer/)
 [![maintainer](https://img.shields.io/badge/maintainer-phborba-blue.svg)](https://github.com/phborba)
-[![DOI](https://zenodo.org/badge/341245871.svg)](https://zenodo.org/badge/latestdoi/341245871)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4574256.svg)](https://doi.org/10.5281/zenodo.4574256)
 
 Framework based on Pytorch, Pytorch Lightning,  segmentation_models.pytorch and hydra to train semantic segmentation models using yaml config files as follows:
 
@@ -98,15 +98,14 @@ Citing:
 
 ```
 
-@software{philipe_borba_2021_4573997,
+@software{philipe_borba_2021_4574256,
   author       = {Philipe Borba},
-  title        = {{phborba/pytorch\_segmentation\_models\_trainer: Minor 
-                   bug fix}},
+  title        = {{phborba/pytorch\_segmentation\_models\_trainer: 
+                   Version 0.1.2}},
   month        = mar,
   year         = 2021,
   publisher    = {Zenodo},
-  version      = {v0.1.1},
-  doi          = {10.5281/zenodo.4573997},
-  url          = {https://doi.org/10.5281/zenodo.4573997}
+  version      = {v0.1.2},
+  doi          = {10.5281/zenodo.4574256},
+  url          = {https://doi.org/10.5281/zenodo.4574256}
 }
-```
