@@ -30,10 +30,13 @@ from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
 from tests.utils import CustomTestCase
 
 class Test_TestDataset(CustomTestCase):
-    
+
     def test_create_instance(self) -> None:
         with initialize(config_path="./test_configs"):
-            cfg = compose(config_name="dataset.yaml", overrides=['input_csv_path='+self.csv_ds_file])
+            cfg = compose(
+                config_name="dataset.yaml",
+                overrides=['input_csv_path='+self.csv_ds_file]
+            )
             ds_from_cfg = hydra.utils.instantiate(cfg)
             ds_from_ref = SegmentationDataset(input_csv_path=self.csv_ds_file)
             self.assertEqual(
@@ -43,14 +46,17 @@ class Test_TestDataset(CustomTestCase):
 
     def test_load_image(self) -> None:
         with initialize(config_path="./test_configs"):
-            cfg = compose(config_name="dataset.yaml", overrides=['input_csv_path='+self.csv_ds_file])
+            cfg = compose(
+                config_name="dataset.yaml",
+                overrides=['input_csv_path='+self.csv_ds_file]
+            )
             ds_from_cfg = hydra.utils.instantiate(cfg)
             ds_from_ref = SegmentationDataset(input_csv_path=self.csv_ds_file)
             assert(
                 np.array_equal(ds_from_cfg[0]['image'], ds_from_ref[0]['image']) and \
                 np.array_equal(ds_from_cfg[0]['mask'], ds_from_ref[0]['mask']) 
             )
-    
+
     def test_load_augmentations(self) -> None:
         with initialize(config_path="./test_configs"):
             cfg = compose(config_name="augmentations.yaml")
