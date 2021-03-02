@@ -48,3 +48,6 @@ def train(cfg: DictConfig) -> Trainer:
     trainer = Trainer(**cfg.pl_trainer, logger=trainer_logger, callbacks=callback_list)
     trainer.fit(model)
     return trainer
+
+if __name__=="__main__":
+    train()
