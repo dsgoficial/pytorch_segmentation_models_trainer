@@ -27,11 +27,3 @@ jobs:
         with:
           push: true
           tags: phborba/pytorch_segmentation_models_trainer:latest
-      - name: Push to GitHub Packages
-        uses: docker/build-push-action@v1
-        with:
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-          registry: docker.pkg.github.com
-          repository: phborba/pytorch_segmentation_models_trainer/image
-          tag_with_ref: true
