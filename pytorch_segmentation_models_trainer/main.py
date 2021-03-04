@@ -27,7 +27,7 @@ from pytorch_segmentation_models_trainer.train import train
 from pytorch_segmentation_models_trainer.config_utils import validate_config
 
 
-@hydra.main()
+@hydra.main(config_path="conf")
 def main(cfg: DictConfig) -> Trainer:
     if cfg.mode == 'train':
         return train(cfg)
@@ -37,6 +37,12 @@ def main(cfg: DictConfig) -> Trainer:
         return validate_config(cfg)
     else:
         raise NotImplementedError
+
+# this function is required to allow automatic detection of the module name when running
+# from a binary script.
+# it should be called from the executable script and not the hydra.main() function directly.
+def entry():
+    main()
 
 if __name__=="__main__":
     main()

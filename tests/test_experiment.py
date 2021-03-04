@@ -42,24 +42,3 @@ class Test_TestExperiment(CustomTestCase):
             )
             train_obj = train(cfg)
             assert isinstance(train_obj, pl.Trainer)
-    def test_run_from_command_line(self) -> None:
-        script_path = os.path.join(
-            os.path.dirname(__file__),
-            '..',
-            'pytorch_segmentation_models_trainer',
-            'train.py'
-        )
-        return_from_process = subprocess.run(
-            [
-                'python3',
-                script_path,
-                '--config-path',
-                '../tests/test_configs',
-                '--config-name',
-                'experiment',
-                'train_dataset.input_csv_path='+self.csv_ds_file,
-                'val_dataset.input_csv_path='+self.csv_ds_file
-            ],
-            check=True
-        )
-        self.assertEqual(return_from_process.returncode, 0)

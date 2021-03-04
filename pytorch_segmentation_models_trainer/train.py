@@ -29,7 +29,7 @@ from pytorch_segmentation_models_trainer.model_loader.model import Model
 
 logger = logging.getLogger(__name__)
 
-@hydra.main(config_path="conf", config_name="config")
+@hydra.main()
 def train(cfg: DictConfig) -> Trainer:
     """Trains the model.
     Args:
