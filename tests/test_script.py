@@ -104,7 +104,7 @@ class Test_TestScript(CustomTestCase):
             [
                 'python3',
                 script_path,
-                '--config-path',
+                '--config-dir',
                 config_path,
                 '--config-name',
                 'experiment',
