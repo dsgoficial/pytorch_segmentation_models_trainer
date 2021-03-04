@@ -3,7 +3,7 @@
 /***************************************************************************
  pytorch_segmentation_models_trainer
                               -------------------
-        begin                : 2021-03-02
+        begin                : 2021-03-04
         git sha              : $Format:%H$
         copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
@@ -18,31 +18,19 @@
  *                                                                         *
  ****
 """
-
 import hydra
-from omegaconf import DictConfig
-from pytorch_lightning import Trainer
-from pytorch_segmentation_models_trainer.predict import predict
-from pytorch_segmentation_models_trainer.train import train
-from pytorch_segmentation_models_trainer.config_utils import validate_config
+import logging
 
+from omegaconf import DictConfig, OmegaConf
 
-@hydra.main(config_path="conf")
-def main(cfg: DictConfig) -> Trainer:
-    if cfg.mode == 'train':
-        return train(cfg)
-    elif cfg.mode == 'predict':
-        return predict(cfg)
-    elif cfg.mode == 'validate-config':
-        return validate_config(cfg)
-    else:
-        raise NotImplementedError
+logger = logging.getLogger(__name__)
 
-# this function is required to allow automatic detection of the module name when running
-# from a binary script.
-# it should be called from the executable script and not the hydra.main() function directly.
-def entry():
-    main()
+@hydra.main()
+def validate_config(cfg: DictConfig) -> None:
+    logger.info(
+        "Input configuration: \n%s",
+        OmegaConf.to_yaml(cfg)
+    )
 
 if __name__=="__main__":
-    main()
+    validate_config()

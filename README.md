@@ -88,7 +88,7 @@ val_dataset:
 To train a model with configuration path ```/path/to/config/folder``` and name ```test.yaml```:
 
 ```
-pytorch-segmentation-models-trainer --config-path /path/to/config/folder --config-name test +mode=train
+pytorch-smt --config-dir /path/to/config/folder --config-name test +mode=train
 ```
 
 The mode can be stored in configuration yaml as well. In this case, do not pass the +mode= argument. If the mode is stored in the yaml and you want to overwrite the value, do not use the + clause, just mode= .

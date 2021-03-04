@@ -18,7 +18,7 @@ URL = 'https://github.com/phborba/pytorch_segmentation_models_trainer'
 EMAIL = 'philipeborba@gmail.com'
 AUTHOR = 'Philipe Borba'
 REQUIRES_PYTHON = '>=3.6.0'
-VERSION = '0.1.2'
+VERSION = '0.1.3'
 
 # The rest you shouldn't have to touch too much :)
 # ------------------------------------------------
@@ -44,7 +44,7 @@ except:
 
 # What packages are optional?
 EXTRAS = {
-    'tests': ['pytest', 'scikit-image'],
+    'tests': ['pytest', 'scikit-image', 'parameterized'],
 }
 
 # Import the README and use it as the long-description.
@@ -114,7 +114,7 @@ setup(
     url=URL,
     packages=find_packages(exclude=('tests', 'docs', 'images', 'examples')),
     entry_points={
-        "console_scripts": ["pytorch-segmentation-models-trainer=pytorch_segmentation_models_trainer.main:main"]
+        "console_scripts": ["pytorch-smt=pytorch_segmentation_models_trainer.main:entry"]
     },
     # If your package is a single module, use this instead of 'packages':
     # py_modules=['mypackage'],
