@@ -22,6 +22,11 @@ import albumentations as A
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
+from pytorch_lightning.metrics import (
+    Accuracy, F1, IoU, Precision, Recall
+)
+#precision e recall com problema no pytorch lightning 1.2, 
+# retirar e depois ver o que fazer
 from torch.utils.data import DataLoader
 
 class Model(pl.LightningModule):
@@ -35,6 +40,16 @@ class Model(pl.LightningModule):
         self.cfg = cfg
         self.model = instantiate(self.cfg.model)
         self.loss_function = self.get_loss_function()
+        metrics = pl.metrics.MetricCollection(
+            [
+                Accuracy(),
+                Precision(),
+                Recall(),
+                F1(num_classes=self.cfg.model.classes)
+            ]
+        )
+        self.train_metrics = metrics.clone()
+        self.validation_metrics = metrics.clone()
 
     def get_loss_function(self):
         return instantiate(self.cfg.loss)
@@ -51,7 +66,7 @@ class Model(pl.LightningModule):
         )
 
     def forward(self, x):
-        return self.model(x)
+        return self.model(x.float())
 
     def configure_optimizers(self):
         # REQUIRED
@@ -104,6 +119,11 @@ class Model(pl.LightningModule):
         masks = masks.long()
         predicted_masks = self(images)
         loss = self.loss_function(predicted_masks, masks)
+        self.train_metrics(predicted_masks, masks)
+        # use log_dict instead of log
+        self.log_dict(
+            self.train_metrics, on_step=True, on_epoch=False
+        )
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -111,6 +131,11 @@ class Model(pl.LightningModule):
         masks = masks.long()
         predicted_masks = self(images)
         loss = self.loss_function(predicted_masks, masks)
+        self.validation_metrics(predicted_masks, masks)
+        # use log_dict instead of log
+        self.log_dict(
+            self.validation_metrics, on_step=True, on_epoch=True
+        )
         return {'val_loss': loss}
 
     def validation_epoch_end(self, outputs):

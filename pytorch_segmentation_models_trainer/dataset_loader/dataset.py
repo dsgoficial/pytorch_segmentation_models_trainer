@@ -86,6 +86,7 @@ class SegmentationDataset(Dataset):
         image = np.array(image)
         mask = Image.open(mask_path).convert('L')
         mask = np.array(mask)
+        mask = (mask > 0).astype(np.uint8)
         result = {
             'image': image,
             'mask': mask
