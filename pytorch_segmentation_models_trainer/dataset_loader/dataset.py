@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -73,11 +74,13 @@ class SegmentationDataset(Dataset):
         )
 
         if self.root_dir is not None:
-            image_path = image_path.replace(
-                '/data', str(self.root_dir)
+            image_path = os.path.join(
+                self.root_dir,
+                image_path
             )
-            mask_path = mask_path.replace(
-                '/data', str(self.root_dir)
+            mask_path = os.path.join(
+                self.root_dir,
+                mask_path
             )
         image = Image.open(image_path)
         image = np.array(image)
