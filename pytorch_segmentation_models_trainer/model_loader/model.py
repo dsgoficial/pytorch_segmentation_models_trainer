@@ -136,7 +136,7 @@ class Model(pl.LightningModule):
         self.train_metrics(predicted_masks, masks)
         # use log_dict instead of log
         self.log_dict(
-            self.train_metrics, on_step=True, on_epoch=False
+            self.train_metrics, on_step=True, on_epoch=False, prog_bar=True
         )
         return loss
 
@@ -148,16 +148,16 @@ class Model(pl.LightningModule):
         self.validation_metrics(predicted_masks, masks)
         # use log_dict instead of log
         self.log_dict(
-            self.validation_metrics, on_step=True, on_epoch=True
+            self.validation_metrics, on_step=True, on_epoch=True, prog_bar=True
         )
-        return {'val_loss': loss}
+        return {'val_loss': loss, 'log': self.validation_metrics.compute()}
 
     def validation_epoch_end(self, outputs):
         # OPTIONAL
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
         tensorboard_logs = {'val_loss': avg_loss}
         tensorboard_logs.update(
-            {'val_'+str(k): v for k,v in self.validation_metrics.items()}
+            {'val_'+k.lower(): v for k, v in self.validation_metrics.compute().items()}
         )
         return {'avg_val_loss': avg_loss,
                 'log': tensorboard_logs}
