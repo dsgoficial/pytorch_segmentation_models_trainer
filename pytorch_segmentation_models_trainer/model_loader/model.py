@@ -29,6 +29,8 @@ from pytorch_lightning.metrics import (
 # retirar e depois ver o que fazer
 from torch.utils.data import DataLoader
 
+from typing import List, Any
+
 class Model(pl.LightningModule):
     """[summary]
 
@@ -77,6 +79,7 @@ class Model(pl.LightningModule):
         for child in self.model.encoder.children():
             for param in child.parameters():
                 param.requires_grad = trainable
+        print(f"\nEncoder weights set to trainable={trainable}\n")
         return
 
     def forward(self, x):
