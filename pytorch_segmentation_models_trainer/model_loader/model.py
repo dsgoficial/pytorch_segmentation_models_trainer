@@ -154,5 +154,8 @@ class Model(pl.LightningModule):
         # OPTIONAL
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
         tensorboard_logs = {'val_loss': avg_loss}
+        tensorboard_logs.update(
+            {'val_'+str(k): v for k,v in self.validation_metrics.items()}
+        )
         return {'avg_val_loss': avg_loss,
                 'log': tensorboard_logs}
