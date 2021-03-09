@@ -65,6 +65,18 @@ class Model(pl.LightningModule):
             steps_per_epoch=len(self.train_dataloader())
         )
 
+    def set_encoder_trainable(self, trainable=False):
+        """Freezes or unfreezes the model encoder.
+
+        Args:
+            trainable (bool, optional): Sets the encoder weights trainable.
+            Defaults to False.
+        """
+        for child in self.model.encoder.children():
+            for param in child.parameters():
+                param.requires_grad = trainable
+        return
+
     def forward(self, x):
         return self.model(x.float())
 
@@ -141,7 +153,6 @@ class Model(pl.LightningModule):
     def validation_epoch_end(self, outputs):
         # OPTIONAL
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-   
         tensorboard_logs = {'val_loss': avg_loss}
         return {'avg_val_loss': avg_loss,
                 'log': tensorboard_logs}
