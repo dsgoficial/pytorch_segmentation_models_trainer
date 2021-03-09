@@ -65,7 +65,7 @@ class Model(pl.LightningModule):
                 epochs=self.cfg.hyperparameters.epochs,
                 steps_per_epoch=len(self.train_dataloader())
             )
-        return instantiate(self.cfg.scheduler)
+        return instantiate(self.cfg.scheduler, optimizer=optimizer)
 
     def set_encoder_trainable(self, trainable=False):
         """Freezes or unfreezes the model encoder.
