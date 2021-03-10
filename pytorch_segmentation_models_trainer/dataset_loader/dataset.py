@@ -51,6 +51,8 @@ class SegmentationDataset(Dataset):
         root_dir=None,
         augmentation_list=None,
         data_loader=None,
+        image_key=None,
+        mask_key=None
     ) -> None:
         self.input_csv_path = input_csv_path
         self.df = pd.read_csv(input_csv_path)
@@ -59,6 +61,8 @@ class SegmentationDataset(Dataset):
             else load_augmentation_object(augmentation_list)
         self.data_loader = data_loader
         self.len = len(self.df)
+        self.image_key = image_key if image_key is not None else 'image_path'
+        self.mask_key = mask_key if mask_key is not None else 'label_path'
 
     def __len__(self) -> int:
         return self.len
@@ -66,8 +70,8 @@ class SegmentationDataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         idx = idx % self.len
 
-        image = self.load_image(idx)
-        mask = self.load_image(idx, key='label_path')
+        image = self.load_image(idx, key=self.image_key)
+        mask = self.load_image(idx, key=self.mask_key, is_mask=True)
         result = {
             'image': image,
             'mask': mask
@@ -76,8 +80,9 @@ class SegmentationDataset(Dataset):
                 mask=mask
             )
         return result
-    
-    def get_path(self, idx, key='image_path'):
+
+    def get_path(self, idx, key=None):
+        key = self.image_key if key is None else key
         image_path = str(self.df.iloc[idx][key])
         if self.root_dir is not None:
             image_path = os.path.join(
@@ -85,8 +90,9 @@ class SegmentationDataset(Dataset):
                 image_path
             )
         return image_path
-    
-    def load_image(self, idx, key='image_path', is_mask=False):
+
+    def load_image(self, idx, key=None, is_mask=False):
+        key = self.image_key if key is None else key
         image_path = self.get_path(idx, key=key)
         image = Image.open(image_path) if not is_mask \
             else Image.open(image_path).convert('L')
