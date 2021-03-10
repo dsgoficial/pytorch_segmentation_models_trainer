@@ -25,16 +25,23 @@ import subprocess
 
 import pytorch_lightning as pl
 from hydra.experimental import compose, initialize
+from parameterized import parameterized
 from pytorch_segmentation_models_trainer.train import train
 
 from tests.utils import CustomTestCase
 
-
+config_name_list = [
+    "experiment.yaml",
+    "experiment_warmup.yaml",
+    "experiment_warmup_and_img_callback.yaml"
+]
 class Test_TestExperiment(CustomTestCase):
-    def test_run_experiment_from_object(self) -> None:
+
+    @parameterized.expand(config_name_list)
+    def test_run_experiment_from_object(self, config_name: str) -> None:
         with initialize(config_path="./test_configs"):
             cfg = compose(
-                config_name="experiment.yaml",
+                config_name=config_name,
                 overrides=[
                     'train_dataset.input_csv_path='+self.csv_ds_file,
                     'val_dataset.input_csv_path='+self.csv_ds_file,
@@ -42,3 +49,4 @@ class Test_TestExperiment(CustomTestCase):
             )
             train_obj = train(cfg)
             assert isinstance(train_obj, pl.Trainer)
+

@@ -29,6 +29,8 @@ from pytorch_lightning.metrics import (
 # retirar e depois ver o que fazer
 from torch.utils.data import DataLoader
 
+from typing import List, Any
+
 class Model(pl.LightningModule):
     """[summary]
 
@@ -58,12 +60,27 @@ class Model(pl.LightningModule):
         return instantiate(self.cfg.optimizer, params=self.parameters())
 
     def get_scheduler(self, optimizer):
-        return torch.optim.lr_scheduler.OneCycleLR(
-            optimizer,
-            max_lr=self.cfg.hyperparameters.max_lr,
-            epochs=self.cfg.hyperparameters.epochs,
-            steps_per_epoch=len(self.train_dataloader())
-        )
+        if 'scheduler' not in self.cfg:
+            return torch.optim.lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=self.cfg.hyperparameters.max_lr,
+                epochs=self.cfg.hyperparameters.epochs,
+                steps_per_epoch=len(self.train_dataloader())
+            )
+        return instantiate(self.cfg.scheduler, optimizer=optimizer)
+
+    def set_encoder_trainable(self, trainable=False):
+        """Freezes or unfreezes the model encoder.
+
+        Args:
+            trainable (bool, optional): Sets the encoder weights trainable.
+            Defaults to False.
+        """
+        for child in self.model.encoder.children():
+            for param in child.parameters():
+                param.requires_grad = trainable
+        print(f"\nEncoder weights set to trainable={trainable}\n")
+        return
 
     def forward(self, x):
         return self.model(x.float())
@@ -122,7 +139,7 @@ class Model(pl.LightningModule):
         self.train_metrics(predicted_masks, masks)
         # use log_dict instead of log
         self.log_dict(
-            self.train_metrics, on_step=True, on_epoch=False
+            self.train_metrics, on_step=True, on_epoch=False, prog_bar=True
         )
         return loss
 
@@ -134,14 +151,16 @@ class Model(pl.LightningModule):
         self.validation_metrics(predicted_masks, masks)
         # use log_dict instead of log
         self.log_dict(
-            self.validation_metrics, on_step=True, on_epoch=True
+            self.validation_metrics, on_step=True, on_epoch=True, prog_bar=True
         )
-        return {'val_loss': loss}
+        return {'val_loss': loss, 'log': self.validation_metrics.compute()}
 
     def validation_epoch_end(self, outputs):
         # OPTIONAL
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-   
         tensorboard_logs = {'val_loss': avg_loss}
+        tensorboard_logs.update(
+            {'val_'+k.lower(): v for k, v in self.validation_metrics.compute().items()}
+        )
         return {'avg_val_loss': avg_loss,
                 'log': tensorboard_logs}

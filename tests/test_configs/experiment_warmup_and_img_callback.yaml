@@ -7,6 +7,12 @@ model:
   classes: 1
   activation: 'sigmoid'
 
+callbacks:
+  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks.WarmupCallback
+    warmup_epochs: 1
+  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.ImageSegmentationResultCallback
+    n_samples: 1
+
 loss:
   _target_: segmentation_models_pytorch.utils.losses.DiceLoss
 
@@ -17,7 +23,7 @@ optimizer:
 
 hyperparameters:
   batch_size: 1
-  epochs: 2
+  epochs: 3
   max_lr: 0.1
 
 pl_trainer:
