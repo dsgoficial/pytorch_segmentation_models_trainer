@@ -91,6 +91,13 @@ class SegmentationDataset(Dataset):
             'image': image,
             'mask': mask
         }
+
+        if self.transform is not None:
+            result = self.transform(
+                image=image,
+                mask=mask
+            )
+
         return result
 
 if __name__ == '__main__':
