@@ -109,7 +109,8 @@ class Model(pl.LightningModule):
                 if 'drop_last' in self.cfg.train_dataset.data_loader else True,
             prefetch_factor=self.cfg.train_dataset.data_loader.prefetch_factor \
                 if 'prefetch_factor' in self.cfg.train_dataset.data_loader \
-                    else 4*self.hyperparameters.batch_size
+                    else 4*self.hyperparameters.batch_size,
+            collate_fn=train_ds.transform
         )
         return train_dl
 
@@ -127,12 +128,13 @@ class Model(pl.LightningModule):
                 if 'drop_last' in self.cfg.val_dataset.data_loader else True,
             prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor \
                 if 'prefetch_factor' in self.cfg.val_dataset.data_loader \
-                    else 4*self.hyperparameters.batch_size
+                    else 4*self.hyperparameters.batch_size,
+            collate_fn=val_ds.transform
         )
         return val_dl
 
     def training_step(self, batch, batch_idx):
-        images, masks = batch.values()
+        images, masks, *_ = batch.values()
         masks = masks.long()
         predicted_masks = self(images)
         loss = self.loss_function(predicted_masks, masks)
@@ -144,7 +146,7 @@ class Model(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        images, masks = batch.values()
+        images, masks, *_ = batch.values()
         masks = masks.long()
         predicted_masks = self(images)
         loss = self.loss_function(predicted_masks, masks)
