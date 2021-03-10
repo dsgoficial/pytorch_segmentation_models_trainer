@@ -32,7 +32,8 @@ from tests.utils import CustomTestCase
 
 config_name_list = [
     "experiment.yaml",
-    "experiment_warmup.yaml"
+    "experiment_warmup.yaml",
+    "experiment_warmup_and_img_callback.yaml"
 ]
 class Test_TestExperiment(CustomTestCase):
 
