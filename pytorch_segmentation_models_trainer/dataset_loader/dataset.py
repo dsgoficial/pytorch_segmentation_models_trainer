@@ -85,9 +85,10 @@ class SegmentationDataset(Dataset):
         key = self.image_key if key is None else key
         image_path = str(self.df.iloc[idx][key])
         if self.root_dir is not None:
-            image_path = os.path.join(
+            return os.path.join(
                 self.root_dir,
-                image_path
+                image_path if not image_path.startswith(os.path.sep) \
+                    else image_path[1::]
             )
         return image_path
 
