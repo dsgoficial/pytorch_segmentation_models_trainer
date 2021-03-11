@@ -18,7 +18,7 @@ URL = 'https://github.com/phborba/pytorch_segmentation_models_trainer'
 EMAIL = 'philipeborba@gmail.com'
 AUTHOR = 'Philipe Borba'
 REQUIRES_PYTHON = '>=3.6.0'
-VERSION = '0.1.4'
+VERSION = '0.2.0'
 
 # The rest you shouldn't have to touch too much :)
 # ------------------------------------------------
