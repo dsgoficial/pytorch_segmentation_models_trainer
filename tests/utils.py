@@ -29,23 +29,26 @@ def get_file_list(dir_path, extension):
         output_list += [os.path.join(root,f) for f in files if f.endswith(extension)]
     return sorted(output_list)
 
-def create_csv_file(file_path, image_list, label_list):
+def create_csv_file(file_path, image_list, label_list, root_to_be_removed=None):
     csv_text = 'id,image_path,label_path,rows,columns\n'
     for idx, i in enumerate(image_list):
         csv_text += f"{idx},{i},{label_list[idx]},512,512\n"
     with open(file_path, 'w') as csv_file:
+        if root_to_be_removed is not None:
+            csv_text = csv_text.replace(root_to_be_removed, '')
         csv_file.write(csv_text)
     return file_path
 
 class CustomTestCase(unittest.TestCase):
     def setUp(self):
         current_dir = os.path.dirname(__file__)
+        self.root_dir = os.path.join(current_dir, 'testing_data', 'data')
         image_list = get_file_list(
-            os.path.join(current_dir, 'testing_data', 'data', 'images'),
+            os.path.join(self.root_dir, 'images'),
             '.png'
         )
         label_list = get_file_list(
-            os.path.join(current_dir, 'testing_data', 'data', 'labels'),
+            os.path.join(self.root_dir, 'labels'),
             '.png'
         )
         label_list = get_file_list(
@@ -57,9 +60,16 @@ class CustomTestCase(unittest.TestCase):
             image_list[0:5],
             label_list[0:5]
         )
+        self.csv_ds_file_without_root = create_csv_file(
+            os.path.join(current_dir, 'testing_data', 'csv_train_ds_without_root.csv'),
+            image_list[0:5],
+            label_list[0:5],
+            root_to_be_removed=self.root_dir
+        )
 
     def tearDown(self):
         os.remove(self.csv_ds_file)
+        os.remove(self.csv_ds_file_without_root)
         outputs_path = os.path.join(
                 os.path.dirname(__file__),
                 '..',

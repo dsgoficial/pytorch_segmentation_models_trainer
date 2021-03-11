@@ -56,6 +56,25 @@ class Test_TestDataset(CustomTestCase):
                 np.array_equal(ds_from_cfg[0]['image'], ds_from_ref[0]['image']) and \
                 np.array_equal(ds_from_cfg[0]['mask'], ds_from_ref[0]['mask']) 
             )
+    
+    def test_load_image_relative_path(self) -> None:
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="dataset.yaml",
+                overrides=[
+                    'input_csv_path='+self.csv_ds_file_without_root,
+                    '+root_dir='+self.root_dir
+                ]
+            )
+            ds_from_cfg = hydra.utils.instantiate(cfg)
+            ds_from_ref = SegmentationDataset(
+                input_csv_path=self.csv_ds_file_without_root,
+                root_dir=self.root_dir
+            )
+            assert(
+                np.array_equal(ds_from_cfg[0]['image'], ds_from_ref[0]['image']) and \
+                np.array_equal(ds_from_cfg[0]['mask'], ds_from_ref[0]['mask']) 
+            )
 
     def test_load_augmentations(self) -> None:
         with initialize(config_path="./test_configs"):
