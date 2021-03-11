@@ -55,10 +55,8 @@ class SegmentationDataset(Dataset):
         mask_key=None
     ) -> None:
         self.input_csv_path = input_csv_path
-        self.root_dir = root_dir if root_dir is not None else ''
-        self.df = pd.read_csv(
-            os.path.join(self.root_dir, input_csv_path)
-        )
+        self.root_dir = root_dir
+        self.df = pd.read_csv(input_csv_path)
         self.transform = None if augmentation_list is None \
             else load_augmentation_object(augmentation_list)
         self.data_loader = data_loader
