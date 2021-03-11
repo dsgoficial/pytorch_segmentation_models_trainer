@@ -133,6 +133,8 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
             image, mask = val_ds[i].values()
             image = image.to(device)
             predicted_mask = model(image.unsqueeze(0))
+            image = image.to('cpu')
+            predicted_mask = predicted_mask.to('cpu')
             plot_title = val_ds.get_path(i)
             plt_result, fig = self.generate_visualization(
                 fig_title=plot_title,
