@@ -149,4 +149,5 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
                     plot_title,
                     trainer.log_dir
                 )
+            plt.close('all')
         return
