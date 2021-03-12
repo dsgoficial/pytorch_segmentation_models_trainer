@@ -9,4 +9,4 @@ tensorboardX
 pillow
 matplotlib
 numpy
-dataclasses-jsonschema
+pytorch_toolbelt
