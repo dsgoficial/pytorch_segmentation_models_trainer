@@ -52,11 +52,13 @@ class SegmentationDataset(Dataset):
         augmentation_list=None,
         data_loader=None,
         image_key=None,
-        mask_key=None
+        mask_key=None,
+        n_first_rows_to_read=None
     ) -> None:
         self.input_csv_path = input_csv_path
         self.root_dir = root_dir
-        self.df = pd.read_csv(input_csv_path)
+        self.df = pd.read_csv(input_csv_path) if n_first_rows_to_read is None \
+            else pd.read_csv(input_csv_path, n_rows=n_first_rows_to_read)
         self.transform = None if augmentation_list is None \
             else load_augmentation_object(augmentation_list)
         self.data_loader = data_loader
