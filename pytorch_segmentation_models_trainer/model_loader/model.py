@@ -42,16 +42,12 @@ class Model(pl.LightningModule):
         self.cfg = cfg
         self.model = instantiate(self.cfg.model)
         self.loss_function = self.get_loss_function()
-        metrics = pl.metrics.MetricCollection(
-            [
-                Accuracy(),
-                Precision(),
-                Recall(),
-                F1(num_classes=self.cfg.model.classes)
-            ]
-        )
-        self.train_metrics = metrics.clone()
-        self.validation_metrics = metrics.clone()
+        self.train_metrics = self.get_metrics()
+        self.validation_metrics = self.get_metrics()
+    
+    def get_metrics(self) -> pl.metrics.MetricCollection:
+        metric_list = [instantiate(i) for i in self.cfg.metrics]
+        return pl.metrics.MetricCollection(metric_list)
 
     def get_loss_function(self):
         return instantiate(self.cfg.loss)

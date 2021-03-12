@@ -81,3 +81,16 @@ class Test_TestDataset(CustomTestCase):
             cfg = compose(config_name="augmentations.yaml")
             transformer = load_augmentation_object(cfg['augmentation_list'])
             assert isinstance(transformer, A.Compose)
+    
+    def test_dataset_size_limit(self) -> None:
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="dataset.yaml",
+                overrides=[
+                    'input_csv_path='+self.csv_ds_file_without_root,
+                    '+root_dir='+self.root_dir,
+                    '+n_first_rows_to_read=2'
+                ]
+            )
+            ds_from_cfg = hydra.utils.instantiate(cfg)
+            self.assertEqual(len(ds_from_cfg), 2)

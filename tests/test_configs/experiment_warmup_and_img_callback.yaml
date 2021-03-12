@@ -21,6 +21,13 @@ optimizer:
   lr: 0.001
   weight_decay: 1e-4
 
+metrics:
+  - _target_: pytorch_lightning.metrics.Accuracy
+  - _target_: pytorch_lightning.metrics.Precision
+  - _target_: pytorch_lightning.metrics.Recall
+  - _target_: pytorch_lightning.metrics.F1
+    num_classes: ${model.classes}
+
 hyperparameters:
   batch_size: 1
   epochs: 3
