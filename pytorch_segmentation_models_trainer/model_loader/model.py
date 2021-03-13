@@ -31,7 +31,7 @@ from torch.utils.data import DataLoader
 
 from typing import List, Any
 
-class Model(pl.LightningDataModule):
+class Model(pl.LightningModule):
     """[summary]
 
     Args:
@@ -52,7 +52,7 @@ class Model(pl.LightningDataModule):
     def get_loss_function(self):
         return instantiate(self.cfg.loss)
 
-    def get_optimizer(self):
+    def configure_optimizers(self):
         return instantiate(self.cfg.optimizer, params=self.parameters())
 
     def get_scheduler(self, optimizer):
