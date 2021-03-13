@@ -127,12 +127,11 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
 
     def on_validation_end(self, trainer, pl_module):
         val_ds = pl_module.val_dataloader().dataset
-        model = pl_module.model
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         for i in range(self.n_samples):
             image, mask = val_ds[i].values()
             image = image.to(device)
-            predicted_mask = model(image.unsqueeze(0))
+            predicted_mask = pl_module.forward(image.unsqueeze(0))
             image = image.to('cpu')
             predicted_mask = predicted_mask.to('cpu')
             plot_title = val_ds.get_path(i)
