@@ -32,7 +32,7 @@ from torch.utils.data import DataLoader
 
 from typing import List, Any
 
-class Model(pl.LightningModule):
+class Model(pl.LightningDataModule):
     """[summary]
 
     Args:
