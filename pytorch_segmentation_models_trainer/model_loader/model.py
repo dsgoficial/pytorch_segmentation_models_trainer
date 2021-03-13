@@ -52,7 +52,7 @@ class Model(pl.LightningModule):
     def get_loss_function(self):
         return instantiate(self.cfg.loss)
 
-    def configure_optimizers(self):
+    def get_optimizer(self):
         return instantiate(self.cfg.optimizer, params=self.parameters())
 
     def get_scheduler(self, optimizer):
