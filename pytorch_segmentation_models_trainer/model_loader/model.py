@@ -22,7 +22,6 @@ import albumentations as A
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
-from pytorch_lightning.core.decorators import auto_move_data
 from pytorch_lightning.metrics import (
     Accuracy, F1, IoU, Precision, Recall
 )
@@ -79,7 +78,6 @@ class Model(pl.LightningDataModule):
         print(f"\nEncoder weights set to trainable={trainable}\n")
         return
 
-    @auto_move_data
     def forward(self, x):
         return self.model(x.float())
 
