@@ -21,6 +21,7 @@
 import datetime
 import io
 import os
+import math
 from pathlib import Path
 from typing import Any, List
 
@@ -30,6 +31,7 @@ import pytorch_lightning as pl
 import torch
 from PIL import Image
 from torch.utils.tensorboard import SummaryWriter
+from pytorch_lightning.utilities import rank_zero_only
 
 
 def denormalize_np_array(image: np.ndarray, \
@@ -74,6 +76,7 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
     
 
     def prepare_image_to_plot(self, image):
+        image = image.squeeze(0)
         image = denormalize_np_array(image, **self.norm_params) \
             if self.normalized_input else image
         return np.moveaxis(image, 0, -1) \
@@ -125,15 +128,14 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
     def on_sanity_check_end(self, trainer, pl_module):
         self.save_outputs = True
 
+    @rank_zero_only
     def on_validation_end(self, trainer, pl_module):
         val_ds = pl_module.val_dataloader().dataset
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         for i in range(self.n_samples):
             image, mask = val_ds[i].values()
-            image = image.to(device)
-            predicted_mask = pl_module.forward(image.unsqueeze(0))
-            image = image.to('cpu')
-            predicted_mask = predicted_mask.to('cpu')
+            image = image.unsqueeze(0)
+            predicted_mask = pl_module(image)
             plot_title = val_ds.get_path(i)
             plt_result, fig = self.generate_visualization(
                 fig_title=plot_title,
@@ -152,5 +154,5 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
                     plot_title,
                     trainer.log_dir
                 )
-            plt.close('all')
+            plt.close(fig)
         return

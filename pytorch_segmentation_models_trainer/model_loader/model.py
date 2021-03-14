@@ -22,11 +22,7 @@ import albumentations as A
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
-from pytorch_lightning.metrics import (
-    Accuracy, F1, IoU, Precision, Recall
-)
-#precision e recall com problema no pytorch lightning 1.2, 
-# retirar e depois ver o que fazer
+
 from torch.utils.data import DataLoader
 
 from typing import List, Any
@@ -42,12 +38,28 @@ class Model(pl.LightningModule):
         self.cfg = cfg
         self.model = instantiate(self.cfg.model)
         self.loss_function = self.get_loss_function()
+        self.metrics_dict = {
+            'train': self.get_metrics(),
+            'val': self.get_metrics()
+        }
         self.train_metrics = self.get_metrics()
         self.validation_metrics = self.get_metrics()
     
-    def get_metrics(self) -> pl.metrics.MetricCollection:
-        metric_list = [instantiate(i) for i in self.cfg.metrics]
-        return pl.metrics.MetricCollection(metric_list)
+    def get_metrics(self):
+        metric_dict = { self.get_metric_name(i):instantiate(i) for i in self.cfg.metrics}
+        return metric_dict
+
+    def get_metric_name(self, x):
+        return x['_target_'].split('.')[-1]
+
+
+    def evaluate_metrics(self, predicted_masks, masks, step_type='train'):
+        if step_type not in self.metrics_dict:
+            raise NotImplementedError
+        return {
+            name: {step_type: metric(predicted_masks, masks).item()} \
+                for name, metric in self.metrics_dict[step_type].items()
+        }
 
     def get_loss_function(self):
         return instantiate(self.cfg.loss)
@@ -79,7 +91,7 @@ class Model(pl.LightningModule):
         return
 
     def forward(self, x):
-        return self.model(x.float())
+        return self.model(x)
 
     def configure_optimizers(self):
         # REQUIRED
@@ -132,10 +144,12 @@ class Model(pl.LightningModule):
         masks = masks.long()
         predicted_masks = self(images)
         loss = self.loss_function(predicted_masks, masks)
-        self.train_metrics(predicted_masks, masks)
+        evaluated_metrics = self.evaluate_metrics(
+            predicted_masks, masks, step_type='train'
+        )
         # use log_dict instead of log
         self.log_dict(
-            self.train_metrics, on_step=True, on_epoch=False, prog_bar=True
+            evaluated_metrics, on_step=True, on_epoch=False, prog_bar=True
         )
         return loss
 
@@ -144,19 +158,18 @@ class Model(pl.LightningModule):
         masks = masks.long()
         predicted_masks = self(images)
         loss = self.loss_function(predicted_masks, masks)
-        self.validation_metrics(predicted_masks, masks)
+        evaluated_metrics = self.evaluate_metrics(
+            predicted_masks, masks, step_type='val'
+        )
         # use log_dict instead of log
         self.log_dict(
-            self.validation_metrics, on_step=True, on_epoch=True, prog_bar=True
+            evaluated_metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True
         )
-        return {'val_loss': loss, 'log': self.validation_metrics.compute()}
+        return {'val_loss': loss}
 
     def validation_epoch_end(self, outputs):
         # OPTIONAL
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
         tensorboard_logs = {'val_loss': avg_loss}
-        tensorboard_logs.update(
-            {'val_'+k.lower(): v for k, v in self.validation_metrics.compute().items()}
-        )
         return {'avg_val_loss': avg_loss,
                 'log': tensorboard_logs}
