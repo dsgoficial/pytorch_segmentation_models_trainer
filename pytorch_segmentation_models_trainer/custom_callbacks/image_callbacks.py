@@ -137,12 +137,13 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
             image = image.to(device)
             predicted_mask = pl_module(image)
             image = image.to('cpu')
+            predicted_mask = predicted_mask.to('cpu')
             plot_title = val_ds.get_path(i)
             plt_result, fig = self.generate_visualization(
                 fig_title=plot_title,
                 image=self.prepare_image_to_plot(image.numpy()),
                 ground_truth_mask=self.prepare_mask_to_plot(mask.numpy()),
-                predicted_mask=self.prepare_mask_to_plot(predicted_mask.detach().numpy())
+                predicted_mask=self.prepare_mask_to_plot(predicted_mask.numpy())
             )
             if self.save_outputs:
                 saved_image = self.save_plot_to_disk(
