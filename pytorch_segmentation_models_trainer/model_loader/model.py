@@ -39,10 +39,10 @@ class Model(pl.LightningModule):
         self.cfg = cfg
         self.model = instantiate(self.cfg.model)
         self.loss_function = self.get_loss_function()
-        self.metrics_dict = nn.ModuleDict({
+        self.metrics_dict = nn.ModuleDict({'metrics_dict': {
             'train': self.get_metrics(),
             'val': self.get_metrics()
-        })
+        }})
     
     def get_metrics(self):
         return nn.ModuleDict([[self.get_metric_name(i), instantiate(i)] for i in self.cfg.metrics])
@@ -52,11 +52,11 @@ class Model(pl.LightningModule):
 
 
     def evaluate_metrics(self, predicted_masks, masks, step_type='train'):
-        if step_type not in self.metrics_dict:
+        if step_type not in self.metrics_dict['metrics_dict']:
             raise NotImplementedError
         return {
             name: {step_type: metric(predicted_masks, masks)} \
-                for name, metric in self.metrics_dict[step_type].items()
+                for name, metric in self.metrics_dict['metrics_dict'][step_type].items()
         }
 
     def get_loss_function(self):
