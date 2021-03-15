@@ -57,7 +57,7 @@ class Model(pl.LightningModule):
         if step_type not in self.metrics_dict:
             raise NotImplementedError
         return {
-            name: {step_type: metric(predicted_masks, masks).item()} \
+            name: {step_type: metric(predicted_masks, masks)} \
                 for name, metric in self.metrics_dict[step_type].items()
         }
 
