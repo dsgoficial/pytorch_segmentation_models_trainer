@@ -111,13 +111,8 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
         )
         return report_path
 
-    def on_init_end(self, trainer):
-        """Pytorch lightning on_init_end. Before initializing the model,
-        if the output_path is not set, set it to the same as lightning logs. 
-
-        Args:
-            trainer ([type]): [description]
-        """
+    def on_sanity_check_end(self, trainer, pl_module):
+        self.save_outputs = True
         self.output_path = os.path.join(
             trainer.log_dir,
             'image_logs'
@@ -125,11 +120,10 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
         if not os.path.exists(self.output_path):
             Path(self.output_path).mkdir(parents=True, exist_ok=True)
 
-    def on_sanity_check_end(self, trainer, pl_module):
-        self.save_outputs = True
-
     @rank_zero_only
     def on_validation_end(self, trainer, pl_module):
+        if not self.save_outputs:
+            return
         val_ds = pl_module.val_dataloader().dataset
         device = pl_module.device
         logger = trainer.logger
