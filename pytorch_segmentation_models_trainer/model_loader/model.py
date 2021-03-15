@@ -45,7 +45,7 @@ class Model(pl.LightningModule):
         ])
     
     def get_metrics(self):
-        return { self.get_metric_name(i):instantiate(i) for i in self.cfg.metrics}
+        return nn.ModuleDict([[self.get_metric_name(i), instantiate(i)] for i in self.cfg.metrics])
 
     def get_metric_name(self, x):
         return x['_target_'].split('.')[-1]
