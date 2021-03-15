@@ -38,6 +38,8 @@ class Model(pl.LightningModule):
         super(Model, self).__init__()
         self.cfg = cfg
         self.model = instantiate(self.cfg.model)
+        self.train_ds = instantiate(self.cfg.train_dataset)
+        self.val_ds = instantiate(self.cfg.val_dataset)
         self.loss_function = self.get_loss_function()
         self.train_metrics = self.get_metrics()
         self.val_metrics = self.get_metrics()
@@ -104,9 +106,8 @@ class Model(pl.LightningModule):
         return [optimizer], [lr_scheduler]
 
     def train_dataloader(self):
-        train_ds = instantiate(self.cfg.train_dataset)
-        train_dl = DataLoader(
-            train_ds,
+        return DataLoader(
+            self.train_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
             shuffle=self.cfg.train_dataset.data_loader.shuffle,
             num_workers=self.cfg.train_dataset.data_loader.num_workers,
@@ -118,12 +119,10 @@ class Model(pl.LightningModule):
                 if 'prefetch_factor' in self.cfg.train_dataset.data_loader \
                     else 4*self.hyperparameters.batch_size
         )
-        return train_dl
 
     def val_dataloader(self):
-        val_ds = instantiate(self.cfg.val_dataset)
-        val_dl = DataLoader(
-            val_ds,
+        return DataLoader(
+            self.val_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
             shuffle=self.cfg.val_dataset.data_loader.shuffle if 'shuffle' \
                 in self.cfg.val_dataset.data_loader else False,
@@ -136,7 +135,6 @@ class Model(pl.LightningModule):
                 if 'prefetch_factor' in self.cfg.val_dataset.data_loader \
                     else 4*self.hyperparameters.batch_size
         )
-        return val_dl
 
     def training_step(self, batch, batch_idx):
         images, masks = batch.values()
