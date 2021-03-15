@@ -22,6 +22,7 @@ import datetime
 import io
 import os
 import math
+import logging
 from pathlib import Path
 from typing import Any, List
 
@@ -32,6 +33,8 @@ import torch
 from PIL import Image
 from torch.utils.tensorboard import SummaryWriter
 from pytorch_lightning.utilities import rank_zero_only
+
+logging.getLogger('matplotlib').setLevel(level=logging.CRITICAL)
 
 
 def denormalize_np_array(image: np.ndarray, \
@@ -115,11 +118,10 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
         Args:
             trainer ([type]): [description]
         """
-        if self.output_path is None:
-            self.output_path = os.path.join(
-                trainer.log_dir,
-                'image_logs'
-            )
+        self.output_path = os.path.join(
+            trainer.log_dir,
+            'image_logs'
+        )
         if not os.path.exists(self.output_path):
             Path(self.output_path).mkdir(parents=True, exist_ok=True)
 
