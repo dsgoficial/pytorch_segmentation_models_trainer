@@ -46,8 +46,7 @@ class Model(pl.LightningModule):
         self.validation_metrics = self.get_metrics()
     
     def get_metrics(self):
-        metric_dict = { self.get_metric_name(i):instantiate(i) for i in self.cfg.metrics}
-        return metric_dict
+        return { self.get_metric_name(i):instantiate(i) for i in self.cfg.metrics}
 
     def get_metric_name(self, x):
         return x['_target_'].split('.')[-1]
