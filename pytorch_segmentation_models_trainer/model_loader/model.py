@@ -40,7 +40,7 @@ class Model(pl.LightningModule):
         self.model = instantiate(self.cfg.model)
         self.loss_function = self.get_loss_function()
         self.train_metrics = self.get_metrics()
-        self.val_metrics = self.get_Metrics()
+        self.val_metrics = self.get_metrics()
     
     def get_metrics(self):
         return nn.ModuleDict([[self.get_metric_name(i), instantiate(i)] for i in self.cfg.metrics])
