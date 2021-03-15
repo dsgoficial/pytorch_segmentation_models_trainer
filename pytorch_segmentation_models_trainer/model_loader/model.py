@@ -171,7 +171,7 @@ class Model(pl.LightningModule):
     def compute_average_metrics(self, outputs, metric_dict, step_type='train'):
         return {
             'avg_'+name: {
-                step_type: torch.stack([x['log'][name] for x in outputs]).mean()
+                step_type: torch.stack([x['log'][name][step_type] for x in outputs]).mean()
             } for name in metric_dict.keys()
         }
     
