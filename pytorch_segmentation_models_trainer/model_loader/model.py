@@ -164,7 +164,7 @@ class Model(pl.LightningModule):
         tensorboard_logs = {k: {'val': v} for k, v in evaluated_metrics.items()}
         # use log_dict instead of log
         self.log_dict(
-            evaluated_metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True
+            evaluated_metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, logger=False
         )
         return {'val_loss': loss, 'log': tensorboard_logs}
     
