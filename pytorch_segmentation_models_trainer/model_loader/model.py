@@ -38,12 +38,10 @@ class Model(pl.LightningModule):
         self.cfg = cfg
         self.model = instantiate(self.cfg.model)
         self.loss_function = self.get_loss_function()
-        self.metrics_dict = {
+        self.metrics_dict = torch.nn.ModuleDict({
             'train': self.get_metrics(),
             'val': self.get_metrics()
-        }
-        self.train_metrics = self.get_metrics()
-        self.validation_metrics = self.get_metrics()
+        })
     
     def get_metrics(self):
         return { self.get_metric_name(i):instantiate(i) for i in self.cfg.metrics}
