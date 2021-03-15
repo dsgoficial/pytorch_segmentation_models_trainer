@@ -146,11 +146,12 @@ class Model(pl.LightningModule):
         evaluated_metrics = self.evaluate_metrics(
             predicted_masks, masks, step_type='train'
         )
+        tensorboard_logs = {k: {'train': v} for k, v in evaluated_metrics.items()}
         # use log_dict instead of log
         self.log_dict(
-            evaluated_metrics, on_step=True, on_epoch=False, prog_bar=True
+            evaluated_metrics, on_step=True, on_epoch=False, prog_bar=True, logger=False
         )
-        return {'loss' : loss, 'log': evaluated_metrics}
+        return {'loss' : loss, 'log': tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
         images, masks = batch.values()
@@ -160,11 +161,12 @@ class Model(pl.LightningModule):
         evaluated_metrics = self.evaluate_metrics(
             predicted_masks, masks, step_type='val'
         )
+        tensorboard_logs = {k: {'val': v} for k, v in evaluated_metrics.items()}
         # use log_dict instead of log
         self.log_dict(
             evaluated_metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True
         )
-        return {'val_loss': loss, 'log': evaluated_metrics}
+        return {'val_loss': loss, 'log': tensorboard_logs}
     
     def compute_average_metrics(self, outputs, metric_dict, step_type='train'):
         return {
