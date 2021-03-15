@@ -53,10 +53,10 @@ class Model(pl.LightningModule):
         if step_type not in ['train', 'val']:
             raise NotImplementedError
         return {
-            name: {step_type: metric(predicted_masks, masks)} \
+            name: metric(predicted_masks, masks) \
                 for name, metric in self.train_metrics.items()
         } if step_type == 'train' else {
-            name: {step_type: metric(predicted_masks, masks)} \
+            name: metric(predicted_masks, masks) \
                 for name, metric in self.val_metrics.items()
         }
 
@@ -150,7 +150,7 @@ class Model(pl.LightningModule):
         self.log_dict(
             evaluated_metrics, on_step=True, on_epoch=False, prog_bar=True
         )
-        return loss
+        return {'loss' : loss, 'log': evaluated_metrics}
 
     def validation_step(self, batch, batch_idx):
         images, masks = batch.values()
@@ -164,11 +164,30 @@ class Model(pl.LightningModule):
         self.log_dict(
             evaluated_metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True
         )
-        return {'val_loss': loss}
+        return {'val_loss': loss, 'log': evaluated_metrics}
+    
+    def compute_average_metrics(self, outputs, metric_dict, step_type='train'):
+        return {
+            'avg_'+name: {
+                step_type: torch.stack([x['log'][name] for x in outputs]).mean()
+            } for name in metric_dict.keys()
+        }
+    
+    def training_epoch_end(self, outputs):
+        avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
+        tensorboard_logs = {'avg_loss': {'train' : avg_loss}}
+        tensorboard_logs.update(
+            self.compute_average_metrics(outputs, self.train_metrics)
+        )
+        return {'avg_train_loss': avg_loss,
+                'log': tensorboard_logs}
 
     def validation_epoch_end(self, outputs):
         # OPTIONAL
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-        tensorboard_logs = {'val_loss': avg_loss}
+        tensorboard_logs = {'avg_loss': {'val' : avg_loss}}
+        tensorboard_logs.update(
+            self.compute_average_metrics(outputs, self.val_metrics, step_type='val')
+        )
         return {'avg_val_loss': avg_loss,
                 'log': tensorboard_logs}
