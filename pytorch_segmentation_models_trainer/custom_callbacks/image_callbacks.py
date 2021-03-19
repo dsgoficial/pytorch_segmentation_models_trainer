@@ -21,6 +21,8 @@
 import datetime
 import io
 import os
+import math
+import logging
 from pathlib import Path
 from typing import Any, List
 
@@ -30,6 +32,9 @@ import pytorch_lightning as pl
 import torch
 from PIL import Image
 from torch.utils.tensorboard import SummaryWriter
+from pytorch_lightning.utilities import rank_zero_only
+
+logging.getLogger('matplotlib').setLevel(level=logging.CRITICAL)
 
 
 def denormalize_np_array(image: np.ndarray, \
@@ -74,6 +79,7 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
     
 
     def prepare_image_to_plot(self, image):
+        image = image.squeeze(0) if image.shape[0] == 1 else image
         image = denormalize_np_array(image, **self.norm_params) \
             if self.normalized_input else image
         return np.moveaxis(image, 0, -1) \
@@ -82,14 +88,12 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
     def prepare_mask_to_plot(self, mask):
         return np.squeeze(mask).astype(np.float64)
     
-    def log_data_to_tensorboard(self, saved_image, image_path, log_dir):
+    def log_data_to_tensorboard(self, saved_image, image_path, logger, current_epoch):
         image = Image.open(saved_image)
         data = np.array(image)
-        writer = SummaryWriter(f"{log_dir}/image_report")
         data = np.moveaxis(data, -1, 0)
         data = torch.from_numpy(data)
-        writer.add_image(image_path, data)
-        writer.flush()
+        logger.experiment.add_image(image_path, data, current_epoch)
 
     def save_plot_to_disk(self, plot, image_name, current_epoch):
         image_name = Path(image_name).name.split('.')[0]
@@ -107,32 +111,27 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
         )
         return report_path
 
-    def on_init_end(self, trainer):
-        """Pytorch lightning on_init_end. Before initializing the model,
-        if the output_path is not set, set it to the same as lightning logs. 
-
-        Args:
-            trainer ([type]): [description]
-        """
-        if self.output_path is None:
-            self.output_path = os.path.join(
-                trainer.log_dir,
-                'image_logs'
-            )
+    def on_sanity_check_end(self, trainer, pl_module):
+        self.save_outputs = True
+        self.output_path = os.path.join(
+            trainer.log_dir,
+            'image_logs'
+        )
         if not os.path.exists(self.output_path):
             Path(self.output_path).mkdir(parents=True, exist_ok=True)
 
-    def on_sanity_check_end(self, trainer, pl_module):
-        self.save_outputs = True
-
+    @rank_zero_only
     def on_validation_end(self, trainer, pl_module):
+        if not self.save_outputs:
+            return
         val_ds = pl_module.val_dataloader().dataset
-        model = pl_module.model
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        device = pl_module.device
+        logger = trainer.logger
         for i in range(self.n_samples):
             image, mask = val_ds[i].values()
+            image = image.unsqueeze(0)
             image = image.to(device)
-            predicted_mask = model(image.unsqueeze(0))
+            predicted_mask = pl_module(image)
             image = image.to('cpu')
             predicted_mask = predicted_mask.to('cpu')
             plot_title = val_ds.get_path(i)
@@ -140,7 +139,7 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
                 fig_title=plot_title,
                 image=self.prepare_image_to_plot(image.numpy()),
                 ground_truth_mask=self.prepare_mask_to_plot(mask.numpy()),
-                predicted_mask=self.prepare_mask_to_plot(predicted_mask.detach().numpy())
+                predicted_mask=self.prepare_mask_to_plot(predicted_mask.numpy())
             )
             if self.save_outputs:
                 saved_image = self.save_plot_to_disk(
@@ -151,7 +150,8 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
                 self.log_data_to_tensorboard(
                     saved_image,
                     plot_title,
-                    trainer.log_dir
+                    logger,
+                    trainer.current_epoch
                 )
-            plt.close('all')
+            plt.close(fig)
         return

@@ -21,13 +21,9 @@
 import albumentations as A
 import pytorch_lightning as pl
 import torch
+import torch.nn as nn
 from hydra.utils import instantiate
-from pytorch_lightning.core.decorators import auto_move_data
-from pytorch_lightning.metrics import (
-    Accuracy, F1, IoU, Precision, Recall
-)
-#precision e recall com problema no pytorch lightning 1.2, 
-# retirar e depois ver o que fazer
+
 from torch.utils.data import DataLoader
 
 from typing import List, Any
@@ -42,13 +38,29 @@ class Model(pl.LightningModule):
         super(Model, self).__init__()
         self.cfg = cfg
         self.model = instantiate(self.cfg.model)
+        self.train_ds = instantiate(self.cfg.train_dataset)
+        self.val_ds = instantiate(self.cfg.val_dataset)
         self.loss_function = self.get_loss_function()
         self.train_metrics = self.get_metrics()
-        self.validation_metrics = self.get_metrics()
+        self.val_metrics = self.get_metrics()
     
-    def get_metrics(self) -> pl.metrics.MetricCollection:
-        metric_list = [instantiate(i) for i in self.cfg.metrics]
-        return pl.metrics.MetricCollection(metric_list)
+    def get_metrics(self):
+        return nn.ModuleDict([[self.get_metric_name(i), instantiate(i)] for i in self.cfg.metrics])
+
+    def get_metric_name(self, x):
+        return x['_target_'].split('.')[-1]
+
+
+    def evaluate_metrics(self, predicted_masks, masks, step_type='train'):
+        if step_type not in ['train', 'val']:
+            raise NotImplementedError
+        return {
+            name: metric(predicted_masks, masks) \
+                for name, metric in self.train_metrics.items()
+        } if step_type == 'train' else {
+            name: metric(predicted_masks, masks) \
+                for name, metric in self.val_metrics.items()
+        }
 
     def get_loss_function(self):
         return instantiate(self.cfg.loss)
@@ -79,9 +91,8 @@ class Model(pl.LightningModule):
         print(f"\nEncoder weights set to trainable={trainable}\n")
         return
 
-    @auto_move_data
     def forward(self, x):
-        return self.model(x.float())
+        return self.model(x)
 
     def configure_optimizers(self):
         # REQUIRED
@@ -95,9 +106,8 @@ class Model(pl.LightningModule):
         return [optimizer], [lr_scheduler]
 
     def train_dataloader(self):
-        train_ds = instantiate(self.cfg.train_dataset)
-        train_dl = DataLoader(
-            train_ds,
+        return DataLoader(
+            self.train_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
             shuffle=self.cfg.train_dataset.data_loader.shuffle,
             num_workers=self.cfg.train_dataset.data_loader.num_workers,
@@ -109,12 +119,10 @@ class Model(pl.LightningModule):
                 if 'prefetch_factor' in self.cfg.train_dataset.data_loader \
                     else 4*self.hyperparameters.batch_size
         )
-        return train_dl
 
     def val_dataloader(self):
-        val_ds = instantiate(self.cfg.val_dataset)
-        val_dl = DataLoader(
-            val_ds,
+        return DataLoader(
+            self.val_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
             shuffle=self.cfg.val_dataset.data_loader.shuffle if 'shuffle' \
                 in self.cfg.val_dataset.data_loader else False,
@@ -127,38 +135,59 @@ class Model(pl.LightningModule):
                 if 'prefetch_factor' in self.cfg.val_dataset.data_loader \
                     else 4*self.hyperparameters.batch_size
         )
-        return val_dl
 
     def training_step(self, batch, batch_idx):
         images, masks = batch.values()
         masks = masks.long()
         predicted_masks = self(images)
         loss = self.loss_function(predicted_masks, masks)
-        self.train_metrics(predicted_masks, masks)
+        evaluated_metrics = self.evaluate_metrics(
+            predicted_masks, masks, step_type='train'
+        )
+        tensorboard_logs = {k: {'train': v} for k, v in evaluated_metrics.items()}
         # use log_dict instead of log
         self.log_dict(
-            self.train_metrics, on_step=True, on_epoch=False, prog_bar=True
+            evaluated_metrics, on_step=True, on_epoch=False, prog_bar=True, logger=False
         )
-        return loss
+        return {'loss' : loss, 'log': tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
         images, masks = batch.values()
         masks = masks.long()
         predicted_masks = self(images)
         loss = self.loss_function(predicted_masks, masks)
-        self.validation_metrics(predicted_masks, masks)
+        evaluated_metrics = self.evaluate_metrics(
+            predicted_masks, masks, step_type='val'
+        )
+        tensorboard_logs = {k: {'val': v} for k, v in evaluated_metrics.items()}
         # use log_dict instead of log
         self.log_dict(
-            self.validation_metrics, on_step=True, on_epoch=True, prog_bar=True
+            evaluated_metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, logger=False
         )
-        return {'val_loss': loss, 'log': self.validation_metrics.compute()}
+        return {'val_loss': loss, 'log': tensorboard_logs}
+    
+    def compute_average_metrics(self, outputs, metric_dict, step_type='train'):
+        return {
+            'avg_'+name: {
+                step_type: torch.stack([x['log'][name][step_type] for x in outputs]).mean()
+            } for name in metric_dict.keys()
+        }
+    
+    def training_epoch_end(self, outputs):
+        avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
+        tensorboard_logs = {'avg_loss': {'train' : avg_loss}}
+        tensorboard_logs.update(
+            self.compute_average_metrics(outputs, self.train_metrics)
+        )
+        return {'avg_train_loss': avg_loss,
+                'log': tensorboard_logs}
 
     def validation_epoch_end(self, outputs):
         # OPTIONAL
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-        tensorboard_logs = {'val_loss': avg_loss}
+        tensorboard_logs = {'avg_loss': {'val' : avg_loss}}
         tensorboard_logs.update(
-            {'val_'+k.lower(): v for k, v in self.validation_metrics.compute().items()}
+            self.compute_average_metrics(outputs, self.val_metrics, step_type='val')
         )
         return {'avg_val_loss': avg_loss,
                 'log': tensorboard_logs}
