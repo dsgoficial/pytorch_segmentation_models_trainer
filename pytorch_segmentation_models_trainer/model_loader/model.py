@@ -37,12 +37,15 @@ class Model(pl.LightningModule):
     def __init__(self, cfg):
         super(Model, self).__init__()
         self.cfg = cfg
-        self.model = instantiate(self.cfg.model)
+        self.model = self.get_model()
         self.train_ds = instantiate(self.cfg.train_dataset)
         self.val_ds = instantiate(self.cfg.val_dataset)
         self.loss_function = self.get_loss_function()
         self.train_metrics = self.get_metrics()
         self.val_metrics = self.get_metrics()
+
+    def get_model(self):
+        return instantiate(self.cfg.model)
     
     def get_metrics(self):
         return nn.ModuleDict([[self.get_metric_name(i), instantiate(i)] for i in self.cfg.metrics])
