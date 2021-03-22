@@ -92,9 +92,9 @@ class FrameFieldBlock(nn.Module):
             self.crossfield_conv2,
             self.frame_field_activation
         ] if self.use_batchnorm else [
-            self.conv1,
+            self.crossfield_conv1,
             self.module_activation,
-            self.conv2,
+            self.crossfield_conv2,
             self.frame_field_activation
         ]
 
@@ -113,7 +113,7 @@ class FrameFieldModel(Model):
 
     def get_model(self):
         self.segmentation_block = instantiate(self.cfg.model.segmentation_block)
-        backbone_output = 
+        backbone_output = self.segmentation_block.segmentation_head
         self.crossfield_model = FrameFieldBlock(backbone_output)
         return super().get_model()
     
