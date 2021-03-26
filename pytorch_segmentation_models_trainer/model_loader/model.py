@@ -27,7 +27,9 @@ from hydra.utils import instantiate
 from torch.utils.data import DataLoader
 
 from typing import List, Any
-
+from pytorch_segmentation_models_trainer.utils.model_utils import (
+    replace_activation
+)
 class Model(pl.LightningModule):
     """[summary]
 
@@ -45,14 +47,18 @@ class Model(pl.LightningModule):
         self.val_metrics = self.get_metrics()
 
     def get_model(self):
-        return instantiate(self.cfg.model)
-    
+        model = instantiate(self.cfg.model)
+        if 'replace_model_activation' in self.cfg:
+            old_activation = instantiate(self.cfg.replace_model_activation.old_activation)
+            new_activation = instantiate(self.cfg.replace_model_activation.new_activation)
+            replace_activation(model, old_activation, new_activation)
+        return model
+
     def get_metrics(self):
         return nn.ModuleDict([[self.get_metric_name(i), instantiate(i)] for i in self.cfg.metrics])
 
     def get_metric_name(self, x):
         return x['_target_'].split('.')[-1]
-
 
     def evaluate_metrics(self, predicted_masks, masks, step_type='train'):
         if step_type not in ['train', 'val']:
