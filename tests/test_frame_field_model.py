@@ -25,10 +25,18 @@ import numpy as np
 import hydra
 import segmentation_models_pytorch as smp
 from hydra.experimental import initialize, compose
+from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
+    FrameFieldModel
+)
 
 class Test_TestFrameFieldModel(unittest.TestCase):
 
     def test_create_instance(self) -> None:
+        model = smp.Unet()
+        frame_field_model = FrameFieldModel(
+            model
+        )
+        print(frame_field_model)
         return True
 
     def test_create_instance_from_config(self) -> None:

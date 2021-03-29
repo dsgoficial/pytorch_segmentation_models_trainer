@@ -30,19 +30,21 @@ from pytorch_segmentation_models_trainer.model_loader.model import Model
 class FrameFieldModel(nn.Module):
     def __init__(
         self,
-        segmentation_backbone,
+        segmentation_model,
         use_batchnorm: bool =True,
-        compute_seg: bool =True,
+        replace_seg_head: bool =True,
         compute_crossfield: bool=True,
-        seg_params: dict=None
+        seg_params: dict=None,
+        module_activation: str=None,
+        frame_field_activation: str=None,
     ):
         """[summary]
 
         Args:
-            segmentation_backbone (pytorch model): Chosen segmentation module
+            segmentation_model (pytorch model): Chosen segmentation module
             use_batchnorm (bool, optional): Enables the use of batchnorm. 
              Defaults to True.
-            compute_seg (bool, optional): Enables computing the segmentation.
+            replace_seg_head (bool, optional): Enables computing the segmentation.
              Defaults to True.
             compute_crossfield (bool, optional): Enables computing the crossfield.
              Defaults to True.
@@ -66,12 +68,15 @@ class FrameFieldModel(nn.Module):
                 if not isinstance(param, bool):
                     raise ValueError(f"Parameter {param} must be boolean!")
                 self.seg_params[param] = seg_params
-        self.segmentation_backbone = segmentation_backbone
-        self.compute_seg = compute_seg
+        self.segmentation_model = segmentation_model
+        self.replace_seg_head = replace_seg_head
         self.compute_crossfield = compute_crossfield
         self.use_batchnorm = use_batchnorm
+        self.frame_field_activation = frame_field_activation
+        self.module_activation = module_activation
         self.backbone_output = self.get_out_channels(
-            self.segmentation_backbone
+            self.segmentation_model.decoder if self.replace_seg_head \
+                else self.segmentation_model.sementation_head
         )
         self.seg_channels = sum(self.seg_params.values())
         self.seg_module = self.get_seg_module()
@@ -83,8 +88,8 @@ class FrameFieldModel(nn.Module):
         Returns:
             torch.nn.Sequential: Sequential module that computes the seg.
         """
-        if not self.compute_seg:
-            return None
+        if not self.replace_seg_head:
+            return self.segmentation_model.segmentation_head
         return torch.nn.Sequential(
             torch.nn.Conv2d(self.backbone_output, self.backbone_output, 3, padding=1),
             torch.nn.BatchNorm2d(self.backbone_output),
@@ -107,17 +112,20 @@ class FrameFieldModel(nn.Module):
             kernel_size=3,
             padding=1
         )
-        self.batch_norm = torch.nn.BatchNorm2d(self.backbone_output)
-        self.module_activation = torch.nn.ELU()
+        self.batch_norm = torch.nn.BatchNorm2d(self.backbone_output) if self.use_batchnorm \
+            else nn.Identity()
+        self.module_activation = torch.nn.ELU() if self.module_activation is None \
+            else instantiate(self.module_activation)
         self.crossfield_conv2 = torch.nn.Conv2d(
             self.backbone_output,
             self.crossfield_channels,
             kernel_size=1
         )
-        self.frame_field_activation = torch.nn.Tanh()
+        self.frame_field_activation = torch.nn.Tanh() if self.frame_field_activation is None \
+            else instantiate(self.frame_field_activation)
         return torch.nn.Sequential(
             self.crossfield_conv1,
-            self.batch_norm if self.use_batchnorm else nn.Identity(),
+            self.batch_norm,
             self.module_activation,
             self.crossfield_conv2,
             self.frame_field_activation
@@ -125,8 +133,10 @@ class FrameFieldModel(nn.Module):
 
     def forward(self, x):
         output_dict = dict()
-        segmentation_features = self.segmentation_backbone(x)
-        if self.compute_seg:
+        segmentation_features = self.segmentation_model(x) if not self.replace_seg_head \
+            else self.segmentation_model.decoder(x)
+        output_dict["seg"] = segmentation_features
+        if self.replace_seg_head:
             seg = self.seg_module(segmentation_features)
             detached_seg = seg.clone().detach()
             segmentation_features = torch.cat(
