@@ -24,6 +24,7 @@ import unittest
 import numpy as np
 import hydra
 import segmentation_models_pytorch as smp
+import torch
 from hydra.experimental import initialize, compose
 from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
     FrameFieldModel
@@ -36,15 +37,12 @@ class Test_TestFrameFieldModel(unittest.TestCase):
         frame_field_model = FrameFieldModel(
             model
         )
+        sample = torch.ones([1, 3, 64, 64])
+        with torch.no_grad():
+            out = frame_field_model(sample)
         print(frame_field_model)
+        print(out['crossfield'].shape)
         return True
-
-    def test_create_instance_from_config(self) -> None:
-        return True
-        # with initialize(config_path="./test_configs"):
-        #     cfg = compose(config_name="model.yaml")
-        #     model_obj = hydra.utils.instantiate(cfg)
-        #     assert isinstance(model_obj, smp.Unet)
 
     def test_create_inference_from_model(self) -> None:
         return True

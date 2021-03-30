@@ -27,6 +27,9 @@ from hydra.utils import instantiate
 from typing import List, Any
 
 from pytorch_segmentation_models_trainer.model_loader.model import Model
+from segmentation_models_pytorch.base.initialization import (
+    initialize_decoder, initialize_head
+)
 class FrameFieldModel(nn.Module):
     def __init__(
         self,
@@ -68,7 +71,8 @@ class FrameFieldModel(nn.Module):
                 if not isinstance(param, bool):
                     raise ValueError(f"Parameter {param} must be boolean!")
                 self.seg_params[param] = seg_params
-        self.segmentation_model = segmentation_model
+        self.segmentation_model = instantiate(segmentation_model) \
+            if isinstance(segmentation_model, str) else segmentation_model
         self.replace_seg_head = replace_seg_head
         self.compute_crossfield = compute_crossfield
         self.use_batchnorm = use_batchnorm
@@ -80,7 +84,8 @@ class FrameFieldModel(nn.Module):
         )
         self.seg_channels = sum(self.seg_params.values())
         self.seg_module = self.get_seg_module()
-        self.crosfield_module = self.get_crossfield_module()
+        self.crossfield_module = self.get_crossfield_module()
+        self.initialize()
 
     def get_seg_module(self) -> torch.nn.Sequential:
         """Prepares the seg module
@@ -106,49 +111,50 @@ class FrameFieldModel(nn.Module):
         """
         if not self.compute_crossfield:
             return None
-        self.crossfield_conv1 = torch.nn.Conv2d(
-            self.backbone_output + self.seg_channels,
-            self.backbone_output,
-            kernel_size=3,
-            padding=1
-        )
-        self.batch_norm = torch.nn.BatchNorm2d(self.backbone_output) if self.use_batchnorm \
-            else nn.Identity()
-        self.module_activation = torch.nn.ELU() if self.module_activation is None \
-            else instantiate(self.module_activation)
-        self.crossfield_conv2 = torch.nn.Conv2d(
-            self.backbone_output,
-            self.crossfield_channels,
-            kernel_size=1
-        )
-        self.frame_field_activation = torch.nn.Tanh() if self.frame_field_activation is None \
-            else instantiate(self.frame_field_activation)
         return torch.nn.Sequential(
-            self.crossfield_conv1,
-            self.batch_norm,
-            self.module_activation,
-            self.crossfield_conv2,
-            self.frame_field_activation
+            torch.nn.Conv2d(
+                self.backbone_output + self.seg_channels,
+                self.backbone_output,
+                kernel_size=3,
+                padding=1
+            ),
+            torch.nn.BatchNorm2d(self.backbone_output) if self.use_batchnorm \
+                else nn.Identity(),
+            torch.nn.ELU() if self.module_activation is None \
+                else instantiate(self.module_activation),
+            torch.nn.Conv2d(
+                self.backbone_output,
+                self.crossfield_channels,
+                kernel_size=1
+            ),
+            torch.nn.Tanh() if self.frame_field_activation is None \
+                else instantiate(self.frame_field_activation)
         )
 
     def forward(self, x):
         output_dict = dict()
-        segmentation_features = self.segmentation_model(x) if not self.replace_seg_head \
-            else self.segmentation_model.decoder(x)
+        encoder_feats = self.segmentation_model.encoder(x)
+        decoder_output = self.segmentation_model.decoder(*encoder_feats)
+        segmentation_features = self.seg_module(decoder_output) 
         output_dict["seg"] = segmentation_features
         if self.replace_seg_head:
-            seg = self.seg_module(segmentation_features)
-            detached_seg = seg.clone().detach()
+            detached_segmentation_features = segmentation_features.clone().detach()
             segmentation_features = torch.cat(
                 [
-                    segmentation_features,
-                    detached_seg
+                    decoder_output,
+                    detached_segmentation_features
                 ], dim=1
             )
-            output_dict["seg"] = seg
+            output_dict["seg"] = segmentation_features
         if self.compute_crossfield:
-            output_dict["crossfield"] = 2 * self.crosfield_module(segmentation_features)
+            output_dict["crossfield"] = 2 * self.crossfield_module(segmentation_features)
         return output_dict
+
+    def initialize(self):
+        if self.replace_seg_head:
+            initialize_head(self.seg_module)
+        if self.compute_crossfield:
+            initialize_decoder(self.crossfield_module)
 
     @staticmethod
     def get_out_channels(module):

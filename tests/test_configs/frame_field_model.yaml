@@ -1,2 +1,2 @@
-_target_: pytorch_segmentation_models_trainer.model_loader.FrameFieldModel
-segmentation_backbone: model
+_target_: pytorch_segmentation_models_trainer.model_loader.frame_field_model.FrameFieldModel
+segmentation_model: model
