@@ -11,4 +11,6 @@ matplotlib
 numpy
 pytorch_toolbelt
 descartes
-shapely
+fiona
+geopandas
+rasterio
