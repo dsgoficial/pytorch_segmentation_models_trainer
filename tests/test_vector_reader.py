@@ -20,27 +20,27 @@
  ****
 """
 import os
+import unittest
 
 from parameterized import parameterized
-from tests.utils import CustomTestCase
 from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
     FileGeoDF
 )
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, 'testing_data', 'data')
 test_list = [
-    {
-        "obj_class": FileGeoDF,
-        "params": {
-            "filename": os.path.join(root_dir, 'vectors', 'test_polygons.geojson')
+    (
+        FileGeoDF,
+        {
+            "file_name": os.path.join(root_dir, 'vectors', 'test_polygons.geojson')
         }
-    }
+    )
 ]
-class Test_TestVectorReader(CustomTestCase):
+class Test_TestVectorReader(unittest.TestCase):
 
     @parameterized.expand(test_list)
     def test_instantiate_object(self, obj_class, params) -> None:
-        obj = obj_class(*params)
+        obj = obj_class(**params)
         geo_df = obj.get_geo_df()
-        assert len(geo_df > 0)
+        assert len(geo_df) > 0
 

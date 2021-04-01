@@ -12,5 +12,6 @@ numpy
 pytorch_toolbelt
 descartes
 fiona
+psycopg2
 geopandas
 rasterio

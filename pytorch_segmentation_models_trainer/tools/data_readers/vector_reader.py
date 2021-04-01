@@ -20,24 +20,43 @@
 """
 import abc
 import geopandas
+import psycopg2
 from geopandas import GeoDataFrame
 from dataclasses import MISSING, dataclass, field
-
 @dataclass
 class GeoDF(abc.ABC):
-    data_loader: MISSING
-    params = dict
 
+    @abc.abstractclassmethod
     def __post_init__(self):
-        self.gdf = self.data_loader(*self.params)
+        pass
     
     def get_geo_df(self):
         return self.gdf
 
 @dataclass
 class FileGeoDF(GeoDF):
-    data_loader: geopandas.read_file
+    file_name: str
+    def __post_init__(self):
+        self.gdf = geopandas.read_file(filename=self.file_name)
 
 @dataclass
 class PostgisGeoDF(GeoDF):
-    data_loader: geopandas.read_postgis
+    user: str
+    password: str
+    database: str
+    sql: str
+    host: str = 'localhost'
+    port: int = 5432
+
+    def __post_init__(self):
+        self.con = psycopg2.connect(
+            host=self.host,
+            port=self.port,
+            database=self.database,
+            user=self.user,
+            password=self.password
+        )
+        self.gdf = geopandas.read_postgis(
+            sql=self.sql,
+            con=self.con
+        )
