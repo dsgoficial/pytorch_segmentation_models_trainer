@@ -10,3 +10,5 @@ pillow
 matplotlib
 numpy
 pytorch_toolbelt
+descartes
+shapely
