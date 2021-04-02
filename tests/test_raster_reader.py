@@ -25,9 +25,9 @@ import unittest
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import \
     RasterFile
-from pytorch_segmentation_models_trainer.utils.os_utils import (
-    create_folder, remove_folder, hash_file
-)
+from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
+                                                                hash_file,
+                                                                remove_folder)
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, 'testing_data')

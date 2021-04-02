@@ -36,11 +36,12 @@ suffix_dict = {
 @dataclass
 class RasterFile:
     file_name: str
+    channels_last: bool = False
 
-    def read_as_numpy_array(self, channels_last=False):
+    def read_as_numpy_array(self):
         with rasterio.open(self.file_name) as src:
             numpy_array = src.read()
-        return numpy_array if not channels_last \
+        return numpy_array if not self.channels_last \
             else reshape_as_image(numpy_array)
     
     def export_to(self, output_dir, output_format, output_basename=None):
