@@ -19,12 +19,15 @@
  ****
 """
 import os
+import numpy as np
 from dataclasses import dataclass
 from pathlib import Path
 
 import rasterio
 from rasterio.plot import reshape_as_image
+from rasterio.features import rasterize
 
+from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import GeoDF
 from pytorch_segmentation_models_trainer.utils.os_utils import create_folder
 
 suffix_dict = {
@@ -44,7 +47,7 @@ class RasterFile:
         return numpy_array if not self.channels_last \
             else reshape_as_image(numpy_array)
     
-    def export_to(self, output_dir, output_format, output_basename=None):
+    def export_to(self, output_dir: Path, output_format: str, output_basename=None):
         with rasterio.open(self.file_name) as src:
             profile = src.profile
             profile['driver'] = output_format
@@ -57,3 +60,29 @@ class RasterFile:
             with rasterio.open(output_filename, 'w', **profile) as out:
                 out.write(input_raster)
         return output_filename
+    
+    def build_polygon_mask_from_vector_layer(self, input_vector_layer: GeoDF,\
+        output_dir: Path, output_filename=None):
+        raster_ds = rasterio.open(self.file_name)
+        profile = raster_ds.profile.copy()
+        profile['count'] = 1
+        raster_array = np.zeros(raster_ds.shape, dtype=rasterio.uint8)
+        mask_feats = input_vector_layer.get_features_from_bbox(
+            raster_ds.bounds.left, raster_ds.bounds.right, raster_ds.bounds.bottom, raster_ds.bounds.top
+        )
+        input_name, extension = os.path.basename(self.file_name).split('.')
+        output_filename = output_filename if output_filename is not None else input_name+'_polygon_mask'
+        rasterize(
+            mask_feats,
+            out=raster_array,
+            out_shape=raster_array.shape,
+            fill=0,
+            default_value=1,
+            all_touched=True,
+            transform=profile['transform'],
+            dtype=rasterio.uint8
+        )
+        output = os.path.join(output_dir, output_filename+'.'+extension)
+        with rasterio.open(output, 'w', **profile) as out:
+            out.write(raster_array, 1) 
+        return output

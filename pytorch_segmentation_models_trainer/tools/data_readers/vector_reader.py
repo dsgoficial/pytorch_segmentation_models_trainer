@@ -21,8 +21,10 @@
 import abc
 import geopandas
 import psycopg2
-from geopandas import GeoDataFrame
+from geopandas import GeoDataFrame, GeoSeries
 from dataclasses import MISSING, dataclass, field
+from shapely.geometry import Polygon
+
 @dataclass
 class GeoDF(abc.ABC):
 
@@ -32,6 +34,10 @@ class GeoDF(abc.ABC):
     
     def get_geo_df(self):
         return self.gdf
+    
+    def get_features_from_bbox(self, x_min, x_max, y_min, y_max, only_geom=True):
+        feats = self.gdf.cx[x_min:x_max, y_min:y_max]
+        return feats['geometry'] if only_geom else feats
 
 @dataclass
 class FileGeoDF(GeoDF):
