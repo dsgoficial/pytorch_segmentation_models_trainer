@@ -101,6 +101,5 @@ class Test_TestRasterReader(unittest.TestCase):
         )
         output_mask = raster.build_polygon_mask_from_vector_layer(geo_df, self.output_dir)
         self.assertEqual(
-            hash_file(expected_output), hash(output_mask)
+            hash_file(expected_output), hash_file(output_mask)
         )
-

@@ -17,8 +17,11 @@
         "torch",
         "pytorch_lightning",
         "pytorch_segmentation_models_trainer",
-        "matplotlib",
     ],
     "python.languageServer": "Pylance",
     "python.experiments.optOutFrom": ["pythonJediLSP"],
+    "python.formatting.provider": "autopep8",
+    "editor.defaultFormatter": "ms-python.python",
+    "python.autoComplete.extraPaths": [
+    ],
 }
