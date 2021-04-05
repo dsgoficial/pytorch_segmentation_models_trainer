@@ -19,12 +19,19 @@
  ****
 """
 import abc
+from dataclasses import MISSING, dataclass, field
+from enum import Enum
+import functools
+import operator
+
 import geopandas
 import psycopg2
-from enum import Enum
+import shapely
 from geopandas import GeoDataFrame, GeoSeries
-from dataclasses import MISSING, dataclass, field
-from shapely.geometry import Polygon
+from shapely.geometry import (GeometryCollection, LineString,
+                              MultiLineString, MultiPoint, MultiPolygon, Point,
+                              Polygon)
+
 
 class GeomType(Enum):
     POINT, LINE, POLYGON = range(3)
@@ -74,7 +81,44 @@ class PostgisGeoDF(GeoDF):
             con=self.con
         )
 
-def handle_features(input_features, output_type: GeomType = None):
+def handle_features(input_features, output_type: GeomType = None) -> list:
     if output_type is None:
         return input_features
-    return input_features
+    handler = lambda x: handle_geometry(x, output_type)
+    return GeoDataFrame(
+        {'geometry':list(map(handler, input_features))},
+        crs=input_features.crs
+    )
+
+def handle_geometry(geom, output_type):
+    """Handles geometry 
+
+    Args:
+        geom ([type]): [description]
+        output_type ([type]): [description]
+
+    Returns:
+        BaseGeometry: [description]
+    """
+    if isinstance(geom, (Point, MultiPoint)):
+        return geom
+    elif isinstance(geom, GeometryCollection):
+        return GeometryCollection([handle_geometry(i, output_type) for i in geom])
+    elif isinstance(geom, (Polygon, MultiPolygon)) and output_type == GeomType.LINE:
+        # return type is LineString or MultiLinestring, depending whether the polygon
+        # has holes, or if it is a MultiPolygon
+        return geom.boundary
+    elif isinstance(geom, (Polygon, MultiPolygon)) and output_type == GeomType.POINT:
+        # return type is MultiPoint
+        return MultiPoint(
+            list(
+                set(
+                    geom.boundary.coords if isinstance(geom, Polygon)\
+                        else functools.reduce(operator.iconcat, [i.coords for i in geom.boundary])
+                )
+            )
+        )
+    elif isinstance(geom, LineString) and output_type == GeomType.POINT:
+        return MultiPoint(geom.coords)
+    else:
+        raise Exception("Invalid geometry handling")
