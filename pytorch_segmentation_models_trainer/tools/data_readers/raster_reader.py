@@ -22,6 +22,7 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import List
 
 import numpy as np
 import rasterio
@@ -70,7 +71,7 @@ class RasterFile:
     
     def build_mask(self, input_vector_layer: GeoDF,\
             output_dir: Path, output_filename: str =None,\
-            mask_types: list[GeomType] = None,\
+            mask_types: List[GeomType] = None,\
             mask_output_type:MaskOutputType = MaskOutputType.SINGLE_FILE_MULTIPLE_BAND
         ) -> str:
         if mask_types is not None and not isinstance(mask_types, list):
