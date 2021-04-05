@@ -24,9 +24,9 @@ import unittest
 
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import \
-    RasterFile, MaskTypeEnum
+    RasterFile
 from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import \
-    FileGeoDF
+    FileGeoDF, GeomTypeEnum
 from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
                                                                 hash_file,
                                                                 remove_folder)
@@ -92,15 +92,29 @@ class Test_TestRasterReader(unittest.TestCase):
         )
     @parameterized.expand(
         [
-            (None,),
-            ([MaskTypeEnum.POLYGON_MASK],),
-            ([MaskTypeEnum.BOUNDARY_MASK],),
-            ([MaskTypeEnum.VERTEX_MASK],),
-            ([MaskTypeEnum.POLYGON_MASK, MaskTypeEnum.BOUNDARY_MASK, MaskTypeEnum.VERTEX_MASK],),
+            (
+                None,
+                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_polygon_mask.png')
+            ),
+            (
+                [GeomTypeEnum.POLYGON],
+                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_polygon_mask.png')
+            ),
+            (
+                [GeomTypeEnum.LINE],
+                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_boundary_mask.png')
+            ),
+            (
+                [GeomTypeEnum.POINT],
+                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_vertex_mask.png')
+            ),
+            (
+                [GeomTypeEnum.POLYGON, GeomTypeEnum.LINE, GeomTypeEnum.POINT],
+                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_stacked_mask.png')
+            ),
         ]
     )
-    def test_build_mask(self, mask_types):
-        expected_output = os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_polygon_mask.png')
+    def test_build_mask(self, mask_types, expected_output):
         geo_df = FileGeoDF(
             file_name=os.path.join(root_dir, 'data', 'vectors', 'test_polygons2.geojson')
         )

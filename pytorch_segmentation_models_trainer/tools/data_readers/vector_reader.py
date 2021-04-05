@@ -29,6 +29,8 @@ from shapely.geometry import Polygon
 class GeomType(Enum):
     POINT, LINE, POLYGON = range(3)
 
+GeomTypeEnum = GeomType
+
 @dataclass
 class GeoDF(abc.ABC):
 
@@ -72,5 +74,7 @@ class PostgisGeoDF(GeoDF):
             con=self.con
         )
 
-def handle_features(input_features, output_type):
+def handle_features(input_features, output_type: GeomType = None):
+    if output_type is None:
+        return input_features
     return input_features
