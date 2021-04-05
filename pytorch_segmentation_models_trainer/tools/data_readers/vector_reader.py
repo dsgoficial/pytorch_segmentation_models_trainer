@@ -81,14 +81,14 @@ class PostgisGeoDF(GeoDF):
             con=self.con
         )
 
-def handle_features(input_features, output_type: GeomType = None) -> list:
+def handle_features(input_features, output_type: GeomType = None, return_list: bool = False) -> list:
     if output_type is None:
         return input_features
     handler = lambda x: handle_geometry(x, output_type)
     return GeoDataFrame(
         {'geometry':list(map(handler, input_features))},
         crs=input_features.crs
-    )
+    ) if not return_list else list(map(handler, input_features))
 
 def handle_geometry(geom, output_type):
     """Handles geometry 
@@ -100,7 +100,9 @@ def handle_geometry(geom, output_type):
     Returns:
         BaseGeometry: [description]
     """
-    if isinstance(geom, (Point, MultiPoint)):
+    if isinstance(geom, (Point, MultiPoint)) or \
+        (isinstance(geom, (Polygon, MultiPolygon)) and output_type == GeomType.POLYGON) or \
+        (isinstance(geom, (LineString, MultiLineString)) and output_type == GeomType.LINE):
         return geom
     elif isinstance(geom, GeometryCollection):
         return GeometryCollection([handle_geometry(i, output_type) for i in geom])
@@ -118,7 +120,7 @@ def handle_geometry(geom, output_type):
                 )
             )
         )
-    elif isinstance(geom, LineString) and output_type == GeomType.POINT:
+    elif isinstance(geom, (LineString, MultiLineString)) and output_type == GeomType.POINT:
         return MultiPoint(geom.coords)
     else:
         raise Exception("Invalid geometry handling")

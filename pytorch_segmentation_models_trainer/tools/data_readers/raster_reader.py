@@ -27,10 +27,10 @@ import numpy as np
 import rasterio
 from geopandas.geoseries import GeoSeries
 from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
-    GeoDF, handle_features, GeomType, GeomTypeEnum)
+    GeoDF, GeomType, GeomTypeEnum, handle_features)
 from pytorch_segmentation_models_trainer.utils.os_utils import create_folder
 from rasterio.features import rasterize
-from rasterio.plot import reshape_as_image
+from rasterio.plot import reshape_as_image, reshape_as_raster
 
 suffix_dict = {
     "PNG": ".png",
@@ -116,7 +116,7 @@ class RasterFile:
         """
         raster_array = np.zeros(output_shape, dtype=rasterio.uint8)
         rasterize(
-            handle_features(mask_feats, mask_type),
+            handle_features(mask_feats, mask_type, return_list=True),
             out=raster_array,
             out_shape=output_shape,
             fill=0,
@@ -134,4 +134,4 @@ def save_with_rasterio(output, profile, raster_iter, mask_types):
         if len(raster_array.shape) == 2:
             out.write(raster_array, 1)
         else:
-            out.write(raster_array)
+            out.write(reshape_as_raster(raster_array))
