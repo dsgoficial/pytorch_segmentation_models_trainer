@@ -19,22 +19,33 @@
  ****
 """
 import os
-import numpy as np
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
+import numpy as np
 import rasterio
-from rasterio.plot import reshape_as_image
-from rasterio.features import rasterize
-
-from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import GeoDF
+from geopandas.geoseries import GeoSeries
+from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
+    GeoDF, handle_features)
 from pytorch_segmentation_models_trainer.utils.os_utils import create_folder
+from rasterio.features import rasterize
+from rasterio.plot import reshape_as_image
 
 suffix_dict = {
     "PNG": ".png",
     "GTiff": ".tif",
     "JPEG": ".jpg"
 }
+
+class MaskType(Enum):
+    VERTEX_MASK, BOUNDARY_MASK, POLYGON_MASK = range(3)
+
+class MaskOutputType(Enum):
+    SINGLE_FILE_MULTIPLE_BAND, MULTIPLE_FILES_SINGLE_BAND = range(2)
+
+MaskTypeEnum = MaskType
+MaskOutputTypeEnum = MaskOutputType
 
 @dataclass
 class RasterFile:
@@ -61,28 +72,70 @@ class RasterFile:
                 out.write(input_raster)
         return output_filename
     
-    def build_polygon_mask_from_vector_layer(self, input_vector_layer: GeoDF,\
-        output_dir: Path, output_filename=None):
+    def build_mask(self, input_vector_layer: GeoDF,\
+            output_dir: Path, output_filename: str =None,\
+            mask_types: list[MaskType] = None,\
+            mask_output_type:MaskOutputType = MaskOutputType.SINGLE_FILE_MULTIPLE_BAND
+        ) -> str:
+        if mask_types is not None and not isinstance(mask_types, list):
+            raise Exception('Invalid parameter for mask_types')
+        # input handling
+        mask_types = [MaskType.POLYGON_MASK] if mask_types is None else mask_types
+        input_name, extension = os.path.basename(self.file_name).split('.')
+        output_filename = output_filename if output_filename is not None else input_name+'_polygon_mask'
+        output = os.path.join(output_dir, output_filename+'.'+extension)
+        #read the raster
         raster_ds = rasterio.open(self.file_name)
         profile = raster_ds.profile.copy()
-        profile['count'] = 1
-        raster_array = np.zeros(raster_ds.shape, dtype=rasterio.uint8)
+        profile['count'] = len(mask_types)
         mask_feats = input_vector_layer.get_features_from_bbox(
             raster_ds.bounds.left, raster_ds.bounds.right, raster_ds.bounds.bottom, raster_ds.bounds.top
         )
-        input_name, extension = os.path.basename(self.file_name).split('.')
-        output_filename = output_filename if output_filename is not None else input_name+'_polygon_mask'
+        raster_list = [
+            self.build_numpy_mask_from_vector_layer(
+                mask_feats=mask_feats,
+                output_shape=raster_ds.shape,
+                transform=profile['transform'],
+                mask_type=mask_type
+            ) for mask_type in mask_types
+        ]
+        
+        save_with_rasterio(output, profile, raster_list, mask_types)
+        return output
+    
+    def build_numpy_mask_from_vector_layer(self, mask_feats: GeoSeries, output_shape:tuple,\
+        transform, mask_type: MaskType = None) -> np.ndarray:
+        """Builds numpy mask from vector layer using rasterio.
+
+        Args:
+            mask_feats (GeoSeries): Features to be used in mask building.
+            output_shape (tuple): Shape of the output numpy array.
+
+        Raises:
+            Exception: Invalid mask type. Allowed types: POLYGON_MASK, BOUNDARY_MASK and
+            VERTEX_MASK
+
+        Returns:
+            np.ndarray: Numpy array
+        """
+        raster_array = np.zeros(output_shape, dtype=rasterio.uint8)
         rasterize(
-            mask_feats,
+            handle_features(mask_feats, mask_type),
             out=raster_array,
-            out_shape=raster_array.shape,
+            out_shape=output_shape,
             fill=0,
             default_value=1,
             all_touched=True,
-            transform=profile['transform'],
+            transform=transform,
             dtype=rasterio.uint8
         )
-        output = os.path.join(output_dir, output_filename+'.'+extension)
-        with rasterio.open(output, 'w', **profile) as out:
-            out.write(raster_array, 1) 
-        return output
+        return raster_array
+
+def save_with_rasterio(output, profile, raster_list, mask_types):
+    raster_array = raster_list.next() if len(mask_types) == 1 \
+        else np.dstack(raster_list)
+    with rasterio.open(output, 'w', **profile) as out:
+        if len(raster_array.shape) == 2:
+            out.write(raster_array, 1)
+        else:
+            out.write(raster_array)

@@ -21,9 +21,13 @@
 import abc
 import geopandas
 import psycopg2
+from enum import Enum
 from geopandas import GeoDataFrame, GeoSeries
 from dataclasses import MISSING, dataclass, field
 from shapely.geometry import Polygon
+
+class GeomType(Enum):
+    POINT, LINE, POLYGON = range(3)
 
 @dataclass
 class GeoDF(abc.ABC):
@@ -35,7 +39,8 @@ class GeoDF(abc.ABC):
     def get_geo_df(self):
         return self.gdf
     
-    def get_features_from_bbox(self, x_min, x_max, y_min, y_max, only_geom=True):
+    def get_features_from_bbox(self, x_min:float, x_max:float,\
+        y_min:float, y_max:float, only_geom: bool=True) -> GeoSeries:
         feats = self.gdf.cx[x_min:x_max, y_min:y_max]
         return feats['geometry'] if only_geom else feats
 
@@ -66,3 +71,6 @@ class PostgisGeoDF(GeoDF):
             sql=self.sql,
             con=self.con
         )
+
+def handle_features(input_features, output_type):
+    return input_features

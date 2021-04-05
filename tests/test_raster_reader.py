@@ -24,7 +24,7 @@ import unittest
 
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import \
-    RasterFile
+    RasterFile, MaskTypeEnum
 from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import \
     FileGeoDF
 from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
@@ -90,8 +90,16 @@ class Test_TestRasterReader(unittest.TestCase):
         self.assertEqual(
             hash_file(expected_output), hash_file(output_raster)
         )
-    
-    def test_build_polygon_mask_from_vector_layer(self):
+    @parameterized.expand(
+        [
+            (None,),
+            ([MaskTypeEnum.POLYGON_MASK],),
+            ([MaskTypeEnum.BOUNDARY_MASK],),
+            ([MaskTypeEnum.VERTEX_MASK],),
+            ([MaskTypeEnum.POLYGON_MASK, MaskTypeEnum.BOUNDARY_MASK, MaskTypeEnum.VERTEX_MASK],),
+        ]
+    )
+    def test_build_mask(self, mask_types):
         expected_output = os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_polygon_mask.png')
         geo_df = FileGeoDF(
             file_name=os.path.join(root_dir, 'data', 'vectors', 'test_polygons2.geojson')
@@ -99,7 +107,7 @@ class Test_TestRasterReader(unittest.TestCase):
         raster = RasterFile(
             file_name=os.path.join(root_dir, 'data', 'rasterize_data', 'images', '10.png')
         )
-        output_mask = raster.build_polygon_mask_from_vector_layer(geo_df, self.output_dir)
+        output_mask = raster.build_mask(geo_df, self.output_dir, mask_types=mask_types)
         self.assertEqual(
             hash_file(expected_output), hash_file(output_mask)
         )
