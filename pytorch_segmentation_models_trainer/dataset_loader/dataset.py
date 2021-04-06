@@ -102,6 +102,51 @@ class SegmentationDataset(Dataset):
         image = np.array(image)
         return (image > 0).astype(np.uint8) if is_mask else image
 
+class FrameFieldSegmentationDataset(SegmentationDataset):
+    def __init__(
+        self,
+        input_csv_path: Path,
+        root_dir=None,
+        augmentation_list=None,
+        data_loader=None,
+        image_key=None,
+        mask_key=None,
+        multi_band_mask=False,
+        boundary_mask_key=None,
+        vertex_mask_key=None,
+        n_first_rows_to_read=None
+    ) -> None:
+        super().__init__(input_csv_path, root_dir=root_dir, augmentation_list=augmentation_list,
+                         data_loader=data_loader, image_key=image_key, mask_key=mask_key,
+                         n_first_rows_to_read=n_first_rows_to_read)
+        self.multi_band_mask = multi_band_mask
+        self.boundary_mask_key = boundary_mask_key if boundary_mask_key is not None else 'boundary_mask_path'
+        self.vertex_mask_key = vertex_mask_key if vertex_mask_key is not None else 'vertex_mask_path'
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        if self.multi_band_mask:
+            return super().__getitem__(idx)
+        image = self.load_image(idx, key=self.image_key)
+        mask = self.load_image(idx, key=self.mask_key, is_mask=True)
+        boundary_mask = self.load_image(idx, key=self.mask_key, is_mask=True)
+        vertex_mask = self.load_image(idx, key=self.vertex_mask_key, is_mask=True)
+        if self.transform is None:
+            return {
+                'image': image,
+                'mask': mask,
+                'boundary_mask': boundary_mask,
+                'vertex_mask': vertex_mask
+            }
+        transformed = self.transform(
+            image=image,
+            masks=[mask, boundary_mask, vertex_mask]
+        )
+        return {
+                'image': transformed['image'],
+                'mask': transformed['masks'][0],
+                'boundary_mask': transformed['masks'][1],
+                'vertex_mask': transformed['masks'][2]
+            }
 
 if __name__ == '__main__':
     pass

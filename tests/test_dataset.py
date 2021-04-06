@@ -94,3 +94,11 @@ class Test_TestDataset(CustomTestCase):
             )
             ds_from_cfg = hydra.utils.instantiate(cfg)
             self.assertEqual(len(ds_from_cfg), 2)
+    
+    def test_create_frame_field_dataset_instance(self):
+        # TODO
+        return True
+
+    def test_load_image_frame_field_dataset(self):
+        # TODO
+        return True
