@@ -15,3 +15,5 @@ fiona
 psycopg2
 geopandas
 rasterio
+numba
+skan
