@@ -104,6 +104,7 @@ class Test_TestSkeletonize(unittest.TestCase):
             plt.savefig(
                 os.path.join(self.output_dir, f'test_output{i}.png')
             )
+            plt.close()
             self.assertEqual(
                 compare_images(
                     os.path.join(root_dir, 'expected_outputs', 'tensor_tools', f'output{i}.png'),
