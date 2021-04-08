@@ -3,6 +3,7 @@ torchvision
 pytorch-lightning
 segmentation-models-pytorch
 hydra-core
+kornia
 albumentations
 pandas
 tensorboardX

@@ -27,7 +27,6 @@ from pytorch_segmentation_models_trainer.utils.complex_utils import (
     complex_abs_squared, complex_mul, complex_sqrt)
 from torch.nn import functional as F
 
-
 class LaplacianPenalty:
     def __init__(self, channels: int):
         self.channels = channels
@@ -45,7 +44,6 @@ class LaplacianPenalty:
     def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
         return self.laplacian_filter(tensor)
 
-
 def framefield_align_error(c0, c2, z, complex_dim=-1):
     assert c0.shape == c2.shape == z.shape, \
         "All inputs should have the same shape. Currently c0: {}, c2: {}, z: {}".format(
@@ -61,7 +59,6 @@ def framefield_align_error(c0, c2, z, complex_dim=-1):
     loss = complex_abs_squared(f_z, complex_dim)
     return loss
 
-
 def c0c2_to_uv(c0c2: torch.Tensor) -> torch.Tensor:
     c0, c2 = torch.chunk(c0c2, 2, dim=1)
     c2_squared = complex_mul(c2, c2, complex_dim=1)
@@ -74,7 +71,6 @@ def c0c2_to_uv(c0c2: torch.Tensor) -> torch.Tensor:
     uv_squared = torch.stack([u_squared, v_squared], dim=1)
     uv = complex_sqrt(uv_squared, complex_dim=2)
     return uv
-
 
 def compute_closest_in_uv(directions: torch.Tensor, uv: torch.Tensor) -> torch.Tensor:
     """
@@ -90,7 +86,6 @@ def compute_closest_in_uv(directions: torch.Tensor, uv: torch.Tensor) -> torch.T
     closest_in_uv = torch.argmin(abs_uv_dot_dir, dim=1)
 
     return closest_in_uv
-
 
 def detect_corners(polylines, u, v):
     def compute_direction_score(ij, edges, field_dir):
