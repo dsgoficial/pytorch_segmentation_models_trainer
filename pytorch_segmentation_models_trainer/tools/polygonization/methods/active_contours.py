@@ -35,7 +35,7 @@ from functools import partial
 
 import torch
 
-from frame_field_learning import polygonize_utils
+from pytorch_segmentation_models_trainer.tools.polygonization import polygonize_utils
 
 from pytorch_segmentation_models_trainer.optimizers.poly_optimizers import TensorPolyOptimizer
 from pytorch_segmentation_models_trainer.tools.visualization import crossfield_plot
