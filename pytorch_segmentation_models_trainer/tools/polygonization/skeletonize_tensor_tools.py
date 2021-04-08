@@ -104,13 +104,8 @@ def skeletons_to_tensorskeleton(skeletons_batch: List[Skeleton], device: str=Non
     :return: TensorSkeleton(pos, path_index, path_delim, batch, batch_size)
     """
     batch_size = len(skeletons_batch)
-    batch_delim_list = []
-    batch_list = []
-    path_delim_list = []
-    path_index_list = []
-    batch_delim_offset = 0
-    path_delim_offset = 0
-    path_index_offset = 0
+    batch_delim_list, batch_list, path_delim_list, path_index_list = [], [], [], []
+    batch_delim_offset, path_delim_offset, path_index_offset = 0, 0, 0
     if batch_size > 0:
         batch_delim_list.append(0)
     for batch_i, skeleton in enumerate(skeletons_batch):
@@ -182,72 +177,3 @@ def plot_skeleton(skeleton: Skeleton):
         path_indices = skeleton.paths.indices[start:stop]
         path_coordinates = skeleton.coordinates[path_indices]
         ax1.plot(path_coordinates[:, 1], path_coordinates[:, 0])
-
-def main():
-
-    device = "cpu"
-
-    np.random.seed(0)
-    torch.manual_seed(0)
-
-    spatial_shape = (10, 10)
-
-    skan_skeletons_batch = []
-    skeleton_image = np.zeros(spatial_shape, dtype=np.bool)
-    skeleton_image[2, :] = True
-    skeleton_image[:, 2] = True
-    skeleton_image[7, :] = True
-    skeleton_image[:, 7] = True
-    skan_skeleton = skan.Skeleton(skeleton_image, keep_images=False)
-    skan_skeletons_batch.append(skan_skeleton)
-    # plt.imshow(skeleton_image)
-    # plot_skeleton(skan_skeleton)
-    # plt.show()
-
-    skeleton_image = np.zeros(spatial_shape, dtype=np.bool)
-    skeleton_image[5, :] = True
-    skeleton_image[:, 5] = True
-    skan_skeleton = skan.Skeleton(skeleton_image, keep_images=False)
-    skan_skeletons_batch.append(skan_skeleton)
-    # plt.imshow(skeleton_image)
-    # plot_skeleton(skan_skeleton)
-    # plt.show()
-
-    skeletons_batch = [Skeleton(skan_skeleton.coordinates, Paths(skan_skeleton.paths.indices, skan_skeleton.paths.indptr)) for skan_skeleton in skan_skeletons_batch]
-
-    print("# --- skeletons_to_tensorskeleton() --- #")
-    tensorskeleton = skeletons_to_tensorskeleton(skeletons_batch, device=device)
-    print("# --- --- #")
-    # print("batch:")
-    # print(tensorskeleton.batch)
-    # print("pos:")
-    # print(tensorskeleton.pos.shape)
-    # print(tensorskeleton.pos)
-    print("path_index:")
-    print(tensorskeleton.path_index.shape)
-    print(tensorskeleton.path_index)
-    print("path_delim:")
-    print(tensorskeleton.path_delim.shape)
-    print(tensorskeleton.path_delim)
-    print("batch_delim:")
-    print(tensorskeleton.batch_delim.shape)
-    print(tensorskeleton.batch_delim)
-
-    print("# --- tensorskeleton_to_skeletons() --- #")
-    skeletons_batch = tensorskeleton_to_skeletons(tensorskeleton)
-
-    # Plot
-    import os
-    for i, skeleton in enumerate(skeletons_batch):
-        plot_skeleton(skeleton)
-        plt.savefig(
-            os.path.join('/Users/philipeborba/github_repos/pytorch_segmentation_models_trainer/tests/testing_data/expected_outputs/tensor_tools', f'output{i}.png')
-        )
-        plt.close()
-        # plt.show()
-
-    print("# --- --- #")
-
-
-if __name__ == "__main__":
-    main()

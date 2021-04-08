@@ -27,6 +27,7 @@ import torch
 import kornia
 import shapely
 import skimage
+from itertools import partial
 from pytorch_segmentation_models_trainer.optimizers.poly_optimizers import \
     PolygonAlignLoss, TensorPolyOptimizer
 from pytorch_segmentation_models_trainer.utils.math_utils import compute_crossfield_uv
@@ -45,22 +46,22 @@ def get_junction_corner_index(tensorskeleton: TensorSkeleton):
         - T: number of tip nodes
     @return: junction_corner_index of shape (Sd*J - T, 3) which is a list of 3-tuples (for each junction corner)
     """
-    junction_edge_index = build_junction_index(tensorskeleton)
-    junction_edge_index = remove_tip_junctions(tensorskeleton, junction_edge_index)
-    grouped_junction_edge_index = group_junction_by_sorting(junction_edge_index)
-    junction_angle_to_axis = compute_angle_to_vertical_axis_at_junction(
+    junction_edge_index = _build_junction_index(tensorskeleton)
+    junction_edge_index = _remove_tip_junctions(tensorskeleton, junction_edge_index)
+    grouped_junction_edge_index = _group_junction_by_sorting(junction_edge_index)
+    junction_angle_to_axis = _compute_angle_to_vertical_axis_at_junction(
         tensorskeleton,
         grouped_junction_edge_index
     )
-    junction_corner_index, junction_end_index = build_junction_corner_index()
-    return slice_over_junction_index(
+    junction_corner_index, junction_end_index = _build_junction_corner_index()
+    return _slice_over_junction_index(
         junction_corner_index,
         junction_end_index,
         junction_angle_to_axis,
         grouped_junction_edge_index
     )
 
-def build_junction_index(ts: TensorSkeleton) -> torch.tensor:
+def _build_junction_index(ts: TensorSkeleton) -> torch.tensor:
     junction_edge_index = torch.empty(
         (2 * ts.num_paths, 2),
         dtype=torch.long,
@@ -72,15 +73,15 @@ def build_junction_index(ts: TensorSkeleton) -> torch.tensor:
     junction_edge_index[ts.num_paths:, 1] = ts.path_index[ts.path_delim[1:] - 2]
     return junction_edge_index
 
-def remove_tip_junctions(ts: TensorSkeleton, junction_edge_index: torch.Tensor):
+def _remove_tip_junctions(ts: TensorSkeleton, junction_edge_index: torch.Tensor):
     degrees = ts.degrees[junction_edge_index[:, 0]]
     return junction_edge_index[1 < degrees, :]
 
-def group_junction_by_sorting(junction_edge_index: torch.Tensor):
+def _group_junction_by_sorting(junction_edge_index: torch.Tensor):
     group_indices = torch.argsort(junction_edge_index[:, 0], dim=0)
     return junction_edge_index[group_indices, :]
 
-def slice_over_junction_index(junction_corner_index, junction_end_index, junction_angle_to_axis, grouped_junction_edge_index, slice_start=0):
+def _slice_over_junction_index(junction_corner_index, junction_end_index, junction_angle_to_axis, grouped_junction_edge_index, slice_start=0):
     for slice_end in junction_end_index:
         slice_angle_to_axis = junction_angle_to_axis[slice_start:slice_end]
         slice_junction_edge_index = grouped_junction_edge_index[slice_start:slice_end]
@@ -92,7 +93,7 @@ def slice_over_junction_index(junction_corner_index, junction_end_index, junctio
         slice_start = slice_end
     return junction_corner_index
 
-def compute_angle_to_vertical_axis_at_junction(ts: TensorSkeleton, grouped_junction_edge_index):
+def _compute_angle_to_vertical_axis_at_junction(ts: TensorSkeleton, grouped_junction_edge_index):
     junction_edge = ts.pos.detach()[grouped_junction_edge_index, :]
     junction_tangent = junction_edge[:, 1, :] - junction_edge[:, 0, :]
     return torch.atan2(
@@ -100,7 +101,7 @@ def compute_angle_to_vertical_axis_at_junction(ts: TensorSkeleton, grouped_junct
         junction_tangent[:, 0]
     )
 
-def build_junction_corner_index(ts: TensorSkeleton, grouped_junction_edge_index):
+def _build_junction_corner_index(ts: TensorSkeleton, grouped_junction_edge_index):
     unique = torch.unique_consecutive(
         grouped_junction_edge_index[:, 0]
     )
@@ -116,77 +117,57 @@ def build_junction_corner_index(ts: TensorSkeleton, grouped_junction_edge_index)
     )
 
 def shapely_postprocess(polylines, np_indicator, tolerance, config):
-    if type(tolerance) == list:
+    if isinstance(tolerance, list):
         # Use several tolerance values for simplification. return a dict with all results
-        out_polygons_dict = {}
-        out_probs_dict = {}
+        out_polygons_dict, out_probs_dict = {}, {}
         for tol in tolerance:
-            out_polygons, out_probs = shapely_postprocess(polylines, np_indicator, tol, config)
-            out_polygons_dict["tol_{}".format(tol)] = out_polygons
-            out_probs_dict["tol_{}".format(tol)] = out_probs
+            (
+                out_polygons_dict[f"tol_{tol}"],
+                out_probs_dict[f"tol_{tol}"]
+            ) = shapely_postprocess(polylines, np_indicator, tol, config)
         return out_polygons_dict, out_probs_dict
-    else:
-        height = np_indicator.shape[0]
-        width = np_indicator.shape[1]
+    height, width = np_indicator.shape[0:2]
+    linestring_list = _get_linestring_list(polylines, width, height, tolerance)
+    filtered_polygons, filtered_polygon_probs = [], []
+    polygonize_lambda_func = lambda x: _polygonize_in_threshold(
+        x, config['min_area'], filtered_polygons, filtered_polygon_probs, np_indicator
+    )
+    list(
+        map(
+            polygonize_lambda_func,
+            shapely.ops.polygonize(
+                shapely.ops.unary_union(linestring_list)
+            )
+        )
+    )
+    return filtered_polygons, filtered_polygon_probs
 
-        # Convert to Shapely:
-        # tic = time.time()
-        line_string_list = [shapely.geometry.LineString(polyline[:, ::-1]) for polyline in polylines]
-        line_string_list = [line_string.simplify(tolerance, preserve_topology=True) for line_string in line_string_list]
-        # toc = time.time()
-        # print(f"simplify: {toc - tic}s")
+def _get_linestring_list(polylines, width, height, tol):
+    line_string_iter = (
+        shapely.geometry.LineString(polyline[:, ::-1]) \
+            for polyline in polylines
+    )
+    line_string_list = [
+        line_string.simplify(tol, preserve_topology=True) \
+            for line_string in line_string_iter
+    ]
+    line_string_list.append(
+        shapely.geometry.LinearRing([
+            (0, 0),
+            (0, height - 1),
+            (width - 1, height - 1),
+            (width - 1, 0),
+        ]))
+    return line_string_list
 
-        # Add image boundary line_strings for border polygons
-        line_string_list.append(
-            shapely.geometry.LinearRing([
-                (0, 0),
-                (0, height - 1),
-                (width - 1, height - 1),
-                (width - 1, 0),
-            ]))
-
-        # debug_print("Merge polylines")
-
-        # Merge polylines (for border polygons):
-
-        # tic = time.time()
-        multi_line_string = shapely.ops.unary_union(line_string_list)
-        # toc = time.time()
-        # print(f"shapely.ops.unary_union: {toc - tic}s")
-
-        # debug_print("polygonize_full")
-
-        # Find polygons:
-        polygons = shapely.ops.polygonize(multi_line_string)
-        polygons = list(polygons)
-
-        # debug_print("Remove small polygons")
-
-        # Remove small polygons
-        # tic = time.time()
-        polygons = [polygon for polygon in polygons if
-                    config["min_area"] < polygon.area]
-        # toc = time.time()
-        # print(f"Remove small polygons: {toc - tic}s")
-
-        # debug_print("Remove low prob polygons")
-
-        # Remove low prob polygons
-        # tic = time.time()
-
-        filtered_polygons = []
-        filtered_polygon_probs = []
-        for polygon in polygons:
-            prob = polygonize_utils.compute_geom_prob(polygon, np_indicator)
-            # print("acm:", np_indicator.min(), np_indicator.mean(), np_indicator.max(), prob)
-            if config["seg_threshold"] < prob:
-                filtered_polygons.append(polygon)
-                filtered_polygon_probs.append(prob)
-
-        # toc = time.time()
-        # print(f"Remove low prob polygons: {toc - tic}s")
-
-        return filtered_polygons, filtered_polygon_probs
+def _polygonize_in_threshold(polygon, threshold, filtered_polygons, \
+    filtered_polygon_probs, np_indicator):
+    if polygon.area <= threshold:
+        return
+    prob = polygonize_utils.compute_geom_prob(polygon, np_indicator)
+    if config["seg_threshold"] < prob:
+        filtered_polygons.append(polygon)
+        filtered_polygon_probs.append(prob)
 
 
 def post_process(polylines, np_indicator, np_crossfield, config):
@@ -204,41 +185,36 @@ def get_skeleton(np_edge_mask, config):
     @param config:
     @return:
     """
-    # --- Skeletonize
-    # tic = time.time()
-    # Pad np_edge_mask first otherwise pixels on the bottom and right are lost after skeletonize:
+    # Pad np_edge_mask first otherwise pixels on the bottom 
+    # and right are lost after skeletonize:
     pad_width = 2
     np_edge_mask_padded = np.pad(np_edge_mask, pad_width=pad_width, mode="edge")
     skeleton_image = skimage.morphology.skeletonize(np_edge_mask_padded)
     skeleton_image = skeleton_image[pad_width:-pad_width, pad_width:-pad_width]
-
-    # toc = time.time()
-    # debug_print(f"skimage.morphology.skeletonize: {toc - tic}s")
-
-    # tic = time.time()
-
-    # if skeleton_image.max() == False:
-    #     # There is no polylines to be detected
-    #     return [], np.empty((0, 2), dtype=np.bool)
-
     skeleton = Skeleton()
-    if 0 < skeleton_image.sum():
-        # skan does not work in some cases (paths of 2 pixels or less, etc) which raises a ValueError, in witch case we continue with an empty skeleton.
-        try:
-            skeleton = skan.Skeleton(skeleton_image, keep_images=False)
-            # skan.skeleton sometimes returns skeleton.coordinates.shape[0] != skeleton.degrees.shape[0] or
-            # skeleton.coordinates.shape[0] != skeleton.paths.indices.max() + 1
-            # Slice coordinates accordingly
-            skeleton.coordinates = skeleton.coordinates[:skeleton.paths.indices.max() + 1]
-            if skeleton.coordinates.shape[0] != skeleton.degrees.shape[0]:
-                raise ValueError(f"skeleton.coordinates.shape[0] = {skeleton.coordinates.shape[0]} while skeleton.degrees.shape[0] = {skeleton.degrees.shape[0]}. They should be of same size.")
-        except ValueError as e:
-            if DEBUG:
-                print_utils.print_warning(
-                    f"WARNING: skan.Skeleton raised a ValueError({e}). skeleton_image has {skeleton_image.sum()} true values. Continuing without detecting skeleton in this image...")
-                skimage.io.imsave("np_edge_mask.png", np_edge_mask.astype(np.uint8) * 255)
-                skimage.io.imsave("skeleton_image.png", skeleton_image.astype(np.uint8) * 255)
-
+    if skeleton_image <= 0:
+        return skeleton
+    # skan does not work in some cases (paths of 2 pixels or less, etc) 
+    # which raises a ValueError, in witch case we continue with an empty skeleton.
+    try:
+        skeleton = skan.Skeleton(skeleton_image, keep_images=False)
+        # Slice coordinates accordingly
+        skeleton.coordinates = skeleton.coordinates[:skeleton.paths.indices.max() + 1]
+        if skeleton.coordinates.shape[0] != skeleton.degrees.shape[0]:
+            raise ValueError(
+                f"skeleton.coordinates.shape[0] = {skeleton.coordinates.shape[0]} "
+                "while skeleton.degrees.shape[0] = {skeleton.degrees.shape[0]}. "
+                "They should be of same size."
+            )
+    except ValueError as e:
+        if DEBUG:
+            print_utils.print_warning(
+                f"WARNING: skan.Skeleton raised a ValueError({e}). "
+                "skeleton_image has {skeleton_image.sum()} true values. "
+                "Continuing without detecting skeleton in this image..."
+            )
+            skimage.io.imsave("np_edge_mask.png", np_edge_mask.astype(np.uint8) * 255)
+            skimage.io.imsave("skeleton_image.png", skeleton_image.astype(np.uint8) * 255)
     return skeleton
 
 
@@ -257,32 +233,27 @@ def get_marching_squares_skeleton(np_int_prob, config):
     )
     # Keep contours with more than 3 vertices and large enough area
     contours = [
-        contour for contour in contours if 3 <= contour.shape[0] and \
-            config["min_area"] < shapely.geometry.Polygon(contour).area
+        contour for contour in contours if contour.shape[0] >= 3 and \
+            shapely.geometry.Polygon(contour).area > config["min_area"]
     ]
 
     # If there are no contours, return empty skeleton
     if len(contours) == 0:
         return Skeleton()
 
-    coordinates = []
+    coordinates, indices, degrees, indptr = [], [], [], [0]
     indices_offset = 0
-    indices = []
-    indptr = [0]
-    degrees = []
 
-    for i, contour in enumerate(contours):
+    def _populate_aux_lists(contour):
         # Check if it is a closed contour
         is_closed = np.max(np.abs(contour[0] - contour[-1])) < 1e-6
-        if is_closed:
-            _coordinates = contour[:-1, :]  # Don't include redundant vertex in coordinates
-        else:
-            _coordinates = contour
+        _coordinates = contour[:-1, :] if is_closed else contour
         _degrees = 2 * np.ones(_coordinates.shape[0], dtype=np.long)
         if not is_closed:
-            _degrees[0] = 1
-            _degrees[-1] = 1
-        _indices = list(range(indices_offset, indices_offset + _coordinates.shape[0]))
+            _degrees[0], _degrees[-1] = 1, 1
+        _indices = list(
+            range(indices_offset, indices_offset + _coordinates.shape[0])
+        )
         if is_closed:
             _indices.append(_indices[0])  # Close contour with indices
         coordinates.append(_coordinates)
@@ -290,17 +261,18 @@ def get_marching_squares_skeleton(np_int_prob, config):
         indices.extend(_indices)
         indptr.append(indptr[-1] + len(_indices))
         indices_offset += _coordinates.shape[0]
+    list(
+        map(_populate_aux_lists, contours)
+    )
 
-    coordinates = np.concatenate(coordinates, axis=0)
-    degrees = np.concatenate(degrees, axis=0)
-    indices = np.array(indices)
-    indptr = np.array(indptr)
-
-    paths = Paths(indices, indptr)
-    skeleton = Skeleton(coordinates, paths, degrees)
-
-    return skeleton
-
+    return Skeleton(
+        coordinates=np.concatenate(coordinates, axis=0),
+        paths=Paths(
+            indices=np.array(indices),
+            indptr=np.array(indptr)
+        ),
+        degrees=np.concatenate(degrees, axis=0)
+    )
 
 # @profile
 def compute_skeletons(seg_batch, config, spatial_gradient, pool=None) -> List[Skeleton]:
@@ -312,29 +284,34 @@ def compute_skeletons(seg_batch, config, spatial_gradient, pool=None) -> List[Sk
         # Only interior segmentation is available, initialize with marching squares
         np_int_prob_batch = int_prob_batch.cpu().numpy()
         get_marching_squares_skeleton_partial = functools.partial(get_marching_squares_skeleton, config=config)
-        if pool is not None:
-            skeletons_batch = pool.map(get_marching_squares_skeleton_partial, np_int_prob_batch)
-        else:
-            skeletons_batch = list(map(get_marching_squares_skeleton_partial, np_int_prob_batch))
+        skeletons_batch = pool.map(
+            get_marching_squares_skeleton_partial, np_int_prob_batch
+        ) if pool is not None \
+            else list(map(get_marching_squares_skeleton_partial, np_int_prob_batch))
     elif config["init_method"] == "skeleton":
-        corrected_edge_prob_batch = config["data_level"] < int_prob_batch  # Convet to mask
-        corrected_edge_prob_batch = corrected_edge_prob_batch[:, None, :, :].float() # Convet to float for spatial grads
-        corrected_edge_prob_batch = 2 * spatial_gradient(corrected_edge_prob_batch)[:, 0, :, :]  # (b, 2, h, w), Normalize (kornia normalizes to -0.5, 0.5 for input in [0, 1])
-        corrected_edge_prob_batch = corrected_edge_prob_batch.norm(dim=1)  # (b, h, w), take the gradient norm
-        if 2 <= seg_batch.shape[1]:
-            corrected_edge_prob_batch = torch.clamp(seg_batch[:, 1, :, :] + corrected_edge_prob_batch, 0, 1)
+        corrected_edge_prob_batch = int_prob_batch > config["data_level"]
+        corrected_edge_prob_batch = corrected_edge_prob_batch[:, None, :, :].float()
+        corrected_edge_prob_batch = 2 * spatial_gradient(corrected_edge_prob_batch)[:, 0, :, :]
+        corrected_edge_prob_batch = corrected_edge_prob_batch.norm(dim=1)
+        if seg_batch.shape[1] >= 2:
+            corrected_edge_prob_batch = torch.clamp(
+                seg_batch[:, 1, :, :] + corrected_edge_prob_batch, 0, 1
+            )
 
         # --- Init skeleton
-        corrected_edge_mask_batch = config["data_level"] < corrected_edge_prob_batch
+        corrected_edge_mask_batch = corrected_edge_prob_batch > config["data_level"]
         np_corrected_edge_mask_batch = corrected_edge_mask_batch.cpu().numpy()
 
         get_skeleton_partial = functools.partial(get_skeleton, config=config)
-        if pool is not None:
-            skeletons_batch = pool.map(get_skeleton_partial, np_corrected_edge_mask_batch)
-        else:
-            skeletons_batch = list(map(get_skeleton_partial, np_corrected_edge_mask_batch))
+        skeletons_batch = pool.map(
+            get_skeleton_partial, np_corrected_edge_mask_batch
+        ) if pool is not None \
+            else list(map(get_skeleton_partial, np_corrected_edge_mask_batch))
     else:
-        raise NotImplementedError(f"init_method '{config['init_method']}' not recognized. Valid init methods are 'skeleton' and 'marching_squares'")
+        raise NotImplementedError(
+            f"init_method '{config['init_method']}' not recognized."
+            " Valid init methods are 'skeleton' and 'marching_squares'"
+        )
 
     return skeletons_batch
 
@@ -363,11 +340,12 @@ class PolygonizerASM:
 
     # @profile
     def __call__(self, seg_batch, crossfield_batch, pre_computed=None):
-        assert len(seg_batch.shape) == 4 and seg_batch.shape[
-            1] <= 3, "seg_batch should be (N, C, H, W) with C <= 3, not {}".format(seg_batch.shape)
-        assert len(crossfield_batch.shape) == 4 and crossfield_batch.shape[
-            1] == 4, "crossfield_batch should be (N, 4, H, W)"
-        assert seg_batch.shape[0] == crossfield_batch.shape[0], "Batch size for seg and crossfield should match"
+        assert len(seg_batch.shape) == 4 and seg_batch.shape[1] <= 3, \
+            "seg_batch should be (N, C, H, W) with C <= 3, not {}".format(seg_batch.shape)
+        assert len(crossfield_batch.shape) == 4 and crossfield_batch.shape[1] == 4,\
+            "crossfield_batch should be (N, 4, H, W)"
+        assert seg_batch.shape[0] == crossfield_batch.shape[0],\
+            "Batch size for seg and crossfield should match"
 
         seg_batch = seg_batch.to(self.config["device"])
         crossfield_batch = crossfield_batch.to(self.config["device"])
@@ -442,12 +420,12 @@ class PolygonizerASM:
         np_crossfield_batch = np.transpose(crossfield_batch.cpu().numpy(), (0, 2, 3, 1))
         np_int_prob_batch = int_prob_batch.cpu().numpy()
         post_process_partial = partial(post_process, config=self.config)
-        if self.pool is not None:
-            polygons_probs_batch = self.pool.starmap(post_process_partial,
-                                                zip(polylines_batch, np_int_prob_batch, np_crossfield_batch))
-        else:
-            polygons_probs_batch = map(post_process_partial, polylines_batch, np_int_prob_batch,
-                                       np_crossfield_batch)
+        polygons_probs_batch = self.pool.starmap(
+            post_process_partial,
+            zip(polylines_batch, np_int_prob_batch, np_crossfield_batch)
+        ) if self.pool is not None else map(
+            post_process_partial, polylines_batch, np_int_prob_batch, np_crossfield_batch
+        )
         polygons_batch, probs_batch = zip(*polygons_probs_batch)
 
         if DEBUG:

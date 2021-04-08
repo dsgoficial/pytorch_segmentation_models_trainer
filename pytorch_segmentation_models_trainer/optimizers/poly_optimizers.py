@@ -23,6 +23,9 @@
 
 import torch
 from pytorch_segmentation_models_trainer.custom_losses.crossfield_losses import AlignLoss
+from pytorch_segmentation_models_trainer.utils import frame_field_utils
+from pytorch_segmentation_models_trainer.utils.math_utils import bilinear_interpolate
+
 
 class TensorPolyOptimizer:
     def __init__(
@@ -65,11 +68,8 @@ class TensorPolyOptimizer:
         self.optimizer = torch.optim.SGD([tensorpoly.pos], lr=config["poly_lr"])
 
         def lr_warmup_func(iter):
-            if iter < config["warmup_iters"]:
-                coef = 1 + (config["warmup_factor"] - 1) * (config["warmup_iters"] - iter) / config["warmup_iters"]
-            else:
-                coef = 1
-            return coef
+            return 1 if iter >= config["warmup_iters"] else \
+                1 + (config["warmup_factor"] - 1) * (config["warmup_iters"] - iter) / config["warmup_iters"]
 
         self.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
             self.optimizer,
@@ -79,20 +79,15 @@ class TensorPolyOptimizer:
     def step(self, iter_num):
         self.optimizer.zero_grad()
         loss, losses_dict = self.criterion(self.tensorpoly)
-        # print("loss:", loss.item())
         loss.backward()
-        # print(polygon_tensor.grad[0])
         self.optimizer.step()
         self.lr_scheduler.step(iter_num)
-
-        # Move endpoints back:
         with torch.no_grad():
             self.tensorpoly.pos[self.tensorpoly.is_endpoint] = self.endpoint_pos
         return loss.item(), losses_dict
 
     def optimize(self):
-        optim_iter = range(self.config["steps"])
-        for iter_num in optim_iter:
+        for iter_num in range(self.config["steps"]):
             loss, losses_dict = self.step(iter_num)
         return self.tensorpoly
 
@@ -155,15 +150,6 @@ class PolygonAlignLoss:
 
         # Align to level set of indicator:
         pos_indicator_value = bilinear_interpolate(self.indicator[:, None, ...], tensorpoly.pos, batch=tensorpoly.batch)
-        # TODO: Try to use grid_sample with batch for speed: put batch dim to height dim and make a single big image.
-        # TODO: Convert pos accordingly and take care of borders
-        # height = self.indicator.shape[1]
-        # width = self.indicator.shape[2]
-        # normed_xy = tensorpoly.pos.roll(shifts=1, dims=-1)
-        # normed_xy[: 0] /= (width-1)
-        # normed_xy[: 1] /= (height-1)
-        # centered_xy = 2*normed_xy - 1
-        # pos_value = torch.nn.functional.grid_sample(self.indicator[None, None, ...], centered_batch_xy[None, None, ...], align_corners=True).squeeze()
         level_loss = torch.sum(torch.pow(pos_indicator_value - self.level, 2))
 
         # Align to minimum distance from the boundary
