@@ -3,12 +3,14 @@ torchvision
 pytorch-lightning
 segmentation-models-pytorch
 hydra-core
+torch_scatter
 kornia
 albumentations
 pandas
 tensorboardX
 pillow
 matplotlib
+scipy
 numpy
 pytorch_toolbelt
 descartes

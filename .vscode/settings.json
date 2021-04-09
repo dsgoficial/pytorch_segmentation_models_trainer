@@ -1,5 +1,5 @@
 {
-    "python.pythonPath": "/usr/local/bin/python",
+    "python.pythonPath": "/usr/bin/python3.6",
     "python.testing.unittestArgs": [
         "-v",
         "-s",
@@ -14,6 +14,8 @@
     "python.linting.pylintEnabled": true,
     "python.linting.pylintArgs": [
         "pytorch_segmentation_models_trainer",
+        "torch",
+        "numpy"
     ],
     "python.languageServer": "Pylance",
     "python.experiments.optOutFrom": ["pythonJediLSP"],

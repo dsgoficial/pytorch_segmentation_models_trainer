@@ -34,7 +34,7 @@ import logging
 from pytorch_segmentation_models_trainer.utils import math_utils
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
 from pytorch_segmentation_models_trainer.utils import frame_field_utils
-from pytorch_segmentation_models_trainer.utils.tensor_utils import 
+from pytorch_segmentation_models_trainer.utils.tensor_utils import SpatialGradient
 
 
 # --- Base classes --- #
@@ -151,9 +151,7 @@ class MultiLoss(torch.nn.Module):
             for pre_process in self.pre_processes:
                 pred_batch, gt_batch = pre_process(pred_batch, gt_batch)
         total_loss = 0
-        # total_weight = 0
-        individual_losses_dict = {}
-        extra_dict = {}
+        individual_losses_dict, extra_dict = {}, {}
         for loss_func_i, weight_i in zip(self.loss_funcs, self.weights):
             loss_i, extra_dict_i = loss_func_i(pred_batch, gt_batch, normalize=normalize)
             current_weight = float(weight_i(epoch)) \
@@ -183,8 +181,7 @@ def compute_seg_loss_weigths(pred_batch, gt_batch, config):
     use_size = config["loss_params"]["seg_loss_params"]["use_size"]
     w0 = config["loss_params"]["seg_loss_params"]["w0"]
     sigma = config["loss_params"]["seg_loss_params"]["sigma"]
-    height = gt_batch["image"].shape[2]
-    width = gt_batch["image"].shape[3]
+    height, width = gt_batch["image"].shape[2], gt_batch["image"].shape[3]
     im_radius = math.sqrt(height * width) / 2
 
     # --- Class imbalance weight (not forgetting background):
@@ -218,15 +215,20 @@ def compute_seg_loss_weigths(pred_batch, gt_batch, config):
 
 def compute_gt_field(pred_batch, gt_batch):
     gt_crossfield_angle = gt_batch["gt_crossfield_angle"]
-    gt_field = torch.cat([torch.cos(gt_crossfield_angle),
-                   torch.sin(gt_crossfield_angle)], dim=1)
+    gt_field = torch.cat(
+        [
+            torch.cos(gt_crossfield_angle),
+            torch.sin(gt_crossfield_angle)
+        ], dim=1)
     gt_batch["gt_field"] = gt_field
     return pred_batch, gt_batch
 
 
 class ComputeSegGrads:
     def __init__(self, device):
-        self.spatial_gradient = torch_lydorn.kornia.filters.SpatialGradient(mode="scharr", coord="ij", normalized=True, device=device)
+        self.spatial_gradient = SpatialGradient(
+            mode="scharr", coord="ij", normalized=True, device=device
+        )
 
     def __call__(self, pred_batch, gt_batch):
         seg = pred_batch["seg"]  # (b, c, h, w)
@@ -240,11 +242,11 @@ class ComputeSegGrads:
 
 
 def build_combined_loss(config):
-    pre_processes = []
-    loss_funcs = []
-    weights = []
+    pre_processes, loss_funcs, weights = [], [], []
     if config["compute_seg"]:
-        partial_compute_seg_loss_weigths = partial(compute_seg_loss_weigths, config=config)
+        partial_compute_seg_loss_weigths = partial(
+            compute_seg_loss_weigths, config=config
+        )
         pre_processes.append(partial_compute_seg_loss_weigths)
         gt_channel_selector = [
             config["seg_params"]["compute_interior"],
@@ -314,7 +316,12 @@ def build_combined_loss(config):
         if need_seg_grads:
             pre_processes.append(ComputeSegGrads(config["device"]))
 
-    combined_loss = MultiLoss(loss_funcs, weights, epoch_thresholds=config["loss_params"]["multiloss"]["coefs"]["epoch_thresholds"], pre_processes=pre_processes)
+    combined_loss = MultiLoss(
+        loss_funcs,
+        weights,
+        epoch_thresholds=config["loss_params"]["multiloss"]["coefs"]["epoch_thresholds"],
+        pre_processes=pre_processes
+    )
     return combined_loss
 
 

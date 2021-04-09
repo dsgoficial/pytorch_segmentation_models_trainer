@@ -20,15 +20,24 @@
  *   https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning/     *
  ****
 """
-
+import numpy as np
 import torch
+import torch_scatter
+import scipy.interpolate
 from pytorch_segmentation_models_trainer.utils import frame_field_utils, math_utils, tensor_utils
 from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor_tools import \
     Paths, Skeleton, TensorSkeleton, skeletons_to_tensorskeleton, tensorskeleton_to_skeletons
 
 
 class AlignLoss:
-    def __init__(self, tensorskeleton: TensorSkeleton, indicator: torch.Tensor, level: float, c0c2: torch.Tensor, loss_params):
+    def __init__(
+        self,
+        tensorskeleton: TensorSkeleton,
+        indicator: torch.Tensor,
+        level: float,
+        c0c2: torch.Tensor,
+        loss_params
+    ):
         """
         :param tensorskeleton: skeleton graph in tensor format
         :return:
@@ -38,19 +47,24 @@ class AlignLoss:
         self.level = level
         self.c0c2 = c0c2
         self.junction_corner_index = get_junction_corner_index(tensorskeleton)
-        self.data_coef_interp = scipy.interpolate.interp1d(loss_params["coefs"]["step_thresholds"],
-                                                           loss_params["coefs"]["data"])
-        self.length_coef_interp = scipy.interpolate.interp1d(loss_params["coefs"]["step_thresholds"],
-                                                             loss_params["coefs"]["length"])
-        self.crossfield_coef_interp = scipy.interpolate.interp1d(loss_params["coefs"]["step_thresholds"],
-                                                                 loss_params["coefs"]["crossfield"])
-        self.curvature_coef_interp = scipy.interpolate.interp1d(loss_params["coefs"]["step_thresholds"],
-                                                                loss_params["coefs"]["curvature"])
-        self.corner_coef_interp = scipy.interpolate.interp1d(loss_params["coefs"]["step_thresholds"],
-                                                             loss_params["coefs"]["corner"])
-        self.junction_coef_interp = scipy.interpolate.interp1d(loss_params["coefs"]["step_thresholds"],
-                                                             loss_params["coefs"]["junction"])
-
+        self.data_coef_interp = scipy.interpolate.interp1d(
+            loss_params["coefs"]["step_thresholds"],
+            loss_params["coefs"]["data"])
+        self.length_coef_interp = scipy.interpolate.interp1d(
+            loss_params["coefs"]["step_thresholds"],
+            loss_params["coefs"]["length"])
+        self.crossfield_coef_interp = scipy.interpolate.interp1d(
+            loss_params["coefs"]["step_thresholds"],
+            loss_params["coefs"]["crossfield"])
+        self.curvature_coef_interp = scipy.interpolate.interp1d(
+            loss_params["coefs"]["step_thresholds"],
+            loss_params["coefs"]["curvature"])
+        self.corner_coef_interp = scipy.interpolate.interp1d(
+            loss_params["coefs"]["step_thresholds"],
+            loss_params["coefs"]["corner"])
+        self.junction_coef_interp = scipy.interpolate.interp1d(
+            loss_params["coefs"]["step_thresholds"],
+            loss_params["coefs"]["junction"])
         self.curvature_dissimilarity_threshold = loss_params["curvature_dissimilarity_threshold"]
         self.corner_angles = np.pi * torch.tensor(loss_params["corner_angles"]) / 180  # Convert to radians
         self.corner_angle_threshold = np.pi * loss_params["corner_angle_threshold"] / 180  # Convert to radians
@@ -224,7 +238,17 @@ class AlignLoss:
         return total_loss, losses_dict
 
 class PolygonAlignLoss:
-    def __init__(self, indicator, level, c0c2, data_coef, length_coef, crossfield_coef, dist=None, dist_coef=None):
+    def __init__(
+        self,
+        indicator,
+        level,
+        c0c2,
+        data_coef,
+        length_coef,
+        crossfield_coef,
+        dist=None,
+        dist_coef=None
+    ):
         self.indicator = indicator
         self.level = level
         self.c0c2 = c0c2
@@ -346,7 +370,8 @@ def _group_junction_by_sorting(junction_edge_index: torch.Tensor):
     group_indices = torch.argsort(junction_edge_index[:, 0], dim=0)
     return junction_edge_index[group_indices, :]
 
-def _slice_over_junction_index(junction_corner_index, junction_end_index, junction_angle_to_axis, grouped_junction_edge_index, slice_start=0):
+def _slice_over_junction_index(junction_corner_index, junction_end_index, \
+    junction_angle_to_axis, grouped_junction_edge_index, slice_start=0):
     for slice_end in junction_end_index:
         slice_angle_to_axis = junction_angle_to_axis[slice_start:slice_end]
         slice_junction_edge_index = grouped_junction_edge_index[slice_start:slice_end]
