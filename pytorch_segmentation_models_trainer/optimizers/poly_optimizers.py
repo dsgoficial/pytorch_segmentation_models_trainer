@@ -25,7 +25,9 @@ import torch
 from pytorch_segmentation_models_trainer.custom_losses.crossfield_losses import AlignLoss
 from pytorch_segmentation_models_trainer.utils import frame_field_utils
 from pytorch_segmentation_models_trainer.utils.math_utils import bilinear_interpolate
-
+from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor_tools import \
+    TensorSkeleton
+DEBUG = False
 
 class TensorPolyOptimizer:
     def __init__(
@@ -175,3 +177,51 @@ class PolygonAlignLoss:
             coef_sum += self.dist_coef
         total_loss /= coef_sum
         return total_loss, losses_dict
+
+class TensorSkeletonOptimizer:
+    def __init__(self, config: dict, tensorskeleton: TensorSkeleton, indicator: torch.Tensor, c0c2: torch.Tensor):
+        assert len(indicator.shape) == 3, f"indicator should be of shape (N, H, W), not {indicator.shape}"
+        assert len(c0c2.shape) == 4 and c0c2.shape[1] == 4, f"c0c2 should be of shape (N, 4, H, W), not {c0c2.shape}"
+
+        self.config = config
+        self.tensorskeleton = tensorskeleton
+
+        # Save endpoints that are tips so that they can be reset after each step (tips are not meant to be moved)
+        self.is_tip = self.tensorskeleton.degrees == 1
+        self.tip_pos = self.tensorskeleton.pos[self.is_tip]
+
+        # Require grads for graph.pos: this is what is optimized
+        self.tensorskeleton.pos.requires_grad = True
+
+        level = config["data_level"]
+        self.criterion = AlignLoss(self.tensorskeleton, indicator, level, c0c2, config["loss_params"])
+        self.optimizer = torch.optim.RMSprop([tensorskeleton.pos], lr=config["lr"], alpha=0.9)
+        self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, config["gamma"])
+
+    def step(self, iter_num):
+        self.optimizer.zero_grad()
+        loss, losses_dict = self.criterion(self.tensorskeleton.pos, iter_num)
+        loss.backward()
+        pos_gard_is_nan = torch.isnan(self.tensorskeleton.pos.grad).any().item()
+        if pos_gard_is_nan:
+            print(f"{iter_num} pos.grad is nan")
+        self.optimizer.step()
+        with torch.no_grad():
+            self.tensorskeleton.pos[self.is_tip] = self.tip_pos
+
+        if self.lr_scheduler is not None:
+            self.lr_scheduler.step()
+
+        return loss.item(), losses_dict
+
+    def optimize(self) -> TensorSkeleton:
+        if DEBUG:
+            optim_iter = tqdm(range(self.config["loss_params"]["coefs"]["step_thresholds"][-1]), desc="Gradient descent", leave=True)
+            for iter_num in optim_iter:
+                loss, losses_dict = self.step(iter_num)
+                optim_iter.set_postfix(loss=loss, **losses_dict)
+        else:
+            for iter_num in range(self.config["loss_params"]["coefs"]["step_thresholds"][-1]):
+                loss, losses_dict = self.step(iter_num)
+        return self.tensorskeleton
+

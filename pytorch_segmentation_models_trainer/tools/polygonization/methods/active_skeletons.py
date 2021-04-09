@@ -22,99 +22,22 @@
 """
 
 import functools
+from typing import List
 import numpy as np
 import torch
 import kornia
 import shapely
 import skimage
-from itertools import partial
+import skimage.measure
+from functools import partial
 from pytorch_segmentation_models_trainer.optimizers.poly_optimizers import \
-    PolygonAlignLoss, TensorPolyOptimizer
+    PolygonAlignLoss, TensorPolyOptimizer, TensorSkeletonOptimizer
+from pytorch_segmentation_models_trainer.tools.visualization import crossfield_plot
 from pytorch_segmentation_models_trainer.utils.math_utils import compute_crossfield_uv
-from pytorch_segmentation_models_trainer.utils import frame_field_utils
+from pytorch_segmentation_models_trainer.utils import frame_field_utils, math_utils, tensor_utils
 from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor_tools import \
     Paths, Skeleton, TensorSkeleton, skeletons_to_tensorskeleton, tensorskeleton_to_skeletons
-
-def get_junction_corner_index(tensorskeleton: TensorSkeleton):
-    """
-    Returns as a tensor the list of 3-tuples each representing a corner of a junction.
-    The 3-tuple contains the indices of the 3 vertices making up the corner.
-
-    In the text below, we use the following notation:
-        - J: the number of junction nodes
-        - Sd: the sum of the degrees of all the junction nodes
-        - T: number of tip nodes
-    @return: junction_corner_index of shape (Sd*J - T, 3) which is a list of 3-tuples (for each junction corner)
-    """
-    junction_edge_index = _build_junction_index(tensorskeleton)
-    junction_edge_index = _remove_tip_junctions(tensorskeleton, junction_edge_index)
-    grouped_junction_edge_index = _group_junction_by_sorting(junction_edge_index)
-    junction_angle_to_axis = _compute_angle_to_vertical_axis_at_junction(
-        tensorskeleton,
-        grouped_junction_edge_index
-    )
-    junction_corner_index, junction_end_index = _build_junction_corner_index()
-    return _slice_over_junction_index(
-        junction_corner_index,
-        junction_end_index,
-        junction_angle_to_axis,
-        grouped_junction_edge_index
-    )
-
-def _build_junction_index(ts: TensorSkeleton) -> torch.tensor:
-    junction_edge_index = torch.empty(
-        (2 * ts.num_paths, 2),
-        dtype=torch.long,
-        device=ts.path_index.device
-    )
-    junction_edge_index[:ts.num_paths, 0] = ts.path_index[ts.path_delim[:-1]]
-    junction_edge_index[:ts.num_paths, 1] = ts.path_index[ts.path_delim[:-1] + 1]
-    junction_edge_index[ts.num_paths:, 0] = ts.path_index[ts.path_delim[1:] - 1]
-    junction_edge_index[ts.num_paths:, 1] = ts.path_index[ts.path_delim[1:] - 2]
-    return junction_edge_index
-
-def _remove_tip_junctions(ts: TensorSkeleton, junction_edge_index: torch.Tensor):
-    degrees = ts.degrees[junction_edge_index[:, 0]]
-    return junction_edge_index[1 < degrees, :]
-
-def _group_junction_by_sorting(junction_edge_index: torch.Tensor):
-    group_indices = torch.argsort(junction_edge_index[:, 0], dim=0)
-    return junction_edge_index[group_indices, :]
-
-def _slice_over_junction_index(junction_corner_index, junction_end_index, junction_angle_to_axis, grouped_junction_edge_index, slice_start=0):
-    for slice_end in junction_end_index:
-        slice_angle_to_axis = junction_angle_to_axis[slice_start:slice_end]
-        slice_junction_edge_index = grouped_junction_edge_index[slice_start:slice_end]
-        sort_indices = torch.argsort(slice_angle_to_axis, dim=0)
-        slice_junction_edge_index = slice_junction_edge_index[sort_indices]
-        junction_corner_index[slice_start:slice_end, 0] = slice_junction_edge_index[:, 1]
-        junction_corner_index[slice_start:slice_end, 1] = slice_junction_edge_index[:, 0]
-        junction_corner_index[slice_start:slice_end, 2] = slice_junction_edge_index[:, 1].roll(-1, dims=0)
-        slice_start = slice_end
-    return junction_corner_index
-
-def _compute_angle_to_vertical_axis_at_junction(ts: TensorSkeleton, grouped_junction_edge_index):
-    junction_edge = ts.pos.detach()[grouped_junction_edge_index, :]
-    junction_tangent = junction_edge[:, 1, :] - junction_edge[:, 0, :]
-    return torch.atan2(
-        junction_tangent[:, 1],
-        junction_tangent[:, 0]
-    )
-
-def _build_junction_corner_index(ts: TensorSkeleton, grouped_junction_edge_index):
-    unique = torch.unique_consecutive(
-        grouped_junction_edge_index[:, 0]
-    )
-    count = ts.degrees[unique]
-    junction_end_index = torch.cumsum(count, dim=0)
-    return (
-        torch.empty(
-            (grouped_junction_edge_index.shape[0], 3),
-            dtype=torch.long,
-            device=ts.path_index.device
-        ),
-        junction_end_index
-    )
+from pytorch_segmentation_models_trainer.tools.polygonization import polygonize_utils
 
 def shapely_postprocess(polylines, np_indicator, tolerance, config):
     if isinstance(tolerance, list):
@@ -244,7 +167,7 @@ def get_marching_squares_skeleton(np_int_prob, config):
     coordinates, indices, degrees, indptr = [], [], [], [0]
     indices_offset = 0
 
-    def _populate_aux_lists(contour):
+    for contour in contours:
         # Check if it is a closed contour
         is_closed = np.max(np.abs(contour[0] - contour[-1])) < 1e-6
         _coordinates = contour[:-1, :] if is_closed else contour
@@ -261,9 +184,6 @@ def get_marching_squares_skeleton(np_int_prob, config):
         indices.extend(_indices)
         indptr.append(indptr[-1] + len(_indices))
         indices_offset += _coordinates.shape[0]
-    list(
-        map(_populate_aux_lists, contours)
-    )
 
     return Skeleton(
         coordinates=np.concatenate(coordinates, axis=0),
@@ -273,6 +193,8 @@ def get_marching_squares_skeleton(np_int_prob, config):
         ),
         degrees=np.concatenate(degrees, axis=0)
     )
+
+
 
 # @profile
 def compute_skeletons(seg_batch, config, spatial_gradient, pool=None) -> List[Skeleton]:
@@ -330,7 +252,7 @@ class PolygonizerASM:
     def __init__(self, config, pool=None):
         self.config = config
         self.pool = pool
-        self.spatial_gradient = kornia.filters.SpatialGradient(
+        self.spatial_gradient = tensor_utils.SpatialGradient(
             mode="scharr",
             coord="ij",
             normalized=True,
@@ -452,3 +374,78 @@ def polygonize(seg_batch, crossfield_batch, config, pool=None, pre_computed=None
     polygonizer_asm = PolygonizerASM(config, pool=pool)
     return polygonizer_asm(seg_batch, crossfield_batch, pre_computed=pre_computed)
 
+def main():
+    
+    config = {
+        "init_method": "marching_squares",  # Can be either skeleton or marching_squares
+        "data_level": 0.5,
+        "loss_params": {
+            "coefs": {
+                "step_thresholds": [0, 100, 200, 300],  # From 0 to 500: gradually go from coefs[0] to coefs[1]
+                "data": [1.0, 0.1, 0.0, 0.0],
+                "crossfield": [0.0, 0.05, 0.0, 0.0],
+                "length": [0.1, 0.01, 0.0, 0.0],
+                "curvature": [0.0, 0.0, 0.0, 0.0],
+                "corner": [0.0, 0.0, 0.0, 0.0],
+                "junction": [0.0, 0.0, 0.0, 0.0],
+            },
+            "curvature_dissimilarity_threshold": 2,
+            # In pixels: for each sub-paths, if the dissimilarity (in the same sense as in the Ramer-Douglas-Peucker alg) is lower than straightness_threshold, then optimize the curve angles to be zero.
+            "corner_angles": [45, 90, 135],  # In degrees: target angles for corners.
+            "corner_angle_threshold": 22.5,
+            # If a corner angle is less than this threshold away from any angle in corner_angles, optimize it.
+            "junction_angles": [0, 45, 90, 135],  # In degrees: target angles for junction corners.
+            "junction_angle_weights": [1, 0.01, 0.1, 0.01],
+            # Order of decreassing importance: straight, right-angle, then 45° junction corners.
+            "junction_angle_threshold": 22.5,
+            # If a junction corner angle is less than this threshold away from any angle in junction_angles, optimize it.
+        },
+        "lr": 0.01,
+        "gamma": 0.995,
+        "device": "cpu",
+        "tolerance": 0.5,
+        "seg_threshold": 0.5,
+        "min_area": 10,
+    }
+
+    seg = np.zeros((6, 8, 1))
+    # Triangle:
+    seg[1, 4] = 1
+    seg[2, 3:5] = 1
+    seg[3, 2:5] = 1
+    seg[4, 1:5] = 1
+    # L extension:
+    seg[3:5, 5:7] = 1
+
+    u = np.zeros((6, 8), dtype=np.complex)
+    v = np.zeros((6, 8), dtype=np.complex)
+    # Init with grid
+    u.real = 1
+    v.imag = 1
+    # Add slope
+    u[:4, :4] *= np.exp(1j * np.pi / 4)
+    v[:4, :4] *= np.exp(1j * np.pi / 4)
+    # Add slope corners
+    # u[:2, 4:6] *= np.exp(1j * np.pi / 4)
+    # v[4:, :2] *= np.exp(- 1j * np.pi / 4)
+
+    crossfield = math_utils.compute_crossfield_c0c2(u, v)
+
+    seg_batch = torch.tensor(np.transpose(seg[:, :, :2], (2, 0, 1)), dtype=torch.float)[None, ...]
+    crossfield_batch = torch.tensor(np.transpose(crossfield, (2, 0, 1)), dtype=torch.float)[None, ...]
+
+    # Add samples to batch to increase batch size
+    batch_size = 16
+    seg_batch = seg_batch.repeat((batch_size, 1, 1, 1))
+    crossfield_batch = crossfield_batch.repeat((batch_size, 1, 1, 1))
+
+    out_contours_batch, out_probs_batch = polygonize(seg_batch, crossfield_batch, config)
+
+    polygons = out_contours_batch[0]
+
+    filepath = "demo_poly_asm.pdf"
+    crossfield_plot.save_poly_viz(seg[:, :, 0], polygons, filepath, linewidths=0.5, draw_vertices=True, crossfield=crossfield)
+
+
+if __name__ == '__main__':
+    main()

@@ -22,8 +22,10 @@
 """
 
 import torch
+from pytorch_segmentation_models_trainer.utils import frame_field_utils, math_utils, tensor_utils
 from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor_tools import \
     Paths, Skeleton, TensorSkeleton, skeletons_to_tensorskeleton, tensorskeleton_to_skeletons
+
 
 class AlignLoss:
     def __init__(self, tensorskeleton: TensorSkeleton, indicator: torch.Tensor, level: float, c0c2: torch.Tensor, loss_params):
@@ -35,14 +37,7 @@ class AlignLoss:
         self.indicator = indicator
         self.level = level
         self.c0c2 = c0c2
-        # self.uv = frame_field_utils.c0c2_to_uv(c0c2)
-
-        # Prepare junction_corner_index:
-
-        # TODO: junction_corner_index: list
         self.junction_corner_index = get_junction_corner_index(tensorskeleton)
-
-        # Loss coefs
         self.data_coef_interp = scipy.interpolate.interp1d(loss_params["coefs"]["step_thresholds"],
                                                            loss_params["coefs"]["data"])
         self.length_coef_interp = scipy.interpolate.interp1d(loss_params["coefs"]["step_thresholds"],
@@ -62,12 +57,6 @@ class AlignLoss:
         self.junction_angles = np.pi * torch.tensor(loss_params["junction_angles"]) / 180  # Convert to radians
         self.junction_angle_weights = torch.tensor(loss_params["junction_angle_weights"])
         self.junction_angle_threshold = np.pi * loss_params["junction_angle_threshold"] / 180  # Convert to radians
-
-        # Pre-compute useful pointers
-        # edge_index_start = tensorskeleton.path_index[:-1]
-        # edge_index_end = tensorskeleton.path_index[1:]
-        #
-        # self.tensorskeleton.edge_index = edge_index
 
     def __call__(self, pos: torch.Tensor, iter_num: int):
         # --- Align to frame field loss
@@ -97,17 +86,7 @@ class AlignLoss:
         total_align_loss = torch.sum(align_loss)
 
         # --- Align to level set of indicator:
-        pos_value = bilinear_interpolate(self.indicator[:, None, ...], pos, batch=self.tensorskeleton.batch)
-        # TODO: use grid_sample with batch: put batch dim to height dim and make a single big image.
-        # TODO: Convert pos accordingly and take care of borders
-        # height = self.indicator.shape[1]
-        # width = self.indicator.shape[2]
-        # normed_xy = tensorskeleton.pos.roll(shifts=1, dims=-1)
-        # normed_xy[: 0] /= (width-1)
-        # normed_xy[: 1] /= (height-1)
-        # centered_xy = 2*normed_xy - 1
-        # pos_value = torch.nn.functional.grid_sample(self.indicator[None, None, ...],
-        #                                             centered_batch_xy[None, None, ...], align_corners=True).squeeze()
+        pos_value = math_utils.bilinear_interpolate(self.indicator[:, None, ...], pos, batch=self.tensorskeleton.batch)
         level_loss = torch.sum(torch.pow(pos_value - self.level, 2))
 
         # --- Prepare useful tensors for curvature loss:
@@ -240,14 +219,8 @@ class AlignLoss:
         curvature_coef = float(self.curvature_coef_interp(iter_num))
         corner_coef = float(self.corner_coef_interp(iter_num))
         junction_coef = float(self.junction_coef_interp(iter_num))
-        # total_loss = data_coef * level_loss + length_coef * total_length_loss + crossfield_coef * total_align_loss + \
-        #              curvature_coef * total_curvature_loss + corner_coef * total_corner_loss + junction_coef * total_junction_loss
         total_loss = data_coef * level_loss + length_coef * total_length_loss + crossfield_coef * total_align_loss + \
                      curvature_coef * total_curvature_loss + corner_coef * total_corner_loss + junction_coef * total_junction_loss
-
-        # print(iter_num)
-        # input("<Enter>...")
-
         return total_loss, losses_dict
 
 class PolygonAlignLoss:
@@ -298,22 +271,13 @@ class PolygonAlignLoss:
         total_align_loss = torch.sum(align_loss)
 
         # Align to level set of indicator:
-        pos_indicator_value = bilinear_interpolate(self.indicator[:, None, ...], tensorpoly.pos, batch=tensorpoly.batch)
-        # TODO: Try to use grid_sample with batch for speed: put batch dim to height dim and make a single big image.
-        # TODO: Convert pos accordingly and take care of borders
-        # height = self.indicator.shape[1]
-        # width = self.indicator.shape[2]
-        # normed_xy = tensorpoly.pos.roll(shifts=1, dims=-1)
-        # normed_xy[: 0] /= (width-1)
-        # normed_xy[: 1] /= (height-1)
-        # centered_xy = 2*normed_xy - 1
-        # pos_value = torch.nn.functional.grid_sample(self.indicator[None, None, ...], centered_batch_xy[None, None, ...], align_corners=True).squeeze()
+        pos_indicator_value = math_utils.bilinear_interpolate(self.indicator[:, None, ...], tensorpoly.pos, batch=tensorpoly.batch)
         level_loss = torch.sum(torch.pow(pos_indicator_value - self.level, 2))
 
         # Align to minimum distance from the boundary
         dist_loss = None
         if self.dist is not None:
-            pos_dist_value = bilinear_interpolate(self.dist[:, None, ...], tensorpoly.pos, batch=tensorpoly.batch)
+            pos_dist_value = math_utils.bilinear_interpolate(self.dist[:, None, ...], tensorpoly.pos, batch=tensorpoly.batch)
             dist_loss = torch.sum(torch.pow(pos_dist_value, 2))
 
         length_penalty = torch.sum(
@@ -333,3 +297,86 @@ class PolygonAlignLoss:
             coef_sum += self.dist_coef
         total_loss /= coef_sum
         return total_loss, losses_dict
+
+
+def get_junction_corner_index(tensorskeleton: TensorSkeleton):
+    """
+    Returns as a tensor the list of 3-tuples each representing a corner of a junction.
+    The 3-tuple contains the indices of the 3 vertices making up the corner.
+
+    In the text below, we use the following notation:
+        - J: the number of junction nodes
+        - Sd: the sum of the degrees of all the junction nodes
+        - T: number of tip nodes
+    @return: junction_corner_index of shape (Sd*J - T, 3) which is a list of 3-tuples (for each junction corner)
+    """
+    junction_edge_index = _build_junction_index(tensorskeleton)
+    junction_edge_index = _remove_tip_junctions(tensorskeleton, junction_edge_index)
+    grouped_junction_edge_index = _group_junction_by_sorting(junction_edge_index)
+    junction_angle_to_axis = _compute_angle_to_vertical_axis_at_junction(
+        tensorskeleton, grouped_junction_edge_index
+    )
+    junction_corner_index, junction_end_index = _build_junction_corner_index(
+        tensorskeleton, grouped_junction_edge_index
+    )
+    return _slice_over_junction_index(
+        junction_corner_index,
+        junction_end_index,
+        junction_angle_to_axis,
+        grouped_junction_edge_index
+    )
+
+def _build_junction_index(ts: TensorSkeleton) -> torch.tensor:
+    junction_edge_index = torch.empty(
+        (2 * ts.num_paths, 2),
+        dtype=torch.long,
+        device=ts.path_index.device
+    )
+    junction_edge_index[:ts.num_paths, 0] = ts.path_index[ts.path_delim[:-1]]
+    junction_edge_index[:ts.num_paths, 1] = ts.path_index[ts.path_delim[:-1] + 1]
+    junction_edge_index[ts.num_paths:, 0] = ts.path_index[ts.path_delim[1:] - 1]
+    junction_edge_index[ts.num_paths:, 1] = ts.path_index[ts.path_delim[1:] - 2]
+    return junction_edge_index
+
+def _remove_tip_junctions(ts: TensorSkeleton, junction_edge_index: torch.Tensor):
+    degrees = ts.degrees[junction_edge_index[:, 0]]
+    return junction_edge_index[1 < degrees, :]
+
+def _group_junction_by_sorting(junction_edge_index: torch.Tensor):
+    group_indices = torch.argsort(junction_edge_index[:, 0], dim=0)
+    return junction_edge_index[group_indices, :]
+
+def _slice_over_junction_index(junction_corner_index, junction_end_index, junction_angle_to_axis, grouped_junction_edge_index, slice_start=0):
+    for slice_end in junction_end_index:
+        slice_angle_to_axis = junction_angle_to_axis[slice_start:slice_end]
+        slice_junction_edge_index = grouped_junction_edge_index[slice_start:slice_end]
+        sort_indices = torch.argsort(slice_angle_to_axis, dim=0)
+        slice_junction_edge_index = slice_junction_edge_index[sort_indices]
+        junction_corner_index[slice_start:slice_end, 0] = slice_junction_edge_index[:, 1]
+        junction_corner_index[slice_start:slice_end, 1] = slice_junction_edge_index[:, 0]
+        junction_corner_index[slice_start:slice_end, 2] = slice_junction_edge_index[:, 1].roll(-1, dims=0)
+        slice_start = slice_end
+    return junction_corner_index
+
+def _compute_angle_to_vertical_axis_at_junction(ts: TensorSkeleton, grouped_junction_edge_index):
+    junction_edge = ts.pos.detach()[grouped_junction_edge_index, :]
+    junction_tangent = junction_edge[:, 1, :] - junction_edge[:, 0, :]
+    return torch.atan2(
+        junction_tangent[:, 1],
+        junction_tangent[:, 0]
+    )
+
+def _build_junction_corner_index(ts: TensorSkeleton, grouped_junction_edge_index):
+    unique = torch.unique_consecutive(
+        grouped_junction_edge_index[:, 0]
+    )
+    count = ts.degrees[unique]
+    junction_end_index = torch.cumsum(count, dim=0)
+    return (
+        torch.empty(
+            (grouped_junction_edge_index.shape[0], 3),
+            dtype=torch.long,
+            device=ts.path_index.device
+        ),
+        junction_end_index
+    )
