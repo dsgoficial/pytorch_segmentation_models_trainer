@@ -87,6 +87,53 @@ def bilinear_interpolate(im, pos, batch=None):
 
     return out
 
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+
+    def __init__(self, name="", init_val=0, fmt=':f'):
+        self.name = name
+        self.init_val = init_val
+        self.fmt = fmt
+        self.val = self.avg = self.init_val
+        self.sum = self.count = 0
+
+    def reset(self):
+        self.val = self.avg = self.init_val
+        self.sum = self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+    def get_avg(self):
+        return self.avg
+
+    def __str__(self):
+        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
+        return fmtstr.format(**self.__dict__)
+
+class RunningDecayingAverage(object):
+    """
+    Updates average with val*(1 - decay) + avg*decay
+    """
+    def __init__(self, decay, init_val=0):
+        assert 0 < decay < 1
+        self.decay = decay
+        self.init_val = init_val
+        self.val = self.avg = self.init_val
+
+    def reset(self):
+        self.val = self.avg = self.init_val
+
+    def update(self, val):
+        self.val = val
+        self.avg = (1 - self.decay)*val + self.decay*self.avg
+
+    def get_avg(self):
+        return self.avg
+
 if __name__=="__main__":
     image = torch.zeros((2, 3, 512, 512)) + 0.5
     seg = torch.zeros((2, 2, 512, 512))

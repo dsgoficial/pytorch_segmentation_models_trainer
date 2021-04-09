@@ -140,7 +140,6 @@ def polygonize(seg_batch, crossfield_batch, config, pool=None, pre_computed=None
 
     dist_batch = None
     if "dist_coef" in config:
-        # tic = time.time()
         np_dist_batch = np.empty(np_indicator_batch.shape)
         for batch_i in range(np_indicator_batch.shape[0]):
             dist_1 = cv2.distanceTransform(

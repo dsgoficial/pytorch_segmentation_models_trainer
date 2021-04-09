@@ -98,16 +98,6 @@ class AlignLoss:
 
         # --- Align to level set of indicator:
         pos_value = bilinear_interpolate(self.indicator[:, None, ...], pos, batch=self.tensorskeleton.batch)
-        # TODO: use grid_sample with batch: put batch dim to height dim and make a single big image.
-        # TODO: Convert pos accordingly and take care of borders
-        # height = self.indicator.shape[1]
-        # width = self.indicator.shape[2]
-        # normed_xy = tensorskeleton.pos.roll(shifts=1, dims=-1)
-        # normed_xy[: 0] /= (width-1)
-        # normed_xy[: 1] /= (height-1)
-        # centered_xy = 2*normed_xy - 1
-        # pos_value = torch.nn.functional.grid_sample(self.indicator[None, None, ...],
-        #                                             centered_batch_xy[None, None, ...], align_corners=True).squeeze()
         level_loss = torch.sum(torch.pow(pos_value - self.level, 2))
 
         # --- Prepare useful tensors for curvature loss:
@@ -299,15 +289,6 @@ class PolygonAlignLoss:
 
         # Align to level set of indicator:
         pos_indicator_value = bilinear_interpolate(self.indicator[:, None, ...], tensorpoly.pos, batch=tensorpoly.batch)
-        # TODO: Try to use grid_sample with batch for speed: put batch dim to height dim and make a single big image.
-        # TODO: Convert pos accordingly and take care of borders
-        # height = self.indicator.shape[1]
-        # width = self.indicator.shape[2]
-        # normed_xy = tensorpoly.pos.roll(shifts=1, dims=-1)
-        # normed_xy[: 0] /= (width-1)
-        # normed_xy[: 1] /= (height-1)
-        # centered_xy = 2*normed_xy - 1
-        # pos_value = torch.nn.functional.grid_sample(self.indicator[None, None, ...], centered_batch_xy[None, None, ...], align_corners=True).squeeze()
         level_loss = torch.sum(torch.pow(pos_indicator_value - self.level, 2))
 
         # Align to minimum distance from the boundary
