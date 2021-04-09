@@ -34,12 +34,12 @@ class FrameFieldModel(nn.Module):
     def __init__(
         self,
         segmentation_model,
-        use_batchnorm: bool =True,
-        replace_seg_head: bool =True,
-        compute_crossfield: bool=True,
-        seg_params: dict=None,
-        module_activation: str=None,
-        frame_field_activation: str=None,
+        use_batchnorm: bool = True,
+        replace_seg_head: bool = True,
+        compute_crossfield: bool = True,
+        seg_params: dict = None,
+        module_activation: str = None,
+        frame_field_activation: str = None,
     ):
         """[summary]
 

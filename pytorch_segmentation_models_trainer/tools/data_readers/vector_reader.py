@@ -124,3 +124,14 @@ def handle_geometry(geom, output_type):
         return MultiPoint(geom.coords)
     else:
         raise Exception("Invalid geometry handling")
+
+if __name__ == "__main__":
+    geo_df = PostgisGeoDF(
+        user="postgres",
+        password="postgres",
+        host="localhost",
+        port=5432,
+        database="dataset_mestrado",
+        sql="select id, geom from buildings"
+    )
+    geo_df.gdf
