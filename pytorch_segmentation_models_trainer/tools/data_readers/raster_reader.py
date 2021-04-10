@@ -44,6 +44,22 @@ class MaskOutputType(Enum):
 
 MaskOutputTypeEnum = MaskOutputType
 
+@dataclass(frozen=True)
+class DatasetEntry:
+    image: str
+    label: str
+    width: int
+    height: int
+    boundary_mask: str = None
+    vertex_mask: str = None
+    mask_is_single_band: bool = False
+    r_mean: float = 0
+    g_mean: float = 0
+    b_mean: float = 0
+    r_std: float = 0
+    g_str: float = 0
+    b_std: float = 0
+
 @dataclass
 class RasterFile:
     file_name: str
@@ -72,7 +88,8 @@ class RasterFile:
     def build_mask(self, input_vector_layer: GeoDF,\
             output_dir: Path, output_filename: str =None,\
             mask_types: List[GeomType] = None,\
-            mask_output_type:MaskOutputType = MaskOutputType.SINGLE_FILE_MULTIPLE_BAND
+            mask_output_type: MaskOutputType = MaskOutputType.SINGLE_FILE_MULTIPLE_BAND,\
+            mask_output_folders: List[str] = None
         ) -> str:
         if mask_types is not None and not isinstance(mask_types, list):
             raise Exception('Invalid parameter for mask_types')
@@ -80,11 +97,11 @@ class RasterFile:
         mask_types = [GeomTypeEnum.POLYGON] if mask_types is None else mask_types
         input_name, extension = os.path.basename(self.file_name).split('.')
         output_filename = output_filename if output_filename is not None else input_name+'_polygon_mask'
-        output = os.path.join(output_dir, output_filename+'.'+extension)
         #read the raster
         raster_ds = rasterio.open(self.file_name)
         profile = raster_ds.profile.copy()
-        profile['count'] = len(mask_types)
+        profile['count'] = len(mask_types) \
+            if mask_output_type == MaskOutputType.SINGLE_FILE_MULTIPLE_BAND else 1
         mask_feats = input_vector_layer.get_features_from_bbox(
             raster_ds.bounds.left, raster_ds.bounds.right, raster_ds.bounds.bottom, raster_ds.bounds.top
         )
@@ -97,6 +114,12 @@ class RasterFile:
             ) for mask_type in mask_types
         )
         
+        base_folders = len(mask_types)*[''] if mask_output_folders is None
+        file_name_iter = (
+            os.path.join(output_dir, base_folder, output_filename+'.'+extension) \
+                for base_folder in base_folders
+        )
+        output = os.path.join(output_dir, output_filename+'.'+extension)
         save_with_rasterio(output, profile, raster_iter, mask_types)
         return output
     
