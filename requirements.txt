@@ -19,4 +19,4 @@ geopandas
 rasterio
 numba
 skan
-torch-scatter==2.0.4
+torch-scatter
