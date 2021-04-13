@@ -30,14 +30,20 @@ import shapely
 import skimage
 import skimage.measure
 from functools import partial
+import logging
+import tqdm
 from pytorch_segmentation_models_trainer.optimizers.poly_optimizers import \
-    PolygonAlignLoss, TensorPolyOptimizer, TensorSkeletonOptimizer
+    DEBUG, PolygonAlignLoss, TensorPolyOptimizer, TensorSkeletonOptimizer
 from pytorch_segmentation_models_trainer.tools.visualization import crossfield_plot
 from pytorch_segmentation_models_trainer.utils.math_utils import compute_crossfield_uv
 from pytorch_segmentation_models_trainer.utils import frame_field_utils, math_utils, tensor_utils
 from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor_tools import \
     Paths, Skeleton, TensorSkeleton, skeletons_to_tensorskeleton, tensorskeleton_to_skeletons
 from pytorch_segmentation_models_trainer.tools.polygonization import polygonize_utils
+
+DEBUG = False
+
+logger = logging.getLogger(__name__)
 
 def shapely_postprocess(polylines, np_indicator, tolerance, config):
     if isinstance(tolerance, list):
@@ -131,7 +137,7 @@ def get_skeleton(np_edge_mask, config):
             )
     except ValueError as e:
         if DEBUG:
-            print_utils.print_warning(
+            logger.warning(
                 f"WARNING: skan.Skeleton raised a ValueError({e}). "
                 "skeleton_image has {skeleton_image.sum()} true values. "
                 "Continuing without detecting skeleton in this image..."
@@ -307,7 +313,7 @@ class PolygonizerASM:
             out_skeletons_batch = tensorskeleton_to_skeletons(tensorskeleton)
             polylines_batch = [skeleton_to_polylines(skeleton) for skeleton in out_skeletons_batch]
             out_polylines = [shapely.geometry.LineString(polyline[:, ::-1]) for polyline in polylines_batch[0]]
-            artists = plot_utils.plot_geometries(ax, out_polylines, draw_vertices=True, linewidths=1)
+            artists = crossfield_plot.plot_geometries(ax, out_polylines, draw_vertices=True, linewidths=1)
 
             optim_pbar = tqdm(desc="Gradient descent", leave=True, total=self.config["loss_params"]["coefs"]["step_thresholds"][-1])
 
@@ -361,7 +367,7 @@ class PolygonizerASM:
             ax = axes.ravel()
 
             ax[0].imshow(image, cmap=plt.cm.gray)
-            plot_utils.plot_geometries(ax[0], out_polylines, draw_vertices=True, linewidths=1)
+            crossfield_plot.plot_geometries(ax[0], out_polylines, draw_vertices=True, linewidths=1)
             ax[0].axis('off')
             ax[0].set_title('original', fontsize=20)
             fig.tight_layout()
