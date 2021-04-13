@@ -3,7 +3,6 @@ torchvision
 pytorch-lightning
 segmentation-models-pytorch
 hydra-core
-torch_scatter
 kornia
 albumentations
 pandas
@@ -20,3 +19,4 @@ geopandas
 rasterio
 numba
 skan
+torch-scatter
