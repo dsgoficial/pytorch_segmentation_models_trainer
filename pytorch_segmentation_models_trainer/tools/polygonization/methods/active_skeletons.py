@@ -31,6 +31,7 @@ import skimage
 import skimage.measure
 from functools import partial
 import logging
+import skan
 import tqdm
 from pytorch_segmentation_models_trainer.optimizers.poly_optimizers import \
     DEBUG, PolygonAlignLoss, TensorPolyOptimizer, TensorSkeletonOptimizer
@@ -59,7 +60,8 @@ def shapely_postprocess(polylines, np_indicator, tolerance, config):
     linestring_list = _get_linestring_list(polylines, width, height, tolerance)
     filtered_polygons, filtered_polygon_probs = [], []
     polygonize_lambda_func = lambda x: _polygonize_in_threshold(
-        x, config['min_area'], filtered_polygons, filtered_polygon_probs, np_indicator
+        x, config['min_area'], config['seg_threshold'],\
+        filtered_polygons, filtered_polygon_probs, np_indicator
     )
     list(
         map(
@@ -89,12 +91,12 @@ def _get_linestring_list(polylines, width, height, tol):
         ]))
     return line_string_list
 
-def _polygonize_in_threshold(polygon, threshold, filtered_polygons, \
+def _polygonize_in_threshold(polygon, min_area_threshold, seg_threshold, filtered_polygons, \
     filtered_polygon_probs, np_indicator):
-    if polygon.area <= threshold:
+    if polygon.area <= min_area_threshold:
         return
     prob = polygonize_utils.compute_geom_prob(polygon, np_indicator)
-    if config["seg_threshold"] < prob:
+    if prob > seg_threshold:
         filtered_polygons.append(polygon)
         filtered_polygon_probs.append(prob)
 
@@ -154,7 +156,6 @@ def get_marching_squares_skeleton(np_int_prob, config):
     @param config:
     @return:
     """
-    # tic = time.time()
     contours = skimage.measure.find_contours(
         np_int_prob, config["data_level"],
         fully_connected='low',
