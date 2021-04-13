@@ -22,6 +22,7 @@
 """
 
 import torch
+import tqdm
 from pytorch_segmentation_models_trainer.custom_losses.crossfield_losses import AlignLoss
 from pytorch_segmentation_models_trainer.utils import frame_field_utils
 from pytorch_segmentation_models_trainer.utils.math_utils import bilinear_interpolate
