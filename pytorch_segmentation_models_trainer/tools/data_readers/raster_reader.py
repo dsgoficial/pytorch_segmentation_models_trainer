@@ -22,7 +22,7 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import List
+from typing import Iterator, List
 
 import numpy as np
 import rasterio
@@ -58,7 +58,7 @@ class DatasetEntry:
     b_mean: float = 0
     r_std: float = 0
     g_str: float = 0
-    b_std: float = 0
+    b_std: float = 0    
 
 @dataclass
 class RasterFile:
@@ -90,13 +90,11 @@ class RasterFile:
             mask_types: List[GeomType] = None,\
             mask_output_type: MaskOutputType = MaskOutputType.SINGLE_FILE_MULTIPLE_BAND,\
             mask_output_folders: List[str] = None
-        ) -> str:
+        ) -> List[str]:
         if mask_types is not None and not isinstance(mask_types, list):
             raise Exception('Invalid parameter for mask_types')
         # input handling
         mask_types = [GeomTypeEnum.POLYGON] if mask_types is None else mask_types
-        input_name, extension = os.path.basename(self.file_name).split('.')
-        output_filename = output_filename if output_filename is not None else input_name+'_polygon_mask'
         #read the raster
         raster_ds = rasterio.open(self.file_name)
         profile = raster_ds.profile.copy()
@@ -104,7 +102,29 @@ class RasterFile:
             if mask_output_type == MaskOutputType.SINGLE_FILE_MULTIPLE_BAND else 1
         mask_feats = input_vector_layer.get_features_from_bbox(
             raster_ds.bounds.left, raster_ds.bounds.right, raster_ds.bounds.bottom, raster_ds.bounds.top
+        )  
+        return self.build_single_file_multiple_band_mask(
+            mask_feats=mask_feats,
+            raster_ds=raster_ds,
+            profile=profile,
+            mask_types=mask_types,
+            output_dir=output_dir,
+            output_filename=output_filename
+        ) if mask_output_type == MaskOutputType.SINGLE_FILE_MULTIPLE_BAND \
+        else self.build_multiple_file_single_band_mask(
+            mask_feats=mask_feats,
+            raster_ds=raster_ds,
+            profile=profile,
+            mask_types=mask_types,
+            output_dir=output_dir,
+            output_filename=output_filename,
+            mask_output_folders=mask_output_folders
         )
+    
+    def build_single_file_multiple_band_mask(self, mask_feats, raster_ds, profile,\
+        mask_types, output_dir, output_filename) -> List[str]:
+        input_name, extension = os.path.basename(self.file_name).split('.')
+        output_filename = output_filename if output_filename is not None else input_name
         raster_iter = (
             self.build_numpy_mask_from_vector_layer(
                 mask_feats=mask_feats,
@@ -113,16 +133,32 @@ class RasterFile:
                 mask_type=mask_type
             ) for mask_type in mask_types
         )
-        
-        base_folders = len(mask_types)*[''] if mask_output_folders is None
-        file_name_iter = (
-            os.path.join(output_dir, base_folder, output_filename+'.'+extension) \
-                for base_folder in base_folders
-        )
         output = os.path.join(output_dir, output_filename+'.'+extension)
         save_with_rasterio(output, profile, raster_iter, mask_types)
-        return output
+        return [output]
     
+    def build_multiple_file_single_band_mask(self, mask_feats, raster_ds, profile,\
+        mask_types, output_dir, output_filename, mask_output_folders) -> List[str]:
+        input_name, extension = os.path.basename(self.file_name).split('.')
+        output_filename = output_filename if output_filename is not None else input_name
+        def compute(args):
+            idx, mask_output_folder = args
+            raster_array = self.build_numpy_mask_from_vector_layer(
+                mask_feats=mask_feats,
+                output_shape=raster_ds.shape,
+                transform=profile['transform'],
+                mask_type=mask_types[idx]
+            )
+            output = os.path.join(output_dir, mask_output_folder, output_filename+'.'+extension)
+            with rasterio.open(output, 'w', **profile) as out:
+                out.write(raster_array, 1)
+            return output
+        return list(
+            map(
+                compute, enumerate(mask_output_folders)
+            )
+        )
+
     def build_numpy_mask_from_vector_layer(self, mask_feats: GeoSeries, output_shape:tuple,\
         transform, mask_type: GeomType = None) -> np.ndarray:
         """Builds numpy mask from vector layer using rasterio.

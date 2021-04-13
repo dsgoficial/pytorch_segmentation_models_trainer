@@ -14,8 +14,6 @@
     "python.linting.pylintEnabled": true,
     "python.linting.pylintArgs": [
         "pytorch_segmentation_models_trainer",
-        "torch",
-        "numpy"
     ],
     "python.languageServer": "Pylance",
     "python.experiments.optOutFrom": ["pythonJediLSP"],

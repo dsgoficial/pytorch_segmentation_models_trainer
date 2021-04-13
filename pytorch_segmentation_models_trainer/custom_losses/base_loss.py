@@ -316,14 +316,12 @@ def build_combined_loss(config):
         if need_seg_grads:
             pre_processes.append(ComputeSegGrads(config["device"]))
 
-    combined_loss = MultiLoss(
+    return MultiLoss(
         loss_funcs,
         weights,
         epoch_thresholds=config["loss_params"]["multiloss"]["coefs"]["epoch_thresholds"],
         pre_processes=pre_processes
     )
-    return combined_loss
-
 
 # --- Specific losses --- #
 class SegLoss(Loss):

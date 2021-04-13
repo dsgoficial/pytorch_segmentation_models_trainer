@@ -24,7 +24,7 @@ import unittest
 
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import \
-    RasterFile
+    RasterFile, MaskOutputTypeEnum
 from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import \
     FileGeoDF, GeomTypeEnum
 from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
@@ -67,6 +67,9 @@ class Test_TestRasterReader(unittest.TestCase):
 
     def setUp(self):
         self.output_dir = create_folder(os.path.join(root_dir, 'test_output'))
+        create_folder(os.path.join(root_dir, 'test_output', 'mask'))
+        create_folder(os.path.join(root_dir, 'test_output', 'boundary_mask'))
+        create_folder(os.path.join(root_dir, 'test_output', 'vertex_mask'))
     
     def tearDown(self):
         remove_folder(self.output_dir)
@@ -94,34 +97,68 @@ class Test_TestRasterReader(unittest.TestCase):
         [
             (
                 None,
-                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_polygon_mask.png')
+                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_polygon_mask.png'),
+                MaskOutputTypeEnum.SINGLE_FILE_MULTIPLE_BAND,
+                None
+
             ),
             (
                 [GeomTypeEnum.POLYGON],
-                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_polygon_mask.png')
+                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_polygon_mask.png'),
+                MaskOutputTypeEnum.SINGLE_FILE_MULTIPLE_BAND,
+                None
             ),
             (
                 [GeomTypeEnum.LINE],
-                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_boundary_mask.png')
+                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_boundary_mask.png'),
+                MaskOutputTypeEnum.SINGLE_FILE_MULTIPLE_BAND,
+                None
             ),
             (
                 [GeomTypeEnum.POINT],
-                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_vertex_mask.png')
+                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_vertex_mask.png'),
+                MaskOutputTypeEnum.SINGLE_FILE_MULTIPLE_BAND,
+                None
             ),
             (
                 [GeomTypeEnum.POLYGON, GeomTypeEnum.LINE, GeomTypeEnum.POINT],
-                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_stacked_mask.png')
+                os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_stacked_mask.png'),
+                MaskOutputTypeEnum.SINGLE_FILE_MULTIPLE_BAND,
+                None
+            ),
+            (
+                [GeomTypeEnum.POLYGON, GeomTypeEnum.LINE, GeomTypeEnum.POINT],
+                [
+                    os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_polygon_mask.png'),
+                    os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_boundary_mask.png'),
+                    os.path.join(root_dir, 'data', 'rasterize_data', 'labels', '10_vertex_mask.png')
+                ],
+                MaskOutputTypeEnum.MULTIPLE_FILES_SINGLE_BAND,
+                [
+                    os.path.join(root_dir, 'test_output', 'mask'),
+                    os.path.join(root_dir, 'test_output', 'boundary_mask'),
+                    os.path.join(root_dir, 'test_output', 'vertex_mask'),
+                ]
             ),
         ]
     )
-    def test_build_mask(self, mask_types, expected_output):
+    def test_build_mask(self, mask_types, expected_output, mask_output_type, mask_output_folders):
         geo_df = FileGeoDF(
             file_name=os.path.join(root_dir, 'data', 'vectors', 'test_polygons2.geojson')
         )
         raster = RasterFile(
             file_name=os.path.join(root_dir, 'data', 'rasterize_data', 'images', '10.png')
         )
-        output_mask = raster.build_mask(geo_df, self.output_dir, mask_types=mask_types)
-        self.assertEqual(
-            hash_file(expected_output), hash_file(output_mask)
-        )
+        for idx, output_mask in enumerate(
+            raster.build_mask(
+                geo_df,
+                self.output_dir,
+                mask_types=mask_types,
+                mask_output_type=mask_output_type,
+                mask_output_folders=mask_output_folders
+            )
+        ):
+            expected_output_item = expected_output[idx] if isinstance(expected_output, list) else expected_output
+            self.assertEqual(
+                hash_file(expected_output_item), hash_file(output_mask)
+            )
