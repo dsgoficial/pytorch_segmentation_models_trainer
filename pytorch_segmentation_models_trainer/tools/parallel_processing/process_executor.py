@@ -20,12 +20,14 @@
 """
 import concurrent.futures
 import itertools
+import os
 from typing import Iterator
 
 class Executor:
-    def __init__(self, compute_func, simultaneous_tasks) -> None:
+    def __init__(self, compute_func, simultaneous_tasks=None) -> None:
         self.compute_func = compute_func
-        self.simultaneous_tasks = simultaneous_tasks
+        self.simultaneous_tasks = os.cpu_count() if simultaneous_tasks is None \
+            else simultaneous_tasks
 
     def execute_tasks(self, tasks: Iterator):
        with concurrent.futures.ThreadPoolExecutor() as executor:
