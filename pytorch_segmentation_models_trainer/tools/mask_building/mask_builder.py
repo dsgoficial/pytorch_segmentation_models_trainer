@@ -76,6 +76,7 @@ def build_mask_func(input_raster_path: str, input_vector: GeoDF, \
         mask_type_list (List[GeomType]): [description]
         mask_output_type (MaskOutputType): [description]
     """
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
     raster_df = RasterFile(file_name=input_raster_path)
     return raster_df.build_mask(
         input_vector_layer=input_vector,

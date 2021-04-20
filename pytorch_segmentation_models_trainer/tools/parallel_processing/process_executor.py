@@ -19,9 +19,9 @@
  ****
 """
 import concurrent.futures
-import itertools
 import os
 from typing import Iterator
+from tqdm import tqdm
 
 class Executor:
     def __init__(self, compute_func, simultaneous_tasks=None) -> None:
@@ -30,23 +30,21 @@ class Executor:
             else simultaneous_tasks
 
     def execute_tasks(self, tasks: Iterator):
-       with concurrent.futures.ThreadPoolExecutor() as executor:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.simultaneous_tasks) as executor:
             # Schedule the first N futures.  We don't want to schedule them all
             # at once, to avoid consuming excessive amounts of memory.
-            futures = {
-                executor.submit(self.compute_func, task)
-                for task in itertools.islice(tasks, self.simultaneous_tasks)
+
+            futures = [
+                executor.submit(self.compute_func, task) \
+                    for task in tasks
+            ]
+            kwargs = {
+                'total': len(futures),
+                'unit': 'it',
+                'unit_scale': True,
+                'leave': True
             }
-
-            while futures:
-                # Wait for the next future to complete.
-                done, futures = concurrent.futures.wait(
-                    futures, return_when=concurrent.futures.FIRST_COMPLETED
-                )
-
-                # Schedule the next set of futures.  We don't want more than N futures
-                # in the pool at a time, to keep memory consumption down.
-                for task in itertools.islice(tasks, len(done)):
-                    futures.add(
-                        executor.submit(self.compute_func, task)
-                    )
+            for _ in tqdm(concurrent.futures.as_completed(futures), **kwargs):
+                pass
+        return futures
