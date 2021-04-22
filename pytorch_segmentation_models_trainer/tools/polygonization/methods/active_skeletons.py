@@ -173,7 +173,7 @@ def get_marching_squares_skeleton(np_int_prob, config):
 
     coordinates, indices, degrees, indptr = [], [], [], [0]
     indices_offset = 0
-    def _populate_aux_structures(contour):
+    def _populate_aux_structures(contour, indices_offset):
         # Check if it is a closed contour
         is_closed = np.max(np.abs(contour[0] - contour[-1])) < 1e-6
         _coordinates = contour[:-1, :] if is_closed else contour
@@ -190,8 +190,9 @@ def get_marching_squares_skeleton(np_int_prob, config):
         indices.extend(_indices)
         indptr.append(indptr[-1] + len(_indices))
         indices_offset += _coordinates.shape[0]
+    lambda_func = lambda x: _populate_aux_structures(x, indices_offset)
 
-    list(map(_populate_aux_structures, contours))
+    list(map(lambda_func, contours))
 
     return Skeleton(
         coordinates=np.concatenate(coordinates, axis=0),
