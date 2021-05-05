@@ -20,6 +20,7 @@
  ****
 """
 import os
+from pathlib import Path
 import unittest
 import geopandas
 
@@ -28,7 +29,7 @@ from parameterized import parameterized
 from shapely.geometry.multilinestring import MultiLineString
 from shapely.geometry.multipoint import MultiPoint
 from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
-    FileGeoDF, GeomTypeEnum, handle_features, handle_geometry
+    FileGeoDF, BatchFileGeoDF, GeomTypeEnum, handle_features, handle_geometry
 )
 from shapely.geometry import Polygon, LineString, LinearRing
 current_dir = os.path.dirname(__file__)
@@ -48,6 +49,18 @@ class Test_TestVectorReader(unittest.TestCase):
         obj = obj_class(**params)
         geo_df = obj.get_geo_df()
         assert len(geo_df) > 0
+    
+    def test_instantiate_batch_file_reader(self) -> None:
+        test_root_dir = os.path.join(root_dir, 'data', 'vectors')
+        obj = BatchFileGeoDF(
+            root_dir=test_root_dir
+        )
+        json_key_list = [
+            str(p).split(".")[0] for p in Path(test_root_dir).glob(f"**/*.geojson")
+        ]
+        for key in json_key_list:
+            assert len(obj.get_geodf_item(key)) > 0
+
     
     @parameterized.expand(
         [

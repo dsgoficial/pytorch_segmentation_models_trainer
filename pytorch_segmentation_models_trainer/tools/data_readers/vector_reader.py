@@ -23,6 +23,7 @@ from dataclasses import MISSING, dataclass, field
 from enum import Enum
 import functools
 import operator
+from pathlib import Path
 
 import geopandas
 import psycopg2
@@ -55,16 +56,16 @@ class GeoDF(abc.ABC):
 
 @dataclass
 class FileGeoDF(GeoDF):
-    file_name: str
+    file_name: str = MISSING
     def __post_init__(self):
         self.gdf = geopandas.read_file(filename=self.file_name)
 
 @dataclass
 class PostgisGeoDF(GeoDF):
-    user: str
-    password: str
-    database: str
-    sql: str
+    user: str = MISSING
+    password: str = MISSING
+    database: str = MISSING
+    sql: str = MISSING
     host: str = 'localhost'
     port: int = 5432
 
@@ -80,6 +81,19 @@ class PostgisGeoDF(GeoDF):
             sql=self.sql,
             con=self.con
         )
+
+@dataclass
+class BatchFileGeoDF:
+    root_dir: str = '/data/vectors'
+    file_extension: str = 'geojson'
+    def __post_init__(self):
+        self.vector_dict = {
+            str(p).replace('.'+str(p).split(".")[-1], ''): FileGeoDF(str(p)) \
+                for p in Path(self.root_dir).glob(f"**/*.{self.file_extension}")
+        }
+    
+    def get_geodf_item(self, key: str) -> GeoDataFrame:
+        return self.vector_dict[key].get_geo_df() if key in self.vector_dict else None
 
 def handle_features(input_features, output_type: GeomType = None, return_list: bool = False) -> list:
     if output_type is None:

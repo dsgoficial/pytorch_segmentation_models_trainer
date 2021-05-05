@@ -29,22 +29,9 @@ from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import
     RasterFile, MaskOutputType
 )
 from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
-    GeoDF, GeomTypeEnum, GeomType
+    GeoDF, FileGeoDF, GeomTypeEnum, GeomType
 )
-
-@dataclass
-class MaskBuilder:
-    root_dir: str
-    output_csv_path: str
-    image_root_dir: str = 'images'
-    replicate_image_folder_structure: bool = True
-    relative_path_on_csv: bool = True
-    build_polygon_mask: bool = True
-    polygon_mask_folder_name: str = 'polygon_masks'
-    build_boundary_mask: bool = True
-    boundary_mask_folder_name: str = 'boundary_masks'
-    build_vertex_mask: bool = True
-    vertex_mask_folder_name: str = 'vertex_masks'
+from pytorch_segmentation_models_trainer.build_mask import MaskBuilder
 
 def build_mask_type_list(cfg: MaskBuilder):
     """[summary]
