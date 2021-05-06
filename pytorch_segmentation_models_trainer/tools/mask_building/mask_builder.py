@@ -27,7 +27,7 @@ import rasterio
 from rasterio.plot import reshape_as_image
 from typing import Any, List
 from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import (
-    RasterFile, MaskOutputType
+    DatasetEntry, RasterFile, MaskOutputType
 )
 from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
     GeoDF, FileGeoDF, GeomTypeEnum, GeomType
@@ -65,6 +65,7 @@ class MaskBuilder:
     root_dir: str = '/data'
     output_csv_path: str = '/data'
     image_root_dir: str = 'images'
+    image_extension: str = 'tif'
     image_dir_is_relative_to_root_dir: str = True
     replicate_image_folder_structure: bool = True
     relative_path_on_csv: bool = True
@@ -74,6 +75,12 @@ class MaskBuilder:
     boundary_mask_folder_name: str = 'boundary_masks'
     build_vertex_mask: bool = True
     vertex_mask_folder_name: str = 'vertex_masks'
+
+mask_dict = {
+    GeomTypeEnum.POLYGON : "mask",
+    GeomTypeEnum.LINE: "boundary_mask",
+    GeomTypeEnum.POINT: "vertex_masks"
+}
         
 def replicate_image_structure(cfg):
     input_base_path = str(
@@ -131,10 +138,33 @@ def build_mask_func(input_raster_path: str, input_vector: GeoDF, \
         mask_output_type (MaskOutputType): [description]
     """
     raster_df = RasterFile(file_name=input_raster_path)
-    return raster_df.build_mask(
+    built_mask = raster_df.build_mask(
         input_vector_layer=input_vector,
         output_dir=output_dir,
         mask_types=mask_type_list,
         mask_output_type=mask_output_type
     )
+    return build_dataset_entry(
+        input_raster_path=input_raster_path,
+        raster_df=raster_df,
+        mask_output_type=mask_output_type,
+        mask_type_list=mask_type_list,
+        built_mask=built_mask
+    )
 
+def build_dataset_entry(input_raster_path: str, raster_df: RasterFile,\
+     mask_type_list:list , built_mask: list) -> DatasetEntry:
+   
+    args_dict = {
+        mask_dict[k]: v for k, v in zip(mask_type_list, built_mask)
+    }
+    args_dict.update(
+        raster_df.get_image_stats()
+    )
+    return DatasetEntry(
+             image=input_raster_path,
+             **args_dict
+         )
+
+def build_iterator(cfg):
+    Path(directory_in_str).glob(f'**/*.{cfg.image_extension}')

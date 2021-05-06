@@ -47,18 +47,14 @@ MaskOutputTypeEnum = MaskOutputType
 @dataclass(frozen=True)
 class DatasetEntry:
     image: str
-    label: str
+    mask: str
     width: int
     height: int
+    bands_means: list = field(default_factory=list)
+    bands_stds: list = field(default_factory=list)
     boundary_mask: str = None
     vertex_mask: str = None
     mask_is_single_band: bool = False
-    r_mean: float = 0
-    g_mean: float = 0
-    b_mean: float = 0
-    r_std: float = 0
-    g_str: float = 0
-    b_std: float = 0    
 
 @dataclass
 class RasterFile:
@@ -186,6 +182,16 @@ class RasterFile:
             dtype=rasterio.uint8
         )
         return raster_array
+    
+    def get_image_stats(self):
+        raster_ds = rasterio.open(self.file_name)
+        raster_np = self.read_as_numpy_array()
+        return {
+            'width': raster_ds.width,
+            'height': raster_ds.height,
+            'bands_means': np.mean(raster_np, axis=0).tolist(),
+            'bands_std': np.std(raster_np, axis=0).tolist()
+        }
 
 def save_with_rasterio(output, profile, raster_iter, mask_types):
     raster_array = list(raster_iter)[0] if len(mask_types) == 1 \

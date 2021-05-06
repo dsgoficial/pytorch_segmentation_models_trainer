@@ -4,6 +4,7 @@ geo_df:
 root_dir: '/data'
 output_csv_path: '/data'
 image_root_dir: 'images'
+image_extension: 'tif'
 image_dir_is_relative_to_root_dir: False
 replicate_image_folder_structure: True
 relative_path_on_csv: True
