@@ -3,7 +3,7 @@
 /***************************************************************************
  segmentation_models_trainer
                               -------------------
-        begin                : 2021-04-02
+        begin                : 2021-05-06
         git sha              : $Format:%H$
         copyright            : (C) 2021 by Philipe Borba - 
                                     Cartographic Engineer @ Brazilian Army
