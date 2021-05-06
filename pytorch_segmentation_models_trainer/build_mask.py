@@ -21,6 +21,8 @@
 import logging
 import os
 from dataclasses import dataclass, field
+from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import MaskOutputTypeEnum
+from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import Executor
 from typing import Any, List
 
 import hydra
@@ -33,6 +35,8 @@ from pytorch_segmentation_models_trainer.tools.mask_building.mask_builder import
     PostgisConfig,
     FileGeoDFConfig,
     MaskBuilder,
+    build_mask_func,
+    build_mask_type_list,
     replicate_image_structure,
 )
 
@@ -60,6 +64,18 @@ def build_masks(cfg: DictConfig):
     geo_df = instantiate(cfg.geo_df)
     if cfg.replicate_image_folder_structure:
         replicate_image_structure(cfg)
+    mask_type_list = build_mask_type_list(cfg)
+    mask_func = lambda x: build_mask_func(
+        input_raster_path=x[0],
+        input_vector=geo_df,
+        output_dir=x[1],
+        mask_type_list=mask_type_list,
+        mask_output_type=MaskOutputTypeEnum.MULTIPLE_FILES_SINGLE_BAND
+    )
+    executor = Executor(mask_func)
+    iterator = iter(
+            list(input_files_dict.values())
+        )
 
 if __name__=="__main__":
     build_masks()
