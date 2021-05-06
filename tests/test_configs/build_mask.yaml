@@ -1,0 +1,15 @@
+geo_df:
+  _target_: "pytorch_segmentation_models_trainer.tools.data_readers.vector_reader.FileGeoDF"
+  file_name: "../tests/testing_data/data/build_masks_data/buildings.geojson"
+root_dir: '/data'
+output_csv_path: '/data'
+image_root_dir: 'images'
+image_dir_is_relative_to_root_dir: False
+replicate_image_folder_structure: True
+relative_path_on_csv: True
+build_polygon_mask: True
+polygon_mask_folder_name: 'polygon_masks'
+build_boundary_mask: True
+boundary_mask_folder_name: 'boundary_masks'
+build_vertex_mask: True
+vertex_mask_folder_name: 'vertex_masks'
