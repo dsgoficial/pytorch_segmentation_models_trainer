@@ -96,6 +96,9 @@ class RasterFile:
         profile = raster_ds.profile.copy()
         profile['count'] = len(mask_types) \
             if mask_output_type == MaskOutputType.SINGLE_FILE_MULTIPLE_BAND else 1
+        profile['compress'] = None
+        profile['width'] = raster_ds.width
+        profile['height'] = raster_ds.height
         mask_feats = input_vector_layer.get_features_from_bbox(
             raster_ds.bounds.left, raster_ds.bounds.right, raster_ds.bounds.bottom, raster_ds.bounds.top
         )  
