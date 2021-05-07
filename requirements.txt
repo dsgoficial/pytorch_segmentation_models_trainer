@@ -21,3 +21,5 @@ numba
 skan
 torch-scatter
 tqdm
+pygeos
+rtree

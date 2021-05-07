@@ -85,7 +85,7 @@ class RasterFile:
             output_dir: Path, output_filename: str =None,\
             mask_types: List[GeomType] = None,\
             mask_output_type: MaskOutputType = MaskOutputType.SINGLE_FILE_MULTIPLE_BAND,\
-            mask_output_folders: List[str] = None
+            mask_output_folders: List[str] = None, filter_area: float = None
         ) -> List[str]:
         if mask_types is not None and not isinstance(mask_types, list):
             raise Exception('Invalid parameter for mask_types')
@@ -100,7 +100,9 @@ class RasterFile:
         profile['width'] = raster_ds.width
         profile['height'] = raster_ds.height
         mask_feats = input_vector_layer.get_features_from_bbox(
-            raster_ds.bounds.left, raster_ds.bounds.right, raster_ds.bounds.bottom, raster_ds.bounds.top
+            raster_ds.bounds.left, raster_ds.bounds.right,
+            raster_ds.bounds.bottom, raster_ds.bounds.top,
+            filter_area=filter_area
         )  
         return self.build_single_file_multiple_band_mask(
             mask_feats=mask_feats,

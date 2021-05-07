@@ -50,9 +50,24 @@ class GeoDF(abc.ABC):
         return self.gdf
     
     def get_features_from_bbox(self, x_min:float, x_max:float,\
-        y_min:float, y_max:float, only_geom: bool=True) -> GeoSeries:
+        y_min:float, y_max:float, only_geom: bool=True, \
+        clip_to_extent: bool=True, filter_area: float=None) -> GeoSeries:
+        if filter_area is not None and (not isinstance(filter_area, float) or filter_area < 0):
+            raise Exception("Filter area must be a float value")
         feats = self.gdf.cx[x_min:x_max, y_min:y_max]
+        feats = self.clip_features_to_extent(
+            feats, x_min, x_max, y_min, y_max
+        ) if clip_to_extent else feats
+        feats = feats if filter_area is None else feats[feats.area > filter_area]
         return feats['geometry'] if only_geom else feats
+    
+    def clip_features_to_extent(self, feats, x_min:float, x_max:float,\
+        y_min:float, y_max:float) -> GeoSeries:
+        clip_polygon = Polygon(
+            [(x_min, y_min), (x_max, y_min), (x_max, y_max), (x_min, y_max)]
+        )
+        return geopandas.clip(feats, clip_polygon, keep_geom_type=True)
+
 
 @dataclass
 class FileGeoDF(GeoDF):

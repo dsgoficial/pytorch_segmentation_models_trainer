@@ -84,6 +84,7 @@ class MaskBuilder:
     boundary_mask_folder_name: str = 'boundary_masks'
     build_vertex_mask: bool = True
     vertex_mask_folder_name: str = 'vertex_masks'
+    min_polygon_area: float = 50.0
 
         
 def replicate_image_structure(cfg):
@@ -133,7 +134,7 @@ def build_destination_dirs(input_base_path: str, output_base_path: str):
 
 def build_mask_func(cfg: DictConfig, input_raster_path: str, input_vector: GeoDF, \
         output_dir: str, mask_type_list: List[GeomType], mask_output_type: MaskOutputType,\
-        mask_output_folders: List[str] = None
+        mask_output_folders: List[str] = None, filter_area: float = None
     ) -> DatasetEntry:
     """[summary]
 
@@ -149,7 +150,8 @@ def build_mask_func(cfg: DictConfig, input_raster_path: str, input_vector: GeoDF
         output_dir=output_dir,
         mask_types=mask_type_list,
         mask_output_type=mask_output_type,
-        mask_output_folders=mask_output_folders
+        mask_output_folders=mask_output_folders,
+        filter_area=filter_area
     )
     return build_dataset_entry(
         cfg=cfg,
