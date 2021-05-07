@@ -88,7 +88,7 @@ class RasterFile:
             mask_output_type: MaskOutputType = MaskOutputType.SINGLE_FILE_MULTIPLE_BAND,\
             mask_output_folders: List[str] = None, filter_area: float = None, output_extension: str = None
         ) -> List[str]:
-        output_extension = os.path.basename(output_filename).split('.')[-1] \
+        output_extension = os.path.basename(self.file_name).split('.')[-1] \
             if output_extension is None else output_extension
         if mask_types is not None and not isinstance(mask_types, list):
             raise Exception('Invalid parameter for mask_types')
