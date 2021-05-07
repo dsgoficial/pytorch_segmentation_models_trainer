@@ -20,22 +20,19 @@
  ****
 """
 import os
-from pytorch_segmentation_models_trainer.build_mask import build_masks
 import unittest
+
 import hydra
-from hydra.experimental import compose, initialize
 import pandas as pd
-
+from hydra.experimental import compose, initialize
 from parameterized import parameterized
-from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import \
-    RasterFile, MaskOutputTypeEnum
-from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import \
-    FileGeoDF, GeomTypeEnum
+from pytorch_segmentation_models_trainer.build_mask import build_masks
+from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import (
+    MaskOutputTypeEnum, RasterFile)
+from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
+    FileGeoDF, GeomTypeEnum)
 from pytorch_segmentation_models_trainer.tools.mask_building.mask_builder import (
-    MaskBuilder,
-    build_destination_dirs
-)
-
+    MaskBuilder, build_destination_dirs)
 from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
                                                                 hash_file,
                                                                 remove_folder)
