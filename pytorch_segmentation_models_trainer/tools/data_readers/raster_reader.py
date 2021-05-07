@@ -32,12 +32,13 @@ from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import
 from pytorch_segmentation_models_trainer.utils.os_utils import create_folder
 from rasterio.features import rasterize
 from rasterio.plot import reshape_as_image, reshape_as_raster
+from bidict import bidict
 
-suffix_dict = {
+suffix_dict = bidict({
     "PNG": ".png",
     "GTiff": ".tif",
     "JPEG": ".jpg"
-}
+})
 
 class MaskOutputType(Enum):
     SINGLE_FILE_MULTIPLE_BAND, MULTIPLE_FILES_SINGLE_BAND = range(2)
@@ -85,8 +86,10 @@ class RasterFile:
             output_dir: Path, output_filename: str =None,\
             mask_types: List[GeomType] = None,\
             mask_output_type: MaskOutputType = MaskOutputType.SINGLE_FILE_MULTIPLE_BAND,\
-            mask_output_folders: List[str] = None, filter_area: float = None
+            mask_output_folders: List[str] = None, filter_area: float = None, output_extension: str = None
         ) -> List[str]:
+        output_extension = os.path.basename(output_filename).split('.')[-1] \
+            if output_extension is None else output_extension
         if mask_types is not None and not isinstance(mask_types, list):
             raise Exception('Invalid parameter for mask_types')
         # input handling
@@ -99,6 +102,10 @@ class RasterFile:
         profile['compress'] = None
         profile['width'] = raster_ds.width
         profile['height'] = raster_ds.height
+        if output_extension is not None:
+            profile['driver'] = suffix_dict.inverse[
+                f'.{output_extension}' if not output_extension.startswith('.') else output_extension
+            ]
         mask_feats = input_vector_layer.get_features_from_bbox(
             raster_ds.bounds.left, raster_ds.bounds.right,
             raster_ds.bounds.bottom, raster_ds.bounds.top,
@@ -110,7 +117,8 @@ class RasterFile:
             profile=profile,
             mask_types=mask_types,
             output_dir=output_dir,
-            output_filename=output_filename
+            output_filename=output_filename,
+            output_extension=output_extension
         ) if mask_output_type == MaskOutputType.SINGLE_FILE_MULTIPLE_BAND \
         else self.build_multiple_file_single_band_mask(
             mask_feats=mask_feats,
@@ -119,12 +127,13 @@ class RasterFile:
             mask_types=mask_types,
             output_dir=output_dir,
             output_filename=output_filename,
-            mask_output_folders=mask_output_folders
+            mask_output_folders=mask_output_folders,
+            output_extension=output_extension
         )
     
     def build_single_file_multiple_band_mask(self, mask_feats, raster_ds, profile,\
-        mask_types, output_dir, output_filename) -> List[str]:
-        input_name, extension = os.path.basename(self.file_name).split('.')
+        mask_types, output_dir, output_filename, output_extension) -> List[str]:
+        input_name, _ = os.path.basename(self.file_name).split('.')
         output_filename = output_filename if output_filename is not None else input_name
         raster_iter = (
             self.build_numpy_mask_from_vector_layer(
@@ -134,13 +143,13 @@ class RasterFile:
                 mask_type=mask_type
             ) for mask_type in mask_types
         )
-        output = os.path.join(output_dir, output_filename+'.'+extension)
+        output = os.path.join(output_dir, output_filename+'.'+output_extension)
         save_with_rasterio(output, profile, raster_iter, mask_types)
         return [output]
     
     def build_multiple_file_single_band_mask(self, mask_feats, raster_ds, profile,\
-        mask_types, output_dir, output_filename, mask_output_folders) -> List[str]:
-        input_name, extension = os.path.basename(self.file_name).split('.')
+        mask_types, output_dir, output_filename, mask_output_folders, output_extension) -> List[str]:
+        input_name, _ = os.path.basename(self.file_name).split('.')
         output_filename = output_filename if output_filename is not None else input_name
         def compute(args):
             idx, mask_output_folder = args
@@ -150,7 +159,7 @@ class RasterFile:
                 transform=profile['transform'],
                 mask_type=mask_types[idx]
             )
-            output = os.path.join(output_dir, mask_output_folder, output_filename+'.'+extension)
+            output = os.path.join(output_dir, mask_output_folder, output_filename+'.'+output_extension)
             with rasterio.open(output, 'w', **profile) as out:
                 out.write(raster_array, 1)
             return output
@@ -175,10 +184,9 @@ class RasterFile:
         Returns:
             np.ndarray: Numpy array
         """
-        raster_array = np.zeros(output_shape, dtype=rasterio.uint8)
-        rasterize(
+        # raster_array = np.zeros(output_shape, dtype=rasterio.uint8)
+        raster_array = rasterize(
             handle_features(mask_feats, mask_type, return_list=True),
-            out=raster_array,
             out_shape=output_shape,
             fill=0,
             default_value=1,

@@ -74,7 +74,8 @@ def build_masks(cfg: DictConfig) -> str:
         output_dir=x[1],
         mask_type_list=mask_type_list,
         mask_output_type=MaskOutputTypeEnum.MULTIPLE_FILES_SINGLE_BAND,
-        mask_output_folders=x[2]
+        mask_output_folders=x[2],
+        output_extension=cfg.mask_output_extension
     )
     executor = Executor(mask_func)
     generator = build_generator(cfg)

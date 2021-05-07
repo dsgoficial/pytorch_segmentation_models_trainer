@@ -64,7 +64,7 @@ class GeoDF(abc.ABC):
     def clip_features_to_extent(self, feats, x_min:float, x_max:float,\
         y_min:float, y_max:float) -> GeoSeries:
         clip_polygon = Polygon(
-            [(x_min, y_min), (x_max, y_min), (x_max, y_max), (x_min, y_max)]
+            [(x_min, y_min), (x_max, y_min), (x_max, y_max), (x_min, y_max), (x_min, y_min)]
         )
         return geopandas.clip(feats, clip_polygon, keep_geom_type=True)
 
