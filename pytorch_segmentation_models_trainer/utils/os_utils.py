@@ -47,3 +47,13 @@ def hash_file(filename):
             chunk = file.read(1024)
             h.update(chunk)
     return h.hexdigest()
+
+def make_path_relative(input_path, base_path):
+    fixed_path = str(input_path).split(base_path)[-1]
+    fixed_path = fixed_path[1::] if fixed_path.startswith(os.path.sep) else fixed_path
+    return str(
+        os.path.join(
+            base_path,
+            fixed_path
+        )
+    )

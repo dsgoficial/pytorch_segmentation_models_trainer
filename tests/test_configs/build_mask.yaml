@@ -3,6 +3,8 @@ geo_df:
   file_name: "../tests/testing_data/data/build_masks_data/buildings.geojson"
 root_dir: '/data'
 output_csv_path: '/data'
+dataset_name: 'dsg_dataset'
+dataset_has_relative_path: True
 image_root_dir: 'images'
 image_extension: 'tif'
 image_dir_is_relative_to_root_dir: False

@@ -24,6 +24,7 @@ from pytorch_segmentation_models_trainer.build_mask import build_masks
 import unittest
 import hydra
 from hydra.experimental import compose, initialize
+import pandas as pd
 
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import \
@@ -84,6 +85,7 @@ class Test_TestBuildMask(unittest.TestCase):
     def test_build_masks(self):
         with initialize(config_path="./test_configs"):
             image_dir = os.path.join(root_dir, 'data', 'build_masks_data', 'images')
+            expected_output_path = os.path.join(root_dir, 'expected_outputs', 'build_masks')
             cfg = compose(
                 config_name="build_mask.yaml",
                 overrides=[
@@ -95,5 +97,11 @@ class Test_TestBuildMask(unittest.TestCase):
                     )
                 ]
             )
-            build_masks(cfg)
+            csv_output = build_masks(cfg)
+            expected_df = pd.read_csv(os.path.join(expected_output_path, 'dsg_dataset.csv'))
+            output_df = pd.read_csv(os.path.join(self.output_dir, 'dsg_dataset.csv'))
+            pd.testing.assert_frame_equal(
+                expected_df,
+                output_df
+            )
             print(cfg)

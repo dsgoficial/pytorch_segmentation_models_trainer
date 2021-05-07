@@ -19,7 +19,7 @@
  ****
 """
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Iterator, List
@@ -47,7 +47,7 @@ MaskOutputTypeEnum = MaskOutputType
 @dataclass(frozen=True)
 class DatasetEntry:
     image: str
-    mask: str
+    polygon_mask: str
     width: int
     height: int
     bands_means: list = field(default_factory=list)
@@ -189,8 +189,8 @@ class RasterFile:
         return {
             'width': raster_ds.width,
             'height': raster_ds.height,
-            'bands_means': np.mean(raster_np, axis=0).tolist(),
-            'bands_std': np.std(raster_np, axis=0).tolist()
+            'bands_means': np.mean(raster_np, axis=(1, 2)).tolist(),
+            'bands_stds': np.std(raster_np, axis=(1, 2)).tolist()
         }
 
 def save_with_rasterio(output, profile, raster_iter, mask_types):

@@ -35,6 +35,8 @@ from pytorch_segmentation_models_trainer.tools.mask_building.mask_builder import
     PostgisConfig,
     FileGeoDFConfig,
     MaskBuilder,
+    build_csv_file_from_concurrent_futures_output,
+    build_generator,
     build_mask_func,
     build_mask_type_list,
     replicate_image_structure,
@@ -49,7 +51,7 @@ cs.store(group="geo_df", name='file', node=FileGeoDFConfig)
 cs.store(group="geo_df", name='postgis', node=PostgisConfig)
 
 @hydra.main(config_name="config")
-def build_masks(cfg: DictConfig):
+def build_masks(cfg: DictConfig) -> str:
     logger.info(
         "Starting the training of a model with the following configuration: \n%s",
         OmegaConf.to_yaml(cfg)
@@ -66,16 +68,25 @@ def build_masks(cfg: DictConfig):
         replicate_image_structure(cfg)
     mask_type_list = build_mask_type_list(cfg)
     mask_func = lambda x: build_mask_func(
+        cfg=cfg,
         input_raster_path=x[0],
         input_vector=geo_df,
         output_dir=x[1],
         mask_type_list=mask_type_list,
-        mask_output_type=MaskOutputTypeEnum.MULTIPLE_FILES_SINGLE_BAND
+        mask_output_type=MaskOutputTypeEnum.MULTIPLE_FILES_SINGLE_BAND,
+        mask_output_folders=x[2]
     )
     executor = Executor(mask_func)
-    iterator = iter(
-            list(input_files_dict.values())
-        )
+    generator = build_generator(cfg)
+    output_list = executor.execute_tasks(
+        generator
+    )
+    csv_file = build_csv_file_from_concurrent_futures_output(
+        cfg,
+        futures=output_list
+    )
+    print(f"Dataset saved at {csv_file}")
+    return csv_file
 
 if __name__=="__main__":
     build_masks()

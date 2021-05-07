@@ -18,21 +18,28 @@
  *                                                                         *
  ****
 """
+import csv
+import dataclasses
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from omegaconf import MISSING, DictConfig, OmegaConf
+from typing import Any, List
 
 import rasterio
-from rasterio.plot import reshape_as_image
-from typing import Any, List
+from omegaconf import MISSING, DictConfig, OmegaConf
 from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import (
-    DatasetEntry, RasterFile, MaskOutputType
-)
+    DatasetEntry, MaskOutputType, RasterFile)
 from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
-    GeoDF, FileGeoDF, GeomTypeEnum, GeomType
-)
+    FileGeoDF, GeoDF, GeomType, GeomTypeEnum)
+from pytorch_segmentation_models_trainer.utils.os_utils import \
+    make_path_relative
+from rasterio.plot import reshape_as_image
 
+mask_dict = {
+    GeomTypeEnum.POLYGON : "polygon_mask",
+    GeomTypeEnum.LINE: "boundary_mask",
+    GeomTypeEnum.POINT: "vertex_mask"
+}
 @dataclass
 class VectorReaderConfig:
     pass
@@ -64,6 +71,8 @@ class MaskBuilder:
     geo_df: VectorReaderConfig = MISSING
     root_dir: str = '/data'
     output_csv_path: str = '/data'
+    dataset_name: str = 'dsg_dataset'
+    dataset_has_relative_path: bool = True
     image_root_dir: str = 'images'
     image_extension: str = 'tif'
     image_dir_is_relative_to_root_dir: str = True
@@ -76,11 +85,6 @@ class MaskBuilder:
     build_vertex_mask: bool = True
     vertex_mask_folder_name: str = 'vertex_masks'
 
-mask_dict = {
-    GeomTypeEnum.POLYGON : "mask",
-    GeomTypeEnum.LINE: "boundary_mask",
-    GeomTypeEnum.POINT: "vertex_masks"
-}
         
 def replicate_image_structure(cfg):
     input_base_path = str(
@@ -127,8 +131,10 @@ def build_destination_dirs(input_base_path: str, output_base_path: str):
         ).mkdir(parents=True, exist_ok=True) for dirpath, _, __ in os.walk(input_base_path)
     ]
 
-def build_mask_func(input_raster_path: str, input_vector: GeoDF, \
-    output_dir: str, mask_type_list: List[GeomType], mask_output_type: MaskOutputType):
+def build_mask_func(cfg: DictConfig, input_raster_path: str, input_vector: GeoDF, \
+        output_dir: str, mask_type_list: List[GeomType], mask_output_type: MaskOutputType,\
+        mask_output_folders: List[str] = None
+    ) -> DatasetEntry:
     """[summary]
 
     Args:
@@ -142,29 +148,78 @@ def build_mask_func(input_raster_path: str, input_vector: GeoDF, \
         input_vector_layer=input_vector,
         output_dir=output_dir,
         mask_types=mask_type_list,
-        mask_output_type=mask_output_type
+        mask_output_type=mask_output_type,
+        mask_output_folders=mask_output_folders
     )
     return build_dataset_entry(
+        cfg=cfg,
         input_raster_path=input_raster_path,
         raster_df=raster_df,
-        mask_output_type=mask_output_type,
         mask_type_list=mask_type_list,
         built_mask=built_mask
     )
 
-def build_dataset_entry(input_raster_path: str, raster_df: RasterFile,\
-     mask_type_list:list , built_mask: list) -> DatasetEntry:
+def build_dataset_entry(cfg: DictConfig, input_raster_path: str, raster_df: RasterFile,\
+    mask_type_list:list, built_mask: list) -> DatasetEntry:
+    lambda_func = lambda x: make_path_relative(x[0], x[1]) \
+        if cfg.dataset_has_relative_path else x[0]
    
     args_dict = {
-        mask_dict[k]: v for k, v in zip(mask_type_list, built_mask)
+        mask_dict[k]: lambda_func(
+            [v, getattr(cfg, f'{mask_dict[k]}_folder_name')]
+        ) for k, v in zip(mask_type_list, built_mask)
     }
     args_dict.update(
         raster_df.get_image_stats()
     )
     return DatasetEntry(
-             image=input_raster_path,
+             image=make_path_relative(
+                    input_raster_path,
+                    os.path.basename(
+                        os.path.normpath(cfg.image_root_dir)
+                    )
+                ) if cfg.dataset_has_relative_path else input_raster_path,
              **args_dict
          )
 
-def build_iterator(cfg):
-    Path(directory_in_str).glob(f'**/*.{cfg.image_extension}')
+def build_output_raster_list(input_raster_path, cfg):
+    image_dir_name = os.path.basename(
+        os.path.normpath(cfg.image_root_dir)
+    )
+    return [
+        str(
+            os.path.join(
+                getattr(cfg, f"{mask_type}_folder_name"),
+                os.path.dirname(
+                    os.path.normpath(
+                        str(input_raster_path).split(f'{image_dir_name}/')[-1]
+                    )
+                )
+            )
+         ) for mask_type in ['polygon_mask', 'boundary_mask', 'vertex_mask'] \
+                if getattr(cfg, f"build_{mask_type}")
+    ]
+
+def build_generator(cfg):
+    image_base_path = os.path.join(
+        cfg.root_dir, cfg.image_root_dir
+    ) if cfg.image_dir_is_relative_to_root_dir else cfg.image_root_dir
+    return (
+        (
+            input_raster_path,
+            cfg.root_dir,
+            build_output_raster_list(input_raster_path, cfg)
+        ) for input_raster_path in Path(image_base_path).glob(f'**/*.{cfg.image_extension}')
+    )
+
+def build_csv_file_from_concurrent_futures_output(cfg, futures):
+    output_file = os.path.join(cfg.output_csv_path, f'{cfg.dataset_name}.csv')
+    with open(output_file, 'w') as data_file:
+        csv_writer = csv.writer(data_file)
+        for i, future in enumerate(futures):
+            data = dataclasses.asdict(future.result())
+            if i == 0:
+                # writes header
+                csv_writer.writerow(data.keys())
+            csv_writer.writerow(data.values())
+    return output_file

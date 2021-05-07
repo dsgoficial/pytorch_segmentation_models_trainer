@@ -29,7 +29,7 @@ class Executor:
         self.simultaneous_tasks = os.cpu_count() if simultaneous_tasks is None \
             else simultaneous_tasks
 
-    def execute_tasks(self, tasks: Iterator):
+    def execute_tasks(self, tasks):
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=self.simultaneous_tasks) as executor:
             # Schedule the first N futures.  We don't want to schedule them all
