@@ -103,19 +103,3 @@ class Test_TestBuildMask(unittest.TestCase):
                 expected_df.reset_index(drop=True),
                 output_df.reset_index(drop=True)
             )
-            selected_keys = [i for i in expected_df.columns if '_mask' in i]
-            for index, row in expected_df.iterrows():
-                output_row = output_df.loc[expected_df['image'] == row['image']]
-                for key in selected_keys:
-                    self.assertEqual(
-                        hash_file(os.path.join(expected_output_path, row[key])),
-                        hash_file(os.path.join(self.output_dir, output_row[key].item()))
-                    )
-                    # np.testing.assert_array_equal(
-                    #     RasterFile(
-                    #         file_name=os.path.join(expected_output_path, row[key])
-                    #     ).read_as_numpy_array(),
-                    #     RasterFile(
-                    #         file_name=os.path.join(self.output_dir, output_row[key].item())
-                    #     ).read_as_numpy_array()
-                    # )
