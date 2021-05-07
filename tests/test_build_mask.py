@@ -98,7 +98,10 @@ class Test_TestBuildMask(unittest.TestCase):
             csv_output = build_masks(cfg)
             expected_df = pd.read_csv(os.path.join(expected_output_path, 'dsg_dataset.csv')).sort_values('image')
             output_df = pd.read_csv(csv_output).sort_values('image')
-            pd.testing.assert_frame_equal(expected_df, output_df)
+            pd.testing.assert_frame_equal(
+                expected_df.reset_index(drop=True),
+                output_df.reset_index(drop=True)
+            )
             selected_keys = [i for i in expected_df.columns if '_mask' in i]
             for index, row in expected_df.iterrows():
                 output_row = output_df.loc[expected_df['image'] == row['image']]
