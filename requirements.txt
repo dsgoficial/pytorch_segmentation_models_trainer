@@ -1,6 +1,6 @@
 torch
 torchvision
-pytorch-lightning
+pytorch-lightning==1.1.8
 segmentation-models-pytorch
 hydra-core
 kornia
