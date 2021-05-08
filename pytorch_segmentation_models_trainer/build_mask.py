@@ -45,12 +45,12 @@ from pytorch_segmentation_models_trainer.tools.mask_building.mask_builder import
 logger = logging.getLogger(__name__)
 
 cs = ConfigStore.instance()
-cs.store(name="config", node=MaskBuilder)
+cs.store(name="mask_config", node=MaskBuilder)
 cs.store(group="geo_df", name='batch_file', node=BatchFileGeoDFConfig)
 cs.store(group="geo_df", name='file', node=FileGeoDFConfig)
 cs.store(group="geo_df", name='postgis', node=PostgisConfig)
 
-@hydra.main(config_name="config")
+@hydra.main(config_name="mask_config")
 def build_masks(cfg: DictConfig) -> str:
     logger.info(
         "Starting the training of a model with the following configuration: \n%s",

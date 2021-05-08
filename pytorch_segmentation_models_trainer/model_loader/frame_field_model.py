@@ -23,13 +23,13 @@
 import torch
 import torch.nn as nn
 from hydra.utils import instantiate
-
-from typing import List, Any
-
+from omegaconf.dictconfig import DictConfig
+from pytorch_segmentation_models_trainer.custom_losses.base_loss import (
+    MultiLoss, build_combined_loss)
 from pytorch_segmentation_models_trainer.model_loader.model import Model
 from segmentation_models_pytorch.base.initialization import (
-    initialize_decoder, initialize_head
-)
+    initialize_decoder, initialize_head)
+
 class FrameFieldModel(nn.Module):
     def __init__(
         self,
@@ -184,13 +184,12 @@ class FrameFieldSegmentationModel(Model):
     def __init__(self, cfg):
         super(FrameFieldSegmentationModel).__init__(cfg)
 
-    def get_loss_function(self):
-        """Multi-loss model
-
+    def get_loss_function(self, cfg: DictConfig) -> MultiLoss:
+        """Multi-loss model defined in frame field article
         Returns:
-            [type]: [description]
+            MultiLoss: Multi loss object
         """
-        return None
+        return build_combined_loss(cfg)
 
     def training_step(self, batch, batch_idx):
         # TODO

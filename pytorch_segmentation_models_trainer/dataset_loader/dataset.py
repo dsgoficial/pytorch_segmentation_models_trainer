@@ -122,14 +122,21 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
         self.multi_band_mask = multi_band_mask
         self.boundary_mask_key = boundary_mask_key if boundary_mask_key is not None else 'boundary_mask_path'
         self.vertex_mask_key = vertex_mask_key if vertex_mask_key is not None else 'vertex_mask_path'
+    
+    def load_masks(self, idx):
+        if self.multi_band_mask:
+            multi_band_mask = self.load_image(idx, key=self.mask_key, is_mask=True)
+            return multi_band_mask[:, :, 0], multi_band_mask[:, :, 1], multi_band_mask[:, :, 2]
+        mask = self.load_image(idx, key=self.mask_key, is_mask=True)
+        boundary_mask = self.load_image(idx, key=self.mask_key, is_mask=True)
+        vertex_mask = self.load_image(idx, key=self.vertex_mask_key, is_mask=True)
+        return mask, boundary_mask, vertex_mask
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         if self.multi_band_mask:
             return super().__getitem__(idx)
         image = self.load_image(idx, key=self.image_key)
-        mask = self.load_image(idx, key=self.mask_key, is_mask=True)
-        boundary_mask = self.load_image(idx, key=self.mask_key, is_mask=True)
-        vertex_mask = self.load_image(idx, key=self.vertex_mask_key, is_mask=True)
+        mask, boundary_mask, vertex_mask = self.load_masks(idx)
         if self.transform is None:
             return {
                 'image': image,
