@@ -38,7 +38,8 @@ from rasterio.plot import reshape_as_image
 mask_dict = {
     GeomTypeEnum.POLYGON : "polygon_mask",
     GeomTypeEnum.LINE: "boundary_mask",
-    GeomTypeEnum.POINT: "vertex_mask"
+    GeomTypeEnum.POINT: "vertex_mask",
+    "angle": "crossfield_mask"
 }
 @dataclass
 class VectorReaderConfig:
@@ -85,14 +86,15 @@ class MaskBuilder:
     build_vertex_mask: bool = True
     vertex_mask_folder_name: str = 'vertex_masks'
     min_polygon_area: float = 50.0
+    crossfield_mask_folder_name: str = 'crossfield_masks'
+    build_crossfield_mask: bool = True
     mask_output_extension: str = 'png'
-
         
 def replicate_image_structure(cfg):
     input_base_path = str(
         os.path.join(cfg.root_dir, cfg.image_root_dir)
     ) if cfg.image_dir_is_relative_to_root_dir else cfg.image_root_dir
-    for mask_type in ['polygon_mask', 'boundary_mask', 'vertex_mask']:
+    for mask_type in ['polygon_mask', 'boundary_mask', 'vertex_mask', 'crossfield_mask']:
         if getattr(cfg, f"build_{mask_type}"):
             mask_folder_name = getattr(cfg, f"{mask_type}_folder_name")
             output_base_path = str(
@@ -119,6 +121,8 @@ def build_mask_type_list(cfg: MaskBuilder):
         mask_type_list.append(GeomTypeEnum.LINE)
     if cfg.build_vertex_mask:
         mask_type_list.append(GeomTypeEnum.POINT)
+    if cfg.build_crossfield_mask:
+        mask_type_list.append("angle")
     return mask_type_list
 
 def build_destination_dirs(input_base_path: str, output_base_path: str):
@@ -200,7 +204,7 @@ def build_output_raster_list(input_raster_path, cfg):
                     )
                 )
             )
-         ) for mask_type in ['polygon_mask', 'boundary_mask', 'vertex_mask'] \
+         ) for mask_type in ['polygon_mask', 'boundary_mask', 'vertex_mask', 'crossfield_mask'] \
                 if getattr(cfg, f"build_{mask_type}")
     ]
 

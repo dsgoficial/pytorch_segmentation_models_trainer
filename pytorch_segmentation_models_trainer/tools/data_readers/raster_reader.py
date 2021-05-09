@@ -22,6 +22,7 @@ import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from pytorch_segmentation_models_trainer.utils.polygon_utils import build_crossfield
 from typing import Iterator, List
 
 import numpy as np
@@ -55,6 +56,7 @@ class DatasetEntry:
     bands_stds: list = field(default_factory=list)
     boundary_mask: str = None
     vertex_mask: str = None
+    crossfield_mask: str = None
     mask_is_single_band: bool = False
 
 @dataclass
@@ -193,6 +195,11 @@ class RasterFile:
             all_touched=True,
             transform=transform,
             dtype=rasterio.uint8
+        ) if not mask_type == "angle" else build_crossfield(
+            handle_features(mask_feats, GeomTypeEnum.POLYGON, return_list=True),
+            output_shape,
+            transform,
+            line_width=4
         )
         return raster_array
     

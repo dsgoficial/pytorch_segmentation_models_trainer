@@ -16,5 +16,7 @@ build_boundary_mask: True
 boundary_mask_folder_name: 'boundary_masks'
 build_vertex_mask: True
 vertex_mask_folder_name: 'vertex_masks'
+crossfield_mask_folder_name: 'crossfield_masks'
+build_crossfield_mask: True
 min_polygon_area: 50.0
 mask_output_extension: 'png'
