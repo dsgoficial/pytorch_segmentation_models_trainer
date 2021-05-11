@@ -36,6 +36,7 @@ class FrameFieldModel(nn.Module):
         segmentation_model,
         use_batchnorm: bool = True,
         replace_seg_head: bool = True,
+        compute_seg: bool = True,
         compute_crossfield: bool = True,
         seg_params: dict = None,
         module_activation: str = None,
@@ -62,7 +63,7 @@ class FrameFieldModel(nn.Module):
         self.seg_params = {
             "compute_interior": True,
             "compute_edge": True,
-            "compute_vertex": False
+            "compute_vertex": True
         }
         if seg_params is not None:
             for param in seg_params:
@@ -74,6 +75,7 @@ class FrameFieldModel(nn.Module):
         self.segmentation_model = instantiate(segmentation_model) \
             if isinstance(segmentation_model, str) else segmentation_model
         self.replace_seg_head = replace_seg_head
+        self.compute_seg = compute_seg
         self.compute_crossfield = compute_crossfield
         self.use_batchnorm = use_batchnorm
         self.frame_field_activation = frame_field_activation
@@ -135,11 +137,10 @@ class FrameFieldModel(nn.Module):
         output_dict = dict()
         encoder_feats = self.segmentation_model.encoder(x)
         decoder_output = self.segmentation_model.decoder(*encoder_feats)
-        segmentation_features = self.seg_module(decoder_output) 
-        output_dict["seg"] = segmentation_features
-        if self.replace_seg_head:
+        if self.compute_seg:
+            segmentation_features = self.seg_module(decoder_output)
             detached_segmentation_features = segmentation_features.clone().detach()
-            segmentation_features = torch.cat(
+            decoder_output = torch.cat(
                 [
                     decoder_output,
                     detached_segmentation_features
@@ -147,7 +148,7 @@ class FrameFieldModel(nn.Module):
             )
             output_dict["seg"] = segmentation_features
         if self.compute_crossfield:
-            output_dict["crossfield"] = 2 * self.crossfield_module(segmentation_features)
+            output_dict["crossfield"] = 2 * self.crossfield_module(decoder_output)
         return output_dict
 
     def initialize(self):

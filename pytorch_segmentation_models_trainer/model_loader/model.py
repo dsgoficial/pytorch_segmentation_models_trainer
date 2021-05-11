@@ -173,6 +173,7 @@ class Model(pl.LightningModule):
         self.log_dict(
             evaluated_metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, logger=False
         )
+        self.log('validation_loss', loss, on_step=True, on_epoch=True, sync_dist=True)
         return {'val_loss': loss, 'log': tensorboard_logs}
     
     def compute_average_metrics(self, outputs, metric_dict, step_type='train'):
