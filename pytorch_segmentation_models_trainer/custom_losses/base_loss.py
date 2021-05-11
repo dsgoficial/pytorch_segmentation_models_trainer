@@ -300,13 +300,9 @@ class ComputeSegGrads:
         )
 
     def __call__(self, pred_batch, gt_batch):
-        seg = pred_batch["seg"]  # (b, c, h, w)
-        seg_grads = 2 * self.spatial_gradient(seg)  # (b, c, 2, h, w), Normalize (kornia normalizes to -0.5, 0.5 for input in [0, 1])
-        seg_grad_norm = seg_grads.norm(dim=2)  # (b, c, h, w)
-        seg_grads_normed = seg_grads / (seg_grad_norm[:, :, None, ...] + 1e-6)  # (b, c, 2, h, w)
-        pred_batch["seg_grads"] = seg_grads
-        pred_batch["seg_grad_norm"] = seg_grad_norm
-        pred_batch["seg_grads_normed"] = seg_grads_normed
+        pred_batch["seg_grads"] = 2 * self.spatial_gradient(pred_batch["seg"])
+        pred_batch["seg_grad_norm"] = pred_batch["seg_grads"].norm(dim=2)  # (b, c, h, w)
+        pred_batch["seg_grads_normed"] = pred_batch["seg_grads"] / (pred_batch["seg_grad_norm"][:, :, None, ...] + 1e-6)  # (b, c, 2, h, w)
         return pred_batch, gt_batch
 
 # --- Build combined loss: --- #

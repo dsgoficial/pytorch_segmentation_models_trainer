@@ -112,47 +112,57 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
         image_key=None,
         mask_key=None,
         multi_band_mask=False,
+        return_is_multi_band=False,
         boundary_mask_key=None,
         vertex_mask_key=None,
-        n_first_rows_to_read=None
+        n_first_rows_to_read=None,
+        return_crossfield_mask=True,
+        crossfield_mask_key=None
     ) -> None:
         super().__init__(input_csv_path, root_dir=root_dir, augmentation_list=augmentation_list,
                          data_loader=data_loader, image_key=image_key, mask_key=mask_key,
                          n_first_rows_to_read=n_first_rows_to_read)
         self.multi_band_mask = multi_band_mask
+        self.return_is_multi_band = return_is_multi_band
         self.boundary_mask_key = boundary_mask_key if boundary_mask_key is not None else 'boundary_mask_path'
         self.vertex_mask_key = vertex_mask_key if vertex_mask_key is not None else 'vertex_mask_path'
+        self.return_crossfield_mask = return_crossfield_mask
+        self.crossfield_mask_key = crossfield_mask_key if crossfield_mask_key is not None else 'crossfield_mask_path'
     
     def load_masks(self, idx):
+        crossfield_mask = self.load_image(idx, key=self.crossfield_mask_key, is_mask=True)
         if self.multi_band_mask:
             multi_band_mask = self.load_image(idx, key=self.mask_key, is_mask=True)
-            return multi_band_mask[:, :, 0], multi_band_mask[:, :, 1], multi_band_mask[:, :, 2]
-        mask = self.load_image(idx, key=self.mask_key, is_mask=True)
-        boundary_mask = self.load_image(idx, key=self.mask_key, is_mask=True)
-        vertex_mask = self.load_image(idx, key=self.vertex_mask_key, is_mask=True)
-        return mask, boundary_mask, vertex_mask
+            return multi_band_mask[:, :, 0], multi_band_mask[:, :, 1], multi_band_mask[:, :, 2], crossfield_mask
+        mask_list = [
+            self.load_image(idx, key=mask_key, is_mask=True) for mask_key in [
+                self.mask_key, self.boundary_mask_key, self.vertex_mask_key, self.crossfield_mask_key]
+        ]
+        return mask_list
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         if self.multi_band_mask:
             return super().__getitem__(idx)
         image = self.load_image(idx, key=self.image_key)
-        mask, boundary_mask, vertex_mask = self.load_masks(idx)
+        mask, boundary_mask, vertex_mask, crossfield_mask = self.load_masks(idx)
         if self.transform is None:
             return {
                 'image': image,
-                'mask': mask,
-                'boundary_mask': boundary_mask,
-                'vertex_mask': vertex_mask
+                'gt_polygons_image': np.stack([mask, boundary_mask, vertex_mask], axis=-1),
+                'gt_crossfield_angle': crossfield_mask
             }
         transformed = self.transform(
             image=image,
-            masks=[mask, boundary_mask, vertex_mask]
+            masks=[mask, boundary_mask, vertex_mask, crossfield_mask]
         )
         return {
                 'image': transformed['image'],
-                'mask': transformed['masks'][0],
-                'boundary_mask': transformed['masks'][1],
-                'vertex_mask': transformed['masks'][2]
+                'gt_polygons_image': np.stack(
+                    [
+                        transformed['masks'][0], transformed['masks'][1], transformed['masks'][2]
+                    ], axis=0
+                ),
+                'gt_crossfield_angle': transformed['masks'][-1]
             }
 
 if __name__ == '__main__':

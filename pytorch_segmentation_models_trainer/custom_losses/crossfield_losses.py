@@ -193,7 +193,6 @@ class AlignLoss:
             sub_path_delim, sub_path_sort_indices = torch.sort(torch.cat([self.tensorskeleton.path_delim, is_corner_index]))
             sub_path_delim_is_corner = self.tensorskeleton.path_delim.shape[0] <= sub_path_sort_indices  # If condition is true, then the delimiter is from is_corner_index
             return sub_path_delim_is_corner, sub_path_delim, is_corner_index
-
     
     def _compute_total_loss(self, iter_num, level_loss, total_length_loss, total_align_loss, total_curvature_loss, total_corner_loss, total_junction_loss):
         data_coef = float(self.data_coef_interp(iter_num))
