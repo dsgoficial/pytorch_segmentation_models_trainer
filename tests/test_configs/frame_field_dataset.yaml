@@ -1,0 +1,3 @@
+_target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.FrameFieldSegmentationDataset
+input_csv_path: teste
+root_dir: current

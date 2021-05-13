@@ -112,18 +112,17 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
         image_key=None,
         mask_key=None,
         multi_band_mask=False,
-        return_is_multi_band=False,
         boundary_mask_key=None,
         vertex_mask_key=None,
         n_first_rows_to_read=None,
         return_crossfield_mask=True,
         crossfield_mask_key=None
     ) -> None:
+        mask_key = 'polygon_mask_path' if mask_key is None else mask_key
         super().__init__(input_csv_path, root_dir=root_dir, augmentation_list=augmentation_list,
                          data_loader=data_loader, image_key=image_key, mask_key=mask_key,
                          n_first_rows_to_read=n_first_rows_to_read)
         self.multi_band_mask = multi_band_mask
-        self.return_is_multi_band = return_is_multi_band
         self.boundary_mask_key = boundary_mask_key if boundary_mask_key is not None else 'boundary_mask_path'
         self.vertex_mask_key = vertex_mask_key if vertex_mask_key is not None else 'vertex_mask_path'
         self.return_crossfield_mask = return_crossfield_mask

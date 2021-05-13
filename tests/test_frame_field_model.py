@@ -19,23 +19,26 @@
  *                                                                         *
  ****
 """
-
+import os
 import unittest
-import numpy as np
+
 import hydra
+import numpy as np
 import segmentation_models_pytorch as smp
 import torch
+from hydra.experimental import compose, initialize
 from parameterized import parameterized
-from hydra.experimental import initialize, compose
-from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
+from pytorch_segmentation_models_trainer.model_loader.frame_field_model import \
     FrameFieldModel
-)
 
 from tests.utils import CustomTestCase
 
 input_model_list = [
     (smp.Unet,)
 ]
+
+current_dir = os.path.dirname(__file__)
+root_dir = os.path.join(current_dir, 'testing_data')
 
 class Test_TestFrameFieldModel(CustomTestCase):
 
@@ -56,8 +59,14 @@ class Test_TestFrameFieldModel(CustomTestCase):
         sample = torch.ones([1, 3, 64, 64])
         with torch.no_grad():
             out = frame_field_model(sample)
-        print(out['crossfield'].shape)
-        return True
+        self.assertEqual(
+            out['seg'].shape,
+            torch.Size([1, 3, 64, 64])
+        )
+        self.assertEqual(
+            out['crossfield'].shape,
+            torch.Size([1,4, 64, 64])
+        )
 
     def test_train_one_epoch(self) -> None:
         return True
