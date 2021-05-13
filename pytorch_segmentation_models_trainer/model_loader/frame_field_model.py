@@ -66,14 +66,14 @@ class FrameFieldModel(nn.Module):
             "compute_vertex": True
         }
         if seg_params is not None:
-            for param in seg_params:
+            for param, value in seg_params.items():
                 if param not in self.seg_params:
                     continue
-                if not isinstance(param, bool):
+                if not isinstance(value, bool):
                     raise ValueError(f"Parameter {param} must be boolean!")
-                self.seg_params[param] = seg_params
+                self.seg_params[param] = value
         self.segmentation_model = instantiate(segmentation_model) \
-            if isinstance(segmentation_model, str) else segmentation_model
+            if isinstance(segmentation_model, (str, DictConfig)) else segmentation_model
         self.replace_seg_head = replace_seg_head
         self.compute_seg = compute_seg
         self.compute_crossfield = compute_crossfield
@@ -181,16 +181,16 @@ class FrameFieldModel(nn.Module):
         # then the prev child of the parent module will be checked, etc.
         return out_channels
 
-class FrameFieldSegmentationModel(Model):
+class FrameFieldSegmentationPLModel(Model):
     def __init__(self, cfg):
-        super(FrameFieldSegmentationModel).__init__(cfg)
+        super(FrameFieldSegmentationPLModel, self).__init__(cfg)
 
-    def get_loss_function(self, cfg: DictConfig) -> MultiLoss:
+    def get_loss_function(self) -> MultiLoss:
         """Multi-loss model defined in frame field article
         Returns:
             MultiLoss: Multi loss object
         """
-        return build_combined_loss(cfg)
+        return build_combined_loss(self.cfg)
 
     def training_step(self, batch, batch_idx):
         # TODO

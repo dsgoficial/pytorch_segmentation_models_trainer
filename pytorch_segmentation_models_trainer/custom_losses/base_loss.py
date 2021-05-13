@@ -26,6 +26,7 @@ from functools import partial
 
 import scipy.interpolate
 import numpy as np
+from omegaconf.listconfig import ListConfig
 import torch
 import torch.distributed
 from torch.nn import functional as F
@@ -115,7 +116,7 @@ class MultiLoss(torch.nn.Module):
     def _build_weights(self, weights, epoch_thresholds):
         weight_list = []
         for weight in weights:
-            if isinstance(weight, list):
+            if isinstance(weight, (list, ListConfig)):
                 # Weight is a list of coefs corresponding to epoch_thresholds, 
                 # they will be interpolated in-between
                 weight_list.append(

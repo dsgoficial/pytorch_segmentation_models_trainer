@@ -27,9 +27,12 @@ import numpy as np
 import segmentation_models_pytorch as smp
 import torch
 from hydra.experimental import compose, initialize
+from importlib import import_module
 from parameterized import parameterized
-from pytorch_segmentation_models_trainer.model_loader.frame_field_model import \
-    FrameFieldModel
+from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
+    FrameFieldModel,
+    FrameFieldSegmentationPLModel
+)
 
 from tests.utils import CustomTestCase
 
@@ -38,9 +41,23 @@ input_model_list = [
 ]
 
 current_dir = os.path.dirname(__file__)
-root_dir = os.path.join(current_dir, 'testing_data')
+frame_field_root_dir = os.path.join(
+    current_dir, 'testing_data', 'data', 'frame_field_data')
 
 class Test_TestFrameFieldModel(CustomTestCase):
+
+    def make_inference(self, frame_field_model):
+        sample = torch.ones([1, 3, 64, 64])
+        with torch.no_grad():
+            out = frame_field_model(sample)
+        self.assertEqual(
+            out['seg'].shape,
+            torch.Size([1, 3, 64, 64])
+        )
+        self.assertEqual(
+            out['crossfield'].shape,
+            torch.Size([1,4, 64, 64])
+        )
 
     def test_create_instance(self) -> None:
         model = smp.Unet()
@@ -56,16 +73,34 @@ class Test_TestFrameFieldModel(CustomTestCase):
         frame_field_model = FrameFieldModel(
             model
         )
-        sample = torch.ones([1, 3, 64, 64])
-        with torch.no_grad():
-            out = frame_field_model(sample)
-        self.assertEqual(
-            out['seg'].shape,
-            torch.Size([1, 3, 64, 64])
-        )
-        self.assertEqual(
-            out['crossfield'].shape,
-            torch.Size([1,4, 64, 64])
+        self.make_inference(frame_field_model)
+    
+    def test_create_model_from_cfg(self) -> None:
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="frame_field_pl_model.yaml"
+            )
+            frame_field_model = hydra.utils.instantiate(cfg)
+        self.make_inference(frame_field_model)
+    
+    def test_create_pl_model(self) -> None:
+        csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_frame_field.yaml",
+                overrides=[
+                    'train_dataset.input_csv_path='+csv_path,
+                    'train_dataset.root_dir='+frame_field_root_dir,
+                    'val_dataset.input_csv_path='+csv_path,
+                    'val_dataset.root_dir='+frame_field_root_dir,
+                ]
+            )
+            module_path, class_name = cfg.pl_model._target_.rsplit('.', 1)
+            module = import_module(module_path)
+            frame_field_model = getattr(module, class_name)(cfg)
+        self.assertIsInstance(
+            frame_field_model,
+            FrameFieldSegmentationPLModel
         )
 
     def test_train_one_epoch(self) -> None:

@@ -42,7 +42,7 @@ def train(cfg: DictConfig) -> Trainer:
         "Starting the training of a model with the following configuration: \n%s",
         OmegaConf.to_yaml(cfg)
     )
-    model = Model(cfg)
+    model = Model(cfg) if "pl_model" not in cfg else instantiate(cfg.pl_model)
     trainer_logger = instantiate(cfg.logger) if "logger" in cfg else True
     callback_list = [instantiate(i) for i in cfg.callbacks] if "callbacks" in cfg else []
     trainer = Trainer(**cfg.pl_trainer, logger=trainer_logger, callbacks=callback_list)
