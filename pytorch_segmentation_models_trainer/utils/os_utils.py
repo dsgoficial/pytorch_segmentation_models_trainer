@@ -19,6 +19,7 @@
  ****
 """
 import hashlib
+from importlib import import_module
 import os
 import shutil
 from pathlib import Path
@@ -57,3 +58,8 @@ def make_path_relative(input_path, base_path):
             fixed_path
         )
     )
+
+def import_module_from_cfg(module_full_path):
+    module_path, class_name = module_full_path._target_.rsplit('.', 1)
+    module = import_module(module_path)
+    return getattr(module, class_name)
