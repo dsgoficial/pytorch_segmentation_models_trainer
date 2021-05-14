@@ -114,6 +114,11 @@ class Test_TestFrameFieldModel(CustomTestCase):
                     'train_dataset.root_dir='+frame_field_root_dir,
                     'val_dataset.input_csv_path='+csv_path,
                     'val_dataset.root_dir='+frame_field_root_dir,
+                    # 'pl_trainer.gpus=1',
+                    # 'device=cuda',
+                    # 'optimizer.lr=0.00001',
+                    # 'hyperparameters.batch_size=4',
+                    # 'hyperparameters.epochs=100'
                 ]
             )
             trainer = train(cfg)
