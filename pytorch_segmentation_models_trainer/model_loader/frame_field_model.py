@@ -193,9 +193,32 @@ class FrameFieldSegmentationPLModel(Model):
         return build_combined_loss(self.cfg)
 
     def training_step(self, batch, batch_idx):
-        # TODO
-        return super().training_step(batch, batch_idx)
+        pred = self.model(batch['image'])
+        loss, individual_metrics_dict, extra_dict = self.loss_function(pred, batch, epoch=self.current_epoch)
+        y_pred = pred["seg"][:, 0, ...]
+        y_true = batch["gt_polygons_image"][:, 0, ...]
+        evaluated_metrics = self.evaluate_metrics(
+            y_pred, y_true, step_type='train'
+        )
+        tensorboard_logs = {k: {'train': v} for k, v in evaluated_metrics.items()}
+        # use log_dict instead of log
+        self.log_dict(
+            evaluated_metrics, on_step=True, on_epoch=False, prog_bar=True, logger=False
+        )
+        return {'loss' : loss, 'log': tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
-        # TODO
-        return super().validation_step(batch, batch_idx)
+        pred = self.model(batch['image'])
+        loss, individual_metrics_dict, extra_dict = self.loss_function(pred, batch, epoch=self.current_epoch)
+        y_pred = pred["seg"][:, 0, ...]
+        y_true = batch["gt_polygons_image"][:, 0, ...]
+        evaluated_metrics = self.evaluate_metrics(
+            y_pred, y_true, step_type='train'
+        )
+        tensorboard_logs = {k: {'val': v} for k, v in evaluated_metrics.items()}
+        # use log_dict instead of log
+        self.log_dict(
+            evaluated_metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, logger=False
+        )
+        self.log('validation_loss', loss, on_step=True, on_epoch=True, sync_dist=True)
+        return {'val_loss': loss, 'log': tensorboard_logs}

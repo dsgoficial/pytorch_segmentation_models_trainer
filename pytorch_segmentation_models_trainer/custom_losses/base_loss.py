@@ -161,7 +161,7 @@ class MultiLoss(torch.nn.Module):
         individual_losses_dict, extra_dict = {}, {}
         for loss_func_i, weight_i in zip(self.loss_funcs, self.weights):
             loss_i, extra_dict_i = loss_func_i(pred_batch, gt_batch, normalize=normalize)
-            current_weight = float(weight_i(epoch)) \
+            current_weight = torch.from_numpy(weight_i(epoch)) \
                 if isinstance(weight_i, scipy.interpolate.interpolate.interp1d) and epoch is not None \
                     else weight_i
             total_loss += current_weight * loss_i
@@ -315,7 +315,7 @@ def compute_seg_loss_weigths(pred_batch, gt_batch, cfg):
     @param gt_batch:
     @return:
     """
-    device = gt_batch["distances"].device
+    # device = gt_batch["distances"].device
     use_dist = cfg.loss_params.seg_loss_params.use_dist
     use_size = cfg.loss_params.seg_loss_params.use_size
     w0 = cfg.loss_params.seg_loss_params.w0
@@ -353,7 +353,7 @@ def compute_seg_loss_weigths(pred_batch, gt_batch, cfg):
 
 
 def compute_gt_field(pred_batch, gt_batch):
-    gt_crossfield_angle = gt_batch["gt_crossfield_angle"]
+    gt_crossfield_angle = gt_batch["gt_crossfield_angle"].float().unsqueeze(0)
     gt_field = torch.cat(
         [
             torch.cos(gt_crossfield_angle),

@@ -20,19 +20,19 @@
  ****
 """
 import os
+import subprocess
 import unittest
+from importlib import import_module
 
 import hydra
 import numpy as np
 import segmentation_models_pytorch as smp
 import torch
 from hydra.experimental import compose, initialize
-from importlib import import_module
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
-    FrameFieldModel,
-    FrameFieldSegmentationPLModel
-)
+    FrameFieldModel, FrameFieldSegmentationPLModel)
+from pytorch_segmentation_models_trainer.train import train
 
 from tests.utils import CustomTestCase
 
@@ -103,5 +103,18 @@ class Test_TestFrameFieldModel(CustomTestCase):
             FrameFieldSegmentationPLModel
         )
 
-    def test_train_one_epoch(self) -> None:
-        return True
+    def test_train_frame_field_model(self) -> None:
+        csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
+        config_path = os.path.join(os.path.abspath(current_dir), 'test_configs')
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_frame_field.yaml",
+                overrides=[
+                    'train_dataset.input_csv_path='+csv_path,
+                    'train_dataset.root_dir='+frame_field_root_dir,
+                    'val_dataset.input_csv_path='+csv_path,
+                    'val_dataset.root_dir='+frame_field_root_dir,
+                ]
+            )
+            trainer = train(cfg)
+            

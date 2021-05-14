@@ -19,6 +19,7 @@
  ****
 """
 import os
+import torch
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -138,6 +139,14 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
                 self.mask_key, self.boundary_mask_key, self.vertex_mask_key, self.crossfield_mask_key]
         ]
         return mask_list
+    
+    def compute_class_freq(self, gt_polygons_image):
+        pass
+
+    def to_tensor(self, x):
+        return x if isinstance(x, torch.Tensor) \
+            else torch.from_numpy(x)
+            
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         if self.multi_band_mask:
@@ -148,20 +157,26 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
             return {
                 'image': image,
                 'gt_polygons_image': np.stack([mask, boundary_mask, vertex_mask], axis=-1),
-                'gt_crossfield_angle': crossfield_mask
+                'gt_crossfield_angle': crossfield_mask,
+                'class_freq': np.mean(mask, axis=(1, 2)) / 255 if 'class_freq' not in self.df.columns \
+                    else self.df.iloc[idx]["class_freq"]
             }
         transformed = self.transform(
             image=image,
             masks=[mask, boundary_mask, vertex_mask, crossfield_mask]
         )
+        gt_polygons_image = self.to_tensor(
+            np.stack([
+                transformed['masks'][0],
+                transformed['masks'][1],
+                transformed['masks'][2]
+            ], axis=0)
+        ).float()
         return {
-                'image': transformed['image'],
-                'gt_polygons_image': np.stack(
-                    [
-                        transformed['masks'][0], transformed['masks'][1], transformed['masks'][2]
-                    ], axis=0
-                ),
-                'gt_crossfield_angle': transformed['masks'][-1]
+                'image': self.to_tensor(transformed['image']),
+                'gt_polygons_image': gt_polygons_image,
+                'gt_crossfield_angle': self.to_tensor(transformed['masks'][-1]).float(),
+                'class_freq': torch.mean(gt_polygons_image, axis=(1, 2))
             }
 
 if __name__ == '__main__':
