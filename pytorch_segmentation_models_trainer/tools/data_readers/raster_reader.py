@@ -54,6 +54,7 @@ class DatasetEntry:
     height: int
     bands_means: list = field(default_factory=list)
     bands_stds: list = field(default_factory=list)
+    class_freq: list = field(default_factory=list)
     boundary_mask: str = None
     vertex_mask: str = None
     crossfield_mask: str = None
@@ -210,7 +211,8 @@ class RasterFile:
             'width': raster_ds.width,
             'height': raster_ds.height,
             'bands_means': np.mean(raster_np, axis=(1, 2)).tolist(),
-            'bands_stds': np.std(raster_np, axis=(1, 2)).tolist()
+            'bands_stds': np.std(raster_np, axis=(1, 2)).tolist(),
+            'class_freq': np.mean(raster_np, axis=(1, 2)) / 255
         }
 
 def save_with_rasterio(output, profile, raster_iter, mask_types):
