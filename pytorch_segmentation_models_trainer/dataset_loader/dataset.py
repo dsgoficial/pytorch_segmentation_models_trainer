@@ -146,6 +146,16 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
     def to_tensor(self, x):
         return x if isinstance(x, torch.Tensor) \
             else torch.from_numpy(x)
+    
+    def get_mean_axis(self, mask):
+        if len(mask.shape) > 2:
+            return tuple([
+                idx for idx, shape in enumerate(mask.shape) if shape != min(mask.shape)
+            ])
+        elif len(mask.shape) == 2:
+            return (0, 1)
+        else:
+            return 0
             
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
@@ -158,7 +168,7 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
                 'image': image,
                 'gt_polygons_image': np.stack([mask, boundary_mask, vertex_mask], axis=-1),
                 'gt_crossfield_angle': crossfield_mask,
-                'class_freq': np.mean(mask, axis=(1, 2)) / 255 if 'class_freq' not in self.df.columns \
+                'class_freq': np.mean(mask, axis=self.get_mean_axis(mask)) / 255 if 'class_freq' not in self.df.columns \
                     else self.df.iloc[idx]["class_freq"]
             }
         transformed = self.transform(
