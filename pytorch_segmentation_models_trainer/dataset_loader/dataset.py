@@ -19,6 +19,7 @@
  ****
 """
 import os
+import torch
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -102,6 +103,91 @@ class SegmentationDataset(Dataset):
         image = np.array(image)
         return (image > 0).astype(np.uint8) if is_mask else image
 
+class FrameFieldSegmentationDataset(SegmentationDataset):
+    def __init__(
+        self,
+        input_csv_path: Path,
+        root_dir=None,
+        augmentation_list=None,
+        data_loader=None,
+        image_key=None,
+        mask_key=None,
+        multi_band_mask=False,
+        boundary_mask_key=None,
+        vertex_mask_key=None,
+        n_first_rows_to_read=None,
+        return_crossfield_mask=True,
+        crossfield_mask_key=None
+    ) -> None:
+        mask_key = 'polygon_mask_path' if mask_key is None else mask_key
+        super().__init__(input_csv_path, root_dir=root_dir, augmentation_list=augmentation_list,
+                         data_loader=data_loader, image_key=image_key, mask_key=mask_key,
+                         n_first_rows_to_read=n_first_rows_to_read)
+        self.multi_band_mask = multi_band_mask
+        self.boundary_mask_key = boundary_mask_key if boundary_mask_key is not None else 'boundary_mask_path'
+        self.vertex_mask_key = vertex_mask_key if vertex_mask_key is not None else 'vertex_mask_path'
+        self.return_crossfield_mask = return_crossfield_mask
+        self.crossfield_mask_key = crossfield_mask_key if crossfield_mask_key is not None else 'crossfield_mask_path'
+    
+    def load_masks(self, idx):
+        crossfield_mask = self.load_image(idx, key=self.crossfield_mask_key, is_mask=True)
+        if self.multi_band_mask:
+            multi_band_mask = self.load_image(idx, key=self.mask_key, is_mask=True)
+            return multi_band_mask[:, :, 0], multi_band_mask[:, :, 1], multi_band_mask[:, :, 2], crossfield_mask
+        mask_list = [
+            self.load_image(idx, key=mask_key, is_mask=True) for mask_key in [
+                self.mask_key, self.boundary_mask_key, self.vertex_mask_key, self.crossfield_mask_key]
+        ]
+        return mask_list
+    
+    def compute_class_freq(self, gt_polygons_image):
+        pass
+
+    def to_tensor(self, x):
+        return x if isinstance(x, torch.Tensor) \
+            else torch.from_numpy(x)
+    
+    def get_mean_axis(self, mask):
+        if len(mask.shape) > 2:
+            return tuple([
+                idx for idx, shape in enumerate(mask.shape) if shape != min(mask.shape)
+            ])
+        elif len(mask.shape) == 2:
+            return (0, 1)
+        else:
+            return 0
+            
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        if self.multi_band_mask:
+            return super().__getitem__(idx)
+        image = self.load_image(idx, key=self.image_key)
+        mask, boundary_mask, vertex_mask, crossfield_mask = self.load_masks(idx)
+        if self.transform is None:
+            return {
+                'image': image,
+                'gt_polygons_image': np.stack([mask, boundary_mask, vertex_mask], axis=-1),
+                'gt_crossfield_angle': crossfield_mask,
+                'class_freq': np.mean(mask, axis=self.get_mean_axis(mask)) / 255 if 'class_freq' not in self.df.columns \
+                    else self.df.iloc[idx]["class_freq"]
+            }
+        transformed = self.transform(
+            image=image,
+            masks=[mask, boundary_mask, vertex_mask, crossfield_mask]
+        )
+        gt_polygons_image = self.to_tensor(
+            np.stack([
+                transformed['masks'][0],
+                transformed['masks'][1],
+                transformed['masks'][2]
+            ], axis=0)
+        ).float()
+        return {
+                'image': self.to_tensor(transformed['image']),
+                'gt_polygons_image': gt_polygons_image,
+                'gt_crossfield_angle': self.to_tensor(transformed['masks'][-1]).float(),
+                'class_freq': torch.mean(gt_polygons_image, axis=(1, 2))
+            }
 
 if __name__ == '__main__':
     pass

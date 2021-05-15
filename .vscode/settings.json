@@ -1,5 +1,5 @@
 {
-    "python.pythonPath": "/usr/local/bin/python",
+    "python.pythonPath": "/usr/bin/python3.6",
     "python.testing.unittestArgs": [
         "-v",
         "-s",
@@ -7,14 +7,18 @@
         "-p",
         "test_*.py"
     ],
+    "python.jediEnabled": false,
     "python.testing.pytestEnabled": false,
     "python.testing.nosetestsEnabled": false,
     "python.testing.unittestEnabled": true,
     "python.linting.pylintEnabled": true,
     "python.linting.pylintArgs": [
-        "numpy.*",
-        "torch.*",
-        "pytorch_lightning.*",
-        "pytorch_segmentation_models_trainer.*"
-    ]
+        "pytorch_segmentation_models_trainer",
+    ],
+    "python.languageServer": "Pylance",
+    "python.experiments.optOutFrom": ["pythonJediLSP"],
+    "python.formatting.provider": "autopep8",
+    "editor.defaultFormatter": "ms-python.python",
+    "python.autoComplete.extraPaths": [
+    ],
 }

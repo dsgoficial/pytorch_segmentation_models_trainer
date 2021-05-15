@@ -20,6 +20,7 @@
  ****
 """
 
+import os
 import albumentations as A
 import hydra
 import numpy as np
@@ -28,6 +29,10 @@ from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     SegmentationDataset, load_augmentation_object)
 
 from tests.utils import CustomTestCase
+
+current_dir = os.path.dirname(__file__)
+frame_field_root_dir = os.path.join(
+    current_dir, 'testing_data', 'data', 'frame_field_data')
 
 class Test_TestDataset(CustomTestCase):
 
@@ -94,3 +99,19 @@ class Test_TestDataset(CustomTestCase):
             )
             ds_from_cfg = hydra.utils.instantiate(cfg)
             self.assertEqual(len(ds_from_cfg), 2)
+    
+    def test_create_frame_field_dataset_instance(self):
+        csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="frame_field_dataset.yaml",
+                overrides=[
+                    'input_csv_path='+csv_path,
+                    'root_dir='+frame_field_root_dir
+                ]
+            )
+            frame_field_ds = hydra.utils.instantiate(cfg)
+        self.assertEqual(len(frame_field_ds), 12)
+        self.assertEqual(frame_field_ds[0]['image'].shape,(571, 571, 3))
+        self.assertEqual(frame_field_ds[0]['gt_polygons_image'].shape,(571, 571, 3))
+        self.assertEqual(frame_field_ds[0]['gt_crossfield_angle'].shape,(571, 571))

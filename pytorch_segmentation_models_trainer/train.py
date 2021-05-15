@@ -26,6 +26,8 @@ from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Trainer
 
 from pytorch_segmentation_models_trainer.model_loader.model import Model
+from pytorch_segmentation_models_trainer.utils.os_utils import \
+    import_module_from_cfg
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +44,7 @@ def train(cfg: DictConfig) -> Trainer:
         "Starting the training of a model with the following configuration: \n%s",
         OmegaConf.to_yaml(cfg)
     )
-    model = Model(cfg)
+    model = Model(cfg) if "pl_model" not in cfg else import_module_from_cfg(cfg.pl_model)(cfg)
     trainer_logger = instantiate(cfg.logger) if "logger" in cfg else True
     callback_list = [instantiate(i) for i in cfg.callbacks] if "callbacks" in cfg else []
     trainer = Trainer(**cfg.pl_trainer, logger=trainer_logger, callbacks=callback_list)

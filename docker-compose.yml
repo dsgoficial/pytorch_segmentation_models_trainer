@@ -1,0 +1,21 @@
+version: '3'
+
+services:
+  db:
+    image: postgis/postgis
+    container_name: postgis
+    environment:
+      # If you need to create multiple database you can add coma separated databases eg gis,data
+      - POSTGRES_DB=test_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASS=postgres
+      - ALLOW_IP_RANGE=0.0.0.0/0
+  app:
+    build: .
+    container_name: pytorch_segmentation_models
+    volumes:
+      - .:/code
+    ports:
+      - "5432:5432"
+    depends_on:
+      - db

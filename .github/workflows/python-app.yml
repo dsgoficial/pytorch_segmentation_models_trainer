@@ -28,6 +28,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install flake8 pytest parameterized
+        pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-1.8.0+cpu.html
         if [ -f requirements.txt ]; then pip install --upgrade --upgrade-strategy eager -r requirements.txt; fi
         pip install .
     - name: Lint with flake8

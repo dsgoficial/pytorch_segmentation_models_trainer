@@ -1,5 +1,10 @@
 # pytorch_segmentation_models_trainer
 
+
+[![Torch](https://img.shields.io/badge/-PyTorch-red?logo=pytorch&labelColor=gray)](https://pytorch.org/get-started/locally/)
+[![Pytorch Lightning](https://img.shields.io/badge/code-Lightning-blueviolet)](https://pytorchlightning.ai/)
+[![Hydra](https://img.shields.io/badge/conf-hydra-blue)](https://hydra.cc/)
+[![Segmentation Models](https://img.shields.io/badge/models-segmentation_models_pytorch-yellow)](https://github.com/qubvel/segmentation_models.pytorch)
 [![Python application](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-app.yml/badge.svg)](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-app.yml)
 [![Upload Python Package](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-publish.yml/badge.svg)](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-publish.yml)
 [![PyPI](https://img.shields.io/pypi/v/pytorch-segmentation-models-trainer)](https://pypi.org/project/pytorch-segmentation-models-trainer/)
