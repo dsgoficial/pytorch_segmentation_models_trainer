@@ -20,11 +20,15 @@
  *   https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning/     *
  ****
 """
-import numpy as np
-from PIL import Image, ImageDraw
+import math
 
-from shapely.geometry import (MultiPolygon,
-                              Polygon)
+import cv2 as cv
+import numpy as np
+import shapely
+import skimage
+from PIL import Image, ImageDraw
+from shapely.geometry import MultiPolygon, Polygon
+
 
 def polygon_remove_holes(polygon):
     return np.array(polygon.exterior.coords)
@@ -84,4 +88,122 @@ def build_crossfield(polygons, shape, transform, line_width=2):
 
     # Convert image to numpy array
     array = np.array(im)
+    return array
+
+def compute_raster_distances_sizes(polygons, shape, fill=True, edges=True, vertices=True, line_width=3, antialiasing=False):
+    """
+    Returns:
+         - distances: sum of distance to closest and second-closest annotation for each pixel.
+         - size_weights: relative size (normalized by image area) of annotation the pixel belongs to.
+    """
+    assert type(polygons) == list, "polygons should be a list"
+
+    # Filter out zero-area polygons
+    polygons = [polygon for polygon in polygons if polygon.area > 0]
+
+    channel_count = fill + edges + vertices
+    polygons_raster = np.zeros((*shape, channel_count), dtype=np.uint8)
+    distance_maps = np.ones((*shape, len(polygons)))  # Init with max value (distances are normed)
+    sizes = np.ones(shape)  # Init with max value (sizes are normed)
+    image_area = shape[0] * shape[1]
+    for i, polygon in enumerate(polygons):
+        minx, miny, maxx, maxy = polygon.bounds
+        mini = max(0, math.floor(miny) - 2*line_width)
+        minj = max(0, math.floor(minx) - 2*line_width)
+        maxi = min(polygons_raster.shape[0], math.ceil(maxy) + 2*line_width)
+        maxj = min(polygons_raster.shape[1], math.ceil(maxx) + 2*line_width)
+        bbox_shape = (maxi - mini, maxj - minj)
+        bbox_polygon = shapely.affinity.translate(polygon, xoff=-minj, yoff=-mini)
+        bbox_raster = draw_polygons([bbox_polygon], bbox_shape, fill, edges, vertices, line_width, antialiasing)
+        polygons_raster[mini:maxi, minj:maxj] = np.maximum(polygons_raster[mini:maxi, minj:maxj], bbox_raster)
+        bbox_mask = np.sum(bbox_raster, axis=2) > 0 # Polygon interior + edge + vertex
+        if bbox_mask.max():  # Make sure mask is not empty
+            polygon_mask = np.zeros(shape, dtype=np.bool)
+            polygon_mask[mini:maxi, minj:maxj] = bbox_mask
+            polygon_dist = cv.distanceTransform(1 - polygon_mask.astype(np.uint8), distanceType=cv.DIST_L2, maskSize=cv.DIST_MASK_5,
+                                        dstType=cv.CV_64F)
+            polygon_dist /= (polygon_mask.shape[0] + polygon_mask.shape[1])  # Normalize dist
+            distance_maps[:, :, i] = polygon_dist
+
+            selem = skimage.morphology.disk(line_width)
+            bbox_dilated_mask = skimage.morphology.binary_dilation(bbox_mask, selem=selem)
+            sizes[mini:maxi, minj:maxj][bbox_dilated_mask] = polygon.area / image_area
+
+    polygons_raster = np.clip(polygons_raster, 0, 255)
+    # skimage.io.imsave("polygons_raster.png", polygons_raster)
+
+    if edges:
+        edge_channels = -1 + fill + edges
+        # Remove border edges because they correspond to cut buildings:
+        polygons_raster[:line_width, :, edge_channels] = 0
+        polygons_raster[-line_width:, :, edge_channels] = 0
+        polygons_raster[:, :line_width, edge_channels] = 0
+        polygons_raster[:, -line_width:, edge_channels] = 0
+
+    distances = compute_distances(distance_maps)
+    distances = distances.astype(np.float16)
+    sizes = sizes.astype(np.float16)
+    return polygons_raster, distances, sizes
+
+
+def compute_distances(distance_maps):
+    distance_maps.sort(axis=2)
+    distance_maps = distance_maps[:, :, :2]
+    distances = np.sum(distance_maps, axis=2)
+    return distances
+
+def draw_polygons(polygons, shape, fill=True, edges=True, vertices=True, line_width=3, antialiasing=False):
+    assert type(polygons) == list, "polygons should be a list"
+    assert type(polygons[0]) == shapely.geometry.Polygon, "polygon should be a shapely.geometry.Polygon"
+
+    if antialiasing:
+        draw_shape = (2 * shape[0], 2 * shape[1])
+        polygons = [shapely.affinity.scale(polygon, xfact=2.0, yfact=2.0, origin=(0, 0)) for polygon in polygons]
+        line_width *= 2
+    else:
+        draw_shape = shape
+    # Channels
+    fill_channel_index = 0  # Always first channel
+    edges_channel_index = fill  # If fill == True, take second channel. If not then take first
+    vertices_channel_index = fill + edges  # Same principle as above
+    channel_count = fill + edges + vertices
+    im_draw_list = []
+    for channel_index in range(channel_count):
+        im = Image.new("L", (draw_shape[1], draw_shape[0]))
+        im_px_access = im.load()
+        draw = ImageDraw.Draw(im)
+        im_draw_list.append((im, draw))
+
+    for polygon in polygons:
+        if fill:
+            draw = im_draw_list[fill_channel_index][1]
+            draw.polygon(polygon.exterior.coords, fill=255)
+            for interior in polygon.interiors:
+                draw.polygon(interior.coords, fill=0)
+        if edges:
+            draw = im_draw_list[edges_channel_index][1]
+            draw.line(polygon.exterior.coords, fill=255, width=line_width)
+            for interior in polygon.interiors:
+                draw.line(interior.coords, fill=255, width=line_width)
+        if vertices:
+            draw = im_draw_list[vertices_channel_index][1]
+            for vertex in polygon.exterior.coords:
+                _draw_circle(draw, vertex, line_width / 2, fill=255)
+            for interior in polygon.interiors:
+                for vertex in interior.coords:
+                    _draw_circle(draw, vertex, line_width / 2, fill=255)
+
+    im_list = []
+    if antialiasing:
+        # resize images:
+        for im_draw in im_draw_list:
+            resize_shape = (shape[1], shape[0])
+            im_list.append(im_draw[0].resize(resize_shape, Image.BILINEAR))
+    else:
+        for im_draw in im_draw_list:
+            im_list.append(im_draw[0])
+
+    # Convert image to numpy array with the right number of channels
+    array_list = [np.array(im) for im in im_list]
+    array = np.stack(array_list, axis=-1)
     return array
