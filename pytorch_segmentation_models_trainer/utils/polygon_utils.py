@@ -107,43 +107,54 @@ def compute_raster_distances_sizes(polygons, shape, fill=True, edges=True, verti
     sizes = np.ones(shape)  # Init with max value (sizes are normed)
     image_area = shape[0] * shape[1]
     for i, polygon in enumerate(polygons):
-        minx, miny, maxx, maxy = polygon.bounds
-        mini = max(0, math.floor(miny) - 2*line_width)
-        minj = max(0, math.floor(minx) - 2*line_width)
-        maxi = min(polygons_raster.shape[0], math.ceil(maxy) + 2*line_width)
-        maxj = min(polygons_raster.shape[1], math.ceil(maxx) + 2*line_width)
+        mini, minj, maxi, maxj = _compute_raster_bounds_coods(polygon, polygons_raster, line_width)
         bbox_shape = (maxi - mini, maxj - minj)
         bbox_polygon = shapely.affinity.translate(polygon, xoff=-minj, yoff=-mini)
         bbox_raster = draw_polygons([bbox_polygon], bbox_shape, fill, edges, vertices, line_width, antialiasing)
         polygons_raster[mini:maxi, minj:maxj] = np.maximum(polygons_raster[mini:maxi, minj:maxj], bbox_raster)
         bbox_mask = np.sum(bbox_raster, axis=2) > 0 # Polygon interior + edge + vertex
         if bbox_mask.max():  # Make sure mask is not empty
-            polygon_mask = np.zeros(shape, dtype=np.bool)
-            polygon_mask[mini:maxi, minj:maxj] = bbox_mask
-            polygon_dist = cv.distanceTransform(1 - polygon_mask.astype(np.uint8), distanceType=cv.DIST_L2, maskSize=cv.DIST_MASK_5,
-                                        dstType=cv.CV_64F)
-            polygon_dist /= (polygon_mask.shape[0] + polygon_mask.shape[1])  # Normalize dist
-            distance_maps[:, :, i] = polygon_dist
-
-            selem = skimage.morphology.disk(line_width)
-            bbox_dilated_mask = skimage.morphology.binary_dilation(bbox_mask, selem=selem)
-            sizes[mini:maxi, minj:maxj][bbox_dilated_mask] = polygon.area / image_area
+            _compute_distance_and_sizes(
+                i, distance_maps, sizes, polygon, image_area, shape, mini, maxi, minj, maxj, bbox_mask, line_width)
 
     polygons_raster = np.clip(polygons_raster, 0, 255)
     # skimage.io.imsave("polygons_raster.png", polygons_raster)
 
     if edges:
-        edge_channels = -1 + fill + edges
-        # Remove border edges because they correspond to cut buildings:
-        polygons_raster[:line_width, :, edge_channels] = 0
-        polygons_raster[-line_width:, :, edge_channels] = 0
-        polygons_raster[:, :line_width, edge_channels] = 0
-        polygons_raster[:, -line_width:, edge_channels] = 0
+        _compute_edges(fill, edges, polygons_raster, line_width)
 
     distances = compute_distances(distance_maps)
     distances = distances.astype(np.float16)
     sizes = sizes.astype(np.float16)
     return polygons_raster, distances, sizes
+
+def _compute_raster_bounds_coods(polygon, polygons_raster, line_width):
+    minx, miny, maxx, maxy = polygon.bounds
+    mini = max(0, math.floor(miny) - 2*line_width)
+    minj = max(0, math.floor(minx) - 2*line_width)
+    maxi = min(polygons_raster.shape[0], math.ceil(maxy) + 2*line_width)
+    maxj = min(polygons_raster.shape[1], math.ceil(maxx) + 2*line_width)
+    return mini, minj, maxi, maxj
+
+def _compute_distance_and_sizes(i, distance_maps, sizes, polygon, image_area, shape, mini, maxi, minj, maxj, bbox_mask, line_width):
+    polygon_mask = np.zeros(shape, dtype=np.bool)
+    polygon_mask[mini:maxi, minj:maxj] = bbox_mask
+    polygon_dist = cv.distanceTransform(1 - polygon_mask.astype(np.uint8), distanceType=cv.DIST_L2, maskSize=cv.DIST_MASK_5,
+                                dstType=cv.CV_64F)
+    polygon_dist /= (polygon_mask.shape[0] + polygon_mask.shape[1])  # Normalize dist
+    distance_maps[:, :, i] = polygon_dist
+
+    selem = skimage.morphology.disk(line_width)
+    bbox_dilated_mask = skimage.morphology.binary_dilation(bbox_mask, selem=selem)
+    sizes[mini:maxi, minj:maxj][bbox_dilated_mask] = polygon.area / image_area
+
+def _compute_edges(fill, edges, polygons_raster, line_width):
+    edge_channels = -1 + fill + edges
+    # Remove border edges because they correspond to cut buildings:
+    polygons_raster[:line_width, :, edge_channels] = 0
+    polygons_raster[-line_width:, :, edge_channels] = 0
+    polygons_raster[:, :line_width, edge_channels] = 0
+    polygons_raster[:, -line_width:, edge_channels] = 0
 
 
 def compute_distances(distance_maps):
