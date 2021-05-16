@@ -90,7 +90,7 @@ def build_crossfield(polygons, shape, transform, line_width=2):
     array = np.array(im)
     return array
 
-def compute_raster_distances_sizes(polygons, shape, fill=True, edges=True, vertices=True, line_width=3, antialiasing=False):
+def compute_raster_masks(polygons, shape, fill=True, edges=True, vertices=True, compute_distances=True, compute_sizes=True, line_width=3, antialiasing=False):
     """
     Returns:
          - distances: sum of distance to closest and second-closest annotation for each pixel.
@@ -110,7 +110,7 @@ def compute_raster_distances_sizes(polygons, shape, fill=True, edges=True, verti
         mini, minj, maxi, maxj = _compute_raster_bounds_coods(polygon, polygons_raster, line_width)
         bbox_shape = (maxi - mini, maxj - minj)
         bbox_polygon = shapely.affinity.translate(polygon, xoff=-minj, yoff=-mini)
-        bbox_raster = draw_polygons([bbox_polygon], bbox_shape, fill, edges, vertices, line_width, antialiasing)
+        bbox_raster = _draw_polygons([bbox_polygon], bbox_shape, fill, edges, vertices, line_width, antialiasing)
         polygons_raster[mini:maxi, minj:maxj] = np.maximum(polygons_raster[mini:maxi, minj:maxj], bbox_raster)
         bbox_mask = np.sum(bbox_raster, axis=2) > 0 # Polygon interior + edge + vertex
         if bbox_mask.max():  # Make sure mask is not empty
@@ -123,10 +123,17 @@ def compute_raster_distances_sizes(polygons, shape, fill=True, edges=True, verti
     if edges:
         _compute_edges(fill, edges, polygons_raster, line_width)
 
-    distances = compute_distances(distance_maps)
+    distances = _compute_distances(distance_maps)
     distances = distances.astype(np.float16)
     sizes = sizes.astype(np.float16)
-    return polygons_raster, distances, sizes
+    return_dict = {
+        "mask": polygons_raster
+    }
+    if compute_distances:
+        return_dict["distances"] = distances
+    if compute_sizes:
+        return_dict["sizes"] = sizes
+    return return_dict
 
 def _compute_raster_bounds_coods(polygon, polygons_raster, line_width):
     minx, miny, maxx, maxy = polygon.bounds
@@ -157,13 +164,13 @@ def _compute_edges(fill, edges, polygons_raster, line_width):
     polygons_raster[:, -line_width:, edge_channels] = 0
 
 
-def compute_distances(distance_maps):
+def _compute_distances(distance_maps):
     distance_maps.sort(axis=2)
     distance_maps = distance_maps[:, :, :2]
     distances = np.sum(distance_maps, axis=2)
     return distances
 
-def draw_polygons(polygons, shape, fill=True, edges=True, vertices=True, line_width=3, antialiasing=False):
+def _draw_polygons(polygons, shape, fill=True, edges=True, vertices=True, line_width=3, antialiasing=False):
     assert type(polygons) == list, "polygons should be a list"
     assert type(polygons[0]) == shapely.geometry.Polygon, "polygon should be a shapely.geometry.Polygon"
 

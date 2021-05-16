@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+from collections import OrderedDict
 import csv
 import dataclasses
 import os
@@ -85,45 +86,33 @@ class MaskBuilder:
     boundary_mask_folder_name: str = 'boundary_masks'
     build_vertex_mask: bool = True
     vertex_mask_folder_name: str = 'vertex_masks'
-    min_polygon_area: float = 50.0
-    crossfield_mask_folder_name: str = 'crossfield_masks'
     build_crossfield_mask: bool = True
+    crossfield_mask_folder_name: str = 'crossfield_masks'
+    build_distance_mask: bool = True
+    distance_mask_folder_name: str = 'distance_mask'
+    build_size_mask: bool = True
+    size_mask_folder_name: str = 'size_mask'
+    min_polygon_area: float = 50.0
     mask_output_extension: str = 'png'
         
-def replicate_image_structure(cfg):
+def build_dir_dict(cfg):
     input_base_path = str(
         os.path.join(cfg.root_dir, cfg.image_root_dir)
     ) if cfg.image_dir_is_relative_to_root_dir else cfg.image_root_dir
-    for mask_type in ['polygon_mask', 'boundary_mask', 'vertex_mask', 'crossfield_mask']:
+    dir_dict = dict()
+    for mask_type in ['polygon_mask', 'boundary_mask', 'vertex_mask', 'crossfield_mask', 'distance_mask', 'size_mask']:
         if getattr(cfg, f"build_{mask_type}"):
             mask_folder_name = getattr(cfg, f"{mask_type}_folder_name")
             output_base_path = str(
                 os.path.join(cfg.root_dir, mask_folder_name)
             )
-            build_destination_dirs(
-                input_base_path=input_base_path,
-                output_base_path=output_base_path
-            )
-
-def build_mask_type_list(cfg: MaskBuilder):
-    """[summary]
-
-    Args:
-        cfg (MaskBuilder): [description]
-
-    Returns:
-        [type]: [description]
-    """
-    mask_type_list = []
-    if cfg.build_polygon_mask:
-        mask_type_list.append(GeomTypeEnum.POLYGON)
-    if cfg.build_boundary_mask:
-        mask_type_list.append(GeomTypeEnum.LINE)
-    if cfg.build_vertex_mask:
-        mask_type_list.append(GeomTypeEnum.POINT)
-    if cfg.build_crossfield_mask:
-        mask_type_list.append("angle")
-    return mask_type_list
+            dir_dict[mask_folder_name] = output_base_path
+            if cfg.replicate_image_folder_structure:
+                build_destination_dirs(
+                    input_base_path=input_base_path,
+                    output_base_path=output_base_path
+                )
+    return dir_dict
 
 def build_destination_dirs(input_base_path: str, output_base_path: str):
     if input_base_path == os.path.commonpath([input_base_path, output_base_path]) \
@@ -138,8 +127,8 @@ def build_destination_dirs(input_base_path: str, output_base_path: str):
     ]
 
 def build_mask_func(cfg: DictConfig, input_raster_path: str, input_vector: GeoDF, \
-        output_dir: str, mask_type_list: List[GeomType], mask_output_type: MaskOutputType,\
-        mask_output_folders: List[str] = None, filter_area: float = None, output_extension: str = None
+        output_dir: str, output_dir_dict: OrderedDict, mask_type_list: List[GeomType], mask_output_type: MaskOutputType,\
+        filter_area: float = None, output_extension: str = None
     ) -> DatasetEntry:
     """[summary]
 
@@ -153,11 +142,14 @@ def build_mask_func(cfg: DictConfig, input_raster_path: str, input_vector: GeoDF
     built_mask = raster_df.build_mask(
         input_vector_layer=input_vector,
         output_dir=output_dir,
+        output_dir_dict=output_dir_dict,
         mask_types=mask_type_list,
         mask_output_type=mask_output_type,
-        mask_output_folders=mask_output_folders,
         filter_area=filter_area,
-        output_extension=output_extension
+        output_extension=output_extension,
+        compute_crossfield=cfg.build_crossfield_mask,
+        compute_distances=cfg.build_distances_mask,
+        compute_sizes=cfg.build_sizes_mask
     )
     return build_dataset_entry(
         cfg=cfg,

@@ -36,6 +36,7 @@ from pytorch_segmentation_models_trainer.tools.mask_building.mask_builder import
     FileGeoDFConfig,
     MaskBuilder,
     build_csv_file_from_concurrent_futures_output,
+    build_dir_dict,
     build_generator,
     build_mask_func,
     build_mask_type_list,
@@ -64,17 +65,15 @@ def build_masks(cfg: DictConfig) -> str:
             )
         )
     geo_df = instantiate(cfg.geo_df)
-    if cfg.replicate_image_folder_structure:
-        replicate_image_structure(cfg)
+    output_dir_dict = build_dir_dict(cfg)
     mask_type_list = build_mask_type_list(cfg)
     mask_func = lambda x: build_mask_func(
         cfg=cfg,
         input_raster_path=x[0],
         input_vector=geo_df,
         output_dir=x[1],
+        output_dir_dict=output_dir_dict,
         mask_type_list=mask_type_list,
-        mask_output_type=MaskOutputTypeEnum.MULTIPLE_FILES_SINGLE_BAND,
-        mask_output_folders=x[2],
         output_extension=cfg.mask_output_extension
     )
     executor = Executor(mask_func)
