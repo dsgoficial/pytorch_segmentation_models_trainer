@@ -152,7 +152,7 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
             }
         if self.return_crossfield_mask:
             mask_dict[self.crossfield_mask_key] = self.load_image(
-                idx, key=self.crossfield_mask_key, is_mask=True)
+                idx, key=self.crossfield_mask_key, is_mask=False)
         if self.return_distance_mask:
             mask_dict[self.distance_mask_key] = self.load_image(
                 idx, key=self.distance_mask_key, is_mask=False)
@@ -219,7 +219,7 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
             }
         mask_idx = 3
         if self.return_crossfield_mask:
-            ds_item_dict['gt_crossfield_angle'] = self.to_tensor(transformed['masks'][mask_idx]).float()
+            ds_item_dict['gt_crossfield_angle'] = self.to_tensor(transformed['masks'][mask_idx]).float() / 255.
             mask_idx += 1
         if self.return_distance_mask:
             ds_item_dict["distances"] = self.to_tensor(transformed['masks'][mask_idx]).float().unsqueeze(0)
