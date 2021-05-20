@@ -39,8 +39,7 @@ from pytorch_segmentation_models_trainer.tools.mask_building.mask_builder import
     build_dir_dict,
     build_generator,
     build_mask_func,
-    build_mask_type_list,
-    replicate_image_structure,
+    build_mask_type_list
 )
 
 logger = logging.getLogger(__name__)

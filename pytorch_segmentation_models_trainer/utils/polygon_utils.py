@@ -26,6 +26,7 @@ import cv2 as cv
 import numpy as np
 import shapely
 import skimage
+import skimage.morphology
 from PIL import Image, ImageDraw
 from shapely.geometry import MultiPolygon, Polygon
 
@@ -88,9 +89,9 @@ def build_crossfield(polygons, shape, transform, line_width=2):
 
     # Convert image to numpy array
     array = np.array(im)
-    return array
+    return array.transpose()
 
-def compute_raster_masks(polygons, shape, fill=True, edges=True, vertices=True, compute_distances=True, compute_sizes=True, line_width=3, antialiasing=False):
+def compute_raster_masks(polygons, shape, transform, fill=True, edges=True, vertices=True, compute_distances=True, compute_sizes=True, line_width=3, antialiasing=False):
     """
     Returns:
          - distances: sum of distance to closest and second-closest annotation for each pixel.
@@ -100,13 +101,15 @@ def compute_raster_masks(polygons, shape, fill=True, edges=True, vertices=True, 
 
     # Filter out zero-area polygons
     polygons = [polygon for polygon in polygons if polygon.area > 0]
-
     channel_count = fill + edges + vertices
     polygons_raster = np.zeros((*shape, channel_count), dtype=np.uint8)
     distance_maps = np.ones((*shape, len(polygons)))  # Init with max value (distances are normed)
     sizes = np.ones(shape)  # Init with max value (sizes are normed)
     image_area = shape[0] * shape[1]
     for i, polygon in enumerate(polygons):
+        polygon = shapely.geometry.Polygon(np.array(
+            [~transform * point for point in np.array(polygon.exterior.coords)]
+        ))
         mini, minj, maxi, maxj = _compute_raster_bounds_coods(polygon, polygons_raster, line_width)
         bbox_shape = (maxi - mini, maxj - minj)
         bbox_polygon = shapely.affinity.translate(polygon, xoff=-minj, yoff=-mini)
@@ -124,15 +127,18 @@ def compute_raster_masks(polygons, shape, fill=True, edges=True, vertices=True, 
         _compute_edges(fill, edges, polygons_raster, line_width)
 
     distances = _compute_distances(distance_maps)
-    distances = distances.astype(np.float16)
-    sizes = sizes.astype(np.float16)
+    distances = distances.astype(np.float32)
+    sizes = sizes.astype(np.float32)
     return_dict = {
-        "mask": polygons_raster
+       key:mask.transpose() for mask, key in zip(
+           np.swapaxes(polygons_raster, -1, 0),
+           ["polygon_masks", "boundary_masks", "vertex_masks"]
+        )
     }
     if compute_distances:
-        return_dict["distances"] = distances
+        return_dict["distance_masks"] = distances
     if compute_sizes:
-        return_dict["sizes"] = sizes
+        return_dict["size_masks"] = sizes
     return return_dict
 
 def _compute_raster_bounds_coods(polygon, polygons_raster, line_width):

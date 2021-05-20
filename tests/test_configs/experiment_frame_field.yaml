@@ -53,8 +53,8 @@ loss_params:
   seg_loss_params:
     bce_coef: 1.0
     dice_coef: 0.2
-    use_dist: false
-    use_size: false
+    use_dist: true
+    use_size: true
     w0: 50.0
     sigma: 10.0
 

@@ -23,7 +23,7 @@ import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Iterator, List
+from typing import List
 
 import numpy as np
 import rasterio
@@ -34,7 +34,6 @@ from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import
 from pytorch_segmentation_models_trainer.utils.os_utils import create_folder
 from pytorch_segmentation_models_trainer.utils.polygon_utils import (
     build_crossfield, compute_raster_masks)
-from rasterio.features import rasterize
 from rasterio.plot import reshape_as_image, reshape_as_raster
 
 suffix_dict = bidict({
@@ -60,6 +59,8 @@ class DatasetEntry:
     boundary_mask: str = None
     vertex_mask: str = None
     crossfield_mask: str = None
+    distance_mask: str = None
+    size_mask: str = None
     mask_is_single_band: bool = False
 
 @dataclass
@@ -130,8 +131,6 @@ class RasterFile:
             raster_dict=raster_dict,
             profile=profile,
             output_dir_dict=output_dir_dict,
-            mask_types=mask_types,
-            output_dir=output_dir,
             output_filename=output_filename,
             output_extension=output_extension
         )
@@ -167,6 +166,7 @@ class RasterFile:
             profile['count'] = 1 if len(raster_dict[key].shape) == 2\
                 else min(raster_dict[key].shape)
             output = os.path.join(path, output_filename+'.'+output_extension)
+            profile['dtype'] = raster_dict[key].dtype
             with rasterio.open(output, 'w', **profile) as out:
                 if len(raster_dict[key].shape) == 2:
                     out.write(raster_dict[key], 1)
@@ -192,9 +192,11 @@ class RasterFile:
         Returns:
             np.ndarray: Numpy array
         """
+        polygons = handle_features(mask_feats, GeomTypeEnum.POLYGON, return_list=True)
         return_dict = compute_raster_masks(
-            handle_features(mask_feats, GeomTypeEnum.POLYGON, return_list=True),
+            polygons,
             shape=output_shape,
+            transform=transform,
             edges=GeomType.LINE in mask_types,
             vertices=GeomType.POINT in mask_types,
             line_width=3,
@@ -202,8 +204,8 @@ class RasterFile:
             compute_sizes=compute_sizes
         )
         if compute_crossfield:
-            return_dict['crossfield'] = build_crossfield(
-                handle_features(mask_feats, GeomTypeEnum.POLYGON, return_list=True),
+            return_dict['crossfield_masks'] = build_crossfield(
+                polygons,
                 output_shape,
                 transform,
                 line_width=4
