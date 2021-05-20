@@ -18,22 +18,23 @@
  *                                                                         *
  ****
 """
+from collections import OrderedDict
 import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from pytorch_segmentation_models_trainer.utils.polygon_utils import build_crossfield
-from typing import Iterator, List
+from typing import List
 
 import numpy as np
 import rasterio
+from bidict import bidict
 from geopandas.geoseries import GeoSeries
 from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
     GeoDF, GeomType, GeomTypeEnum, handle_features)
 from pytorch_segmentation_models_trainer.utils.os_utils import create_folder
-from rasterio.features import rasterize
+from pytorch_segmentation_models_trainer.utils.polygon_utils import (
+    build_crossfield, compute_raster_masks)
 from rasterio.plot import reshape_as_image, reshape_as_raster
-from bidict import bidict
 
 suffix_dict = bidict({
     "PNG": ".png",
@@ -58,6 +59,8 @@ class DatasetEntry:
     boundary_mask: str = None
     vertex_mask: str = None
     crossfield_mask: str = None
+    distance_mask: str = None
+    size_mask: str = None
     mask_is_single_band: bool = False
 
 @dataclass
@@ -86,94 +89,96 @@ class RasterFile:
         return output_filename
     
     def build_mask(self, input_vector_layer: GeoDF,\
-            output_dir: Path, output_filename: str =None,\
-            mask_types: List[GeomType] = None,\
-            mask_output_type: MaskOutputType = MaskOutputType.SINGLE_FILE_MULTIPLE_BAND,\
-            mask_output_folders: List[str] = None, filter_area: float = None, output_extension: str = None
+            output_dir: Path, output_dir_dict: OrderedDict, output_filename: str =None,\
+            mask_types: List[GeomType] = None,filter_area: float = None, output_extension: str = None,\
+            compute_crossfield: bool = False, compute_distances: bool = False, compute_sizes: bool = False
         ) -> List[str]:
+        """Build segmentation mask according to parameters.
+
+        Args:
+            input_vector_layer (GeoDF): [description]
+            output_dir_dict (OrderedDict): [description]
+            output_filename (str, optional): [description]. Defaults to None.
+            filter_area (float, optional): [description]. Defaults to None.
+            output_extension (str, optional): [description]. Defaults to None.
+            compute_distances (bool, optional): [description]. Defaults to False.
+            compute_sizes (bool, optional): [description]. Defaults to False.
+
+        Returns:
+            List[str]: [description]
+        """
+        mask_types = [GeomTypeEnum.POLYGON] if mask_types is None else mask_types
         output_extension = os.path.basename(self.file_name).split('.')[-1] \
             if output_extension is None else output_extension
-        if mask_types is not None and not isinstance(mask_types, list):
-            raise Exception('Invalid parameter for mask_types')
-        # input handling
-        mask_types = [GeomTypeEnum.POLYGON] if mask_types is None else mask_types
         #read the raster
         raster_ds = rasterio.open(self.file_name)
+        profile = self._prepare_profile(raster_ds, output_extension)
+        mask_feats = input_vector_layer.get_features_from_bbox(
+            raster_ds.bounds.left, raster_ds.bounds.right,
+            raster_ds.bounds.bottom, raster_ds.bounds.top,
+            filter_area=filter_area
+        )
+        raster_dict = self.build_numpy_mask_from_vector_layer(
+            mask_feats=mask_feats,
+            output_shape=raster_ds.shape,
+            transform=profile['transform'],
+            mask_types=mask_types,
+            compute_distances=compute_distances,
+            compute_sizes=compute_sizes,
+            compute_crossfield=compute_crossfield
+        )
+        return self.write_masks_to_disk(
+            raster_dict=raster_dict,
+            profile=profile,
+            output_dir_dict=output_dir_dict,
+            output_filename=output_filename,
+            output_extension=output_extension
+        )
+    
+    def _prepare_profile(self, raster_ds, output_extension: str):
+        """Prepares the rasterio profile according to an input raster.
+
+        Args:
+            raster_ds ([type]): rasterio dataset
+            output_extension (str): extension of the output
+
+        Returns:
+            [type]: rasterio profile
+        """
         profile = raster_ds.profile.copy()
-        profile['count'] = len(mask_types) \
-            if mask_output_type == MaskOutputType.SINGLE_FILE_MULTIPLE_BAND else 1
         profile['compress'] = None
         profile['width'] = raster_ds.width
         profile['height'] = raster_ds.height
         if output_extension is not None:
             profile['driver'] = suffix_dict.inverse[
-                f'.{output_extension}' if not output_extension.startswith('.') else output_extension
+                f'.{output_extension}' if not output_extension.startswith('.') \
+                    else output_extension
             ]
-        mask_feats = input_vector_layer.get_features_from_bbox(
-            raster_ds.bounds.left, raster_ds.bounds.right,
-            raster_ds.bounds.bottom, raster_ds.bounds.top,
-            filter_area=filter_area
-        )  
-        return self.build_single_file_multiple_band_mask(
-            mask_feats=mask_feats,
-            raster_ds=raster_ds,
-            profile=profile,
-            mask_types=mask_types,
-            output_dir=output_dir,
-            output_filename=output_filename,
-            output_extension=output_extension
-        ) if mask_output_type == MaskOutputType.SINGLE_FILE_MULTIPLE_BAND \
-        else self.build_multiple_file_single_band_mask(
-            mask_feats=mask_feats,
-            raster_ds=raster_ds,
-            profile=profile,
-            mask_types=mask_types,
-            output_dir=output_dir,
-            output_filename=output_filename,
-            mask_output_folders=mask_output_folders,
-            output_extension=output_extension
-        )
+        return profile
     
-    def build_single_file_multiple_band_mask(self, mask_feats, raster_ds, profile,\
-        mask_types, output_dir, output_filename, output_extension) -> List[str]:
+    def write_masks_to_disk(self, raster_dict, profile,\
+            output_dir_dict, output_filename, output_extension
+        ) -> List[str]:
+        path_dict = OrderedDict()
         input_name, _ = os.path.basename(self.file_name).split('.')
         output_filename = output_filename if output_filename is not None else input_name
-        raster_iter = (
-            self.build_numpy_mask_from_vector_layer(
-                mask_feats=mask_feats,
-                output_shape=raster_ds.shape,
-                transform=profile['transform'],
-                mask_type=mask_type
-            ) for mask_type in mask_types
-        )
-        output = os.path.join(output_dir, output_filename+'.'+output_extension)
-        save_with_rasterio(output, profile, raster_iter, mask_types)
-        return [output]
-    
-    def build_multiple_file_single_band_mask(self, mask_feats, raster_ds, profile,\
-        mask_types, output_dir, output_filename, mask_output_folders, output_extension) -> List[str]:
-        input_name, _ = os.path.basename(self.file_name).split('.')
-        output_filename = output_filename if output_filename is not None else input_name
-        def compute(args):
-            idx, mask_output_folder = args
-            raster_array = self.build_numpy_mask_from_vector_layer(
-                mask_feats=mask_feats,
-                output_shape=raster_ds.shape,
-                transform=profile['transform'],
-                mask_type=mask_types[idx]
-            )
-            output = os.path.join(output_dir, mask_output_folder, output_filename+'.'+output_extension)
+        for key, path in output_dir_dict.items():
+            profile['count'] = 1 if len(raster_dict[key].shape) == 2\
+                else min(raster_dict[key].shape)
+            output = os.path.join(path, output_filename+'.'+output_extension)
+            profile['dtype'] = raster_dict[key].dtype
             with rasterio.open(output, 'w', **profile) as out:
-                out.write(raster_array, 1)
-            return output
-        return list(
-            map(
-                compute, enumerate(mask_output_folders)
-            )
-        )
+                if len(raster_dict[key].shape) == 2:
+                    out.write(raster_dict[key], 1)
+                else:
+                    out.write(reshape_as_raster(raster_dict[key]))
+            path_dict[key] = output
+        return path_dict
 
     def build_numpy_mask_from_vector_layer(self, mask_feats: GeoSeries, output_shape:tuple,\
-        transform, mask_type: GeomType = None) -> np.ndarray:
+        transform, mask_types: List[GeomType], compute_distances=True, compute_sizes=True,\
+        compute_crossfield=False
+    ) -> np.ndarray:
         """Builds numpy mask from vector layer using rasterio.
 
         Args:
@@ -187,22 +192,25 @@ class RasterFile:
         Returns:
             np.ndarray: Numpy array
         """
-        # raster_array = np.zeros(output_shape, dtype=rasterio.uint8)
-        raster_array = rasterize(
-            handle_features(mask_feats, mask_type, return_list=True),
-            out_shape=output_shape,
-            fill=0,
-            default_value=1,
-            all_touched=True,
+        polygons = handle_features(mask_feats, GeomTypeEnum.POLYGON, return_list=True)
+        return_dict = compute_raster_masks(
+            polygons,
+            shape=output_shape,
             transform=transform,
-            dtype=rasterio.uint8
-        ) if not mask_type == "angle" else build_crossfield(
-            handle_features(mask_feats, GeomTypeEnum.POLYGON, return_list=True),
-            output_shape,
-            transform,
-            line_width=4
+            edges=GeomType.LINE in mask_types,
+            vertices=GeomType.POINT in mask_types,
+            line_width=3,
+            compute_distances=compute_distances,
+            compute_sizes=compute_sizes
         )
-        return raster_array
+        if compute_crossfield:
+            return_dict['crossfield_masks'] = build_crossfield(
+                polygons,
+                output_shape,
+                transform,
+                line_width=4
+            )
+        return return_dict
     
     def get_image_stats(self):
         raster_ds = rasterio.open(self.file_name)

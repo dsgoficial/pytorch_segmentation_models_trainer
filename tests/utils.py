@@ -30,7 +30,7 @@ def get_file_list(dir_path, extension):
     return sorted(output_list)
 
 def create_csv_file(file_path, image_list, label_list, root_to_be_removed=None):
-    csv_text = 'id,image_path,label_path,rows,columns\n'
+    csv_text = 'id,image,mask,rows,columns\n'
     for idx, i in enumerate(image_list):
         csv_text += f"{idx},{i},{label_list[idx]},512,512\n"
     with open(file_path, 'w') as csv_file:
