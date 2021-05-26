@@ -17,6 +17,7 @@ fiona
 psycopg2
 geopandas
 rasterio
+numba
 skan
 torch-scatter
 tqdm
