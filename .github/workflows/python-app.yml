@@ -16,7 +16,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - name: Up testing env
+    - name: Setting up testing environment
       run: docker-compose up -d
     - name: Lint with flake8
       run: |
