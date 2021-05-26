@@ -9,4 +9,4 @@ RUN apt update \
     && pip3 install -r requirements.txt
 COPY . .
 RUN  pip3 install .
-CMD ["jupyter", "notebook", "--notebook-dir=/github_repos", "--ip 0.0.0.0", "--port=8888", "--no-browser", "--allow-root"]
+CMD ["jupyter", "notebook", "--ip 0.0.0.0", "--port=8888", "--no-browser", "--allow-root"]

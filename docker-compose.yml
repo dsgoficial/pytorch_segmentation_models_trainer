@@ -17,6 +17,7 @@ services:
     ports:
       - "2222:5432"
   app:
+    image: phborba/pytorch_segmentation_models
     build: .
     container_name: pytorch_segmentation_models
     volumes:

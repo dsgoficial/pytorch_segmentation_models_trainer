@@ -16,14 +16,34 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - name: Setting up testing environment
-      run: docker-compose up -d
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.8
+    - uses: actions/cache@v2
+      with:
+        path: ~/.cache/pip
+        key: ${{ hashFiles('setup.py') }}-${{ hashFiles('requirements.txt') }}
+    - uses: huaxk/postgis-action@v1
+      with:
+        postgresql version: 'latest'
+        postgresql password: 'postgres'
+        postgresql user: 'postgres'  # This optional environment variable is used in conjunction with postgresql password to set a user and its password. This variable will create the specified user with superuser power and a database with the same name. If it is not specified, then the default user of 'postgres' will be used.
+        postgresql db: 'test_db'  # This optional environment variable can be used to define a different name for the default database that is created when the image is first started. If it is not specified, then the value of postgresql user will be used.
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 pytest parameterized
+        pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-1.8.0+cpu.html
+        if [ -f requirements.txt ]; then pip install --upgrade --upgrade-strategy eager -r requirements.txt; fi
+        pip install .
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
-        docker-compose run app flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        docker-compose run app flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with unittest
       run: |
-        docker-compose run app python -m unittest
+        python -m unittest
