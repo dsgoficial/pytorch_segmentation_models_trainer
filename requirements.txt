@@ -16,6 +16,7 @@ descartes
 fiona
 psycopg2
 geopandas
+geoalchemy2
 rasterio
 numba
 skan
