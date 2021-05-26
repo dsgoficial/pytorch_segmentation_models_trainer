@@ -75,7 +75,9 @@ def build_masks(cfg: DictConfig) -> str:
         mask_type_list=mask_type_list,
         output_extension=cfg.mask_output_extension
     )
-    executor = Executor(mask_func)
+    tasks = os.cpu_count() if "simultaneous_tasks" not in cfg \
+        else cfg.simultaneous_tasks
+    executor = Executor(mask_func, simultaneous_tasks=tasks)
     generator = build_generator(cfg)
     output_list = executor.execute_tasks(
         generator
