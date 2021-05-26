@@ -12,6 +12,8 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - ALLOW_IP_RANGE=0.0.0.0/0
+    networks:
+      - my_network
     ports:
       - "2222:5432"
   app:
@@ -21,3 +23,7 @@ services:
       - .:/code
     depends_on:
       - db
+    networks:
+      - my_network
+networks:
+  my_network:
