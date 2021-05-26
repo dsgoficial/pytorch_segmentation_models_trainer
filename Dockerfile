@@ -1,4 +1,5 @@
 FROM pytorch/pytorch:latest
+ENV DEBIAN_FRONTEND=noninteractive 
 WORKDIR /code
 COPY requirements.txt requirements.txt
 RUN apt update \
