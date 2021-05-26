@@ -1,6 +1,6 @@
 FROM pytorch/pytorch:latest
 RUN apt update \
-    && apt install -y git htop nano \
+    && apt install -y git htop nano libpq-dev python-dev \
     && pip install debugpy \
     && pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-1.8.0+cu111.html \
     && pip install -U jupyter git+https://github.com/phborba/pytorch_segmentation_models_trainer
