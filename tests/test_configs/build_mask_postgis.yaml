@@ -1,0 +1,32 @@
+geo_df:
+  _target_: "pytorch_segmentation_models_trainer.tools.data_readers.vector_reader.PostgisGeoDF"
+  user: postgres
+  password: postgres
+  database: test_db
+  sql: select * from buildings
+  host: 'localhost'
+  port: 5432
+  geometry_column: geometry
+root_dir: '/data'
+output_csv_path: '/data'
+dataset_name: 'dsg_dataset'
+dataset_has_relative_path: True
+image_root_dir: 'images'
+image_extension: 'tif'
+image_dir_is_relative_to_root_dir: False
+replicate_image_folder_structure: True
+relative_path_on_csv: True
+build_polygon_mask: True
+polygon_mask_folder_name: 'polygon_masks'
+build_boundary_mask: True
+boundary_mask_folder_name: 'boundary_masks'
+build_vertex_mask: True
+vertex_mask_folder_name: 'vertex_masks'
+build_crossfield_mask: True
+crossfield_mask_folder_name: 'crossfield_masks'
+build_distance_mask: True
+distance_mask_folder_name: 'distance_masks'
+build_size_mask: True
+size_mask_folder_name: 'size_masks'
+min_polygon_area: 50.0
+mask_output_extension: 'tif'

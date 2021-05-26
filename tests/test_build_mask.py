@@ -27,6 +27,8 @@ import numpy as np
 import pandas as pd
 from hydra.experimental import compose, initialize
 from parameterized import parameterized
+from sqlalchemy import create_engine
+import psycopg2
 from pytorch_segmentation_models_trainer.build_mask import build_masks
 from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import (
     MaskOutputTypeEnum, RasterFile)
@@ -52,6 +54,14 @@ class Test_TestBuildMask(unittest.TestCase):
     def setUp(self):
         self.output_dir = create_folder(os.path.join(root_dir, 'test_output'))
         self.replicated_dir = create_folder(os.path.join(root_dir, '..', 'replicated_dirs'))
+        self.build_test_dataset()
+    
+    def build_test_dataset(self):
+        mask_geo_df = FileGeoDF(
+            os.path.join(root_dir, 'data', 'build_masks_data', 'buildings.geojson')
+        )
+        engine = create_engine("postgresql://postgres:postgres@localhost:5432/test_db")
+        mask_geo_df.gdf.to_postgis("buildings", engine, if_exists="replace")
     
     def tearDown(self):
         remove_folder(self.output_dir)
@@ -93,6 +103,26 @@ class Test_TestBuildMask(unittest.TestCase):
                     'geo_df.file_name='+os.path.join(
                         root_dir, 'data', 'build_masks_data', 'buildings.geojson'
                     )
+                ]
+            )
+            print(cfg)
+            csv_output = build_masks(cfg)
+            expected_df = pd.read_csv(os.path.join(expected_output_path, 'dsg_dataset.csv')).sort_values('image')
+            output_df = pd.read_csv(csv_output).sort_values('image')
+            pd.testing.assert_frame_equal(
+                expected_df.reset_index(drop=True),
+                output_df.reset_index(drop=True)
+            )
+    def test_build_masks_from_postgis(self):
+        with initialize(config_path="./test_configs"):
+            image_dir = os.path.join(root_dir, 'data', 'build_masks_data', 'images')
+            expected_output_path = os.path.join(root_dir, 'expected_outputs', 'build_masks')
+            cfg = compose(
+                config_name="build_mask_postgis.yaml",
+                overrides=[
+                    'root_dir='+self.output_dir,
+                    'output_csv_path='+self.output_dir,
+                    'image_root_dir='+image_dir,
                 ]
             )
             print(cfg)

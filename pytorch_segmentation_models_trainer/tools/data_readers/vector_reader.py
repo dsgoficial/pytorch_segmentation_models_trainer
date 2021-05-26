@@ -83,6 +83,7 @@ class PostgisGeoDF(GeoDF):
     sql: str = MISSING
     host: str = 'localhost'
     port: int = 5432
+    geometry_column: str = 'geom'
 
     def __post_init__(self):
         self.con = psycopg2.connect(
@@ -92,9 +93,10 @@ class PostgisGeoDF(GeoDF):
             user=self.user,
             password=self.password
         )
-        self.gdf = geopandas.read_postgis(
+        self.gdf = geopandas.GeoDataFrame.from_postgis(
             sql=self.sql,
-            con=self.con
+            con=self.con,
+            geom_col=self.geometry_column
         )
 
 @dataclass
