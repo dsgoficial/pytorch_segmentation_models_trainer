@@ -24,6 +24,7 @@ from omegaconf import DictConfig
 from pytorch_lightning import Trainer
 from pytorch_segmentation_models_trainer.predict import predict
 from pytorch_segmentation_models_trainer.train import train
+from pytorch_segmentation_models_trainer.build_mask import build_masks
 from pytorch_segmentation_models_trainer.config_utils import validate_config
 
 
@@ -35,6 +36,8 @@ def main(cfg: DictConfig) -> Trainer:
         return predict(cfg)
     elif cfg.mode == 'validate-config':
         return validate_config(cfg)
+    elif cfg.mode == 'build-mask':
+        return build_masks(cfg)
     else:
         raise NotImplementedError
 
