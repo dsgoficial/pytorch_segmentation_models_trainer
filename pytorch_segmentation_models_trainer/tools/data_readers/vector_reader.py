@@ -41,7 +41,6 @@ GeomTypeEnum = GeomType
 
 @dataclass
 class GeoDF(abc.ABC):
-
     @abc.abstractclassmethod
     def __post_init__(self):
         pass
@@ -51,15 +50,28 @@ class GeoDF(abc.ABC):
     
     def get_features_from_bbox(self, x_min:float, x_max:float,\
         y_min:float, y_max:float, only_geom: bool=True, \
-        clip_to_extent: bool=True, filter_area: float=None) -> GeoSeries:
+        clip_to_extent: bool=True, filter_area: float=None,\
+        use_spatial_filter: bool=True
+    ) -> GeoSeries:
         if filter_area is not None and (not isinstance(filter_area, float) or filter_area < 0):
             raise Exception("Filter area must be a float value")
-        feats = self.gdf.cx[x_min:x_max, y_min:y_max]
+        feats = self._get_features(x_min, x_max, y_min, y_max)
         feats = self.clip_features_to_extent(
             feats, x_min, x_max, y_min, y_max
         ) if clip_to_extent else feats
         feats = feats if filter_area is None else feats[feats.area > filter_area]
-        return feats['geometry'] if only_geom else feats
+        return feats[self.gdf.geometry.name] if only_geom else feats
+    
+    def _get_features(self,  x_min:float, x_max:float,\
+        y_min:float, y_max:float):
+        if self.spatial_index is None:
+            return self.gdf.cx[x_min:x_max, y_min:y_max]
+        clip_polygon = Polygon(
+            [(x_min, y_min), (x_max, y_min), (x_max, y_max), (x_min, y_max), (x_min, y_min)]
+        )
+        candidates = list(self.spatial_index.intersection(clip_polygon.bounds))
+        possible_matches = self.gdf.iloc[candidates]
+        return possible_matches[possible_matches.intersects(clip_polygon)]
     
     def clip_features_to_extent(self, feats, x_min:float, x_max:float,\
         y_min:float, y_max:float) -> GeoSeries:
@@ -72,8 +84,10 @@ class GeoDF(abc.ABC):
 @dataclass
 class FileGeoDF(GeoDF):
     file_name: str = MISSING
+    build_spatial_index: bool = True
     def __post_init__(self):
         self.gdf = geopandas.read_file(filename=self.file_name)
+        self.spatial_index = self.gdf.sindex if self.build_spatial_index else None
 
 @dataclass
 class PostgisGeoDF(GeoDF):
@@ -84,6 +98,7 @@ class PostgisGeoDF(GeoDF):
     host: str = 'localhost'
     port: int = 5432
     geometry_column: str = 'geom'
+    build_spatial_index: bool = True
 
     def __post_init__(self):
         self.con = psycopg2.connect(
@@ -93,11 +108,12 @@ class PostgisGeoDF(GeoDF):
             user=self.user,
             password=self.password
         )
-        self.gdf = geopandas.GeoDataFrame.from_postgis(
+        self.gdf = geopandas.read_postgis(
             sql=self.sql,
             con=self.con,
             geom_col=self.geometry_column
         )
+        self.spatial_index = self.gdf.sindex if self.build_spatial_index else None
 
 @dataclass
 class BatchFileGeoDF:
@@ -108,6 +124,7 @@ class BatchFileGeoDF:
             str(p).replace('.'+str(p).split(".")[-1], ''): FileGeoDF(str(p)) \
                 for p in Path(self.root_dir).glob(f"**/*.{self.file_extension}")
         }
+        self.spatial_index = None
     
     def get_geodf_item(self, key: str) -> GeoDataFrame:
         return self.vector_dict[key].get_geo_df() if key in self.vector_dict else None

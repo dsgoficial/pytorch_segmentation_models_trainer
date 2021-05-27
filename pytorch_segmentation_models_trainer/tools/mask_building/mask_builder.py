@@ -166,13 +166,15 @@ def build_mask_func(cfg: DictConfig, input_raster_path: str, input_vector: GeoDF
         compute_distances=cfg.build_distance_mask,
         compute_sizes=cfg.build_size_mask
     )
-    return build_dataset_entry(
+    ds_entry = build_dataset_entry(
         cfg=cfg,
         input_raster_path=input_raster_path,
         raster_df=raster_df,
         mask_type_list=mask_type_list,
         built_mask_dict=built_mask_dict
     )
+    del raster_df
+    return ds_entry
 
 def build_dataset_entry(cfg: DictConfig, input_raster_path: str, raster_df: RasterFile,\
     mask_type_list:list, built_mask_dict: dict) -> DatasetEntry:
@@ -228,12 +230,20 @@ def build_generator(cfg):
         ) for input_raster_path in Path(image_base_path).glob(f'**/*.{cfg.image_extension}')
     )
 
-def build_csv_file_from_concurrent_futures_output(cfg, futures):
+def get_number_of_tasks(cfg):
+    image_base_path = os.path.join(
+        cfg.root_dir, cfg.image_root_dir
+    ) if cfg.image_dir_is_relative_to_root_dir else cfg.image_root_dir
+    return len([
+        i for i in Path(image_base_path).glob(f'**/*.{cfg.image_extension}')
+    ])
+
+def build_csv_file_from_concurrent_futures_output(cfg, result_list):
     output_file = os.path.join(cfg.output_csv_path, f'{cfg.dataset_name}.csv')
     with open(output_file, 'w') as data_file:
         csv_writer = csv.writer(data_file)
-        for i, future in enumerate(futures):
-            data = dataclasses.asdict(future.result())
+        for i, result in enumerate(result_list):
+            data = dataclasses.asdict(result)
             if i == 0:
                 # writes header
                 csv_writer.writerow(data.keys())

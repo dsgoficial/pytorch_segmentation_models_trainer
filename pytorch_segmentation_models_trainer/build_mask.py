@@ -39,7 +39,8 @@ from pytorch_segmentation_models_trainer.tools.mask_building.mask_builder import
     build_dir_dict,
     build_generator,
     build_mask_func,
-    build_mask_type_list
+    build_mask_type_list,
+    get_number_of_tasks
 )
 
 logger = logging.getLogger(__name__)
@@ -79,12 +80,14 @@ def build_masks(cfg: DictConfig) -> str:
         else cfg.simultaneous_tasks
     executor = Executor(mask_func, simultaneous_tasks=tasks)
     generator = build_generator(cfg)
+    n_tasks = get_number_of_tasks(cfg)
     output_list = executor.execute_tasks(
-        generator
+        generator,
+        n_tasks
     )
     csv_file = build_csv_file_from_concurrent_futures_output(
         cfg,
-        futures=output_list
+        result_list=output_list
     )
     print(f"Dataset saved at {csv_file}")
     return csv_file

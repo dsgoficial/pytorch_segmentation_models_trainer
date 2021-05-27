@@ -127,6 +127,7 @@ class RasterFile:
             compute_sizes=compute_sizes,
             compute_crossfield=compute_crossfield
         )
+        raster_ds.close()
         return self.write_masks_to_disk(
             raster_dict=raster_dict,
             profile=profile,
@@ -215,13 +216,15 @@ class RasterFile:
     def get_image_stats(self):
         raster_ds = rasterio.open(self.file_name)
         raster_np = self.read_as_numpy_array()
-        return {
+        return_dict = {
             'width': raster_ds.width,
             'height': raster_ds.height,
             'bands_means': np.mean(raster_np, axis=(1, 2)).tolist(),
             'bands_stds': np.std(raster_np, axis=(1, 2)).tolist(),
             'class_freq': np.mean(raster_np, axis=(1, 2)) / 255
         }
+        raster_ds.close()
+        return return_dict
 
 def save_with_rasterio(output, profile, raster_iter, mask_types):
     raster_array = list(raster_iter)[0] if len(mask_types) == 1 \
