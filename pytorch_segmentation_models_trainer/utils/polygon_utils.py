@@ -47,8 +47,11 @@ def _draw_circle(draw, center, radius, fill):
                   center[1] + radius], fill=fill, outline=None)
 
 def polygons_to_pixel_coords(polygons, transform):
+    item_list = []
+    for polygon in polygons:
+        item_list += polygon.geoms if polygon.geom_type == 'MultiPolygon' else [polygon]
     return [
-        np.array([~transform * point for point in np.array(polygon.exterior.coords)]) for polygon in polygons
+        np.array([~transform * point for point in np.array(polygon.exterior.coords)]) for polygon in item_list
     ]
 
 def build_crossfield(polygons, shape, transform, line_width=2):
@@ -107,18 +110,16 @@ def compute_raster_masks(polygons, shape, transform, fill=True, edges=True, vert
     sizes = np.ones(shape)  # Init with max value (sizes are normed)
     image_area = shape[0] * shape[1]
     for i, polygon in enumerate(polygons):
-        polygon = shapely.geometry.Polygon(np.array(
-            [~transform * point for point in np.array(polygon.exterior.coords)]
-        ))
-        mini, minj, maxi, maxj = _compute_raster_bounds_coods(polygon, polygons_raster, line_width)
-        bbox_shape = (maxi - mini, maxj - minj)
-        bbox_polygon = shapely.affinity.translate(polygon, xoff=-minj, yoff=-mini)
-        bbox_raster = _draw_polygons([bbox_polygon], bbox_shape, fill, edges, vertices, line_width, antialiasing)
-        polygons_raster[mini:maxi, minj:maxj] = np.maximum(polygons_raster[mini:maxi, minj:maxj], bbox_raster)
-        bbox_mask = np.sum(bbox_raster, axis=2) > 0 # Polygon interior + edge + vertex
-        if bbox_mask.max():  # Make sure mask is not empty
-            _compute_distance_and_sizes(
-                i, distance_maps, sizes, polygon, image_area, shape, mini, maxi, minj, maxj, bbox_mask, line_width)
+        if polygon.geom_type == 'Polygon':
+            _process_polygon(polygon, shape, transform, fill, edges, vertices, line_width,\
+                antialiasing, polygons_raster, distance_maps, sizes, image_area, i)
+        else:
+            for single_polygon in polygon.geoms:
+                _process_polygon(
+                    single_polygon, shape, transform, fill, edges, vertices,\
+                    line_width, antialiasing, polygons_raster, distance_maps,\
+                    sizes, image_area, i
+                )
 
     polygons_raster = np.clip(polygons_raster, 0, 255)
     # skimage.io.imsave("polygons_raster.png", polygons_raster)
@@ -140,6 +141,21 @@ def compute_raster_masks(polygons, shape, transform, fill=True, edges=True, vert
     if compute_sizes:
         return_dict["size_masks"] = sizes
     return return_dict
+
+def _process_polygon(polygon, shape, transform, fill, edges, vertices, line_width,\
+    antialiasing, polygons_raster, distance_maps, sizes, image_area, i):
+    polygon = shapely.geometry.Polygon(np.array(
+            [~transform * point for point in np.array(polygon.exterior.coords)]
+        ))
+    mini, minj, maxi, maxj = _compute_raster_bounds_coods(polygon, polygons_raster, line_width)
+    bbox_shape = (maxi - mini, maxj - minj)
+    bbox_polygon = shapely.affinity.translate(polygon, xoff=-minj, yoff=-mini)
+    bbox_raster = _draw_polygons([bbox_polygon], bbox_shape, fill, edges, vertices, line_width, antialiasing)
+    polygons_raster[mini:maxi, minj:maxj] = np.maximum(polygons_raster[mini:maxi, minj:maxj], bbox_raster)
+    bbox_mask = np.sum(bbox_raster, axis=2) > 0
+    # Polygon interior + edge + vertexif bbox_mask.max():  # Make sure mask is not empty
+    _compute_distance_and_sizes(
+            i, distance_maps, sizes, polygon, image_area, shape, mini, maxi, minj, maxj, bbox_mask, line_width)
 
 def _compute_raster_bounds_coods(polygon, polygons_raster, line_width):
     minx, miny, maxx, maxy = polygon.bounds

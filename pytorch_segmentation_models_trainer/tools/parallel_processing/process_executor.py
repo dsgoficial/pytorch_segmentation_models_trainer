@@ -33,8 +33,7 @@ class Executor:
     def execute_tasks(self, tasks, n_tasks):
         result_list = []
         with tqdm(total=n_tasks) as pbar:
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.simultaneous_tasks) as executor:
+            with concurrent.futures.ThreadPoolExecutor() as executor:
                 # Schedule the first N futures.  We don't want to schedule them all
                 # at once, to avoid consuming excessive amounts of memory.
                 futures = {
