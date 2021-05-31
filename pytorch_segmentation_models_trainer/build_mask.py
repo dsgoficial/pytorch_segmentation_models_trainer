@@ -28,6 +28,7 @@ from typing import Any, List
 import hydra
 from hydra.core.config_store import ConfigStore
 from hydra.utils import instantiate
+from hydra.experimental import compose, initialize
 from omegaconf import MISSING, DictConfig, OmegaConf
 
 from pytorch_segmentation_models_trainer.tools.mask_building.mask_builder import (
@@ -39,7 +40,8 @@ from pytorch_segmentation_models_trainer.tools.mask_building.mask_builder import
     build_dir_dict,
     build_generator,
     build_mask_func,
-    build_mask_type_list
+    build_mask_type_list,
+    get_number_of_tasks
 )
 
 logger = logging.getLogger(__name__)
@@ -53,7 +55,7 @@ cs.store(group="geo_df", name='postgis', node=PostgisConfig)
 @hydra.main(config_name="mask_config")
 def build_masks(cfg: DictConfig) -> str:
     logger.info(
-        "Starting the training of a model with the following configuration: \n%s",
+        "Starting the process of building masks with the following configuration: \n%s",
         OmegaConf.to_yaml(cfg)
     )
     if 'root_dir' in cfg.geo_df and cfg.geo_df.root_dir.startswith(".."):
@@ -63,6 +65,7 @@ def build_masks(cfg: DictConfig) -> str:
                 cfg.geo_df.root_dir
             )
         )
+    logger.info("Reading vectors and preparing structure...")
     geo_df = instantiate(cfg.geo_df)
     output_dir_dict = build_dir_dict(cfg)
     mask_type_list = build_mask_type_list(cfg)
@@ -75,17 +78,26 @@ def build_masks(cfg: DictConfig) -> str:
         mask_type_list=mask_type_list,
         output_extension=cfg.mask_output_extension
     )
-    executor = Executor(mask_func)
+    tasks = os.cpu_count() if "simultaneous_tasks" not in cfg \
+        else cfg.simultaneous_tasks
+    executor = Executor(mask_func, simultaneous_tasks=tasks)
     generator = build_generator(cfg)
+    n_tasks = get_number_of_tasks(cfg)
+    logger.info("Starting tasks!")
     output_list = executor.execute_tasks(
-        generator
+        generator,
+        n_tasks
     )
     csv_file = build_csv_file_from_concurrent_futures_output(
         cfg,
-        futures=output_list
+        result_list=output_list
     )
     print(f"Dataset saved at {csv_file}")
     return csv_file
 
 if __name__=="__main__":
-    build_masks()
+    with initialize(config_path="../../mestrado_experimentos_dissertacao/build_mask/"):
+        cfg = compose(
+            config_name="build_mask_postgis.yaml"
+        )
+        build_masks(cfg)

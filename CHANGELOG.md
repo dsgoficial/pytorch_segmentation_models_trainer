@@ -1,3 +1,7 @@
+# Version 0.4.1
+
+Bug fixes on missing entrypoints and mask process execution.
+
 # Version 0.4
 
 ## Polygoniztion by Frame Field Learning features

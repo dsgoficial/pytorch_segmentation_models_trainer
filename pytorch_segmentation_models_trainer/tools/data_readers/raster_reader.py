@@ -90,7 +90,7 @@ class RasterFile:
     
     def build_mask(self, input_vector_layer: GeoDF,\
             output_dir: Path, output_dir_dict: OrderedDict, output_filename: str =None,\
-            mask_types: List[GeomType] = None,filter_area: float = None, output_extension: str = None,\
+            mask_types: List[GeomType] = None, filter_area: float = None, output_extension: str = None,\
             compute_crossfield: bool = False, compute_distances: bool = False, compute_sizes: bool = False
         ) -> List[str]:
         """Build segmentation mask according to parameters.
@@ -127,6 +127,7 @@ class RasterFile:
             compute_sizes=compute_sizes,
             compute_crossfield=compute_crossfield
         )
+        raster_ds.close()
         return self.write_masks_to_disk(
             raster_dict=raster_dict,
             profile=profile,
@@ -157,15 +158,19 @@ class RasterFile:
         return profile
     
     def write_masks_to_disk(self, raster_dict, profile,\
-            output_dir_dict, output_filename, output_extension
+            output_dir_dict, output_filename, output_extension,\
+            folder_basename=None, replicate_input_structure=True
         ) -> List[str]:
         path_dict = OrderedDict()
         input_name, _ = os.path.basename(self.file_name).split('.')
         output_filename = output_filename if output_filename is not None else input_name
+        folder_basename = 'images' if folder_basename is None else folder_basename
+        subfolders = str(self.file_name.parents[0]).split(folder_basename)[-1] if replicate_input_structure else ''
+        subfolders = subfolders[1::] if subfolders.startswith(os.sep) else subfolders
         for key, path in output_dir_dict.items():
             profile['count'] = 1 if len(raster_dict[key].shape) == 2\
                 else min(raster_dict[key].shape)
-            output = os.path.join(path, output_filename+'.'+output_extension)
+            output = os.path.join(path, subfolders, output_filename+'.'+output_extension)
             profile['dtype'] = raster_dict[key].dtype
             with rasterio.open(output, 'w', **profile) as out:
                 if len(raster_dict[key].shape) == 2:
@@ -215,13 +220,15 @@ class RasterFile:
     def get_image_stats(self):
         raster_ds = rasterio.open(self.file_name)
         raster_np = self.read_as_numpy_array()
-        return {
+        return_dict = {
             'width': raster_ds.width,
             'height': raster_ds.height,
             'bands_means': np.mean(raster_np, axis=(1, 2)).tolist(),
             'bands_stds': np.std(raster_np, axis=(1, 2)).tolist(),
             'class_freq': np.mean(raster_np, axis=(1, 2)) / 255
         }
+        raster_ds.close()
+        return return_dict
 
 def save_with_rasterio(output, profile, raster_iter, mask_types):
     raster_array = list(raster_iter)[0] if len(mask_types) == 1 \
