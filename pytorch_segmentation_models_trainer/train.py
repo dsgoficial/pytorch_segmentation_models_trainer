@@ -23,7 +23,6 @@ import logging
 import hydra
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
-from pytorch_lightning import Trainer
 
 from pytorch_segmentation_models_trainer.model_loader.model import Model
 from pytorch_segmentation_models_trainer.utils.os_utils import \
@@ -32,7 +31,7 @@ from pytorch_segmentation_models_trainer.utils.os_utils import \
 logger = logging.getLogger(__name__)
 
 @hydra.main()
-def train(cfg: DictConfig) -> Trainer:
+def train(cfg: DictConfig):
     """Trains the model.
     Args:
         cfg (DictConfig): hydra yaml config

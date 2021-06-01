@@ -78,7 +78,11 @@ class GeoDF(abc.ABC):
         clip_polygon = Polygon(
             [(x_min, y_min), (x_max, y_min), (x_max, y_max), (x_min, y_max), (x_min, y_min)]
         )
-        return geopandas.clip(feats, clip_polygon, keep_geom_type=True)
+        try:
+            output = geopandas.clip(feats, clip_polygon, keep_geom_type=True)
+        except:
+            output = feats
+        return output
 
 
 @dataclass
