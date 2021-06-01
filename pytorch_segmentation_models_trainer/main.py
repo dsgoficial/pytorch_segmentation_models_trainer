@@ -21,7 +21,6 @@
 
 import hydra
 from omegaconf import DictConfig
-from pytorch_lightning import Trainer
 from pytorch_segmentation_models_trainer.predict import predict
 from pytorch_segmentation_models_trainer.train import train
 from pytorch_segmentation_models_trainer.build_mask import build_masks
@@ -29,7 +28,7 @@ from pytorch_segmentation_models_trainer.config_utils import validate_config
 
 
 @hydra.main(config_path="conf")
-def main(cfg: DictConfig) -> Trainer:
+def main(cfg: DictConfig):
     if cfg.mode == 'train':
         return train(cfg)
     elif cfg.mode == 'predict':
