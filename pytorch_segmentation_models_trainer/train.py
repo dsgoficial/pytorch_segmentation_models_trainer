@@ -23,6 +23,7 @@ import logging
 import hydra
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
+from pytorch_lightning import Trainer
 
 from pytorch_segmentation_models_trainer.model_loader.model import Model
 from pytorch_segmentation_models_trainer.utils.os_utils import \
