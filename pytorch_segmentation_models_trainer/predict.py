@@ -20,11 +20,9 @@
 """
 import hydra
 from omegaconf import DictConfig
-from pytorch_lightning import Trainer
-
 
 @hydra.main(config_path="conf", config_name="config")
-def predict(cfg: DictConfig) -> Trainer:
+def predict(cfg: DictConfig):
     print("Not implemented yet.")
     pass
 
