@@ -122,4 +122,23 @@ class Test_TestFrameFieldModel(CustomTestCase):
                 ]
             )
             trainer = train(cfg)
-            
+    
+    def test_train_frame_field_model_with_callback(self) -> None:
+        csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
+        config_path = os.path.join(os.path.abspath(current_dir), 'test_configs')
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_frame_field_with_callback.yaml",
+                overrides=[
+                    'train_dataset.input_csv_path='+csv_path,
+                    'train_dataset.root_dir='+frame_field_root_dir,
+                    'val_dataset.input_csv_path='+csv_path,
+                    'val_dataset.root_dir='+frame_field_root_dir,
+                    # 'pl_trainer.gpus=1',
+                    # 'device=cuda',
+                    # 'optimizer.lr=0.00001',
+                    # 'hyperparameters.batch_size=4',
+                    # 'hyperparameters.epochs=10'
+                ]
+            )
+            trainer = train(cfg)

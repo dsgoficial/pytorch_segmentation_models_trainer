@@ -191,6 +191,13 @@ class FrameFieldSegmentationPLModel(Model):
             MultiLoss: Multi loss object
         """
         return build_combined_loss(self.cfg)
+    
+    def set_encoder_trainable(self, trainable=False):
+        for child in self.model.segmentation_model.encoder.children():
+            for param in child.parameters():
+                param.requires_grad = trainable
+        print(f"\nEncoder weights set to trainable={trainable}\n")
+        return
 
     def training_step(self, batch, batch_idx):
         pred = self.model(batch['image'])
