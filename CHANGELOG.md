@@ -1,3 +1,7 @@
+# Version 0.5.0
+
+- Added frame field training image visualization callback.
+
 # Version 0.4.1
 
 Bug fixes on missing entrypoints and mask process execution.
