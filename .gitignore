@@ -134,3 +134,9 @@ dmypy.json
 .vscode/launch.json
 
 .postgres-data
+
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
