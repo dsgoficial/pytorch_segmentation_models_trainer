@@ -11,6 +11,7 @@
 [![Publish Docker image](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/docker-publish.yml)
 [![maintainer](https://img.shields.io/badge/maintainer-phborba-blue.svg)](https://github.com/phborba)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4574256.svg)](https://doi.org/10.5281/zenodo.4574256)
+[![codecov](https://codecov.io/gh/phborba/pytorch_segmentation_models_trainer/branch/main/graph/badge.svg?token=PRJL5GVOL2)](https://codecov.io/gh/phborba/pytorch_segmentation_models_trainer)
 
 Framework based on Pytorch, Pytorch Lightning,  segmentation_models.pytorch and hydra to train semantic segmentation models using yaml config files as follows:
 
