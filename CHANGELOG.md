@@ -1,3 +1,8 @@
+# Version 0.5.1
+
+- Bug fixes when inputs are RGBA images;
+- Bug fixes on frame field model with models other than U-Net;
+
 # Version 0.5.0
 
 - Added frame field training image visualization callback.

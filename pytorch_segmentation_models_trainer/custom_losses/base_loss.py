@@ -354,8 +354,8 @@ def compute_seg_loss_weigths(pred_batch, gt_batch, cfg):
 
 def compute_gt_field(pred_batch, gt_batch):
     gt_crossfield_angle = gt_batch["gt_crossfield_angle"].float()
-    gt_crossfield_angle = gt_crossfield_angle.unsqueeze(0) \
-        if len(gt_crossfield_angle.shape) == 2 else gt_crossfield_angle.unsqueeze(1)
+    # gt_crossfield_angle = gt_crossfield_angle.unsqueeze(0) \
+    #     if len(gt_crossfield_angle.shape) == 2 else gt_crossfield_angle.unsqueeze(1)
     gt_field = torch.cat(
         [
             torch.cos(gt_crossfield_angle),

@@ -114,4 +114,4 @@ class Test_TestDataset(CustomTestCase):
         self.assertEqual(len(frame_field_ds), 12)
         self.assertEqual(frame_field_ds[0]['image'].shape,(571, 571, 3))
         self.assertEqual(frame_field_ds[0]['gt_polygons_image'].shape,(571, 571, 3))
-        self.assertEqual(frame_field_ds[0]['gt_crossfield_angle'].shape,(571, 571))
+        self.assertEqual(frame_field_ds[0]['gt_crossfield_angle'].shape,(1, 571, 571))
