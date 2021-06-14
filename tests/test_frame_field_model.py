@@ -37,7 +37,8 @@ from pytorch_segmentation_models_trainer.train import train
 from tests.utils import CustomTestCase
 
 input_model_list = [
-    (smp.Unet,)
+    (smp.Unet,),
+    #(smp.DeepLabV3Plus,)
 ]
 
 current_dir = os.path.dirname(__file__)
@@ -46,17 +47,16 @@ frame_field_root_dir = os.path.join(
 
 class Test_TestFrameFieldModel(CustomTestCase):
 
-    def make_inference(self, frame_field_model):
-        sample = torch.ones([1, 3, 64, 64])
+    def make_inference(self, sample, frame_field_model):
         with torch.no_grad():
             out = frame_field_model(sample)
         self.assertEqual(
             out['seg'].shape,
-            torch.Size([1, 3, 64, 64])
+            torch.Size([sample.shape[0], 3, sample.shape[-2], sample.shape[-1]])
         )
         self.assertEqual(
             out['crossfield'].shape,
-            torch.Size([1,4, 64, 64])
+            torch.Size([sample.shape[0], 4, sample.shape[-2], sample.shape[-1]])
         )
 
     def test_create_instance(self) -> None:
@@ -73,7 +73,10 @@ class Test_TestFrameFieldModel(CustomTestCase):
         frame_field_model = FrameFieldModel(
             model
         )
-        self.make_inference(frame_field_model)
+        self.make_inference(
+            torch.ones([2, 3, 256, 256]),
+            frame_field_model
+        )
     
     def test_create_model_from_cfg(self) -> None:
         with initialize(config_path="./test_configs"):
