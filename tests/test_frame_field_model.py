@@ -84,7 +84,10 @@ class Test_TestFrameFieldModel(CustomTestCase):
                 config_name="frame_field_pl_model.yaml"
             )
             frame_field_model = hydra.utils.instantiate(cfg)
-        self.make_inference(frame_field_model)
+        self.make_inference(
+            torch.ones([2, 3, 256, 256]),
+            frame_field_model
+        )
     
     def test_create_pl_model(self) -> None:
         csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
