@@ -188,13 +188,23 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
         mask_dict = self.load_masks(idx)
         if self.transform is None:
             ds_item_dict = {
-                'image': image,
-                'gt_polygons_image': np.stack(
-                    [mask_dict[self.mask_key], mask_dict[self.boundary_mask_key], mask_dict[self.vertex_mask_key]],
-                    axis=-1
+                'image': self.to_tensor(image),
+                'gt_polygons_image': self.to_tensor(
+                    np.stack(
+                        [
+                            mask_dict[self.mask_key],
+                            mask_dict[self.boundary_mask_key],
+                            mask_dict[self.vertex_mask_key]]
+                        ,
+                        axis=-1
+                    )
                 ),
-                'class_freq': np.mean(mask_dict[self.mask_key], axis=self.get_mean_axis(mask_dict[self.mask_key])) / 255 if 'class_freq' not in self.df.columns \
-                    else self.df.iloc[idx]["class_freq"]
+                'class_freq': self.to_tensor(
+                    np.mean(
+                        mask_dict[self.mask_key], axis=self.get_mean_axis(mask_dict[self.mask_key])
+                    ) / 255 if 'class_freq' not in self.df.columns \
+                    else self.to_tensor(np.fromstring(self.df.iloc[idx]["class_freq"].replace('[','').replace(']',''), sep=" "))
+                )
             }
             if self.return_crossfield_mask:
                 ds_item_dict['gt_crossfield_angle'] = self.to_tensor(mask_dict[self.crossfield_mask_key]).float().unsqueeze(0)
