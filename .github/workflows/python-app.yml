@@ -13,6 +13,8 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+    env:
+        HYDRA_FULL_ERROR:1
 
     steps:
     - uses: actions/checkout@v2
@@ -41,8 +43,6 @@ jobs:
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with unittest
-      env:
-        HYDRA_FULL_ERROR:1
       run: |
         coverage run --source pytorch_segmentation_models_trainer -m unittest
     - name: statistics
