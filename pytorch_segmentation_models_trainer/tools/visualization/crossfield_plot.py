@@ -28,7 +28,7 @@ def get_seg_display(seg):
     return seg_display
 
 
-def get_tensorboard_image_seg_display(image, seg, crossfield=None, crossfield_stride=10, alpha=None):
+def get_tensorboard_image_seg_display(image, seg, crossfield=None, crossfield_stride=10, alpha=None, width=0.2):
     assert len(image.shape) == 4 and image.shape[1] == 3, f"image should be (N, 3, H, W), not {image.shape}."
     assert len(seg.shape) == 4 and seg.shape[1] <= 3, f"image should be (N, C<=3, H, W), not {seg.shape}."
     assert image.shape[0] == seg.shape[0], "image and seg should have the same batch size."
@@ -52,16 +52,19 @@ def get_tensorboard_image_seg_display(image, seg, crossfield=None, crossfield_st
 
     if crossfield is not None:
         np_crossfield = crossfield.cpu().detach().numpy().transpose(0, 2, 3, 1)
-        image_plot_crossfield_list = [get_image_plot_crossfield(_crossfield, crossfield_stride=crossfield_stride) for _crossfield in
-                                      np_crossfield]
+        image_plot_crossfield_list = [
+            get_image_plot_crossfield(_crossfield, crossfield_stride=crossfield_stride, width=width) \
+                for _crossfield in np_crossfield]
         image_plot_crossfield_list = [torchvision.transforms.functional.to_tensor(image_plot_crossfield).float() / 255
                                       for image_plot_crossfield in image_plot_crossfield_list]
         image_plot_crossfield = torch.stack(image_plot_crossfield_list, dim=0)
-        alpha = image_plot_crossfield[:, 3:4, :, :]
-        # image_seg_display = (1 - alpha) * image_seg_display + alpha * image_plot_crossfield[:, :3, :, :]
-        image_seg_display = image_plot_crossfield[:, :3, :, :]
+        alpha_band = 255*image_plot_crossfield[:, 3:4, :, :]
+        crossfield_image_plot = 255*image_plot_crossfield[:, :3, :, :]
+        image_seg_display = (1 - alpha_band) * image_seg_display +  alpha_band * crossfield_image_plot
+        # image_seg_display = image_seg_display * crossfield_image_plot.int()
+        # image_seg_display = (1-alpha)*image_seg_display + alpha * image_seg_display * crossfield_image_plot.int()
 
-    return image_seg_display
+    return image_seg_display.int()
 
 
 def plot_crossfield(axis, crossfield, crossfield_stride, alpha=0.5, width=0.5, add_scale=1, invert_y=True):
@@ -83,18 +86,18 @@ def plot_crossfield(axis, crossfield, crossfield_stride, alpha=0.5, width=0.5, a
     # v *= 0
 
     quiveropts = dict(color=(0, 0, 1, alpha), headaxislength=0, headlength=0, pivot='middle', angles="xy", units='xy',
-                      scale=scale, width=width, headwidth=1)
+                      scale=scale, width=width, headwidth=0.1)
     axis.quiver(x, y, u.imag, -u.real, **quiveropts)
     axis.quiver(x, y, v.imag, -v.real, **quiveropts)
     return axis
 
 
-def get_image_plot_crossfield(crossfield, crossfield_stride):
+def get_image_plot_crossfield(crossfield, crossfield_stride, width=2.0):
     fig = Figure(figsize=(crossfield.shape[1] / 100, crossfield.shape[0] / 100), dpi=100)
     canvas = FigureCanvasAgg(fig)
     ax = fig.gca()
 
-    plot_crossfield(ax, crossfield, crossfield_stride, alpha=1.0, width=2.0, add_scale=1)
+    plot_crossfield(ax, crossfield, crossfield_stride, alpha=1.0, width=width, add_scale=1)
 
     ax.axis('off')
     fig.tight_layout(pad=0)

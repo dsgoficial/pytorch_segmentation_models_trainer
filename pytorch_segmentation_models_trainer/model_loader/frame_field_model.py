@@ -82,7 +82,7 @@ class FrameFieldModel(nn.Module):
         self.module_activation = module_activation
         self.backbone_output = self.get_out_channels(
             self.segmentation_model.decoder if self.replace_seg_head \
-                else self.segmentation_model.sementation_head
+                else self.segmentation_model.segmentation_head
         )
         self.seg_channels = sum(self.seg_params.values())
         self.seg_module = self.get_seg_module()

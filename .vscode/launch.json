@@ -10,7 +10,7 @@
             "request": "attach",
             "connect": {
                 "host": "${env:REMOTE_IP}",
-                "port": 3000
+                "port": 5678
             },
             "pathMappings": [
                 {

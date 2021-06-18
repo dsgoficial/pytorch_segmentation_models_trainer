@@ -95,11 +95,13 @@ class SegmentationDataset(Dataset):
             )
         return image_path
 
-    def load_image(self, idx, key=None, is_mask=False):
+    def load_image(self, idx, key=None, is_mask=False, force_rgb=False):
         key = self.image_key if key is None else key
         image_path = self.get_path(idx, key=key)
         image = Image.open(image_path) if not is_mask \
             else Image.open(image_path).convert('L')
+        if force_rgb:
+            image = image.convert('RGB')
         image = np.array(image)
         return (image > 0).astype(np.uint8) if is_mask else image
 
@@ -152,7 +154,7 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
             }
         if self.return_crossfield_mask:
             mask_dict[self.crossfield_mask_key] = self.load_image(
-                idx, key=self.crossfield_mask_key, is_mask=False)
+                idx, key=self.crossfield_mask_key, is_mask=True)
         if self.return_distance_mask:
             mask_dict[self.distance_mask_key] = self.load_image(
                 idx, key=self.distance_mask_key, is_mask=False)
@@ -182,24 +184,34 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         if self.multi_band_mask:
             return super().__getitem__(idx)
-        image = self.load_image(idx, key=self.image_key)
+        image = self.load_image(idx, force_rgb=True)
         mask_dict = self.load_masks(idx)
         if self.transform is None:
             ds_item_dict = {
-                'image': image,
-                'gt_polygons_image': np.stack(
-                    [mask_dict[self.mask_key], mask_dict[self.boundary_mask_key], mask_dict[self.vertex_mask_key]],
-                    axis=-1
+                'image': self.to_tensor(image),
+                'gt_polygons_image': self.to_tensor(
+                    np.stack(
+                        [
+                            mask_dict[self.mask_key],
+                            mask_dict[self.boundary_mask_key],
+                            mask_dict[self.vertex_mask_key]]
+                        ,
+                        axis=-1
+                    )
                 ),
-                'class_freq': np.mean(mask_dict[self.mask_key], axis=self.get_mean_axis(mask_dict[self.mask_key])) / 255 if 'class_freq' not in self.df.columns \
-                    else self.df.iloc[idx]["class_freq"]
+                'class_freq': self.to_tensor(
+                    np.mean(
+                        mask_dict[self.mask_key], axis=self.get_mean_axis(mask_dict[self.mask_key])
+                    ) / 255 if 'class_freq' not in self.df.columns \
+                    else self.to_tensor(np.fromstring(self.df.iloc[idx]["class_freq"].replace('[','').replace(']',''), sep=" "))
+                )
             }
             if self.return_crossfield_mask:
-                ds_item_dict['gt_crossfield_angle'] = mask_dict[self.crossfield_mask_key]
+                ds_item_dict['gt_crossfield_angle'] = self.to_tensor(mask_dict[self.crossfield_mask_key]).float().unsqueeze(0)
             if self.return_distance_mask:
-                ds_item_dict["distances"] = mask_dict[self.distance_mask_key]
+                ds_item_dict["distances"] = self.to_tensor(mask_dict[self.distance_mask_key]).float().unsqueeze(0)
             if self.return_size_mask:
-                ds_item_dict["sizes"] = mask_dict[self.size_mask_key]
+                ds_item_dict["sizes"] = self.to_tensor(mask_dict[self.size_mask_key]).float().unsqueeze(0)
             return ds_item_dict
         transformed = self.transform(
             image=image,
@@ -219,7 +231,7 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
             }
         mask_idx = 3
         if self.return_crossfield_mask:
-            ds_item_dict['gt_crossfield_angle'] = self.to_tensor(transformed['masks'][mask_idx]).float() / 255.
+            ds_item_dict['gt_crossfield_angle'] = self.to_tensor(transformed['masks'][mask_idx]).float().unsqueeze(0)
             mask_idx += 1
         if self.return_distance_mask:
             ds_item_dict["distances"] = self.to_tensor(transformed['masks'][mask_idx]).float().unsqueeze(0)
