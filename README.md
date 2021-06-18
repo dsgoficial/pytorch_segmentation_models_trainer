@@ -101,7 +101,23 @@ The mode can be stored in configuration yaml as well. In this case, do not pass 
 
 This module suports hydra features such as configuration composition. For further information, please visit https://hydra.cc/docs/intro
 
-Citing:
+# Install
+
+If you are not using docker and if you want to enable gpu acceleration, before installing this package, you should install pytorch_scatter as instructed in https://github.com/rusty1s/pytorch_scatter 
+
+After installing pytorch_scatter, just do
+
+```
+pip install pytorch_segmentation_models_trainer
+```
+
+We have a docker container in which all dependencies are installed and ready for gpu usage. You can pull the image from dockerhub:
+
+```
+docker pull phborba/pytorch_segmentation_models_trainer:latest
+```
+
+# Citing:
 
 ```
 
