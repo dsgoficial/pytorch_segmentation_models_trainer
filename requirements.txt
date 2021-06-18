@@ -2,7 +2,7 @@ torch
 torchvision
 pytorch-lightning==1.1.8
 segmentation-models-pytorch
-hydra-core
+hydra-core==1.0.6
 kornia
 albumentations
 pandas
