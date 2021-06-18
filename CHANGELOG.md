@@ -1,3 +1,7 @@
+# Version 0.5.2
+
+- Bug fixes warmup callback (invalid signature on method);
+
 # Version 0.5.1
 
 - Bug fixes when inputs are RGBA images;

@@ -33,7 +33,6 @@ class WarmupCallback(pl.callbacks.base.Callback):
         super().__init__()
         self.warmup_epochs = warmup_epochs
         self.warmed_up = False
-        self.trainable = False
 
     def on_init_end(self, trainer):
         print(f"\nWarmupCallback initialization at epoch {trainer.current_epoch}.\n")
@@ -41,7 +40,7 @@ class WarmupCallback(pl.callbacks.base.Callback):
             self.warmed_up = True
 
     def on_train_epoch_start(self, trainer, pl_module):
-        if self.warmed_up:
+        if self.warmed_up or trainer.current_epoch < self.warmup_epochs - 1:
             return
         if not self.warmed_up:
             print(
@@ -51,7 +50,6 @@ class WarmupCallback(pl.callbacks.base.Callback):
             pl_module.set_encoder_trainable(trainable=False)
 
     def on_train_epoch_end(self, trainer, pl_module, unused):
-        
         if self.warmed_up:
             return
         if trainer.current_epoch >= self.warmup_epochs - 1:
