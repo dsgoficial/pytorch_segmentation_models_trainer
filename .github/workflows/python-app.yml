@@ -42,6 +42,7 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with unittest
       run: |
+        EXPORT HYDRA_FULL_ERROR=1
         coverage run --source pytorch_segmentation_models_trainer -m unittest
     - name: statistics
       if: success()
