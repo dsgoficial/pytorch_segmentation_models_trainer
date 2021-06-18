@@ -199,6 +199,6 @@ class FrameFieldResultCallback(pl.callbacks.base.Callback):
         if "seg" in pred:
             crossfield = pred["crossfield"] if "crossfield" in pred else None
             image_seg_display = get_tensorboard_image_seg_display(
-                image_display, pred["seg"], crossfield=crossfield)
+                image_display, 255*pred["seg"], crossfield=crossfield)
             trainer.logger.experiment.add_images(
                 'seg', image_seg_display, trainer.current_epoch)
