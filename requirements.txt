@@ -1,5 +1,5 @@
-torch
-torchvision
+torch==1.7.1
+torchvision==0.8.2
 pytorch-lightning==1.1.8
 segmentation-models-pytorch
 hydra-core==1.0.6
