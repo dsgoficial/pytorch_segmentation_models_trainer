@@ -2,6 +2,7 @@
 
 - Bug fixes when inputs are RGBA images;
 - Bug fixes on frame field model with models other than U-Net;
+- Bug fixes on FrameFieldResultCallback (all black image fixed).
 
 # Version 0.5.0
 
