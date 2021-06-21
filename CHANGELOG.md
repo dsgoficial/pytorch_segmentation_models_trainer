@@ -1,5 +1,7 @@
-# Version 0.5.2
+# Version 0.6.0
 
+- Polygon inference
+- Unittests to Polygon inference;
 - Bug fixes warmup callback (invalid signature on method);
 
 # Version 0.5.1

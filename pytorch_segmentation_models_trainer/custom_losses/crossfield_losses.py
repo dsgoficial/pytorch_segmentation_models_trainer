@@ -201,10 +201,9 @@ class AlignLoss:
         curvature_coef = float(self.curvature_coef_interp(iter_num))
         corner_coef = float(self.corner_coef_interp(iter_num))
         junction_coef = float(self.junction_coef_interp(iter_num))
-        return np.dot(
-            [data_coef, length_coef, crossfield_coef, curvature_coef, corner_coef, junction_coef],
-            [level_loss, total_length_loss, total_align_loss, total_curvature_loss, total_corner_loss, total_junction_loss]
-        )
+        return data_coef * level_loss + length_coef * total_length_loss + crossfield_coef * total_align_loss + \
+                     curvature_coef * total_curvature_loss + corner_coef * total_corner_loss + junction_coef * total_junction_loss
+
     
     def _compute_sub_path_dissimilarity(self, sub_path_delim, sub_path_delim_is_corner, path_pos):
         # --- Compute sub-path dissimilarity in the sense of the Ramer-Douglas-Peucker alg
@@ -232,10 +231,11 @@ class AlignLoss:
     def _compute_vertex_angles_for_curvature_loss(self, prev_tangent, next_tangent, prev_norm, next_norm, is_corner_index):
         prev_dir = prev_tangent / (prev_norm[:, None] + 1e-6)
         next_dir = next_tangent / (next_norm[:, None] + 1e-6)
-        dot = np.dot(prev_dir[:, 0:2], next_dir[:, 0:2])
+        dot = prev_dir[:, 0] * next_dir[:, 0] + \
+              prev_dir[:, 1] * next_dir[:, 1] # dot prod
         det = prev_dir[:, 0] * next_dir[:, 1] - \
               prev_dir[:, 1] * next_dir[:, 0]  # determinant
-        vertex_angles = torch.acos(dot) * torch.sign(det)  # TODO: remove acos for speed? Switch everything to signed dot product?
+        vertex_angles = torch.acos(dot) * torch.sign(det)
         # Save angles of detected corners:
         corner_angles = vertex_angles[is_corner_index - 1]  # -1 because of the shift of vertex_angles relative to path_pos
         return vertex_angles, corner_angles
@@ -367,7 +367,7 @@ class PolygonAlignLoss:
         }
         coef_list = [self.data_coef, self.length_coef, self.crossfield_coef]
         coef_sum = sum(coef_list)
-        total_loss = np.dot(coef_list, [level_loss, length_penalty, total_align_loss])
+        total_loss = torch.dot(coef_list, [level_loss, length_penalty, total_align_loss])
         if dist_loss is not None:
             losses_dict["dist"] = dist_loss.item()
             total_loss += self.dist_coef * dist_loss

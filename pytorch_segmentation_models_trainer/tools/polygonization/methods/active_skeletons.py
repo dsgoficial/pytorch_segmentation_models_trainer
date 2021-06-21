@@ -123,7 +123,7 @@ def get_skeleton(np_edge_mask, config):
     skeleton_image = skimage.morphology.skeletonize(np_edge_mask_padded)
     skeleton_image = skeleton_image[pad_width:-pad_width, pad_width:-pad_width]
     skeleton = Skeleton()
-    if skeleton_image <= 0:
+    if skeleton_image.sum() <= 0:
         return skeleton
     # skan does not work in some cases (paths of 2 pixels or less, etc) 
     # which raises a ValueError, in witch case we continue with an empty skeleton.
