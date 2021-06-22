@@ -46,6 +46,8 @@ root_dir = os.path.join(current_dir, 'testing_data')
 frame_field_root_dir = os.path.join(
     current_dir, 'testing_data', 'data', 'frame_field_data')
 
+device = "cpu"
+
 class Test_TestPolygonize(unittest.TestCase):
 
     def setUp(self):
@@ -64,7 +66,7 @@ class Test_TestPolygonize(unittest.TestCase):
             "poly_lr": 0.01,
             "warmup_iters": 100,
             "warmup_factor": 0.1,
-            "device": "cuda",
+            "device": device,
             "tolerance": 0.125,
             "seg_threshold": 0.5,
             "min_area": 10
@@ -110,7 +112,7 @@ class Test_TestPolygonize(unittest.TestCase):
             "poly_lr": 0.01,
             "warmup_iters": 100,
             "warmup_factor": 0.1,
-            "device": "cpu",
+            "device": device,
             "tolerance": 0.5,
             "seg_threshold": 0.5,
             "min_area": 1,
@@ -184,7 +186,7 @@ class Test_TestPolygonize(unittest.TestCase):
             },
             "lr": 0.001,
             "gamma": 0.0001,
-            "device": "cpu",
+            "device": device,
             "tolerance": 22,
             "seg_threshold": 0.5,
             "min_area": 12,
@@ -244,7 +246,7 @@ class Test_TestPolygonize(unittest.TestCase):
             },
             "lr": 0.01,
             "gamma": 0.995,
-            "device": "cpu",
+            "device": device,
             "tolerance": 0.5,
             "seg_threshold": 0.5,
             "min_area": 10,
