@@ -161,7 +161,7 @@ class MultiLoss(torch.nn.Module):
         individual_losses_dict, extra_dict = {}, {}
         for loss_func_i, weight_i in zip(self.loss_funcs, self.weights):
             loss_i, extra_dict_i = loss_func_i(pred_batch, gt_batch, normalize=normalize)
-            current_weight = torch.from_numpy(weight_i(epoch)) \
+            current_weight = torch.from_numpy(weight_i(epoch)).to(loss_i.device) \
                 if isinstance(weight_i, scipy.interpolate.interpolate.interp1d) and epoch is not None \
                     else weight_i
             total_loss += current_weight * loss_i
@@ -270,7 +270,7 @@ class SegCrossfieldLoss(Loss):
         align_loss = frame_field_utils.framefield_align_error(
             c0, c2, seg_slice_grads_normed, complex_dim=1
         )
-        avg_align_loss = torch.mean(align_loss * seg_slice_grad_norm.detach())
+        avg_align_loss = torch.mean(align_loss * seg_slice_grad_norm)
         self.extra_info["seg_slice_grads"] = pred_batch["seg_grads"][:, self.pred_channel, ...]
         return avg_align_loss
 
