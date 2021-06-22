@@ -95,7 +95,7 @@ class Test_TestPolygonize(unittest.TestCase):
         )
 
         polygons = out_contours_batch[0]
-        save_to_file(polygons, base_filepath=self.output_dir, name='vector', driver='GeoJSON', epsg=31982)
+        save_to_file(polygons, base_filepath=self.output_dir, name='vector', driver='GeoJSON')
 
         filepath = os.path.join(self.output_dir, "output_poly_acm.png")
         crossfield_plot.save_poly_viz(frame_field_ds[0]['image'], polygons, filepath, linewidths=0.5, draw_vertices=True, crossfield=crossfield.squeeze(0))
