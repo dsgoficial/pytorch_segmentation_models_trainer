@@ -19,6 +19,7 @@
  ****
 """
 import os
+from albumentations.augmentations.transforms import Normalize
 import torch
 from pathlib import Path
 from typing import Any, Dict, List
@@ -123,7 +124,9 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
         return_distance_mask=True,
         distance_mask_key=None,
         return_size_mask=True,
-        size_mask_key=None
+        size_mask_key=None,
+        image_width=224,
+        image_height=224
     ) -> None:
         mask_key = 'polygon_mask' if mask_key is None else mask_key
         super().__init__(input_csv_path, root_dir=root_dir, augmentation_list=augmentation_list,
@@ -138,6 +141,11 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
         self.crossfield_mask_key = crossfield_mask_key if crossfield_mask_key is not None else 'crossfield_mask'
         self.distance_mask_key = distance_mask_key if distance_mask_key is not None else 'distance_mask'
         self.size_mask_key = size_mask_key if size_mask_key is not None else 'size_mask'
+        self.alternative_transform = A.Compose([
+            A.Resize(image_height, image_width),
+            A.Normalize(),
+            A.pytorch.transforms.ToTensorV2()
+        ])
     
     def load_masks(self, idx):
         if self.multi_band_mask:
@@ -179,7 +187,28 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
             return (0, 1)
         else:
             return 0
-            
+    
+    def is_valid_crop(self, ds_item_dict):
+        if ds_item_dict['class_freq'][0] == 1 and ds_item_dict['class_freq'][1] == 0 and ds_item_dict['class_freq'][2] == 0:
+            return False
+        return True
+    
+    def build_ds_item_dict(self, idx, transformed):
+        gt_polygons_image = self.to_tensor(
+                np.stack([
+                    transformed['masks'][0],
+                    transformed['masks'][1],
+                    transformed['masks'][2]
+                ], axis=0)
+            ).float()
+        ds_item_dict = {
+                'idx': idx,
+                'path': self.get_path(idx),
+                'image': self.to_tensor(transformed['image']),
+                'gt_polygons_image': gt_polygons_image,
+                'class_freq': torch.mean(gt_polygons_image, axis=(1, 2))
+            }
+        return ds_item_dict
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         if self.multi_band_mask:
@@ -188,6 +217,8 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
         mask_dict = self.load_masks(idx)
         if self.transform is None:
             ds_item_dict = {
+                'idx': idx,
+                'path': self.get_path(idx),
                 'image': self.to_tensor(image),
                 'gt_polygons_image': self.to_tensor(
                     np.stack(
@@ -217,18 +248,14 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
             image=image,
             masks=list(mask_dict.values())
         )
-        gt_polygons_image = self.to_tensor(
-            np.stack([
-                transformed['masks'][0],
-                transformed['masks'][1],
-                transformed['masks'][2]
-            ], axis=0)
-        ).float()
-        ds_item_dict = {
-                'image': self.to_tensor(transformed['image']),
-                'gt_polygons_image': gt_polygons_image,
-                'class_freq': torch.mean(gt_polygons_image, axis=(1, 2))
-            }
+        ds_item_dict = self.build_ds_item_dict(idx, transformed)
+        if not self.is_valid_crop(ds_item_dict):
+            transformed = self.alternative_transform(
+                image=image,
+                masks=list(mask_dict.values())
+            )
+            ds_item_dict = self.build_ds_item_dict(idx, transformed)
+
         mask_idx = 3
         if self.return_crossfield_mask:
             ds_item_dict['gt_crossfield_angle'] = self.to_tensor(transformed['masks'][mask_idx]).float().unsqueeze(0)

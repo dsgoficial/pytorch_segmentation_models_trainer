@@ -330,11 +330,21 @@ def compute_seg_loss_weigths(pred_batch, gt_batch, cfg):
                        (1 - gt_polygons_mask) * background_freq[:, None, None, None]
     if pixel_class_freq.min() == 0:
         logger.error("ERROR: pixel_class_freq has some zero values, can't divide by zero!")
+        logger.error("Candidates:")
+        zero_elements = (pixel_class_freq==0).nonzero()
+        logger.error(zero_elements)
+        for i, path in enumerate(gt_batch['path']):
+            logger.error(f"{i} idx: {gt_batch['idx'][i]}, path: {path}, class_freq: {gt_batch['class_freq'][i]}")
         raise ZeroDivisionError
     freq_weights = 1 / pixel_class_freq
     size_weights = None
     if use_size:
         if gt_batch["sizes"].min() == 0:
+            logger.error("Candidates:")
+            zero_elements = (gt_batch["sizes"]==0).nonzero()
+            logger.error(zero_elements)
+            for i, path in enumerate(gt_batch['path']):
+                logger.error(f"{i} idx: {gt_batch['idx'][i]}, path: {path}, class_freq: {gt_batch['class_freq'][i]}")
             logger.error("ERROR: sizes tensor has zero values, can't divide by zero!")
             raise ZeroDivisionError
         size_weights = 1 + 1 / (im_radius * gt_batch["sizes"])

@@ -5,6 +5,7 @@
 - Bug fixes warmup callback (invalid signature on method);
 - FrameFieldResultCallback renamed to FrameFieldOverlayedResultCallback;
 - New implementation of FrameFieldResultCallback;
+- Invalid mask handling (frame field training mask with only polygon mask and empty vertex and boundary masks);
 
 # Version 0.5.1
 
