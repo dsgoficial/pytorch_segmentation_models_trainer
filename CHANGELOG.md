@@ -3,6 +3,8 @@
 - Polygon inference
 - Unittests to Polygon inference;
 - Bug fixes warmup callback (invalid signature on method);
+- FrameFieldResultCallback renamed to FrameFieldOverlayedResultCallback;
+- New implementation of FrameFieldResultCallback;
 
 # Version 0.5.1
 
