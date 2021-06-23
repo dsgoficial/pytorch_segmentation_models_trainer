@@ -210,7 +210,7 @@ class FrameFieldResultCallback(ImageSegmentationResultCallback):
             plot_title = val_ds.dataset.get_path(i)
             plt_result, fig = generate_visualization(
                 fig_title=plot_title,
-                image=image.swapaxes(0,-1),
+                image=np.transpose(image, (1,2,0)),
                 ground_truth_mask=self.prepare_mask_to_plot(mask.numpy()[0]),
                 predicted_mask=self.prepare_mask_to_plot(predicted_mask.numpy()[0]),
                 ground_truth_boundary=self.prepare_mask_to_plot(mask.numpy()[1]),
