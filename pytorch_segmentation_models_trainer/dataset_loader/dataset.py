@@ -189,7 +189,11 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
             return 0
     
     def is_valid_crop(self, ds_item_dict):
-        if ds_item_dict['class_freq'][0] == 1 and ds_item_dict['class_freq'][1] == 0 and ds_item_dict['class_freq'][2] == 0:
+        gt_polygons_mask = (0 < ds_item_dict["gt_polygons_image"]).float()
+        background_freq = 1 - torch.sum(ds_item_dict["class_freq"], dim=0)
+        pixel_class_freq = gt_polygons_mask * ds_item_dict["class_freq"][ :, None, None] + \
+                        (1 - gt_polygons_mask) * background_freq[None, None, None]
+        if pixel_class_freq.min() == 0 or ('sizes' in ds_item_dict and ds_item_dict['sizes'].min() == 0):
             return False
         return True
     
