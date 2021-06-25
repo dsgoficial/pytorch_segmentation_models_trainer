@@ -399,7 +399,8 @@ def build_combined_loss(cfg):
                 gt_channel_selector=gt_channel_selector,
                 bce_coef=cfg.loss_params.seg_loss_params.bce_coef,
                 dice_coef=cfg.loss_params.seg_loss_params.dice_coef,
-                use_mixed_precision=True if cfg.pl_trainer.precision == 16 else False
+                use_mixed_precision= True if "precision" in cfg.pl_trainer \
+                    and cfg.pl_trainer.precision == 16 else False
             )
         )
         weights.append(cfg.loss_params.multiloss.coefs.seg)
