@@ -77,16 +77,6 @@ class Model(pl.LightningModule):
     def get_optimizer(self):
         return instantiate(self.cfg.optimizer, params=self.parameters())
 
-    def get_scheduler(self, optimizer):
-        if 'scheduler' not in self.cfg:
-            return torch.optim.lr_scheduler.OneCycleLR(
-                optimizer,
-                max_lr=self.cfg.hyperparameters.max_lr,
-                epochs=self.cfg.hyperparameters.epochs,
-                steps_per_epoch=len(self.train_dataloader())
-            )
-        return instantiate(self.cfg.scheduler, optimizer=optimizer)
-
     def set_encoder_trainable(self, trainable=False):
         """Freezes or unfreezes the model encoder.
 
@@ -106,13 +96,14 @@ class Model(pl.LightningModule):
     def configure_optimizers(self):
         # REQUIRED
         optimizer = self.get_optimizer()
-        lr_scheduler = {
-            'scheduler': self.get_scheduler(optimizer),
-            'name': 'learning_rate',
-            'interval': 'step',
-            'frequency': 1
-        }
-        return [optimizer], [lr_scheduler]
+        scheduler_list = []
+        if 'scheduler_list' not in self.cfg:
+            return [optimizer], scheduler_list
+        for item in self.cfg.scheduler_list:
+            dict_item = dict(item)
+            dict_item['scheduler'] = instantiate(item.scheduler, optimizer=optimizer)
+            scheduler_list.append(dict_item)
+        return [optimizer], scheduler_list
 
     def train_dataloader(self):
         return DataLoader(

@@ -6,6 +6,7 @@
 - FrameFieldResultCallback renamed to FrameFieldOverlayedResultCallback;
 - New implementation of FrameFieldResultCallback;
 - Invalid mask handling (frame field training mask with only polygon mask and empty vertex and boundary masks);
+- Added multiple schedulers option;
 
 # Version 0.5.1
 
