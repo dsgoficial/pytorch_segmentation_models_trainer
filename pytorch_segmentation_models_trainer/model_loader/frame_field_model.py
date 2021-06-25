@@ -210,7 +210,7 @@ class FrameFieldSegmentationPLModel(Model):
         tensorboard_logs = {k: {'train': v} for k, v in evaluated_metrics.items()}
         # use log_dict instead of log
         self.log_dict(
-            evaluated_metrics, on_step=True, on_epoch=False, prog_bar=True, logger=False
+            evaluated_metrics, on_step=True, on_epoch=False, prog_bar=False, logger=True
         )
         return {'loss' : loss, 'log': tensorboard_logs}
 
@@ -225,7 +225,7 @@ class FrameFieldSegmentationPLModel(Model):
         tensorboard_logs = {k: {'val': v} for k, v in evaluated_metrics.items()}
         # use log_dict instead of log
         self.log_dict(
-            evaluated_metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, logger=False
+            evaluated_metrics, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True, logger=False
         )
         self.log('validation_loss', loss, on_step=True, on_epoch=True, sync_dist=True)
         return {'val_loss': loss, 'log': tensorboard_logs}
