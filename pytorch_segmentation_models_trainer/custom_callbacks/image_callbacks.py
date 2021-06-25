@@ -101,13 +101,14 @@ def generate_visualization(fig_title=None, **images):
 class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
 
     def __init__(self, n_samples: int = None, output_path: str = None, \
-        normalized_input=True, norm_params=None) -> None:
+        normalized_input=True, norm_params=None, log_every_k_epochs=1) -> None:
         super().__init__()
         self.n_samples = n_samples
         self.normalized_input = normalized_input
         self.output_path = None if output_path is None else output_path
         self.norm_params = norm_params if norm_params is not None else {}
         self.save_outputs = False
+        self.log_every_k_epochs = log_every_k_epochs
 
     def prepare_image_to_plot(self, image):
         image = image.squeeze(0) if image.shape[0] == 1 else image
