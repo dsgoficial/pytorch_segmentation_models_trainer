@@ -177,7 +177,7 @@ class MultiLoss(torch.nn.Module):
 
 # --- Specific losses --- #
 class SegLoss(Loss):
-    def __init__(self, name, gt_channel_selector, bce_coef=0.5, dice_coef=0.5):
+    def __init__(self, name, gt_channel_selector, bce_coef=0.5, dice_coef=0.5, use_mixed_precision=False):
         """
         :param name:
         :param gt_channel_selector: used to select which channels gt_polygons_image to use to compare to predicted seg
@@ -187,6 +187,7 @@ class SegLoss(Loss):
         self.gt_channel_selector = gt_channel_selector
         self.bce_coef = bce_coef
         self.dice_coef = dice_coef
+        self.use_mixed_precision = use_mixed_precision
 
     def compute(self, pred_batch, gt_batch):
         """
@@ -204,7 +205,13 @@ class SegLoss(Loss):
         weights = gt_batch["seg_loss_weights"][:, self.gt_channel_selector, ...]
         dice = metrics.dice_loss(pred_seg, gt_seg)
         mean_dice = torch.mean(dice)
-        mean_cross_entropy = F.binary_cross_entropy(pred_seg, gt_seg, weight=weights, reduction="mean")
+        # if mixed precision is used, the right function is binary_cross_entropy_with_logits
+        # because it can handle operations with fp16 and fp32
+        cross_entropy_func = F.binary_cross_entropy if not self.use_mixed_precision \
+            else F.binary_cross_entropy_with_logits
+        mean_cross_entropy = cross_entropy_func(
+            pred_seg, gt_seg, weight=weights, reduction="mean"
+        )
         return self.bce_coef * mean_cross_entropy + self.dice_coef * mean_dice
 
 
@@ -391,7 +398,8 @@ def build_combined_loss(cfg):
                 name="seg",
                 gt_channel_selector=gt_channel_selector,
                 bce_coef=cfg.loss_params.seg_loss_params.bce_coef,
-                dice_coef=cfg.loss_params.seg_loss_params.dice_coef
+                dice_coef=cfg.loss_params.seg_loss_params.dice_coef,
+                use_mixed_precision=True if cfg.pl_trainer.precision == 16 else False
             )
         )
         weights.append(cfg.loss_params.multiloss.coefs.seg)
