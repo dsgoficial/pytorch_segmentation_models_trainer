@@ -117,7 +117,9 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
         mask_key=None,
         multi_band_mask=False,
         boundary_mask_key=None,
+        return_boundary_mask=True,
         vertex_mask_key=None,
+        return_vertex_mask=True,
         n_first_rows_to_read=None,
         return_crossfield_mask=True,
         crossfield_mask_key=None,
@@ -146,6 +148,11 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
             A.Normalize(),
             A.pytorch.transforms.ToTensorV2()
         ])
+        self.mask_dict = {
+            mask_key: True,
+            self.boundary_mask_key: return_boundary_mask,
+            self.vertex_mask_key: return_vertex_mask,
+        }
     
     def load_masks(self, idx):
         if self.multi_band_mask:
@@ -157,8 +164,8 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
             }
         else:
             mask_dict = {
-                mask_key: self.load_image(idx, key=mask_key, is_mask=True) for mask_key in [
-                    self.mask_key, self.boundary_mask_key, self.vertex_mask_key]
+                mask_key: self.load_image(idx, key=mask_key, is_mask=True) \
+                    for mask_key, load_mask in self.mask_dict.items() if load_mask
             }
         if self.return_crossfield_mask:
             mask_dict[self.crossfield_mask_key] = self.load_image(
@@ -227,11 +234,8 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
                 'gt_polygons_image': self.to_tensor(
                     np.stack(
                         [
-                            mask_dict[self.mask_key],
-                            mask_dict[self.boundary_mask_key],
-                            mask_dict[self.vertex_mask_key]]
-                        ,
-                        axis=-1
+                            mask_dict[key] for key, load_key in self.mask_dict.items() if load_key
+                        ], axis=-1
                     )
                 ),
                 'class_freq': self.to_tensor(
@@ -260,7 +264,7 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
             )
             ds_item_dict = self.build_ds_item_dict(idx, transformed)
 
-        mask_idx = 3
+        mask_idx = sum(mask_dict)
         if self.return_crossfield_mask:
             ds_item_dict['gt_crossfield_angle'] = self.to_tensor(transformed['masks'][mask_idx]).float().unsqueeze(0)
             mask_idx += 1
