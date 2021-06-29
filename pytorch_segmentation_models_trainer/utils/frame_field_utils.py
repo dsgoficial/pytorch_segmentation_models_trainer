@@ -134,3 +134,20 @@ def detect_corners(polylines, u, v):
         corner_masks.append(corner_mask)
 
     return corner_masks
+
+def compute_crossfield_to_plot(gt_crossfield_angle, crossfield_shape=None):
+    u_angle = gt_crossfield_angle
+    v_angle = gt_crossfield_angle + np.pi / 2 
+    u = np.cos(u_angle) + 1j * np.sin(u_angle)
+    v = np.cos(v_angle) + 1j * np.sin(v_angle)
+    c0 = np.power(u, 2) * np.power(v, 2)
+    c2 = - (np.power(u, 2) + np.power(v, 2))
+
+    crossfield = torch.zeros((1, 4, u_angle.shape[-2], u_angle.shape[-1])) if crossfield_shape is None \
+        else torch.zeros(crossfield_shape)
+
+    crossfield[:, 0, :, :] = c0.real
+    crossfield[:, 1, :, :] = c0.imag
+    crossfield[:, 2, :, :] = c2.real
+    crossfield[:, 3, :, :] = c2.imag
+    return crossfield

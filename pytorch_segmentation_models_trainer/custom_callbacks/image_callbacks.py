@@ -52,7 +52,7 @@ def denormalize_np_array(image: np.ndarray, \
     mean = [0.485, 0.456, 0.406] if mean is None else mean
     std = [0.229, 0.224, 0.225] if std is None else std
 
-    return image * np.array(mean)[..., None, None] + np.array(mean)[..., None, None]
+    return image * np.array(std)[..., None, None] + np.array(mean)[..., None, None]
 
 def batch_denormalize_tensor(tensor, mean=None, std=None, inplace=False):
     """Denormalize a batched tensor image with batched mean and batched standard deviation.
@@ -85,30 +85,30 @@ def batch_denormalize_tensor(tensor, mean=None, std=None, inplace=False):
     tensor.mul_(std[..., None, None]).add_(mean[..., None, None])
     return tensor
 
+def generate_visualization(fig_title=None, **images):
+    n = len(images)
+    fig = plt.figure(figsize=(16, 5))
+    if fig_title is not None:
+        fig.suptitle(fig_title, fontsize=16)
+    for i, (name, image) in enumerate(images.items()):
+        plt.subplot(1, n, i + 1)
+        plt.xticks([])
+        plt.yticks([])
+        plt.title(' '.join(name.split('_')).title())
+        plt.imshow(image)
+    return plt, fig
+
 class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
 
-    def __init__(self, n_samples: int, output_path: str = None, \
-        normalized_input=True, norm_params=None) -> None:
+    def __init__(self, n_samples: int = None, output_path: str = None, \
+        normalized_input=True, norm_params=None, log_every_k_epochs=1) -> None:
         super().__init__()
         self.n_samples = n_samples
         self.normalized_input = normalized_input
         self.output_path = None if output_path is None else output_path
         self.norm_params = norm_params if norm_params is not None else {}
         self.save_outputs = False
-
-    def generate_visualization(self, fig_title=None, **images):
-        n = len(images)
-        fig = plt.figure(figsize=(16, 5))
-        if fig_title is not None:
-            fig.suptitle(fig_title, fontsize=16)
-        for i, (name, image) in enumerate(images.items()):
-            plt.subplot(1, n, i + 1)
-            plt.xticks([])
-            plt.yticks([])
-            plt.title(' '.join(name.split('_')).title())
-            plt.imshow(image)
-        return plt, fig
-    
+        self.log_every_k_epochs = log_every_k_epochs
 
     def prepare_image_to_plot(self, image):
         image = image.squeeze(0) if image.shape[0] == 1 else image
@@ -159,6 +159,8 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
         val_ds = pl_module.val_dataloader().dataset
         device = pl_module.device
         logger = trainer.logger
+        if self.n_samples is None:
+            self.n_samples = pl_module.val_dataloader().batch_size
         for i in range(self.n_samples):
             image, mask = val_ds[i].values()
             image = image.unsqueeze(0)
@@ -167,7 +169,7 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
             image = image.to('cpu')
             predicted_mask = predicted_mask.to('cpu')
             plot_title = val_ds.get_path(i)
-            plt_result, fig = self.generate_visualization(
+            plt_result, fig = generate_visualization(
                 fig_title=plot_title,
                 image=self.prepare_image_to_plot(image.numpy()),
                 ground_truth_mask=self.prepare_mask_to_plot(mask.numpy()),
@@ -188,7 +190,50 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
             plt.close(fig)
         return
 
-class FrameFieldResultCallback(pl.callbacks.base.Callback):
+class FrameFieldResultCallback(ImageSegmentationResultCallback):
+    @rank_zero_only
+    def on_validation_end(self, trainer, pl_module):
+        if not self.save_outputs:
+            return
+        val_ds = pl_module.val_dataloader()
+        device = pl_module.device
+        logger = trainer.logger
+        batch = next(iter(val_ds))
+        image_display = batch_denormalize_tensor(batch["image"]).to('cpu')
+        pred =  pl_module(batch["image"].to(device))
+        if self.n_samples is None:
+            self.n_samples = pl_module.val_dataloader().batch_size
+        for i in range(self.n_samples):
+            image = image_display[i].numpy()
+            mask = batch['gt_polygons_image'][i]
+            predicted_mask = pred['seg'][i]
+            predicted_mask = predicted_mask.to('cpu')
+            plot_title = val_ds.dataset.get_path(i)
+            plt_result, fig = generate_visualization(
+                fig_title=plot_title,
+                image=np.transpose(image, (1,2,0)),
+                ground_truth_mask=self.prepare_mask_to_plot(mask.numpy()[0]),
+                predicted_mask=self.prepare_mask_to_plot(predicted_mask.numpy()[0]),
+                ground_truth_boundary=self.prepare_mask_to_plot(mask.numpy()[1]),
+                predicted_boundary=self.prepare_mask_to_plot(predicted_mask.numpy()[1]),
+            )
+            if self.save_outputs:
+                saved_image = self.save_plot_to_disk(
+                    plt_result,
+                    plot_title,
+                    trainer.current_epoch
+                )
+                self.log_data_to_tensorboard(
+                    saved_image,
+                    plot_title,
+                    logger,
+                    trainer.current_epoch
+                )
+            plt.close(fig)
+        return
+
+
+class FrameFieldOverlayedResultCallback(pl.callbacks.base.Callback):
 
     @rank_zero_only
     def on_validation_end(self, trainer, pl_module):

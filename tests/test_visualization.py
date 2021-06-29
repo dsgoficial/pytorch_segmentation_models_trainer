@@ -31,6 +31,8 @@ from hydra.experimental import compose, initialize
 from matplotlib.testing.compare import compare_images
 from pytorch_segmentation_models_trainer.tools.visualization.crossfield_plot import \
     get_tensorboard_image_seg_display
+from pytorch_segmentation_models_trainer.utils.frame_field_utils import \
+    compute_crossfield_to_plot
 from pytorch_segmentation_models_trainer.utils.math_utils import (
     compute_crossfield_c0c2, compute_crossfield_uv)
 from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
@@ -54,23 +56,6 @@ class Test_TestVisualization(unittest.TestCase):
     def tearDown(self):
         remove_folder(self.output_dir)
     
-    def compute_crossfield_to_plot(self, gt_crossfield_angle, crossfield_shape=None):
-        u_angle = gt_crossfield_angle
-        v_angle = gt_crossfield_angle + np.pi / 2 
-        u = np.cos(u_angle) + 1j * np.sin(u_angle)
-        v = np.cos(v_angle) + 1j * np.sin(v_angle)
-        c0 = np.power(u, 2) * np.power(v, 2)
-        c2 = - (np.power(u, 2) + np.power(v, 2))
-
-        crossfield = torch.zeros((1, 4, u_angle.shape[-2], u_angle.shape[-1])) if crossfield_shape is None \
-            else torch.zeros(crossfield_shape)
-
-        crossfield[:, 0, :, :] = c0.real
-        crossfield[:, 1, :, :] = c0.imag
-        crossfield[:, 2, :, :] = c2.real
-        crossfield[:, 3, :, :] = c2.imag
-        return crossfield
-    
     def test_seg_display_real_example(self) -> None:
         csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
         with initialize(config_path="./test_configs"):
@@ -82,7 +67,7 @@ class Test_TestVisualization(unittest.TestCase):
                 ]
             )
             frame_field_ds = hydra.utils.instantiate(cfg)
-        crossfield = self.compute_crossfield_to_plot(
+        crossfield = compute_crossfield_to_plot(
             frame_field_ds[0]['gt_crossfield_angle']
         )
         image_seg_display = get_tensorboard_image_seg_display(
@@ -110,7 +95,7 @@ class Test_TestVisualization(unittest.TestCase):
         image = torch.zeros((1, 3, 512, 512)) + 0.5
         seg = torch.zeros((1, 2, 512, 512))
         seg[:, 0, 100:200, 100:200] = 1
-        crossfield = self.compute_crossfield_to_plot(0.25, crossfield_shape=(1, 4, 512, 512))
+        crossfield = compute_crossfield_to_plot(0.25, crossfield_shape=(1, 4, 512, 512))
 
         image_seg_display = get_tensorboard_image_seg_display(
             255*image,

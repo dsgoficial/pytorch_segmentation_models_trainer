@@ -45,6 +45,10 @@ class Model(pl.LightningModule):
         self.loss_function = self.get_loss_function()
         self.train_metrics = self.get_metrics()
         self.val_metrics = self.get_metrics()
+        self.gpu_train_transform = None if 'gpu_augmentation_list' not in self.cfg.train_dataset \
+            else self.get_gpu_augmentations(self.cfg.train_dataset.gpu_augmentation_list)
+        self.gpu_val_transform = None if 'gpu_augmentation_list' not in self.cfg.val_dataset \
+            else self.get_gpu_augmentations(self.cfg.val_dataset.gpu_augmentation_list)
 
     def get_model(self):
         model = instantiate(self.cfg.model)
@@ -59,6 +63,11 @@ class Model(pl.LightningModule):
 
     def get_metric_name(self, x):
         return x['_target_'].split('.')[-1]
+
+    def get_gpu_augmentations(self, augmentation_list):
+        return torch.nn.Sequential(*[
+            instantiate(aug) for aug in augmentation_list
+        ])
 
     def evaluate_metrics(self, predicted_masks, masks, step_type='train'):
         if step_type not in ['train', 'val']:
@@ -76,16 +85,6 @@ class Model(pl.LightningModule):
 
     def get_optimizer(self):
         return instantiate(self.cfg.optimizer, params=self.parameters())
-
-    def get_scheduler(self, optimizer):
-        if 'scheduler' not in self.cfg:
-            return torch.optim.lr_scheduler.OneCycleLR(
-                optimizer,
-                max_lr=self.cfg.hyperparameters.max_lr,
-                epochs=self.cfg.hyperparameters.epochs,
-                steps_per_epoch=len(self.train_dataloader())
-            )
-        return instantiate(self.cfg.scheduler, optimizer=optimizer)
 
     def set_encoder_trainable(self, trainable=False):
         """Freezes or unfreezes the model encoder.
@@ -106,13 +105,14 @@ class Model(pl.LightningModule):
     def configure_optimizers(self):
         # REQUIRED
         optimizer = self.get_optimizer()
-        lr_scheduler = {
-            'scheduler': self.get_scheduler(optimizer),
-            'name': 'learning_rate',
-            'interval': 'step',
-            'frequency': 1
-        }
-        return [optimizer], [lr_scheduler]
+        scheduler_list = []
+        if 'scheduler_list' not in self.cfg:
+            return [optimizer], scheduler_list
+        for item in self.cfg.scheduler_list:
+            dict_item = dict(item)
+            dict_item['scheduler'] = instantiate(item.scheduler, optimizer=optimizer)
+            scheduler_list.append(dict_item)
+        return [optimizer], scheduler_list
 
     def train_dataloader(self):
         return DataLoader(

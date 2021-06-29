@@ -195,6 +195,7 @@ class SpatialGradient(torch.nn.Module):
         self.normalized: bool = normalized
         self.order: int = order
         self.mode: str = mode
+        self.dtype = dtype
         self.kernel: torch.Tensor = get_spatial_gradient_kernel2d(mode, order, coord)
         if self.normalized:
             self.kernel = normalize_kernel2d(self.kernel)
@@ -203,11 +204,17 @@ class SpatialGradient(torch.nn.Module):
                             self.kernel.size(1) // 2,
                             self.kernel.size(2) // 2,
                             self.kernel.size(2) // 2]
-        # Prepare kernel
-        self.kernel: torch.Tensor = self.kernel.to(device).to(dtype).detach()
-        self.kernel: torch.Tensor = self.kernel.unsqueeze(1).unsqueeze(1)
-        self.kernel: torch.Tensor = self.kernel.flip(-3)
+        # # Prepare kernel
+        # self.kernel: torch.Tensor = self.kernel.to(device).to(dtype).detach()
+        # self.kernel: torch.Tensor = self.kernel.unsqueeze(1).unsqueeze(1)
+        # self.kernel: torch.Tensor = self.kernel.flip(-3)
         return
+    
+    def prepare_kernel(self, device, dtype):
+        kernel = self.kernel.to(device).to(dtype).detach()
+        kernel = kernel.unsqueeze(1).unsqueeze(1)
+        kernel = kernel.flip(-3)
+        return kernel
 
     def __repr__(self) -> str:
         return self.__class__.__name__ + '('\
@@ -229,7 +236,8 @@ class SpatialGradient(torch.nn.Module):
         out_channels: int = 3 if self.order == 2 else 2
         padded_inp: torch.Tensor = torch.nn.functional.pad(inp.reshape(b * c, 1, h, w),
                                                            self.spatial_pad, 'replicate')[:, :, None]
-        return torch.nn.functional.conv3d(padded_inp, self.kernel, padding=0).view(b, c, out_channels, h, w)
+        kernel = self.prepare_kernel(padded_inp.device, self.dtype)
+        return torch.nn.functional.conv3d(padded_inp, kernel, padding=0).view(b, c, out_channels, h, w)
 
 def get_scharr_kernel_3x3() -> torch.Tensor:
     """Utility function that returns a sobel kernel of 3x3"""
@@ -272,3 +280,9 @@ def get_spatial_gradient_kernel2d(mode: str, order: int, coord: str = "xy") -> t
         raise NotImplementedError("")
     return kernel
 
+def batch_to_cuda(batch):
+    # Send data to computing device:
+    for key, item in batch.items():
+        if hasattr(item, "cuda"):
+            batch[key] = item.cuda(non_blocking=True)
+    return batch

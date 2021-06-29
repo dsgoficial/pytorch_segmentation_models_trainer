@@ -19,25 +19,33 @@
  ****
 """
 import abc
-from dataclasses import MISSING, dataclass, field
-from enum import Enum
 import functools
 import operator
+import os
+from dataclasses import MISSING, dataclass, field
+from enum import Enum
 from pathlib import Path
 
+import fiona
 import geopandas
 import psycopg2
 import shapely
+from bidict import bidict
 from geopandas import GeoDataFrame, GeoSeries
-from shapely.geometry import (GeometryCollection, LineString,
-                              MultiLineString, MultiPoint, MultiPolygon, Point,
-                              Polygon)
+from shapely.geometry import (GeometryCollection, LineString, MultiLineString,
+                              MultiPoint, MultiPolygon, Point, Polygon, base)
 
 
 class GeomType(Enum):
     POINT, LINE, POLYGON = range(3)
 
 GeomTypeEnum = GeomType
+
+suffix_dict = bidict({
+    "GPKG": ".gpkg",
+    "GeoJSON": ".geojson",
+    "ESRI Shapefile": ".shp"
+})
 
 @dataclass
 class GeoDF(abc.ABC):
@@ -176,6 +184,19 @@ def handle_geometry(geom, output_type):
         return MultiPoint(geom.coords)
     else:
         raise Exception("Invalid geometry handling")
+
+def save_to_file(polygons, base_filepath, name, driver=None, epsg=None):
+    driver = 'GeoJSON' if driver is None else driver
+    if driver not in suffix_dict:
+        raise TypeError(f"Invalid driver. Supported drivers are: {', '.join(fiona.supported_drivers.keys())}")
+    geoseries = geopandas.GeoSeries(polygons)
+    gdf = geopandas.GeoDataFrame.from_features(geoseries)
+    if epsg is not None:
+        gdf.to_crs(epsg=epsg, inplace=True)
+    gdf.to_file(
+        os.path.join(base_filepath, name+suffix_dict[driver]),
+        driver=driver
+    )
 
 if __name__ == "__main__":
     geo_df = PostgisGeoDF(

@@ -161,7 +161,7 @@ class MultiLoss(torch.nn.Module):
         individual_losses_dict, extra_dict = {}, {}
         for loss_func_i, weight_i in zip(self.loss_funcs, self.weights):
             loss_i, extra_dict_i = loss_func_i(pred_batch, gt_batch, normalize=normalize)
-            current_weight = torch.from_numpy(weight_i(epoch)) \
+            current_weight = torch.from_numpy(weight_i(epoch)).to(loss_i.device) \
                 if isinstance(weight_i, scipy.interpolate.interpolate.interp1d) and epoch is not None \
                     else weight_i
             total_loss += current_weight * loss_i
@@ -177,7 +177,7 @@ class MultiLoss(torch.nn.Module):
 
 # --- Specific losses --- #
 class SegLoss(Loss):
-    def __init__(self, name, gt_channel_selector, bce_coef=0.5, dice_coef=0.5):
+    def __init__(self, name, gt_channel_selector, bce_coef=0.5, dice_coef=0.5, use_mixed_precision=False):
         """
         :param name:
         :param gt_channel_selector: used to select which channels gt_polygons_image to use to compare to predicted seg
@@ -187,6 +187,7 @@ class SegLoss(Loss):
         self.gt_channel_selector = gt_channel_selector
         self.bce_coef = bce_coef
         self.dice_coef = dice_coef
+        self.use_mixed_precision = use_mixed_precision
 
     def compute(self, pred_batch, gt_batch):
         """
@@ -204,7 +205,13 @@ class SegLoss(Loss):
         weights = gt_batch["seg_loss_weights"][:, self.gt_channel_selector, ...]
         dice = metrics.dice_loss(pred_seg, gt_seg)
         mean_dice = torch.mean(dice)
-        mean_cross_entropy = F.binary_cross_entropy(pred_seg, gt_seg, weight=weights, reduction="mean")
+        # if mixed precision is used, the right function is binary_cross_entropy_with_logits
+        # because it can handle operations with fp16 and fp32
+        cross_entropy_func = F.binary_cross_entropy if not self.use_mixed_precision \
+            else F.binary_cross_entropy_with_logits
+        mean_cross_entropy = cross_entropy_func(
+            pred_seg, gt_seg, weight=weights, reduction="mean"
+        )
         return self.bce_coef * mean_cross_entropy + self.dice_coef * mean_dice
 
 
@@ -270,7 +277,7 @@ class SegCrossfieldLoss(Loss):
         align_loss = frame_field_utils.framefield_align_error(
             c0, c2, seg_slice_grads_normed, complex_dim=1
         )
-        avg_align_loss = torch.mean(align_loss * seg_slice_grad_norm.detach())
+        avg_align_loss = torch.mean(align_loss * seg_slice_grad_norm)
         self.extra_info["seg_slice_grads"] = pred_batch["seg_grads"][:, self.pred_channel, ...]
         return avg_align_loss
 
@@ -330,11 +337,21 @@ def compute_seg_loss_weigths(pred_batch, gt_batch, cfg):
                        (1 - gt_polygons_mask) * background_freq[:, None, None, None]
     if pixel_class_freq.min() == 0:
         logger.error("ERROR: pixel_class_freq has some zero values, can't divide by zero!")
+        logger.error("Candidates:")
+        zero_elements = (pixel_class_freq==0).nonzero()
+        logger.error(zero_elements)
+        for i, path in enumerate(gt_batch['path']):
+            logger.error(f"{i} idx: {gt_batch['idx'][i]}, path: {path}, class_freq: {gt_batch['class_freq'][i]}")
         raise ZeroDivisionError
     freq_weights = 1 / pixel_class_freq
     size_weights = None
     if use_size:
         if gt_batch["sizes"].min() == 0:
+            logger.error("Candidates:")
+            zero_elements = (gt_batch["sizes"]==0).nonzero()
+            logger.error(zero_elements)
+            for i, path in enumerate(gt_batch['path']):
+                logger.error(f"{i} idx: {gt_batch['idx'][i]}, path: {path}, class_freq: {gt_batch['class_freq'][i]}")
             logger.error("ERROR: sizes tensor has zero values, can't divide by zero!")
             raise ZeroDivisionError
         size_weights = 1 + 1 / (im_radius * gt_batch["sizes"])
@@ -381,7 +398,9 @@ def build_combined_loss(cfg):
                 name="seg",
                 gt_channel_selector=gt_channel_selector,
                 bce_coef=cfg.loss_params.seg_loss_params.bce_coef,
-                dice_coef=cfg.loss_params.seg_loss_params.dice_coef
+                dice_coef=cfg.loss_params.seg_loss_params.dice_coef,
+                use_mixed_precision= True if "precision" in cfg.pl_trainer \
+                    and cfg.pl_trainer.precision == 16 else False
             )
         )
         weights.append(cfg.loss_params.multiloss.coefs.seg)
