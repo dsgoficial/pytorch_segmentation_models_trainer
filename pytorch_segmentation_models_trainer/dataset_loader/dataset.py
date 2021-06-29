@@ -128,7 +128,8 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
         return_size_mask=True,
         size_mask_key=None,
         image_width=224,
-        image_height=224
+        image_height=224,
+        gpu_augmentation_list=None
     ) -> None:
         mask_key = 'polygon_mask' if mask_key is None else mask_key
         super().__init__(input_csv_path, root_dir=root_dir, augmentation_list=augmentation_list,

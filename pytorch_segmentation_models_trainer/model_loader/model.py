@@ -45,6 +45,10 @@ class Model(pl.LightningModule):
         self.loss_function = self.get_loss_function()
         self.train_metrics = self.get_metrics()
         self.val_metrics = self.get_metrics()
+        self.gpu_train_transform = None if 'gpu_augmentation_list' not in self.cfg.train_dataset \
+            else self.get_gpu_augmentations(self.cfg.train_dataset.gpu_augmentation_list)
+        self.gpu_val_transform = None if 'gpu_augmentation_list' not in self.cfg.val_dataset \
+            else self.get_gpu_augmentations(self.cfg.val_dataset.gpu_augmentation_list)
 
     def get_model(self):
         model = instantiate(self.cfg.model)
@@ -59,6 +63,11 @@ class Model(pl.LightningModule):
 
     def get_metric_name(self, x):
         return x['_target_'].split('.')[-1]
+
+    def get_gpu_augmentations(self, augmentation_list):
+        return torch.nn.Sequential(*[
+            instantiate(aug) for aug in augmentation_list
+        ])
 
     def evaluate_metrics(self, predicted_masks, masks, step_type='train'):
         if step_type not in ['train', 'val']:

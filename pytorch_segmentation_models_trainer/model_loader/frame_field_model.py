@@ -29,6 +29,9 @@ from pytorch_segmentation_models_trainer.custom_losses.base_loss import (
 from pytorch_segmentation_models_trainer.model_loader.model import Model
 from segmentation_models_pytorch.base.initialization import (
     initialize_decoder, initialize_head)
+from pytorch_segmentation_models_trainer.custom_metrics import metrics
+from pytorch_segmentation_models_trainer.utils import tensor_utils
+from tqdm import tqdm
 
 class FrameFieldModel(nn.Module):
     def __init__(
@@ -184,6 +187,7 @@ class FrameFieldModel(nn.Module):
 class FrameFieldSegmentationPLModel(Model):
     def __init__(self, cfg):
         super(FrameFieldSegmentationPLModel, self).__init__(cfg)
+        self.loss_norm_is_initializated = False
 
     def get_loss_function(self) -> MultiLoss:
         """Multi-loss model defined in frame field article
@@ -198,34 +202,147 @@ class FrameFieldSegmentationPLModel(Model):
                 param.requires_grad = trainable
         print(f"\nEncoder weights set to trainable={trainable}\n")
         return
+    
+    def compute_iou_metrics(self, y_pred, y_true, individual_metrics_dict):
+        iou_thresholds = [0.1, 0.25, 0.5, 0.75, 0.9]
+        for iou_threshold in iou_thresholds:
+            iou = metrics.iou(
+                y_pred.reshape(y_pred.shape[0], -1),
+                y_true.reshape(y_true.shape[0], -1),
+                threshold=iou_threshold
+            )
+            mean_iou = torch.mean(iou)
+            individual_metrics_dict[f"IoU_{iou_threshold}"] = mean_iou
+
+    def on_train_epoch_start(self) -> None:
+        if self.loss_norm_is_initializated:
+            return super().on_train_epoch_start()
+        self.model.train()  # Important for batchnorm and dropout, even in computing loss norms
+        init_dl = self.train_dataloader()
+        with torch.no_grad():
+            loss_norm_batches_min = self.cfg.loss_params.multiloss.normalization_params.min_samples // (2 * self.cfg.hyperparameters.batch_size) + 1
+            loss_norm_batches_max = self.cfg.loss_params.multiloss.normalization_params.max_samples // (2 * self.cfg.hyperparameters.batch_size) + 1
+            loss_norm_batches = max(loss_norm_batches_min, min(loss_norm_batches_max, len(init_dl)))
+            self.compute_loss_norms(init_dl, loss_norm_batches)
+        self.loss_norm_is_initializated = True
+        return super().on_train_epoch_start()
+    
+    def compute_loss_norms(self, dl, total_batches):
+        self.loss_function.reset_norm()
+
+        t = None
+        if self.local_rank == 0:
+            t = tqdm(total=total_batches, desc="Init loss norms", leave=False)  # Initialise
+
+        batch_i = 0
+        while batch_i < total_batches:
+            batch = next(iter(dl))
+            # Update loss norms
+            batch = tensor_utils.batch_to_cuda(batch) if self.cfg.device == 'cuda' else batch
+            pred = self.model(batch['image'])
+            self.loss_function.update_norm(pred, batch, batch["image"].shape[0])
+            if t is not None:
+                t.update(1)
+            batch_i += 1
+
+        # Now sync loss norms across GPUs:
+        world_size = self.get_world_size()
+        if world_size > 1:
+            self.loss_function.sync(world_size)
+    
+    def get_world_size(self):
+        if self.cfg.device == 'cpu' or self.cfg.pl_trainer.gpus == 0:
+            return 1
+        elif isinstance(self.cfg.pl_trainer.gpus, list):
+            return len(self.cfg.pl_trainer.gpus)
+        elif self.cfg.pl_trainer.gpus == -1:
+            return torch.cuda.device_count()
+        else:
+            return self.cfg.pl_trainer.gpus
 
     def training_step(self, batch, batch_idx):
+        batch['image'] = batch['image'] if self.gpu_train_transform is None \
+            else self.gpu_train_transform(batch['image'])
         pred = self.model(batch['image'])
         loss, individual_metrics_dict, extra_dict = self.loss_function(pred, batch, epoch=self.current_epoch)
         y_pred = pred["seg"][:, 0, ...]
         y_true = batch["gt_polygons_image"][:, 0, ...]
+        if 'seg' in pred:
+            self.compute_iou_metrics(y_pred, y_true, individual_metrics_dict)
+            self.log_dict(individual_metrics_dict,\
+                prog_bar=True, on_step=True, on_epoch=True, logger=True, sync_dist=True)
         evaluated_metrics = self.evaluate_metrics(
             y_pred, y_true, step_type='train'
         )
         tensorboard_logs = {k: {'train': v} for k, v in evaluated_metrics.items()}
+        tensorboard_logs.update(
+            {
+                k: {'train': v} for k, v in individual_metrics_dict.items()
+            }
+        )
         # use log_dict instead of log
         self.log_dict(
-            evaluated_metrics, on_step=True, on_epoch=False, prog_bar=False, logger=True
+            evaluated_metrics, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True
         )
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         return {'loss' : loss, 'log': tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
-        pred = self.model(batch['image'])
+        image = batch['image'] if self.gpu_val_transform is None \
+            else self.gpu_val_transform(batch['image'])
+        pred = self.model(image)
         loss, individual_metrics_dict, extra_dict = self.loss_function(pred, batch, epoch=self.current_epoch)
         y_pred = pred["seg"][:, 0, ...]
         y_true = batch["gt_polygons_image"][:, 0, ...]
+        if 'seg' in pred:
+            self.compute_iou_metrics(y_pred, y_true, individual_metrics_dict)
+            self.log_dict(individual_metrics_dict, prog_bar=True, \
+                on_step=False, on_epoch=True, logger=True, sync_dist=True)
         evaluated_metrics = self.evaluate_metrics(
-            y_pred, y_true, step_type='train'
+            y_pred, y_true, step_type='val'
         )
         tensorboard_logs = {k: {'val': v} for k, v in evaluated_metrics.items()}
+        tensorboard_logs.update(
+            {
+                k: {'val': v} for k, v in individual_metrics_dict.items()
+            }
+        )
         # use log_dict instead of log
         self.log_dict(
-            evaluated_metrics, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True, logger=False
+            evaluated_metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True, logger=False
         )
-        self.log('validation_loss', loss, on_step=True, on_epoch=True, sync_dist=True)
+        self.log('validation_loss', loss, on_step=False, on_epoch=True, sync_dist=True)
         return {'val_loss': loss, 'log': tensorboard_logs}
+
+    def training_epoch_end(self, outputs):
+        avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
+        tensorboard_logs = {'avg_loss': {'train' : avg_loss}}
+        tensorboard_logs.update(
+            self.compute_average_metrics(outputs, self.train_metrics)
+        )
+        tensorboard_logs.update(
+            {
+                'avg_'+name: {
+                    'train': torch.stack([x['log'][name]['train'] for x in outputs]).mean()
+                } for name in outputs[0]['log'].keys() if name not in self.train_metrics.keys()
+            }
+        )
+        return {'avg_train_loss': avg_loss,
+                'log': tensorboard_logs}
+
+    def validation_epoch_end(self, outputs):
+        # OPTIONAL
+        avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
+        tensorboard_logs = {'avg_loss': {'val' : avg_loss}}
+        tensorboard_logs.update(
+            self.compute_average_metrics(outputs, self.val_metrics, step_type='val')
+        )
+        tensorboard_logs.update(
+            {
+                'avg_'+name: {
+                    'val': torch.stack([x['log'][name]['val'] for x in outputs]).mean()
+                } for name in outputs[0]['log'].keys() if name not in self.val_metrics.keys()
+            }
+        )
+        return {'avg_val_loss': avg_loss,
+                'log': tensorboard_logs}
