@@ -101,7 +101,7 @@ class DeepLab101(BaseSegmentationModel):
 class DeepLab50(BaseSegmentationModel):
     backbone: DeepLab50SegmentationBackbone = field(
         default_factory=DeepLab50SegmentationBackbone)
-    name: str "deeplab50"
+    name: str = "deeplab50"
     output_conv_kernel: 256
 
 
@@ -109,7 +109,7 @@ class DeepLab50(BaseSegmentationModel):
 class FCN101(BaseSegmentationModel):
     backbone: FCN101SegmentationBackbone = field(
         default_factory=FCN101SegmentationBackbone)
-    name: "fcn101"
+    name: str = "fcn101"
     output_conv_kernel: 512
 
 
@@ -125,7 +125,7 @@ class FCN50(BaseSegmentationModel):
 class UNetResNet:
     backbone: UNetResNetSegmentationBackbone = field(
         default_factory=UNetResNetSegmentationBackbone)
-    name: "unet_resnet"
+    name: str = "unet_resnet"
 
     def __post_init__(self):
         self.backbone = _SimpleSegmentationModel(
