@@ -76,7 +76,7 @@ class UNetResNetSegmentationBackbone:
 @dataclass
 class BaseSegmentationModel:
     features: 1
-    name: MISSING
+    name: str = MISSING
     backbone: MISSING
     output_conv_kernel: int = MISSING
 
@@ -93,8 +93,8 @@ class BaseSegmentationModel:
 class DeepLab101(BaseSegmentationModel):
     backbone: DeepLab101SegmentationBackbone = field(
         default_factory=DeepLab101SegmentationBackbone)
-    name: str "deeplab101"
-    output_conv_kernel: 256
+    name: str = "deeplab101"
+    output_conv_kernel: int = 256
 
 
 @dataclass
@@ -117,8 +117,8 @@ class FCN101(BaseSegmentationModel):
 class FCN50(BaseSegmentationModel):
     backbone: FCN101SegmentationBackbone = field(
         default_factory=FCN101SegmentationBackbone)
-    name: "fcn50"
-    output_conv_kernel: 512
+    name: str = "fcn50"
+    output_conv_kernel: int = 512
 
 
 @dataclass
