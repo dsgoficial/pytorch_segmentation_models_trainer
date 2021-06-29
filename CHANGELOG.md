@@ -7,6 +7,8 @@
 - New implementation of FrameFieldResultCallback;
 - Invalid mask handling (frame field training mask with only polygon mask and empty vertex and boundary masks);
 - Added multiple schedulers option;
+- Added IoU 10, 25, 50, 75 and 90;
+- Added GPU augmentation using kornia;
 
 # Version 0.5.1
 
