@@ -1,3 +1,9 @@
+# Version 0.7.0
+
+- Bug fix on loss sync;
+- Custom models from Frame Field implementation (to compare training results);
+- HR-Net and HR-Net-OCR backbones;
+
 # Version 0.6.0
 
 - Polygon inference
