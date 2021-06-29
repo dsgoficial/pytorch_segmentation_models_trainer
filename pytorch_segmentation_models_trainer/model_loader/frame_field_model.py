@@ -197,11 +197,38 @@ class FrameFieldSegmentationPLModel(Model):
         return build_combined_loss(self.cfg)
     
     def set_encoder_trainable(self, trainable=False):
-        for child in self.model.segmentation_model.encoder.children():
+        return self.set_model_component_trainable(
+            self.model.segmentation_model.encoder,
+            'Encoder',
+            trainable=trainable
+        )
+    
+    def set_decoder_trainable(self, trainable=False):
+        return self.set_model_component_trainable(
+            self.model.segmentation_model.decoder,
+            'Decoder',
+            trainable=trainable
+        )
+    
+    def set_seg_module_trainable(self, trainable=False):
+        return self.set_model_component_trainable(
+            self.seg_module,
+            'Seg Module',
+            trainable=trainable
+        )
+    
+    def set_model_component_trainable(self, component, component_name, trainable=False):
+        for child in component.children():
             for param in child.parameters():
                 param.requires_grad = trainable
-        print(f"\nEncoder weights set to trainable={trainable}\n")
+        print(f"{component_name} weights set to trainable={trainable}")
         return
+    
+    def set_only_crossfield_trainable(self, trainable=False):
+        self.set_encoder_trainable(trainable=trainable)
+        self.set_decoder_trainable(trainable=trainable)
+        self.set_seg_module_trainable(trainable=trainable)
+
     
     def compute_iou_metrics(self, y_pred, y_true, individual_metrics_dict):
         iou_thresholds = [0.1, 0.25, 0.5, 0.75, 0.9]

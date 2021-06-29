@@ -19,6 +19,7 @@
  ****
 """
 import os
+from albumentations.pytorch import ToTensorV2
 from albumentations.augmentations.transforms import Normalize
 import torch
 from pathlib import Path
