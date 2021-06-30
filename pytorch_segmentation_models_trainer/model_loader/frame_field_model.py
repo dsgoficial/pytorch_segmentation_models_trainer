@@ -298,9 +298,10 @@ class FrameFieldSegmentationPLModel(Model):
             self.compute_iou_metrics(y_pred, y_true, individual_metrics_dict)
             self.log_dict(individual_metrics_dict,\
                 prog_bar=True, on_step=True, on_epoch=True, logger=True, sync_dist=True)
-        evaluated_metrics = self.evaluate_metrics(
-            y_pred, y_true, step_type='train'
-        )
+        # evaluated_metrics = self.evaluate_metrics(
+        #     y_pred, y_true.long(), step_type='train'
+        # )
+        evaluated_metrics = self.train_metrics(y_pred, y_true.long())
         tensorboard_logs = {k: {'train': v} for k, v in evaluated_metrics.items()}
         tensorboard_logs.update(
             {
@@ -325,9 +326,10 @@ class FrameFieldSegmentationPLModel(Model):
             self.compute_iou_metrics(y_pred, y_true, individual_metrics_dict)
             self.log_dict(individual_metrics_dict, prog_bar=True, \
                 on_step=False, on_epoch=True, logger=True, sync_dist=True)
-        evaluated_metrics = self.evaluate_metrics(
-            y_pred, y_true, step_type='val'
-        )
+        # evaluated_metrics = self.evaluate_metrics(
+        #     y_pred, y_true.long(), step_type='val'
+        # )
+        evaluated_metrics = self.val_metrics(y_pred, y_true.long())
         tensorboard_logs = {k: {'val': v} for k, v in evaluated_metrics.items()}
         tensorboard_logs.update(
             {
@@ -350,12 +352,12 @@ class FrameFieldSegmentationPLModel(Model):
         tensorboard_logs.update(
             {
                 'avg_'+name: {
-                    'train': torch.stack([x['log'][name]['train'] for x in outputs]).mean()
-                } for name in outputs[0]['log'].keys() if name not in self.train_metrics.keys()
+                    'train': torch.stack([x['log'][name]['train'] for x in outputs]).mean().detach()
+                } for name in outputs[0]['log'].keys() if name not in list(map('train_{0}'.format,self.train_metrics.keys()))
             }
         )
-        return {'avg_train_loss': avg_loss,
-                'log': tensorboard_logs}
+        self.log_dict(tensorboard_logs, logger=True)
+        self.log('avg_train_loss', avg_loss, logger=True)
 
     def validation_epoch_end(self, outputs):
         # OPTIONAL
@@ -367,8 +369,8 @@ class FrameFieldSegmentationPLModel(Model):
         tensorboard_logs.update(
             {
                 'avg_'+name: {
-                    'val': torch.stack([x['log'][name]['val'] for x in outputs]).mean()
-                } for name in outputs[0]['log'].keys() if name not in self.val_metrics.keys()
+                    'train': torch.stack([x['log'][name]['val'] for x in outputs]).mean().detach()
+                } for name in outputs[0]['log'].keys() if name not in self.train_metrics.keys()
             }
         )
         return {'avg_val_loss': avg_loss,
