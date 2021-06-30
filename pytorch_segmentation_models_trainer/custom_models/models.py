@@ -65,7 +65,7 @@ class FCN50SegmentationBackbone:
 
 @dataclass
 class UNetResNetSegmentationBackbone:
-    _target_: "pytorch_segmentation_models_trainer.custom_models.unet_resnet.UNetResNetBackbone"
+    _target_: str = "pytorch_segmentation_models_trainer.custom_models.unet_resnet.UNetResNetBackbone"
     encoder_depth: int = 34
     num_filters: int = 32
     dropout_2d: float = 0.2

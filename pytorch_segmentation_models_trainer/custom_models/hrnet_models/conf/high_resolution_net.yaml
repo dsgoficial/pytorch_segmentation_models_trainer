@@ -1,0 +1,44 @@
+pretrained_layers:
+  - '*'
+stem_inplanes: 64
+final_conv_kernel: 1
+with_head: true
+stage2:
+  num_modules: 1
+  num_branches: 2
+  num_blocks:
+    - 4
+    - 4
+  num_channels:
+    - 32
+    - 64
+  block: basic
+  fuse_method: sum
+stage3:
+  num_modules: 1
+  num_branches: 3
+  num_blocks:
+    - 4
+    - 4
+    - 4
+  num_channels:
+   - 32
+   - 64
+   - 128
+  block: basic
+  fuse_method: sum
+stage4:
+  num_modules: 1
+  num_branches: 4
+  num_blocks:
+    - 4
+    - 4
+    - 4
+    - 4
+  num_channels:
+    - 32
+    - 64
+    - 128
+    - 256
+  block: basic
+  fuse_method: sum

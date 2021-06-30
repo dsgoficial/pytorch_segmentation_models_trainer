@@ -260,7 +260,7 @@ blocks_dict = {
 
 class HighResolutionNet(nn.Module):
 
-    def __init__(self, config, **kwargs):
+    def __init__(self, config,  **kwargs):
         global ALIGN_CORNERS
         extra = config.MODEL.EXTRA
         super(HighResolutionNet, self).__init__()
