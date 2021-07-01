@@ -44,7 +44,7 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with unittest
       run: |
-        coverage run --source pytorch_segmentation_models_trainer -m unittest discover -p 'test_*.py'
+        coverage run --source pytorch_segmentation_models_trainer --omit pytorch_segmentation_models_trainer/custom_models/sync_bn/* -m unittest discover -p 'test_*.py'
     - name: statistics
       if: success()
       run: |

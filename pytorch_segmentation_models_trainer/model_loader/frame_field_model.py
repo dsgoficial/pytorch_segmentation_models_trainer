@@ -241,19 +241,6 @@ class FrameFieldSegmentationPLModel(Model):
             )
             mean_iou = torch.mean(iou)
             individual_metrics_dict[f"IoU_{iou_threshold}"] = mean_iou
-
-    def on_train_epoch_start(self) -> None:
-        if self.loss_norm_is_initializated:
-            return super().on_train_epoch_start()
-        self.model.train()  # Important for batchnorm and dropout, even in computing loss norms
-        init_dl = self.train_dataloader()
-        with torch.no_grad():
-            loss_norm_batches_min = self.cfg.loss_params.multiloss.normalization_params.min_samples // (2 * self.cfg.hyperparameters.batch_size) + 1
-            loss_norm_batches_max = self.cfg.loss_params.multiloss.normalization_params.max_samples // (2 * self.cfg.hyperparameters.batch_size) + 1
-            loss_norm_batches = max(loss_norm_batches_min, min(loss_norm_batches_max, len(init_dl)))
-            self.compute_loss_norms(init_dl, loss_norm_batches)
-        self.loss_norm_is_initializated = True
-        return super().on_train_epoch_start()
     
     def compute_loss_norms(self, dl, total_batches):
         self.loss_function.reset_norm()
