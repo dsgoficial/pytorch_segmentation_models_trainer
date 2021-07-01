@@ -71,64 +71,68 @@ class UNetResNetSegmentationBackbone:
     dropout_2d: float = 0.2
     pretrained: bool = True
     is_deconv: bool = False
-
-
-@dataclass
-class BaseSegmentationModel:
-    features: 1
-    name: str = MISSING
-    backbone: MISSING
-    output_conv_kernel: int = MISSING
-
+    
+    
+class BaseSegmentationModel(torch.nn.Module):
+    def __init__(self, backbone, output_conv_kernel=None, features=1):
+        super(BaseSegmentationModel, self).__init__()
+        self.backbone = backbone
+        self.output_conv_kernel = output_conv_kernel
+        self.features = features
+    
     def __post_init__(self):
-        self.backbone.classifier = torch.nn.Sequential(
-            *list(self.backbone.classifier.children())[:-1],
-            torch.nn.Conv2d(
-                self.output_conv_kernel, self.features, kernel_size=(1, 1), stride=(1, 1)
+        self.backbone = instantiate(self.backbone)
+        if self.output_conv_kernel is not None:
+            self.backbone.classifier = torch.nn.Sequential(
+                *list(self.backbone.classifier.children())[:-1],
+                torch.nn.Conv2d(
+                    self.output_conv_kernel,
+                    self.features,
+                    kernel_size=(1, 1),
+                    stride=(1, 1)
+                )
             )
-        )
 
+    def forward(self, x):
+        return self.backbone(x)['out']
 
-@dataclass
 class DeepLab101(BaseSegmentationModel):
-    backbone: DeepLab101SegmentationBackbone = field(
-        default_factory=DeepLab101SegmentationBackbone)
-    name: str = "deeplab101"
-    output_conv_kernel: int = 256
+    def __init__(self, backbone=None, features=128):
+        backbone = DeepLab101SegmentationBackbone if backbone is None else backbone
+        super(DeepLab101, self).__init__(backbone=backbone,
+                                         output_conv_kernel=256, features=features)
+        super(DeepLab101, self).__post_init__()
 
-
-@dataclass
 class DeepLab50(BaseSegmentationModel):
-    backbone: DeepLab50SegmentationBackbone = field(
-        default_factory=DeepLab50SegmentationBackbone)
-    name: str = "deeplab50"
-    output_conv_kernel: 256
+    def __init__(self, backbone=None, features=128):
+        backbone = DeepLab50SegmentationBackbone if backbone is None else backbone
+        super(DeepLab50, self).__init__(backbone=backbone,
+                                         output_conv_kernel=256, features=features)
+        super(DeepLab50, self).__post_init__()
 
-
-@dataclass
 class FCN101(BaseSegmentationModel):
-    backbone: FCN101SegmentationBackbone = field(
-        default_factory=FCN101SegmentationBackbone)
-    name: str = "fcn101"
-    output_conv_kernel: 512
+    def __init__(self, backbone=None, features=256):
+        backbone = FCN50SegmentationBackbone if backbone is None else backbone
+        super(FCN101, self).__init__(backbone=backbone,
+                                         output_conv_kernel=512, features=features)
+        super(FCN101, self).__post_init__()
 
-
-@dataclass
 class FCN50(BaseSegmentationModel):
-    backbone: FCN101SegmentationBackbone = field(
-        default_factory=FCN101SegmentationBackbone)
-    name: str = "fcn50"
-    output_conv_kernel: int = 512
+    def __init__(self, backbone=None, features=256):
+        backbone = FCN50SegmentationBackbone if backbone is None else backbone
+        super(FCN50, self).__init__(backbone=backbone,
+                                         output_conv_kernel=512, features=features)
+        super(FCN50, self).__post_init__()
 
-
-@dataclass
-class UNetResNet:
-    backbone: UNetResNetSegmentationBackbone = field(
-        default_factory=UNetResNetSegmentationBackbone)
-    name: str = "unet_resnet"
+class UNetResNet(BaseSegmentationModel):
 
     def __post_init__(self):
         self.backbone = _SimpleSegmentationModel(
-            self.backbone,
+            instantiate(self.backbone),
             classifier=torch.nn.Identity()
         )
+    
+    def __init__(self, features=256):
+        super(UNetResNet, self).__init__(backbone=UNetResNetSegmentationBackbone,
+                                         output_conv_kernel=None, features=features)
+        super(UNetResNet, self).__post_init__()

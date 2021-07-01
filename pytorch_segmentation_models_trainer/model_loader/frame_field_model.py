@@ -136,11 +136,18 @@ class FrameFieldModel(nn.Module):
             torch.nn.Tanh() if self.frame_field_activation is None \
                 else instantiate(self.frame_field_activation)
         )
+    
+    def get_output(self, x):
+        if 'segmentation_models_pytorch' in self.cfg.model.segmentation_model._target_:
+            encoder_feats = self.segmentation_model.encoder(x)
+            decoder_output = self.segmentation_model.decoder(*encoder_feats)
+        else:
+            decoder_output = self.segmentation_model(x)
+        return decoder_output
 
     def forward(self, x):
         output_dict = dict()
-        encoder_feats = self.segmentation_model.encoder(x)
-        decoder_output = self.segmentation_model.decoder(*encoder_feats)
+        decoder_output = self.get_output(x)
         if self.compute_seg:
             segmentation_features = self.seg_module(decoder_output)
             detached_segmentation_features = segmentation_features.clone().detach()
