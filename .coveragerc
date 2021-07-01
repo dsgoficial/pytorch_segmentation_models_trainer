@@ -1,2 +1,3 @@
 [run]
 source=pytorch_segmentation_models_trainer
+omit=pytorch_segmentation_models_trainer/custom_models/sync_bn/*
