@@ -20,6 +20,7 @@
  *   https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning/     *
  ****
 """
+from logging import log
 import torch
 import torch.nn as nn
 from hydra.utils import instantiate
@@ -340,7 +341,7 @@ class FrameFieldSegmentationPLModel(Model):
         self.log_dict(
             evaluated_metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True, logger=False
         )
-        self.log('validation_loss', loss, on_step=False, on_epoch=True, sync_dist=True)
+        self.log('validation_loss', loss, on_step=True, on_epoch=True, sync_dist=True)
         return {'val_loss': loss, 'log': tensorboard_logs}
 
     def training_epoch_end(self, outputs):
@@ -369,9 +370,9 @@ class FrameFieldSegmentationPLModel(Model):
         tensorboard_logs.update(
             {
                 'avg_'+name: {
-                    'train': torch.stack([x['log'][name]['val'] for x in outputs]).mean().detach()
+                    'val': torch.stack([x['log'][name]['val'] for x in outputs]).mean().detach()
                 } for name in outputs[0]['log'].keys() if name not in self.train_metrics.keys()
             }
         )
-        return {'avg_val_loss': avg_loss,
-                'log': tensorboard_logs}
+        self.log_dict(tensorboard_logs, logger=True)
+        self.log('avg_train_loss', avg_loss, logger=True)
