@@ -26,3 +26,6 @@ tqdm
 pygeos
 rtree
 bidict
+Cython
+ninja
+pyyaml
