@@ -23,6 +23,7 @@
 from logging import log
 import torch
 import torch.nn as nn
+import segmentation_models_pytorch as smp
 from hydra.utils import instantiate
 from omegaconf.dictconfig import DictConfig
 from pytorch_segmentation_models_trainer.custom_losses.base_loss import (
@@ -138,7 +139,8 @@ class FrameFieldModel(nn.Module):
         )
     
     def get_output(self, x):
-        if 'segmentation_models_pytorch' in self.cfg.model.segmentation_model._target_:
+        if isinstance(self.segmentation_model, (smp.Unet, smp.UnetPlusPlus, smp.FPN, \
+                smp.PSPNet, smp.PAN, smp.DeepLabV3, smp.DeepLabV3Plus)):
             encoder_feats = self.segmentation_model.encoder(x)
             decoder_output = self.segmentation_model.decoder(*encoder_feats)
         else:
