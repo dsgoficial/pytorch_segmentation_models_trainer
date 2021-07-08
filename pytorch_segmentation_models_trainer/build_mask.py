@@ -33,15 +33,11 @@ from omegaconf import MISSING, DictConfig, OmegaConf
 
 from pytorch_segmentation_models_trainer.tools.mask_building.mask_builder import (
     BatchFileGeoDFConfig,
+    COCOGeoDFConfig,
     PostgisConfig,
     FileGeoDFConfig,
     MaskBuilder,
     build_csv_file_from_concurrent_futures_output,
-    build_dir_dict,
-    build_generator,
-    build_mask_func,
-    build_mask_type_list,
-    get_number_of_tasks
 )
 
 logger = logging.getLogger(__name__)
@@ -51,6 +47,7 @@ cs.store(name="mask_config", node=MaskBuilder)
 cs.store(group="geo_df", name='batch_file', node=BatchFileGeoDFConfig)
 cs.store(group="geo_df", name='file', node=FileGeoDFConfig)
 cs.store(group="geo_df", name='postgis', node=PostgisConfig)
+cs.store(group="geo_df", name='coco', node=COCOGeoDFConfig)
 
 @hydra.main(config_name="mask_config")
 def build_masks(cfg: DictConfig) -> str:
@@ -66,23 +63,13 @@ def build_masks(cfg: DictConfig) -> str:
             )
         )
     logger.info("Reading vectors and preparing structure...")
-    geo_df = instantiate(cfg.geo_df)
-    output_dir_dict = build_dir_dict(cfg)
-    mask_type_list = build_mask_type_list(cfg)
-    mask_func = lambda x: build_mask_func(
-        cfg=cfg,
-        input_raster_path=x[0],
-        input_vector=geo_df,
-        output_dir=x[1],
-        output_dir_dict=output_dir_dict,
-        mask_type_list=mask_type_list,
-        output_extension=cfg.mask_output_extension
-    )
+    mask_builder_obj = instantiate(cfg)
+    mask_func = mask_builder_obj.build_mask_func()
     tasks = os.cpu_count() if "simultaneous_tasks" not in cfg \
         else cfg.simultaneous_tasks
     executor = Executor(mask_func, simultaneous_tasks=tasks)
-    generator = build_generator(cfg)
-    n_tasks = get_number_of_tasks(cfg)
+    generator = mask_builder_obj.build_generator()
+    n_tasks = mask_builder_obj.get_number_of_tasks()
     logger.info("Starting tasks!")
     output_list = executor.execute_tasks(
         generator,

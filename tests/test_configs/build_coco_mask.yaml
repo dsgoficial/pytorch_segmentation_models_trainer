@@ -1,19 +1,13 @@
-_target_: "pytorch_segmentation_models_trainer.tools.mask_building.mask_builder.MaskBuilder"
+_target_: "pytorch_segmentation_models_trainer.tools.mask_building.mask_builder.COCOMaskBuilder"
 geo_df:
-  _target_: "pytorch_segmentation_models_trainer.tools.data_readers.vector_reader.PostgisGeoDF"
-  user: postgres
-  password: postgres
-  database: test_db
-  sql: select * from buildings
-  host: 'localhost'
-  port: 5432
-  geometry_column: geometry
+  _target_: "pytorch_segmentation_models_trainer.tools.data_readers.vector_reader.COCOGeoDF"
+  file_name: "../tests/testing_data/data/build_masks_data/annotation.json"
 root_dir: '/data'
 output_csv_path: '/data'
-dataset_name: 'dsg_dataset'
+dataset_name: 'coco_dataset'
 dataset_has_relative_path: True
-image_root_dir: 'images'
-image_extension: 'tif'
+image_root_dir: 'coco_images'
+image_extension: 'jpg'
 image_dir_is_relative_to_root_dir: False
 replicate_image_folder_structure: True
 relative_path_on_csv: True

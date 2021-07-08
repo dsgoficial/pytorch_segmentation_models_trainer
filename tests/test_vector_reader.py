@@ -20,18 +20,19 @@
  ****
 """
 import os
-from pathlib import Path
 import unittest
-import geopandas
+from pathlib import Path
 
-from geopandas.testing import geom_equals
+import geopandas
+from geopandas.testing import geom_equals, geom_almost_equals
 from parameterized import parameterized
+from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
+    BatchFileGeoDF, COCOGeoDF, FileGeoDF, GeomTypeEnum, handle_features,
+    handle_geometry)
+from shapely.geometry import LinearRing, LineString, Polygon
 from shapely.geometry.multilinestring import MultiLineString
 from shapely.geometry.multipoint import MultiPoint
-from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
-    FileGeoDF, BatchFileGeoDF, GeomTypeEnum, handle_features, handle_geometry
-)
-from shapely.geometry import Polygon, LineString, LinearRing
+
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, 'testing_data')
 test_list = [
@@ -122,5 +123,13 @@ class Test_TestVectorReader(unittest.TestCase):
         expected_output_gdf = geopandas.read_file(filename=expected_output)
         assert geom_equals(expected_output_gdf['geometry'], output_features['geometry'])
 
-
-
+    def test_instantiate_coco_geo_df(self) -> None:
+        input_gdf = COCOGeoDF(
+            file_name=os.path.join(root_dir, 'data', 'build_masks_data', 'annotation.json')
+        )
+        for key in [160847, 232566]:
+            output_features_gdf = input_gdf.get_geodf_item(key).gdf
+            expected_output_gdf = geopandas.read_file(
+                filename=os.path.join(root_dir, 'expected_outputs', 'vector_reader', f'{key}.geojson')
+            )
+            assert geom_almost_equals(expected_output_gdf['geometry'], output_features_gdf['geometry'])

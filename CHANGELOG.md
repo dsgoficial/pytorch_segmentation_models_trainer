@@ -4,6 +4,7 @@
 - Custom models from Frame Field implementation (to compare training results);
 - HR-Net and HR-Net-OCR backbones;
 - Fixed bugs on new versions of pytorch-lightning;
+- Build mask from COCO dataset format;
 
 # Version 0.6.0
 
