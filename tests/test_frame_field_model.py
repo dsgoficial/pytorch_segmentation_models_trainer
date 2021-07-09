@@ -41,6 +41,34 @@ input_model_list = [
     #(smp.DeepLabV3Plus,)
 ]
 
+input_overrides_list = [
+    # (
+    #     [
+    #         "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.DeepLab101",
+    #     ],
+    # ),
+    # (
+    #     [
+    #         "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.DeepLab50",
+    #     ],
+    # ),
+    # (
+    #     [
+    #         "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.FCN101",
+    #     ],
+    # ),
+    # (
+    #     [
+    #         "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.FCN50",
+    #     ],
+    # ),
+    (
+        [
+            "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.UNetResNet",
+        ],
+    ),
+]
+
 current_dir = os.path.dirname(__file__)
 frame_field_root_dir = os.path.join(
     current_dir, 'testing_data', 'data', 'frame_field_data')
@@ -136,6 +164,27 @@ class Test_TestFrameFieldModel(CustomTestCase):
             cfg = compose(
                 config_name="experiment_frame_field_with_callback.yaml",
                 overrides=[
+                    'train_dataset.input_csv_path='+csv_path,
+                    'train_dataset.root_dir='+frame_field_root_dir,
+                    'val_dataset.input_csv_path='+csv_path,
+                    'val_dataset.root_dir='+frame_field_root_dir,
+                    # 'pl_trainer.gpus=1',
+                    # 'device=cuda',
+                    # 'optimizer.lr=0.00001',
+                    # 'hyperparameters.batch_size=4',
+                    # 'hyperparameters.epochs=10'
+                ]
+            )
+            trainer = train(cfg)
+    
+    @parameterized.expand(input_overrides_list)
+    def test_train_custom_models_with_frame_field(self, overrides_list) -> None:
+        csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
+        config_path = os.path.join(os.path.abspath(current_dir), 'test_configs')
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_frame_field_custom_model.yaml",
+                overrides=overrides_list + [
                     'train_dataset.input_csv_path='+csv_path,
                     'train_dataset.root_dir='+frame_field_root_dir,
                     'val_dataset.input_csv_path='+csv_path,

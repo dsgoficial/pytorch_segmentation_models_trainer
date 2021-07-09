@@ -85,10 +85,13 @@ class FrameFieldModel(nn.Module):
         self.use_batchnorm = use_batchnorm
         self.frame_field_activation = frame_field_activation
         self.module_activation = module_activation
-        self.backbone_output = self.get_out_channels(
-            self.segmentation_model.decoder if self.replace_seg_head \
-                else self.segmentation_model.segmentation_head
-        )
+        if hasattr(self.segmentation_model, 'decoder'):
+            self.backbone_output = self.get_out_channels(
+                self.segmentation_model.decoder if self.replace_seg_head \
+                    else self.segmentation_model.segmentation_head
+            )
+        else:
+            self.backbone_output = self.get_out_channels(self.segmentation_model)
         self.seg_channels = sum(self.seg_params.values())
         self.seg_module = self.get_seg_module()
         self.crossfield_module = self.get_crossfield_module()
