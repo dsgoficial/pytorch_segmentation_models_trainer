@@ -21,6 +21,7 @@
  ****
 """
 from logging import log
+from collections import OrderedDict
 import torch
 import torch.nn as nn
 import segmentation_models_pytorch as smp
@@ -45,7 +46,7 @@ class FrameFieldModel(nn.Module):
         compute_crossfield: bool = True,
         seg_params: dict = None,
         module_activation: str = None,
-        frame_field_activation: str = None,
+        frame_field_activation: str = None
     ):
         """[summary]
 
@@ -93,6 +94,7 @@ class FrameFieldModel(nn.Module):
         else:
             self.backbone_output = self.get_out_channels(self.segmentation_model)
         self.seg_channels = sum(self.seg_params.values())
+        self.upsampling = self.get_upsampling_method()
         self.seg_module = self.get_seg_module()
         self.crossfield_module = self.get_crossfield_module()
         self.initialize()
@@ -110,8 +112,15 @@ class FrameFieldModel(nn.Module):
             torch.nn.BatchNorm2d(self.backbone_output),
             torch.nn.ELU(),
             torch.nn.Conv2d(self.backbone_output, self.seg_channels, 1),
+            self.upsampling,
             torch.nn.Sigmoid()
         )
+    
+    def get_upsampling_method(self) -> torch.nn.Module:
+        return list(self.segmentation_model.segmentation_head.children())[1] \
+            if hasattr(self.segmentation_model, 'segmentation_head') \
+                else torch.nn.Identity()
+        
 
     def get_crossfield_module(self) -> torch.nn.Sequential:
         """Prepares the crossfield module
@@ -148,17 +157,17 @@ class FrameFieldModel(nn.Module):
             decoder_output = self.segmentation_model.decoder(*encoder_feats)
         else:
             decoder_output = self.segmentation_model(x)
-        return decoder_output
+        return decoder_output if not isinstance(decoder_output, OrderedDict) else decoder_output['out']
 
     def forward(self, x):
-        output_dict = dict()
+        output_dict = OrderedDict()
         decoder_output = self.get_output(x)
         if self.compute_seg:
             segmentation_features = self.seg_module(decoder_output)
             detached_segmentation_features = segmentation_features.clone().detach()
             decoder_output = torch.cat(
                 [
-                    decoder_output,
+                    self.upsampling(decoder_output),
                     detached_segmentation_features
                 ], dim=1
             )

@@ -38,30 +38,13 @@ from tests.utils import CustomTestCase
 
 input_model_list = [
     (smp.Unet,),
-    #(smp.DeepLabV3Plus,)
+    (smp.DeepLabV3Plus,),
+    (smp.FPN,),
+    (smp.PSPNet,),
+    (smp.PAN,),
 ]
 
 input_overrides_list = [
-    # (
-    #     [
-    #         "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.DeepLab101",
-    #     ],
-    # ),
-    # (
-    #     [
-    #         "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.DeepLab50",
-    #     ],
-    # ),
-    # (
-    #     [
-    #         "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.FCN101",
-    #     ],
-    # ),
-    # (
-    #     [
-    #         "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.FCN50",
-    #     ],
-    # ),
     (
         [
             "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.UNetResNet",
