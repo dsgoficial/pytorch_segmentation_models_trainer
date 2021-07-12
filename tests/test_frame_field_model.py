@@ -49,6 +49,38 @@ input_overrides_list = [
         [
             "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.UNetResNet",
         ],
+    ),(
+        [
+            "model.segmentation_model._target_=segmentation_models_pytorch.DeepLabV3Plus",
+        ],
+    ),
+]
+
+input_model_overrides_list = [
+    (
+        [
+            "model.segmentation_model._target_=segmentation_models_pytorch.Unet",
+        ],
+    ),
+    (
+        [
+            "model.segmentation_model._target_=segmentation_models_pytorch.DeepLabV3Plus",
+        ],
+    ),
+    (
+        [
+            "model.segmentation_model._target_=segmentation_models_pytorch.FPN",
+        ],
+    ),
+    (
+        [
+            "model.segmentation_model._target_=segmentation_models_pytorch.PSPNet",
+        ],
+    ),
+    (
+        [
+            "model.segmentation_model._target_=segmentation_models_pytorch.PAN",
+        ],
     ),
 ]
 
@@ -120,13 +152,14 @@ class Test_TestFrameFieldModel(CustomTestCase):
             FrameFieldSegmentationPLModel
         )
 
-    def test_train_frame_field_model(self) -> None:
+    @parameterized.expand(input_model_overrides_list)
+    def test_train_frame_field_model(self, overrides_list) -> None:
         csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
         config_path = os.path.join(os.path.abspath(current_dir), 'test_configs')
         with initialize(config_path="./test_configs"):
             cfg = compose(
                 config_name="experiment_frame_field.yaml",
-                overrides=[
+                overrides=overrides_list + [
                     'train_dataset.input_csv_path='+csv_path,
                     'train_dataset.root_dir='+frame_field_root_dir,
                     'val_dataset.input_csv_path='+csv_path,
