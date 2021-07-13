@@ -2,7 +2,7 @@
 
 - Bug fix on loss sync;
 - Custom models from Frame Field implementation (to compare training results);
-- HR-Net and HR-Net-OCR backbones;
+- New HRNet-OCR-W48 backbone;
 - Fixed bugs on new versions of pytorch-lightning;
 - Build mask from COCO dataset format;
 
