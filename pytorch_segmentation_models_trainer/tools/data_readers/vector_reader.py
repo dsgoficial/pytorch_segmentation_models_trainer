@@ -22,18 +22,22 @@ import abc
 import functools
 import operator
 import os
+from collections import defaultdict
 from dataclasses import MISSING, dataclass, field
 from enum import Enum
 from pathlib import Path
 
 import fiona
 import geopandas
+import numpy as np
 import psycopg2
 import shapely
 from bidict import bidict
 from geopandas import GeoDataFrame, GeoSeries
+from pycocotools.coco import COCO
 from shapely.geometry import (GeometryCollection, LineString, MultiLineString,
                               MultiPoint, MultiPolygon, Point, Polygon, base)
+from shapely.geometry.geo import shape
 
 
 class GeomType(Enum):
@@ -140,6 +144,57 @@ class BatchFileGeoDF:
     
     def get_geodf_item(self, key: str) -> GeoDataFrame:
         return self.vector_dict[key].get_geo_df() if key in self.vector_dict else None
+
+@dataclass
+class COCOMemoryGeoDF(GeoDF):
+    def __init__(self, annotation_list):
+        self.annotation_list = annotation_list
+        self.gdf = geopandas.GeoDataFrame.from_features(
+            geopandas.GeoSeries(self.annotation_list)
+        )
+
+    def __post_init__(self):
+        return
+
+    def get_features_from_bbox(self, x_min:float, x_max:float,\
+        y_min:float, y_max:float, only_geom: bool=True, \
+        clip_to_extent: bool=True, filter_area: float=None,\
+        use_spatial_filter: bool=True
+    ) -> GeoSeries:
+        feats = self.gdf.cx[x_min:x_max, y_min:y_max]
+        feats = feats if filter_area is None else feats[feats.area > filter_area]
+        return feats[self.gdf.geometry.name] if only_geom else feats
+
+
+@dataclass
+class COCOGeoDF:
+    file_name: str = MISSING
+
+    def __post_init__(self):
+        self.coco = COCO(self.file_name)
+        self.vector_dict = {
+            image_id: COCOMemoryGeoDF(
+                map(
+                    _build_polygon_from_annotation,
+                    self.coco.loadAnns(ids=self.coco.getAnnIds(imgIds=image_id))
+                )
+            ) for image_id in self.coco.getImgIds(catIds=self.coco.getCatIds())
+        }
+    
+    def get_geodf_item(self, key: str) -> GeoDataFrame:
+        return self.vector_dict[int(key)]
+
+
+def _build_polygon_from_annotation(annotation):
+    seg_list = annotation["segmentation"]
+    if len(seg_list) != 1:
+        print(f"len(seg_list) = {len(seg_list)}, but it should be 1.")
+        raise NotImplementedError
+    coords = np.reshape(
+        np.array(seg_list),
+        (-1, 2)
+    )
+    return Polygon(coords)
 
 def handle_features(input_features, output_type: GeomType = None, return_list: bool = False) -> list:
     if output_type is None:

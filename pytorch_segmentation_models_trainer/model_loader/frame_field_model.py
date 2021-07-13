@@ -20,8 +20,11 @@
  *   https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning/     *
  ****
 """
+from logging import log
+from collections import OrderedDict
 import torch
 import torch.nn as nn
+import segmentation_models_pytorch as smp
 from hydra.utils import instantiate
 from omegaconf.dictconfig import DictConfig
 from pytorch_segmentation_models_trainer.custom_losses.base_loss import (
@@ -43,7 +46,7 @@ class FrameFieldModel(nn.Module):
         compute_crossfield: bool = True,
         seg_params: dict = None,
         module_activation: str = None,
-        frame_field_activation: str = None,
+        frame_field_activation: str = None
     ):
         """[summary]
 
@@ -83,11 +86,15 @@ class FrameFieldModel(nn.Module):
         self.use_batchnorm = use_batchnorm
         self.frame_field_activation = frame_field_activation
         self.module_activation = module_activation
-        self.backbone_output = self.get_out_channels(
-            self.segmentation_model.decoder if self.replace_seg_head \
-                else self.segmentation_model.segmentation_head
-        )
+        if hasattr(self.segmentation_model, 'decoder'):
+            self.backbone_output = self.get_out_channels(
+                self.segmentation_model.decoder if self.replace_seg_head \
+                    else self.segmentation_model.segmentation_head
+            )
+        else:
+            self.backbone_output = self.get_out_channels(self.segmentation_model)
         self.seg_channels = sum(self.seg_params.values())
+        self.upsampling = self.get_upsampling_method()
         self.seg_module = self.get_seg_module()
         self.crossfield_module = self.get_crossfield_module()
         self.initialize()
@@ -105,8 +112,15 @@ class FrameFieldModel(nn.Module):
             torch.nn.BatchNorm2d(self.backbone_output),
             torch.nn.ELU(),
             torch.nn.Conv2d(self.backbone_output, self.seg_channels, 1),
+            self.upsampling,
             torch.nn.Sigmoid()
         )
+    
+    def get_upsampling_method(self) -> torch.nn.Module:
+        return list(self.segmentation_model.segmentation_head.children())[1] \
+            if hasattr(self.segmentation_model, 'segmentation_head') \
+                else torch.nn.Identity()
+        
 
     def get_crossfield_module(self) -> torch.nn.Sequential:
         """Prepares the crossfield module
@@ -135,17 +149,25 @@ class FrameFieldModel(nn.Module):
             torch.nn.Tanh() if self.frame_field_activation is None \
                 else instantiate(self.frame_field_activation)
         )
+    
+    def get_output(self, x):
+        if isinstance(self.segmentation_model, (smp.Unet, smp.UnetPlusPlus, smp.FPN, \
+                smp.PSPNet, smp.PAN, smp.DeepLabV3, smp.DeepLabV3Plus)):
+            encoder_feats = self.segmentation_model.encoder(x)
+            decoder_output = self.segmentation_model.decoder(*encoder_feats)
+        else:
+            decoder_output = self.segmentation_model(x)
+        return decoder_output if not isinstance(decoder_output, OrderedDict) else decoder_output['out']
 
     def forward(self, x):
-        output_dict = dict()
-        encoder_feats = self.segmentation_model.encoder(x)
-        decoder_output = self.segmentation_model.decoder(*encoder_feats)
+        output_dict = OrderedDict()
+        decoder_output = self.get_output(x)
         if self.compute_seg:
             segmentation_features = self.seg_module(decoder_output)
             detached_segmentation_features = segmentation_features.clone().detach()
             decoder_output = torch.cat(
                 [
-                    decoder_output,
+                    self.upsampling(decoder_output),
                     detached_segmentation_features
                 ], dim=1
             )
@@ -240,19 +262,6 @@ class FrameFieldSegmentationPLModel(Model):
             )
             mean_iou = torch.mean(iou)
             individual_metrics_dict[f"IoU_{iou_threshold}"] = mean_iou
-
-    def on_train_epoch_start(self) -> None:
-        if self.loss_norm_is_initializated:
-            return super().on_train_epoch_start()
-        self.model.train()  # Important for batchnorm and dropout, even in computing loss norms
-        init_dl = self.train_dataloader()
-        with torch.no_grad():
-            loss_norm_batches_min = self.cfg.loss_params.multiloss.normalization_params.min_samples // (2 * self.cfg.hyperparameters.batch_size) + 1
-            loss_norm_batches_max = self.cfg.loss_params.multiloss.normalization_params.max_samples // (2 * self.cfg.hyperparameters.batch_size) + 1
-            loss_norm_batches = max(loss_norm_batches_min, min(loss_norm_batches_max, len(init_dl)))
-            self.compute_loss_norms(init_dl, loss_norm_batches)
-        self.loss_norm_is_initializated = True
-        return super().on_train_epoch_start()
     
     def compute_loss_norms(self, dl, total_batches):
         self.loss_function.reset_norm()
@@ -298,9 +307,10 @@ class FrameFieldSegmentationPLModel(Model):
             self.compute_iou_metrics(y_pred, y_true, individual_metrics_dict)
             self.log_dict(individual_metrics_dict,\
                 prog_bar=True, on_step=True, on_epoch=True, logger=True, sync_dist=True)
-        evaluated_metrics = self.evaluate_metrics(
-            y_pred, y_true, step_type='train'
-        )
+        # evaluated_metrics = self.evaluate_metrics(
+        #     y_pred, y_true.long(), step_type='train'
+        # )
+        evaluated_metrics = self.train_metrics(y_pred, y_true.long())
         tensorboard_logs = {k: {'train': v} for k, v in evaluated_metrics.items()}
         tensorboard_logs.update(
             {
@@ -325,9 +335,10 @@ class FrameFieldSegmentationPLModel(Model):
             self.compute_iou_metrics(y_pred, y_true, individual_metrics_dict)
             self.log_dict(individual_metrics_dict, prog_bar=True, \
                 on_step=False, on_epoch=True, logger=True, sync_dist=True)
-        evaluated_metrics = self.evaluate_metrics(
-            y_pred, y_true, step_type='val'
-        )
+        # evaluated_metrics = self.evaluate_metrics(
+        #     y_pred, y_true.long(), step_type='val'
+        # )
+        evaluated_metrics = self.val_metrics(y_pred, y_true.long())
         tensorboard_logs = {k: {'val': v} for k, v in evaluated_metrics.items()}
         tensorboard_logs.update(
             {
@@ -338,7 +349,7 @@ class FrameFieldSegmentationPLModel(Model):
         self.log_dict(
             evaluated_metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True, logger=False
         )
-        self.log('validation_loss', loss, on_step=False, on_epoch=True, sync_dist=True)
+        self.log('validation_loss', loss, on_step=True, on_epoch=True, sync_dist=True)
         return {'val_loss': loss, 'log': tensorboard_logs}
 
     def training_epoch_end(self, outputs):
@@ -350,12 +361,12 @@ class FrameFieldSegmentationPLModel(Model):
         tensorboard_logs.update(
             {
                 'avg_'+name: {
-                    'train': torch.stack([x['log'][name]['train'] for x in outputs]).mean()
-                } for name in outputs[0]['log'].keys() if name not in self.train_metrics.keys()
+                    'train': torch.stack([x['log'][name]['train'] for x in outputs]).mean().detach()
+                } for name in outputs[0]['log'].keys() if name not in list(map('train_{0}'.format,self.train_metrics.keys()))
             }
         )
-        return {'avg_train_loss': avg_loss,
-                'log': tensorboard_logs}
+        self.log_dict(tensorboard_logs, logger=True)
+        self.log('avg_train_loss', avg_loss, logger=True)
 
     def validation_epoch_end(self, outputs):
         # OPTIONAL
@@ -367,9 +378,9 @@ class FrameFieldSegmentationPLModel(Model):
         tensorboard_logs.update(
             {
                 'avg_'+name: {
-                    'val': torch.stack([x['log'][name]['val'] for x in outputs]).mean()
-                } for name in outputs[0]['log'].keys() if name not in self.val_metrics.keys()
+                    'val': torch.stack([x['log'][name]['val'] for x in outputs]).mean().detach()
+                } for name in outputs[0]['log'].keys() if name not in self.train_metrics.keys()
             }
         )
-        return {'avg_val_loss': avg_loss,
-                'log': tensorboard_logs}
+        self.log_dict(tensorboard_logs, logger=True)
+        self.log('avg_train_loss', avg_loss, logger=True)

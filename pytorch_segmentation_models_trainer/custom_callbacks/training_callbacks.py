@@ -49,7 +49,7 @@ class WarmupCallback(pl.callbacks.base.Callback):
             )
             pl_module.set_encoder_trainable(trainable=False)
 
-    def on_train_epoch_end(self, trainer, pl_module, unused):
+    def on_train_epoch_end(self, trainer, pl_module):
         if self.warmed_up:
             return
         if trainer.current_epoch >= self.warmup_epochs - 1:
@@ -59,3 +59,20 @@ class WarmupCallback(pl.callbacks.base.Callback):
             )
             pl_module.set_encoder_trainable(trainable=True)
             self.warmed_up=True
+
+class FrameFieldComputeWeightNormLossesCallback(pl.callbacks.base.Callback):
+    def __init__(self) -> None:
+        super().__init__()
+        self.loss_norm_is_initializated = False
+    
+    def on_train_epoch_start(self, trainer, pl_module) -> None:
+        if self.loss_norm_is_initializated or trainer.current_epoch > 1:
+            return
+        pl_module.model.train()  # Important for batchnorm and dropout, even in computing loss norms
+        init_dl = pl_module.train_dataloader()
+        with torch.no_grad():
+            loss_norm_batches_min = pl_module.cfg.loss_params.multiloss.normalization_params.min_samples // (2 * pl_module.cfg.hyperparameters.batch_size) + 1
+            loss_norm_batches_max = pl_module.cfg.loss_params.multiloss.normalization_params.max_samples // (2 * pl_module.cfg.hyperparameters.batch_size) + 1
+            loss_norm_batches = max(loss_norm_batches_min, min(loss_norm_batches_max, len(init_dl)))
+            pl_module.compute_loss_norms(init_dl, loss_norm_batches)
+        self.loss_norm_is_initializated = True

@@ -133,3 +133,27 @@ class Test_TestBuildMask(unittest.TestCase):
                 expected_df.reset_index(drop=True),
                 output_df.reset_index(drop=True)
             )
+    
+    def test_build_masks_coco(self):
+        with initialize(config_path="./test_configs"):
+            image_dir = os.path.join(root_dir, 'data', 'build_masks_data', 'coco_images')
+            expected_output_path = os.path.join(root_dir, 'expected_outputs', 'build_masks')
+            cfg = compose(
+                config_name="build_coco_mask.yaml",
+                overrides=[
+                    'root_dir='+self.output_dir,
+                    'output_csv_path='+self.output_dir,
+                    'image_root_dir='+image_dir,
+                    'geo_df.file_name='+os.path.join(
+                        root_dir, 'data', 'build_masks_data', 'annotation.json'
+                    )
+                ]
+            )
+            print(cfg)
+            csv_output = build_masks(cfg)
+            expected_df = pd.read_csv(os.path.join(expected_output_path, 'coco_dataset.csv')).sort_values('image')
+            output_df = pd.read_csv(csv_output).sort_values('image')
+            pd.testing.assert_frame_equal(
+                expected_df.reset_index(drop=True),
+                output_df.reset_index(drop=True)
+            )

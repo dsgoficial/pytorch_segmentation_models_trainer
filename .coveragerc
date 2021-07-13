@@ -1,2 +1,5 @@
 [run]
 source=pytorch_segmentation_models_trainer
+omit=
+    pytorch_segmentation_models_trainer/custom_models/*
+    */pytorch_segmentation_models_trainer/custom_models/*

@@ -20,6 +20,7 @@
 """
 import albumentations as A
 import pytorch_lightning as pl
+import torchmetrics
 import torch
 import torch.nn as nn
 from hydra.utils import instantiate
@@ -43,8 +44,13 @@ class Model(pl.LightningModule):
         self.train_ds = instantiate(self.cfg.train_dataset)
         self.val_ds = instantiate(self.cfg.val_dataset)
         self.loss_function = self.get_loss_function()
-        self.train_metrics = self.get_metrics()
-        self.val_metrics = self.get_metrics()
+        metrics = torchmetrics.MetricCollection(
+            [instantiate(i) for i in self.cfg.metrics]
+        )
+        self.train_metrics = metrics.clone(prefix='train_')
+        self.val_metrics = metrics.clone(prefix='val_')
+        # self.train_metrics = self.get_metrics()
+        # self.val_metrics = self.get_metrics()
         self.gpu_train_transform = None if 'gpu_augmentation_list' not in self.cfg.train_dataset \
             else self.get_gpu_augmentations(self.cfg.train_dataset.gpu_augmentation_list)
         self.gpu_val_transform = None if 'gpu_augmentation_list' not in self.cfg.val_dataset \
@@ -72,12 +78,11 @@ class Model(pl.LightningModule):
     def evaluate_metrics(self, predicted_masks, masks, step_type='train'):
         if step_type not in ['train', 'val']:
             raise NotImplementedError
+        iterate_dict = self.train_metrics if step_type == 'train' \
+            else self.val_metrics
         return {
             name: metric(predicted_masks, masks) \
-                for name, metric in self.train_metrics.items()
-        } if step_type == 'train' else {
-            name: metric(predicted_masks, masks) \
-                for name, metric in self.val_metrics.items()
+                for name, metric in iterate_dict.items()
         }
 
     def get_loss_function(self):
@@ -150,9 +155,10 @@ class Model(pl.LightningModule):
         masks = masks.long()
         predicted_masks = self(images)
         loss = self.loss_function(predicted_masks, masks)
-        evaluated_metrics = self.evaluate_metrics(
-            predicted_masks, masks, step_type='train'
-        )
+        # evaluated_metrics = self.evaluate_metrics(
+        #     predicted_masks, masks, step_type='train'
+        # )
+        evaluated_metrics = self.train_metrics(predicted_masks, masks)
         tensorboard_logs = {k: {'train': v} for k, v in evaluated_metrics.items()}
         # use log_dict instead of log
         self.log_dict(
@@ -165,21 +171,22 @@ class Model(pl.LightningModule):
         masks = masks.long()
         predicted_masks = self(images)
         loss = self.loss_function(predicted_masks, masks)
-        evaluated_metrics = self.evaluate_metrics(
-            predicted_masks, masks, step_type='val'
-        )
+        # evaluated_metrics = self.evaluate_metrics(
+        #     predicted_masks, masks, step_type='val'
+        # )
+        evaluated_metrics = self.val_metrics(predicted_masks, masks)
         tensorboard_logs = {k: {'val': v} for k, v in evaluated_metrics.items()}
         # use log_dict instead of log
         self.log_dict(
-            evaluated_metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, logger=False
+            evaluated_metrics, on_step=True, on_epoch=True, prog_bar=True, logger=False
         )
-        self.log('validation_loss', loss, on_step=True, on_epoch=True, sync_dist=True)
+        self.log('validation_loss', loss, on_step=True, on_epoch=True)
         return {'val_loss': loss, 'log': tensorboard_logs}
     
     def compute_average_metrics(self, outputs, metric_dict, step_type='train'):
         return {
             'avg_'+name: {
-                step_type: torch.stack([x['log'][name][step_type] for x in outputs]).mean()
+                step_type: torch.stack([x['log'][name if step_type in name else f'{step_type}_'+name][step_type] for x in outputs]).mean()
             } for name in metric_dict.keys()
         }
     
@@ -189,8 +196,8 @@ class Model(pl.LightningModule):
         tensorboard_logs.update(
             self.compute_average_metrics(outputs, self.train_metrics)
         )
-        return {'avg_train_loss': avg_loss,
-                'log': tensorboard_logs}
+        self.log_dict(tensorboard_logs, logger=True)
+        self.log('avg_train_loss', avg_loss, logger=True)
 
     def validation_epoch_end(self, outputs):
         # OPTIONAL

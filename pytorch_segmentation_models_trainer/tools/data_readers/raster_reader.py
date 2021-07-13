@@ -172,6 +172,8 @@ class RasterFile:
                 else min(raster_dict[key].shape)
             output = os.path.join(path, subfolders, output_filename+'.'+output_extension)
             profile['dtype'] = raster_dict[key].dtype
+            if 'photometric' in profile:
+                profile.pop('photometric')
             with rasterio.open(output, 'w', **profile) as out:
                 if len(raster_dict[key].shape) == 2:
                     out.write(raster_dict[key], 1)

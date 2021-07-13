@@ -1,3 +1,11 @@
+# Version 0.7.0
+
+- Bug fix on loss sync;
+- Custom models from Frame Field implementation (to compare training results);
+- New HRNet-OCR-W48 backbone;
+- Fixed bugs on new versions of pytorch-lightning;
+- Build mask from COCO dataset format;
+
 # Version 0.6.0
 
 - Polygon inference
