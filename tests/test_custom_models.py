@@ -32,20 +32,23 @@ from parameterized import parameterized
 from pytorch_segmentation_models_trainer.custom_models import models
 
 input_model_list = [
-    (models.DeepLab101, torch.Size([2, 128, 256, 256])),
-    (models.DeepLab50, torch.Size([2, 128, 256, 256])),
-    (models.FCN101, torch.Size([2, 256, 256, 256])),
-    (models.FCN50, torch.Size([2, 256, 256, 256])),
-    (models.UNetResNet, torch.Size([2, 32, 256, 256])),
-    (models.HRNetOCRW48, torch.Size([2, 1, 64, 64]))
+    (models.DeepLab101, {}, torch.Size([2, 128, 256, 256])),
+    (models.DeepLab50, {}, torch.Size([2, 128, 256, 256])),
+    (models.FCN101, {}, torch.Size([2, 256, 256, 256])),
+    (models.FCN50, {}, torch.Size([2, 256, 256, 256])),
+    (models.UNetResNet, {}, torch.Size([2, 32, 256, 256])),
+    (models.HRNetOCRW48, {}, torch.Size([2, 1, 64, 64])),
+    (models.HRNetOCRW48, {'pretrained': 'cityscapes'}, torch.Size([2, 19, 64, 64])),
+    (models.HRNetOCRW48, {'pretrained': 'lip'}, torch.Size([2, 20, 64, 64])),
+    (models.HRNetOCRW48, {'pretrained': 'pascal'}, torch.Size([2, 59, 64, 64])),
 ]
 
 class Test_TestCustomModels(unittest.TestCase):
     
 
     @parameterized.expand(input_model_list)
-    def test_create_inference_from_model(self, input_model, expected_output_shape) -> None:
-        model = input_model()
+    def test_create_inference_from_model(self, input_model, model_args, expected_output_shape) -> None:
+        model = input_model(**model_args)
         sample = torch.ones([2, 3, 256, 256])
         with torch.no_grad():
             out = model(sample)

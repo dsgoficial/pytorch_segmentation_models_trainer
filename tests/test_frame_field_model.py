@@ -33,15 +33,21 @@ from parameterized import parameterized
 from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
     FrameFieldModel, FrameFieldSegmentationPLModel)
 from pytorch_segmentation_models_trainer.train import train
+from pytorch_segmentation_models_trainer.custom_models import models as pytorch_smt_cm
 
 from tests.utils import CustomTestCase
 
 input_model_list = [
-    (smp.Unet,),
-    (smp.DeepLabV3Plus,),
-    (smp.FPN,),
-    (smp.PSPNet,),
-    (smp.PAN,),
+    (smp.Unet, {},),
+    (smp.DeepLabV3Plus, {},),
+    (smp.FPN, {},),
+    (smp.PSPNet, {},),
+    (smp.PAN, {},),
+    (pytorch_smt_cm.UNetResNet, {},),
+    (pytorch_smt_cm.HRNetOCRW48, {},),
+    (pytorch_smt_cm.HRNetOCRW48, {'pretrained': 'cityscapes'},),
+    (pytorch_smt_cm.HRNetOCRW48, {'pretrained': 'lip'},),
+    (pytorch_smt_cm.HRNetOCRW48, {'pretrained': 'pascal'},),
 ]
 
 input_overrides_list = [
@@ -49,9 +55,16 @@ input_overrides_list = [
         [
             "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.UNetResNet",
         ],
-    ),(
+    ),
+    (
         [
-            "model.segmentation_model._target_=segmentation_models_pytorch.DeepLabV3Plus",
+            "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.HRNetOCRW48",
+        ],
+    ),
+    (
+        [
+            "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.HRNetOCRW48",
+            "+model.segmentation_model.pretrained=cityscapes"
         ],
     ),
 ]
@@ -111,8 +124,8 @@ class Test_TestFrameFieldModel(CustomTestCase):
         return True
 
     @parameterized.expand(input_model_list)
-    def test_create_inference_from_model(self, input_model) -> None:
-        model = input_model()
+    def test_create_inference_from_model(self, input_model, model_args) -> None:
+        model = input_model(**model_args)
         frame_field_model = FrameFieldModel(
             model
         )

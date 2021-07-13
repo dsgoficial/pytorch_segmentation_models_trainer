@@ -140,3 +140,5 @@ htmlcov/
 .coverage
 .coverage.*
 .cache
+
+*.pth

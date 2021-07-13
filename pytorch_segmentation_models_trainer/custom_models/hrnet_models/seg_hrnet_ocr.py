@@ -22,7 +22,6 @@ import torch.nn.functional as F
 
 from .bn_helper import relu_inplace
 
-ALIGN_CORNERS = True
 BN_MOMENTUM = 0.1
 logger = logging.getLogger(__name__)
 
@@ -85,11 +84,13 @@ class _ObjectAttentionBlock(nn.Module):
                  in_channels, 
                  key_channels, 
                  scale=1, 
-                 bn_type=None):
+                 bn_type=None,
+                 align_corners=True):
         super(_ObjectAttentionBlock, self).__init__()
         self.scale = scale
         self.in_channels = in_channels
         self.key_channels = key_channels
+        self.align_corners = align_corners
         self.pool = nn.MaxPool2d(kernel_size=(scale, scale))
         self.f_pixel = nn.Sequential(
             nn.Conv2d(in_channels=self.in_channels, out_channels=self.key_channels,
@@ -139,7 +140,7 @@ class _ObjectAttentionBlock(nn.Module):
         context = context.view(batch_size, self.key_channels, *x.size()[2:])
         context = self.f_up(context)
         if self.scale > 1:
-            context = F.interpolate(input=context, size=(h, w), mode='bilinear', align_corners=ALIGN_CORNERS)
+            context = F.interpolate(input=context, size=(h, w), mode='bilinear', align_corners=self.align_corners)
 
         return context
 
@@ -149,11 +150,13 @@ class ObjectAttentionBlock2D(_ObjectAttentionBlock):
                  in_channels, 
                  key_channels, 
                  scale=1, 
-                 bn_type=None):
+                 bn_type=None,
+                 align_corners=True):
         super(ObjectAttentionBlock2D, self).__init__(in_channels,
                                                      key_channels,
                                                      scale, 
-                                                     bn_type=bn_type)
+                                                     bn_type=bn_type,
+                                                     align_corners=align_corners)
 
 
 class SpatialOCR_Module(nn.Module):
@@ -167,12 +170,14 @@ class SpatialOCR_Module(nn.Module):
                  out_channels, 
                  scale=1, 
                  dropout=0.1, 
-                 bn_type=None):
+                 bn_type=None,
+                 align_corners=True):
         super(SpatialOCR_Module, self).__init__()
         self.object_context_block = ObjectAttentionBlock2D(in_channels, 
                                                            key_channels, 
                                                            scale, 
-                                                           bn_type)
+                                                           bn_type,
+                                                           align_corners=align_corners)
         _in_channels = 2 * in_channels
 
         self.conv_bn_dropout = nn.Sequential(
@@ -264,7 +269,7 @@ class Bottleneck(nn.Module):
 
 class HighResolutionModule(nn.Module):
     def __init__(self, num_branches, blocks, num_blocks, num_inchannels,
-                 num_channels, fuse_method, multi_scale_output=True):
+                 num_channels, fuse_method, multi_scale_output=True, align_corners=True):
         super(HighResolutionModule, self).__init__()
         self._check_branches(
             num_branches, blocks, num_blocks, num_inchannels, num_channels)
@@ -279,6 +284,7 @@ class HighResolutionModule(nn.Module):
             num_branches, blocks, num_blocks, num_channels)
         self.fuse_layers = self._make_fuse_layers()
         self.relu = nn.ReLU(inplace=relu_inplace)
+        self.align_corners = align_corners
 
     def _check_branches(self, num_branches, blocks, num_blocks,
                         num_inchannels, num_channels):
@@ -401,7 +407,7 @@ class HighResolutionModule(nn.Module):
                     y = y + F.interpolate(
                         self.fuse_layers[i][j](x[j]),
                         size=[height_output, width_output],
-                        mode='bilinear', align_corners=ALIGN_CORNERS)
+                        mode='bilinear', align_corners=self.align_corners)
                 else:
                     y = y + self.fuse_layers[i][j](x[j])
             x_fuse.append(self.relu(y))
@@ -495,6 +501,7 @@ class HRNetOCR(nn.Module):
                                                  out_channels=ocr_mid_channels,
                                                  scale=self.ocr.scale,
                                                  dropout=self.ocr.dropout,
+                                                 align_corners=self.align_corners
                                                  )
         self.cls_head = nn.Conv2d(
             ocr_mid_channels, self.n_classes, kernel_size=1, stride=1, padding=0, bias=True)
@@ -582,7 +589,8 @@ class HRNetOCR(nn.Module):
                                      num_inchannels,
                                      num_channels,
                                      fuse_method,
-                                     reset_multi_scale_output)
+                                     reset_multi_scale_output,
+                                     align_corners=self.align_corners)
             )
             num_inchannels = modules[-1].get_num_inchannels()
 

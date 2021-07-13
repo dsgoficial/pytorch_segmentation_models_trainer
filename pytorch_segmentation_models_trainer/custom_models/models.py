@@ -32,9 +32,14 @@ import torchvision
 from hydra.core.config_store import ConfigStore
 from hydra.utils import instantiate
 from omegaconf import MISSING, DictConfig, OmegaConf
+from segmentation_models_pytorch.base import SegmentationHead
+from segmentation_models_pytorch.base import initialization as init
 from pytorch_segmentation_models_trainer.custom_models.utils import \
     _SimpleSegmentationModel
 from pytorch_segmentation_models_trainer.custom_models.hrnet_models import seg_hrnet_ocr
+from torchvision.datasets.utils import download_url
+
+current_dir = os.path.dirname(__file__)
 
 @dataclass
 class DeepLab101SegmentationBackbone:
@@ -135,16 +140,62 @@ class UNetResNet(BaseSegmentationModel):
         super(UNetResNet, self).__post_init__()
 
 class HRNetOCRW48(torch.nn.Module):
-    def __init__(self, features=256):
+    pretrained_weights_names = {
+        'cityscapes' : 'hrnet_ocr_w48_cityscapes',
+        'lip' : 'hrnet_ocr_w48_lip',
+        'pascal' : 'hrnet_ocr_w48_pascal',
+    }
+    pretrained_weights_download_links = {
+        'cityscapes': 'https://github.com/hsfzxjy/models.storage/releases/download/HRNet-OCR/hrnet_ocr_cs_trainval_8227_torch11.pth',
+        'lip': 'https://github.com/hsfzxjy/models.storage/releases/download/HRNet-OCR/hrnet_ocr_lip_5648_torch04.pth',
+        'pascal': 'https://github.com/hsfzxjy/models.storage/releases/download/HRNet-OCR/hrnet_ocr_pascal_ctx_5618_torch11.pth'
+    }
+    pretrained_dataset_outputs = {
+        'cityscapes' : 19,
+        'lip' : 20,
+        'pascal' : 59,
+    }
+    def __init__(self, in_channels=3, classes=1, upsampling=4, activation=None, pretrained=None):
         super(HRNetOCRW48, self).__init__()
         self.cfg = OmegaConf.load(
-            os.path.join(os.path.dirname(__file__), "hrnet_models", "conf", "hrnet_ocr_w48.yml")
+            os.path.join(current_dir, "hrnet_models", "conf", "hrnet_ocr_w48.yml")
         )
+        self.cfg.n_classes = self.pretrained_dataset_outputs[pretrained] \
+            if pretrained is not None and pretrained in self.pretrained_dataset_outputs \
+                else self.cfg.n_classes
+        self.out_channels = self.cfg.n_classes
         self.backbone = instantiate(self.cfg)
-        self.backbone.init_weights(self.cfg.pretrained)
+        self.segmentation_head = SegmentationHead(
+            in_channels=self.cfg.n_classes,
+            out_channels=classes,
+            activation=activation,
+            kernel_size=1,
+            upsampling=upsampling,
+        )
+        pretrained_weights = self.get_pretrained_weights(pretrained) if pretrained is not None \
+            else self.cfg.pretrained
+
+        self.backbone.init_weights(pretrained_weights)
+        init.initialize_head(self.segmentation_head)
     
-    def forward(self, x):
-        return self.backbone(x)['out']
+    def get_pretrained_weights(self, pretrained):
+        if pretrained not in self.pretrained_weights_names:
+            raise RuntimeError("Invalid weight. Allowed values are cityscapes, lip and pascal")
+        root_name = os.path.join(current_dir, 'pretrained')
+        file_name = f'{self.pretrained_weights_names[pretrained]}.pth'
+        weight_file = os.path.join(root_name, file_name)
+        if os.path.isfile(weight_file):
+            return weight_file
+        download_url(
+            url=self.pretrained_weights_download_links[pretrained],
+            root=root_name,
+            filename=file_name    
+        )
+        return weight_file
+    
+    def forward(self, x, apply_segmentation_head=False):
+        return self.backbone(x)['out'] if not apply_segmentation_head \
+            else self.segmentation_head(self.backbone(x)['out'])
 
 if __name__ == "__main__":
     x = HRNetOCRW48()
