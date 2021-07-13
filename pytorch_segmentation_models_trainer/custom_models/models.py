@@ -19,6 +19,7 @@
  ****
 """
 
+import os
 import dataclasses
 import logging
 from collections import OrderedDict
@@ -33,7 +34,7 @@ from hydra.utils import instantiate
 from omegaconf import MISSING, DictConfig, OmegaConf
 from pytorch_segmentation_models_trainer.custom_models.utils import \
     _SimpleSegmentationModel
-
+from pytorch_segmentation_models_trainer.custom_models.hrnet_models import seg_hrnet_ocr
 
 @dataclass
 class DeepLab101SegmentationBackbone:
@@ -48,20 +49,17 @@ class DeepLab50SegmentationBackbone:
     pretrained: bool = True
     num_classes: int = 21
 
-
 @dataclass
 class FCN101SegmentationBackbone:
     _target_: str = "torchvision.models.segmentation.fcn_resnet101"
     pretrained: bool = True
     num_classes: int = 21
 
-
 @dataclass
 class FCN50SegmentationBackbone:
     _target_: str = "torchvision.models.segmentation.fcn_resnet50"
     pretrained: bool = True
     num_classes: int = 21
-
 
 @dataclass
 class UNetResNetSegmentationBackbone:
@@ -71,8 +69,7 @@ class UNetResNetSegmentationBackbone:
     dropout_2d: float = 0.2
     pretrained: bool = True
     is_deconv: bool = False
-    
-    
+
 class BaseSegmentationModel(torch.nn.Module):
     def __init__(self, backbone, output_conv_kernel=None, features=1):
         super(BaseSegmentationModel, self).__init__()
@@ -136,3 +133,19 @@ class UNetResNet(BaseSegmentationModel):
         super(UNetResNet, self).__init__(backbone=UNetResNetSegmentationBackbone,
                                          output_conv_kernel=None, features=features)
         super(UNetResNet, self).__post_init__()
+
+class HRNetOCRW48(torch.nn.Module):
+    def __init__(self, features=256):
+        super(HRNetOCRW48, self).__init__()
+        self.cfg = OmegaConf.load(
+            os.path.join(os.path.dirname(__file__), "hrnet_models", "conf", "hrnet_ocr_w48.yml")
+        )
+        self.backbone = instantiate(self.cfg)
+        self.backbone.init_weights(self.cfg.pretrained)
+    
+    def forward(self, x):
+        return self.backbone(x)['out']
+
+if __name__ == "__main__":
+    x = HRNetOCRW48()
+    print(x)
