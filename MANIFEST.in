@@ -1,0 +1,1 @@
+recursive-include pytorch_segmentation_models_trainer *.yml

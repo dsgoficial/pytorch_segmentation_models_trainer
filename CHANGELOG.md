@@ -1,3 +1,7 @@
+# Version 0.7.1
+
+- Added MANIFEST.in to include missing yml on pypi packaging.
+
 # Version 0.7.0
 
 - Bug fix on loss sync;
