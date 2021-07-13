@@ -54,17 +54,14 @@ input_overrides_list = [
     (
         [
             "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.UNetResNet",
+            "hyperparameters.epochs=1",
         ],
     ),
     (
         [
             "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.HRNetOCRW48",
-        ],
-    ),
-    (
-        [
-            "model.segmentation_model._target_=pytorch_segmentation_models_trainer.custom_models.models.HRNetOCRW48",
-            "+model.segmentation_model.pretrained=cityscapes"
+            "+model.segmentation_model.pretrained=cityscapes",
+            "hyperparameters.epochs=1",
         ],
     ),
 ]
@@ -73,26 +70,31 @@ input_model_overrides_list = [
     (
         [
             "model.segmentation_model._target_=segmentation_models_pytorch.Unet",
+            "hyperparameters.epochs=1",
         ],
     ),
     (
         [
             "model.segmentation_model._target_=segmentation_models_pytorch.DeepLabV3Plus",
+            "hyperparameters.epochs=1",
         ],
     ),
     (
         [
             "model.segmentation_model._target_=segmentation_models_pytorch.FPN",
+            "hyperparameters.epochs=1",
         ],
     ),
     (
         [
             "model.segmentation_model._target_=segmentation_models_pytorch.PSPNet",
+            "hyperparameters.epochs=1",
         ],
     ),
     (
         [
             "model.segmentation_model._target_=segmentation_models_pytorch.PAN",
+            "hyperparameters.epochs=1",
         ],
     ),
 ]

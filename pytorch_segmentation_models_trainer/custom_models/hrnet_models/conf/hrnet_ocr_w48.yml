@@ -1,5 +1,5 @@
 _target_: "pytorch_segmentation_models_trainer.custom_models.hrnet_models.seg_hrnet_ocr.HRNetOCR"
-n_classes: 19
+n_classes: 1
 pretrained: ""
 extra:
   final_conv_kernel: 1
