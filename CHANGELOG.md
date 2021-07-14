@@ -1,3 +1,7 @@
+# Version 0.7.2
+
+- Changed the versions of pytorch and torchvision.
+
 # Version 0.7.1
 
 - Added MANIFEST.in to include missing yml on pypi packaging.
