@@ -1,6 +1,6 @@
 _target_: "pytorch_segmentation_models_trainer.tools.mask_building.mask_builder.COCOMaskBuilder"
 geo_df:
-  _target_: "pytorch_segmentation_models_trainer.tools.data_readers.vector_reader.COCOGeoDF"
+  _target_: "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.COCOGeoDF"
   file_name: "../tests/testing_data/data/build_masks_data/annotation.json"
 root_dir: '/data'
 output_csv_path: '/data'

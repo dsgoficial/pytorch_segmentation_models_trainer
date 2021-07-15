@@ -30,9 +30,9 @@ from parameterized import parameterized
 from sqlalchemy import create_engine
 import psycopg2
 from pytorch_segmentation_models_trainer.build_mask import build_masks
-from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import (
+from pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader import (
     MaskOutputTypeEnum, RasterFile)
-from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
+from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import (
     FileGeoDF, GeomTypeEnum)
 from pytorch_segmentation_models_trainer.tools.mask_building.mask_builder import (
     MaskBuilder, build_destination_dirs)

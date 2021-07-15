@@ -29,7 +29,7 @@ import numpy as np
 import rasterio
 from bidict import bidict
 from geopandas.geoseries import GeoSeries
-from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
+from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import (
     GeoDF, GeomType, GeomTypeEnum, handle_features)
 from pytorch_segmentation_models_trainer.utils.os_utils import create_folder
 from pytorch_segmentation_models_trainer.utils.polygon_utils import (

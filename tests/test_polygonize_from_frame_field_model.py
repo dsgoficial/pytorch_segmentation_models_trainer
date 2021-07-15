@@ -24,7 +24,7 @@ import os
 from pytorch_segmentation_models_trainer.utils.polygon_utils import polygons_to_world_coords
 
 import rasterio
-from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import save_to_file
+from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import save_to_file
 import unittest
 
 import hydra

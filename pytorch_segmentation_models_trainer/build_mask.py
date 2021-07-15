@@ -21,7 +21,7 @@
 import logging
 import os
 from dataclasses import dataclass, field
-from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import MaskOutputTypeEnum
+from pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader import MaskOutputTypeEnum
 from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import Executor
 from typing import Any, List
 

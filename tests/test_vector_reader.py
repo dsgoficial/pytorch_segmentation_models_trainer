@@ -26,7 +26,7 @@ from pathlib import Path
 import geopandas
 from geopandas.testing import geom_equals, geom_almost_equals
 from parameterized import parameterized
-from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
+from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import (
     BatchFileGeoDF, COCOGeoDF, FileGeoDF, GeomTypeEnum, handle_features,
     handle_geometry)
 from shapely.geometry import LinearRing, LineString, Polygon

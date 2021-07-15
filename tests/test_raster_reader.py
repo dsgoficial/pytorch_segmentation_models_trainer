@@ -23,9 +23,9 @@ import os
 import unittest
 
 from parameterized import parameterized
-from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import \
+from pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader import \
     RasterFile, MaskOutputTypeEnum
-from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import \
+from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import \
     FileGeoDF, GeomTypeEnum
 from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
                                                                 hash_file,

@@ -29,9 +29,9 @@ from typing import Any, List
 
 import rasterio
 from omegaconf import MISSING, DictConfig, OmegaConf
-from pytorch_segmentation_models_trainer.tools.data_readers.raster_reader import (
+from pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader import (
     DatasetEntry, MaskOutputType, RasterFile)
-from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
+from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import (
     FileGeoDF, GeoDF, GeomType, GeomTypeEnum)
 from pytorch_segmentation_models_trainer.utils.os_utils import \
     make_path_relative
@@ -97,12 +97,12 @@ class VectorReaderConfig:
 
 @dataclass
 class FileGeoDFConfig:
-    _target_: str = "pytorch_segmentation_models_trainer.tools.data_readers.vector_reader.FileGeoDF"
+    _target_: str = "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.FileGeoDF"
     file_name: str = "../tests/testing_data/data/vectors/test_polygons.geojson"
 
 @dataclass
 class PostgisConfig(VectorReaderConfig):
-    _target_: str = "pytorch_segmentation_models_trainer.tools.data_readers.vector_reader.PostgisGeoDF"
+    _target_: str = "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.PostgisGeoDF"
     database: str = "dataset_mestrado"
     sql: str = "select id, geom from buildings"
     user: str = "postgres"
@@ -112,13 +112,13 @@ class PostgisConfig(VectorReaderConfig):
 
 @dataclass
 class BatchFileGeoDFConfig(VectorReaderConfig):
-    _target_: str = "pytorch_segmentation_models_trainer.tools.data_readers.vector_reader.BatchFileGeoDF"
+    _target_: str = "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.BatchFileGeoDF"
     root_dir: str = "../tests/testing_data/data/vectors"
     file_extension: str = "geojson"
 
 @dataclass
 class COCOGeoDFConfig(VectorReaderConfig):
-    _target_: str = "pytorch_segmentation_models_trainer.tools.data_readers.vector_reader.COCOGeoDF"
+    _target_: str = "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.COCOGeoDF"
     file_name: str = MISSING
 
 @dataclass
