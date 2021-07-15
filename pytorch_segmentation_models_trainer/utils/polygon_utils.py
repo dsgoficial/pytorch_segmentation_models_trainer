@@ -24,6 +24,7 @@ import math
 
 import cv2 as cv
 import numpy as np
+import pyproj
 import shapely
 import skimage
 import skimage.morphology
@@ -46,12 +47,26 @@ def _draw_circle(draw, center, radius, fill):
                   center[0] + radius,
                   center[1] + radius], fill=fill, outline=None)
 
-def polygons_to_pixel_coords(polygons, transform):
+def polygons_to_pixel_coords(polygons, transform, crs):
     item_list = []
     for polygon in polygons:
         item_list += polygon.geoms if polygon.geom_type == 'MultiPolygon' else [polygon]
     return [
         np.array([~transform * point for point in np.array(polygon.exterior.coords)]) for polygon in item_list
+    ]
+
+def polygons_to_world_coords(polygons, transform, epsg_number):
+    item_list = []
+    # base_crs = pyproj.CRS('EPSG:4326')
+    # destination_crs = pyproj.CRS(f'EPSG:{epsg_number}')
+    # project = pyproj.Transformer.from_crs(base_crs, destination_crs, always_xy=True).transform
+    # project_func = lambda x: shapely.ops.transform(project, x)
+    for polygon in polygons:
+        item_list += polygon.geoms if polygon.geom_type == 'MultiPolygon' else [polygon]
+    return [
+        shapely.geometry.asPolygon(
+            np.array([transform * point for point in np.array(polygon.exterior.coords)])
+        ) for polygon in item_list
     ]
 
 def build_crossfield(polygons, shape, transform, line_width=2):

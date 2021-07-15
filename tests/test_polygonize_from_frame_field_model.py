@@ -21,6 +21,9 @@
 """
 
 import os
+from pytorch_segmentation_models_trainer.utils.polygon_utils import polygons_to_world_coords
+
+import rasterio
 from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import save_to_file
 import unittest
 
@@ -213,7 +216,13 @@ class Test_TestPolygonize(unittest.TestCase):
         )
 
         polygons = out_contours_batch[0]
-        save_to_file(polygons, base_filepath=self.output_dir, name='output_poly_real_skeleton', driver='GeoJSON')
+        raster_ds = rasterio.open(frame_field_ds[0]['path'])
+        transform = raster_ds.transform
+        crs = raster_ds.crs
+        raster_ds.close()
+        projected_polygons = polygons_to_world_coords(polygons, transform, epsg_number=crs.to_epsg())
+
+        save_to_file(projected_polygons, base_filepath=self.output_dir, name='output_poly_real_skeleton', driver='GeoJSON', crs=f"EPSG:{crs.to_epsg()}")
 
         filepath = os.path.join(self.output_dir, "output_poly_real_skeleton.png")
         crossfield_plot.save_poly_viz(frame_field_ds[0]['image'], polygons, filepath, linewidths=0.5, draw_vertices=True, crossfield=crossfield.squeeze(0))

@@ -1,0 +1,113 @@
+# @package _group_
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.frame_field_model.FrameFieldSegmentationPLModel
+
+model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.frame_field_model.FrameFieldModel
+  segmentation_model:
+    _target_: segmentation_models_pytorch.Unet
+    encoder_name: ${backbone.name}
+    encoder_weights: imagenet
+    in_channels: 3
+    classes: ${hyperparameters.classes}
+    activation: 'sigmoid'
+  seg_params: ${seg_params}
+  compute_seg: ${compute_seg)
+  compute_crossfield: ${compute_crossfield}
+
+compute_seg: true
+compute_crossfield: true
+device: "cuda"
+
+seg_params:
+  compute_interior: true
+  compute_edge: true
+  compute_vertex: false
+
+loss_params:
+  multiloss:
+    normalization_params:
+      min_samples: 10
+      max_samples: 40000
+    coefs:
+      epoch_thresholds:
+        - 0
+        - 5
+        - 10
+      seg: 10
+      crossfield_align: 1.0
+      crossfield_align90: 0.2
+      crossfield_smooth: 0.005
+      seg_interior_crossfield:
+        - 0
+        - 0
+        - 0.2
+      seg_edge_crossfield:
+        - 0
+        - 0
+        - 0.2
+      seg_edge_interior:
+        - 0
+        - 0
+        - 0.2
+  seg_loss_params:
+    bce_coef: 0.75
+    dice_coef: 0.25
+    use_dist: true
+    use_size: false
+    w0: 50.0
+    sigma: 10.0
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1e-3
+
+hyperparameters:
+  model_name: unet
+  backbone: ${backbone.name}
+  batch_size: 16
+  epochs: 30
+  max_lr: 1e-2
+  classes: 1
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.OneCycleLR
+      max_lr: ${hyperparameters.max_lr}
+      steps_per_epoch: 5161
+      epochs: ${hyperparameters.epochs}
+    name: learning_rate
+    interval: step
+    frequency: 1
+    monitor: avg_val_loss
+
+callbacks:
+  - _target_: pytorch_lightning.callbacks.LearningRateMonitor
+    logging_interval: step
+  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.FrameFieldResultCallback
+
+pl_trainer:
+  stochastic_weight_avg: true
+  sync_batchnorm: true
+
+inference:
+  model_checkpoint: path/to/checkpoint
+  image_path: /data
+  threshold: 0.5
+  tile_size:
+    - 512
+    - 512
+  tile_step:
+    - 256
+    - 256
+
+
+defaults:
+  - backbone: resnet152
+  - pl_trainer: local
+  - train_dataset: dsg_dataset_frame_field_train
+  - train_dataset/data_loader: ${defaults.1.pl_trainer}
+  - val_dataset: dsg_dataset_frame_field_val
+  - val_dataset/data_loader: ${defaults.1.pl_trainer}
+  - metrics: pytorch_lightning_frame_field

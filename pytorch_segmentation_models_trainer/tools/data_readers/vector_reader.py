@@ -23,6 +23,8 @@ import functools
 import operator
 import os
 from collections import defaultdict
+from typing import List, Union
+from affine import Affine
 from dataclasses import MISSING, dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -31,6 +33,7 @@ import fiona
 import geopandas
 import numpy as np
 import psycopg2
+import rasterio
 import shapely
 from bidict import bidict
 from geopandas import GeoDataFrame, GeoSeries
@@ -240,14 +243,12 @@ def handle_geometry(geom, output_type):
     else:
         raise Exception("Invalid geometry handling")
 
-def save_to_file(polygons, base_filepath, name, driver=None, epsg=None):
+def save_to_file(polygons, base_filepath, name, driver=None, crs=None):
     driver = 'GeoJSON' if driver is None else driver
     if driver not in suffix_dict:
         raise TypeError(f"Invalid driver. Supported drivers are: {', '.join(fiona.supported_drivers.keys())}")
-    geoseries = geopandas.GeoSeries(polygons)
-    gdf = geopandas.GeoDataFrame.from_features(geoseries)
-    if epsg is not None:
-        gdf.to_crs(epsg=epsg, inplace=True)
+    geoseries = geopandas.GeoSeries(polygons, crs=crs)
+    gdf = geopandas.GeoDataFrame.from_features(geoseries, crs=crs)
     gdf.to_file(
         os.path.join(base_filepath, name+suffix_dict[driver]),
         driver=driver

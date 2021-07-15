@@ -297,49 +297,7 @@ class PolygonizerASM:
             crossfield_batch
         )
 
-        if DEBUG:
-            # Animation of optimization
-            import matplotlib.pyplot as plt
-            import matplotlib.animation as animation
-
-            fig, ax = plt.subplots(figsize=(10, 10))
-            ax.autoscale(False)
-            ax.axis('equal')
-            ax.axis('off')
-            plt.subplots_adjust(left=0, right=1, top=1, bottom=0)  # Plot without margins
-
-            image = int_prob_batch.cpu().numpy()[0]
-            ax.imshow(image, cmap=plt.cm.gray)
-
-            out_skeletons_batch = tensorskeleton_to_skeletons(tensorskeleton)
-            polylines_batch = [skeleton_to_polylines(skeleton) for skeleton in out_skeletons_batch]
-            out_polylines = [shapely.geometry.LineString(polyline[:, ::-1]) for polyline in polylines_batch[0]]
-            artists = crossfield_plot.plot_geometries(ax, out_polylines, draw_vertices=True, linewidths=1)
-
-            optim_pbar = tqdm(desc="Gradient descent", leave=True, total=self.config["loss_params"]["coefs"]["step_thresholds"][-1])
-
-            def init():  # only required for blitting to give a clean slate.
-                for artist, polyline in zip(artists, polylines_batch[0]):
-                    artist.set_xdata([np.nan] * polyline.shape[0])
-                    artist.set_ydata([np.nan] * polyline.shape[0])
-                return artists
-
-            def animate(i):
-                loss, losses_dict = tensorskeleton_optimizer.step(i)
-                optim_pbar.update(int(2 * i / self.config["loss_params"]["coefs"]["step_thresholds"][-1]))
-                optim_pbar.set_postfix(loss=loss, **losses_dict)
-                out_skeletons_batch = tensorskeleton_to_skeletons(tensorskeleton)
-                polylines_batch = [skeleton_to_polylines(skeleton) for skeleton in out_skeletons_batch]
-                for artist, polyline in zip(artists, polylines_batch[0]):
-                    artist.set_xdata(polyline[:, 1])
-                    artist.set_ydata(polyline[:, 0])
-                return artists
-
-            ani = animation.FuncAnimation(
-                fig, animate, init_func=init, interval=0, blit=True, frames=self.config["loss_params"]["coefs"]["step_thresholds"][-1], repeat=False)
-            plt.show()
-        else:
-            tensorskeleton = tensorskeleton_optimizer.optimize()
+        tensorskeleton = tensorskeleton_optimizer.optimize()
 
         out_skeletons_batch = tensorskeleton_to_skeletons(tensorskeleton)
 
@@ -356,23 +314,6 @@ class PolygonizerASM:
             post_process_partial, polylines_batch, np_int_prob_batch, np_crossfield_batch
         )
         polygons_batch, probs_batch = zip(*polygons_probs_batch)
-
-        if DEBUG:
-            # --- display results
-            import matplotlib.pyplot as plt
-            image = np_int_prob_batch[0]
-            polygons = polygons_batch[0]
-            out_polylines = [shapely.geometry.LineString(polyline[:, ::-1]) for polyline in polylines_batch[0]]
-
-            fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(16, 16), sharex=True, sharey=True)
-            ax = axes.ravel()
-
-            ax[0].imshow(image, cmap=plt.cm.gray)
-            crossfield_plot.plot_geometries(ax[0], out_polylines, draw_vertices=True, linewidths=1)
-            ax[0].axis('off')
-            ax[0].set_title('original', fontsize=20)
-            fig.tight_layout()
-            plt.show()
 
         return polygons_batch, probs_batch
 

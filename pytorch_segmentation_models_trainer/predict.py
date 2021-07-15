@@ -18,13 +18,22 @@
  *                                                                         *
  ****
 """
+import logging
 import hydra
+import omegaconf
+import rasterio
+from torch.utils.data import DataLoader
+import numpy as np
 from omegaconf import DictConfig
 
 @hydra.main(config_path="conf", config_name="config")
 def predict(cfg: DictConfig):
-    print("Not implemented yet.")
-    pass
+    logger.info(
+        "Starting the inference of input images using: \n%s",
+        omegaconf.to_yaml(cfg)
+    )
+    model = Model(cfg) if "pl_model" not in cfg else import_module_from_cfg(cfg.pl_model)(cfg)
+
 
 if __name__=="__main__":
     predict()
