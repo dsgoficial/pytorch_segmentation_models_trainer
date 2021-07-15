@@ -47,7 +47,7 @@ def _draw_circle(draw, center, radius, fill):
                   center[0] + radius,
                   center[1] + radius], fill=fill, outline=None)
 
-def polygons_to_pixel_coords(polygons, transform, crs):
+def polygons_to_pixel_coords(polygons, transform):
     item_list = []
     for polygon in polygons:
         item_list += polygon.geoms if polygon.geom_type == 'MultiPolygon' else [polygon]
