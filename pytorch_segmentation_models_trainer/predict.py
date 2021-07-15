@@ -28,11 +28,8 @@ from omegaconf import DictConfig
 
 @hydra.main(config_path="conf", config_name="config")
 def predict(cfg: DictConfig):
-    logger.info(
-        "Starting the inference of input images using: \n%s",
-        omegaconf.to_yaml(cfg)
-    )
-    model = Model(cfg) if "pl_model" not in cfg else import_module_from_cfg(cfg.pl_model)(cfg)
+    print("Not implemented yet.")
+    pass
 
 
 if __name__=="__main__":
