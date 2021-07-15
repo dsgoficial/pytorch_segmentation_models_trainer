@@ -29,7 +29,7 @@ import torch
 from hydra.experimental import compose, initialize
 from hydra.utils import instantiate
 from parameterized import parameterized
-from pytorch_segmentation_models_trainer.tools.inference_processors.inference import \
+from pytorch_segmentation_models_trainer.tools.inference.inference_processors import \
     SingleImageInfereceProcessor
 from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
                                                                 remove_folder)

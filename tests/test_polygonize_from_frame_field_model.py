@@ -40,7 +40,6 @@ from pytorch_segmentation_models_trainer.tools.visualization import \
 from pytorch_segmentation_models_trainer.utils import (frame_field_utils,
                                                        math_utils)
 from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
-                                                                hash_file,
                                                                 remove_folder)
 
 current_dir = os.path.dirname(__file__)

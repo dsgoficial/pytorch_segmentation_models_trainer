@@ -23,24 +23,21 @@ import functools
 import operator
 import os
 from collections import defaultdict
-from typing import List, Union
-from affine import Affine
 from dataclasses import MISSING, dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import List, Union
 
 import fiona
 import geopandas
 import numpy as np
 import psycopg2
-import rasterio
-import shapely
+from affine import Affine
 from bidict import bidict
 from geopandas import GeoDataFrame, GeoSeries
 from pycocotools.coco import COCO
 from shapely.geometry import (GeometryCollection, LineString, MultiLineString,
                               MultiPoint, MultiPolygon, Point, Polygon, base)
-from shapely.geometry.geo import shape
 
 
 class GeomType(Enum):
