@@ -75,7 +75,7 @@ class VectorDatabaseDataWriter(AbstractDataWriter):
     geometry_column: str = "geom"
     if_exists: str = "append"
 
-    def write_data(self, input_data: np.array) -> None:
+    def write_data(self, input_data: List[Union[BaseGeometry, BaseMultipartGeometry]]) -> None:
         geoseries = GeoSeries(input_data, crs=self.crs)
         gdf = GeoDataFrame.from_features(geoseries, crs=self.crs)
         gdf.rename_geometry(self.geometry_column, inplace=True)

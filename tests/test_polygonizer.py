@@ -21,26 +21,30 @@
 """
 
 import os
-from pytorch_segmentation_models_trainer.utils.polygon_utils import polygons_to_world_coords
-
-import rasterio
-from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import save_to_file
 import unittest
 
 import hydra
 import numpy as np
+import pyproj
+import rasterio
 import segmentation_models_pytorch as smp
 import torch
 from hydra.experimental import compose, initialize
 from matplotlib.testing.compare import compare_images
 from omegaconf import OmegaConf
-from pytorch_segmentation_models_trainer.tools.polygonization.methods import active_contours, active_skeletons
+from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import \
+    save_to_file
+from pytorch_segmentation_models_trainer.tools.polygonization.methods import (
+    active_contours, active_skeletons, simple)
 from pytorch_segmentation_models_trainer.tools.visualization import \
     crossfield_plot
 from pytorch_segmentation_models_trainer.utils import (frame_field_utils,
                                                        math_utils)
 from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
                                                                 remove_folder)
+from pytorch_segmentation_models_trainer.utils.polygon_utils import \
+    polygons_to_world_coords
+from tools.polygonization.polygonizer import SimplePolConfig, SimplePolygonizerProcessor
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, 'testing_data')
@@ -54,9 +58,23 @@ class Test_TestPolygonize(unittest.TestCase):
 
     def setUp(self):
         self.output_dir = create_folder(os.path.join(root_dir, 'test_output'))
+        self.frame_field_ds = self.get_frame_field_ds()
 
     def tearDown(self):
         remove_folder(self.output_dir)
+    
+    def get_frame_field_ds(self):
+        csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="frame_field_dataset.yaml",
+                overrides=[
+                    'input_csv_path='+csv_path,
+                    'root_dir='+frame_field_root_dir
+                ]
+            )
+            frame_field_ds = hydra.utils.instantiate(cfg)
+        return frame_field_ds
     
     def test_polygonize_active_contours_real_data(self) -> None:
         config_active_contours = {
@@ -73,25 +91,11 @@ class Test_TestPolygonize(unittest.TestCase):
             "seg_threshold": 0.5,
             "min_area": 10
         }
-        csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
-        with initialize(config_path="./test_configs"):
-            cfg = compose(
-                config_name="frame_field_dataset.yaml",
-                overrides=[
-                    'input_csv_path='+csv_path,
-                    'root_dir='+frame_field_root_dir
-                ]
-            )
-            frame_field_ds = hydra.utils.instantiate(cfg)
         crossfield = frame_field_utils.compute_crossfield_to_plot(
-            frame_field_ds[0]['gt_crossfield_angle']
+            self.frame_field_ds[0]['gt_crossfield_angle']
         )
-
-        # seg_batch = torch.tensor(np.transpose(seg[:, :, :2], (2, 0, 1)), dtype=torch.float)[None, ...]
-        # crossfield_batch = torch.tensor(np.transpose(crossfield, (2, 0, 1)), dtype=torch.float)[None, ...]
-
         out_contours_batch, out_probs_batch = active_contours.polygonize(
-            torch.movedim(frame_field_ds[0]['gt_polygons_image'], -1, 0).unsqueeze(0),
+            torch.movedim(self.frame_field_ds[0]['gt_polygons_image'], -1, 0).unsqueeze(0),
             crossfield, 
             config_active_contours
         )
@@ -100,7 +104,7 @@ class Test_TestPolygonize(unittest.TestCase):
         save_to_file(polygons, base_filepath=self.output_dir, name='vector', driver='GeoJSON')
 
         filepath = os.path.join(self.output_dir, "output_poly_acm.png")
-        crossfield_plot.save_poly_viz(frame_field_ds[0]['image'], polygons, filepath, linewidths=0.5, draw_vertices=True, crossfield=crossfield.squeeze(0))
+        crossfield_plot.save_poly_viz(self.frame_field_ds[0]['image'], polygons, filepath, linewidths=0.5, draw_vertices=True, crossfield=crossfield.squeeze(0))
         return True
 
     def test_polygonize_active_contours_fake_data(self) -> None:
@@ -194,28 +198,18 @@ class Test_TestPolygonize(unittest.TestCase):
             "min_area": 12,
         }
         config_active_skeletons = OmegaConf.create(conf)
-        csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
-        with initialize(config_path="./test_configs"):
-            cfg = compose(
-                config_name="frame_field_dataset.yaml",
-                overrides=[
-                    'input_csv_path='+csv_path,
-                    'root_dir='+frame_field_root_dir
-                ]
-            )
-            frame_field_ds = hydra.utils.instantiate(cfg)
         crossfield = frame_field_utils.compute_crossfield_to_plot(
-            frame_field_ds[0]['gt_crossfield_angle']
+            self.frame_field_ds[0]['gt_crossfield_angle']
         )
 
         out_contours_batch, out_probs_batch = active_skeletons.polygonize(
-            torch.movedim(frame_field_ds[0]['gt_polygons_image'], -1, 0).unsqueeze(0),
+            torch.movedim(self.frame_field_ds[0]['gt_polygons_image'], -1, 0).unsqueeze(0),
             crossfield, 
             config_active_skeletons
         )
 
         polygons = out_contours_batch[0]
-        raster_ds = rasterio.open(frame_field_ds[0]['path'])
+        raster_ds = rasterio.open(self.frame_field_ds[0]['path'])
         transform = raster_ds.transform
         crs = raster_ds.crs
         raster_ds.close()
@@ -224,7 +218,7 @@ class Test_TestPolygonize(unittest.TestCase):
         save_to_file(projected_polygons, base_filepath=self.output_dir, name='output_poly_real_skeleton', driver='GeoJSON', crs=f"EPSG:{crs.to_epsg()}")
 
         filepath = os.path.join(self.output_dir, "output_poly_real_skeleton.png")
-        crossfield_plot.save_poly_viz(frame_field_ds[0]['image'], polygons, filepath, linewidths=0.5, draw_vertices=True, crossfield=crossfield.squeeze(0))
+        crossfield_plot.save_poly_viz(self.frame_field_ds[0]['image'], polygons, filepath, linewidths=0.5, draw_vertices=True, crossfield=crossfield.squeeze(0))
         return True
     
     def test_polygonize_active_skeleton_fake_data(self) -> None:
@@ -299,3 +293,21 @@ class Test_TestPolygonize(unittest.TestCase):
         filepath = os.path.join(self.output_dir, "demo_poly_asm.png")
         crossfield_plot.save_poly_viz(seg[:, :, 0], polygons, filepath, linewidths=0.5, draw_vertices=True, crossfield=crossfield)
         return True
+
+    def test_simple_polygonizer(self) -> None:
+        config = {
+            "data_level": 0.5,
+            "tolerance": 1.0,
+            "seg_threshold": 0.5,
+            "min_area": 10
+        }
+        out_contours_batch, out_probs_batch = simple.polygonize(
+            torch.movedim(self.frame_field_ds[0]['gt_polygons_image'], -1, 0).unsqueeze(0),
+            config
+        )
+    
+    # def test_simple_polygonizer_processor(self) -> None:
+    #     config = SimplePolConfig()
+    #     processor = SimplePolygonizerProcessor(
+    #         crs=pyproj.CRS.from_epsg(31982),
+    #     )
