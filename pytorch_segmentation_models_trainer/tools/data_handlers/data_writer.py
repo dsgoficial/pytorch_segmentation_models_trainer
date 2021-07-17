@@ -57,6 +57,8 @@ class VectorFileDataWriter(AbstractDataWriter):
     def write_data(self, input_data: List[Union[BaseGeometry, BaseMultipartGeometry]]) -> None:
         geoseries = GeoSeries(input_data, crs=self.crs)
         gdf = GeoDataFrame.from_features(geoseries, crs=self.crs)
+        if len(gdf) == 0:
+            return
         gdf.to_file(
             self.output_file_path,
             driver=self.driver
@@ -78,6 +80,8 @@ class VectorDatabaseDataWriter(AbstractDataWriter):
     def write_data(self, input_data: List[Union[BaseGeometry, BaseMultipartGeometry]]) -> None:
         geoseries = GeoSeries(input_data, crs=self.crs)
         gdf = GeoDataFrame.from_features(geoseries, crs=self.crs)
+        if len(gdf) == 0:
+            return
         gdf.rename_geometry(self.geometry_column, inplace=True)
         engine = create_engine(f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}")
         gdf.to_postgis(self.table_name, engine, if_exists=self.if_exists)

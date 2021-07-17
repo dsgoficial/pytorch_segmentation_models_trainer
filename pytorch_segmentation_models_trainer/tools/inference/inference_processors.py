@@ -51,7 +51,11 @@ class AbstractInferenceProcessor(ABC):
         image = cv2.imread(image_path)
         inference = self.make_inference(image)
         if self.polygonizer is not None:
-            self.polygonizer.execute(inference)
+            self.polygonizer.process(
+                {
+                    key: tensor_from_rgb_image(value).unsqueeze(0) for key, value in inference.items()
+                }
+            )
         return self.export_strategy.save_inference(inference)
 
     @abstractmethod

@@ -20,6 +20,10 @@
  ****
 """
 import os
+from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import VectorFileDataWriter
+from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import SimplePolConfig, SimplePolygonizerProcessor
+
+import rasterio
 from pytorch_segmentation_models_trainer.model_loader.frame_field_model import FrameFieldModel
 import unittest
 
@@ -49,11 +53,17 @@ class Test_TestInference(unittest.TestCase):
 
     def setUp(self):
         self.output_dir = create_folder(os.path.join(root_dir, 'test_output'))
+        self.frame_field_ds = self.get_frame_field_ds()
+        with rasterio.open(self.frame_field_ds[0]['path'], 'r') as raster_ds:
+            self.crs = raster_ds.crs
+            self.profile = raster_ds.profile
+            self.transform = raster_ds.transform
+        self.simple_polygonizer = self.get_simple_polygonizer()
 
     def tearDown(self):
         remove_folder(self.output_dir)
-
-    def test_create_inference_from_inference_processor(self) -> None:
+    
+    def get_frame_field_ds(self):
         csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
         with initialize(config_path="./test_configs"):
             cfg = compose(
@@ -64,32 +74,46 @@ class Test_TestInference(unittest.TestCase):
                 ]
             )
             frame_field_ds = hydra.utils.instantiate(cfg)
+        return frame_field_ds
+    
+    def get_simple_polygonizer(self):
+        config = SimplePolConfig()
+        self.output_file_path = os.path.join(self.output_dir, 'simple_polygonizer.geojson')
+        data_writer = VectorFileDataWriter(
+            output_file_path=self.output_file_path,
+            crs=self.crs
+        )
+        return SimplePolygonizerProcessor(
+            crs=self.crs,
+            transform=self.transform,
+            data_writer=data_writer,
+            config=config
+        )
+
+    def test_create_inference_from_inference_processor(self) -> None:
+        
         output_file_path = os.path.join(self.output_dir, 'output.tif')
         inference_processor = SingleImageInfereceProcessor(
             model=smp.Unet(),
             device=device,
             batch_size=8,
             export_strategy=RasterExportInferenceStrategy(
-                input_raster_path=frame_field_ds[0]['path'],
+                input_raster_path=self.frame_field_ds[0]['path'],
                 output_file_path=output_file_path
             )
         )
         inference_processor.process(
-            image_path=frame_field_ds[0]['path']
+            image_path=self.frame_field_ds[0]['path']
         )
         assert os.path.isfile(output_file_path)
     
-    def test_create_frame_field_inference_from_inference_processor(self) -> None:
-        csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
-        with initialize(config_path="./test_configs"):
-            cfg = compose(
-                config_name="frame_field_dataset.yaml",
-                overrides=[
-                    'input_csv_path='+csv_path,
-                    'root_dir='+frame_field_root_dir
-                ]
-            )
-            frame_field_ds = hydra.utils.instantiate(cfg)
+    @parameterized.expand(
+        [
+            (False,),
+            (True,),
+        ]
+    )
+    def test_create_frame_field_inference_from_inference_processor(self, with_polygonizer) -> None:
         inference_processor = SingleImageFromFrameFieldProcessor(
             model=FrameFieldModel(
                 segmentation_model=smp.Unet(),
@@ -102,14 +126,15 @@ class Test_TestInference(unittest.TestCase):
             device=device,
             batch_size=8,
             export_strategy=MultipleRasterExportInferenceStrategy(
-                input_raster_path=frame_field_ds[0]['path'],
+                input_raster_path=self.frame_field_ds[0]['path'],
                 output_folder=self.output_dir,
                 output_basename='output.tif'
             ),
-            mask_bands=2
+            mask_bands=2,
+            polygonizer=self.simple_polygonizer if with_polygonizer else None
         )
         inference_processor.process(
-            image_path=frame_field_ds[0]['path']
+            image_path=self.frame_field_ds[0]['path']
         )
         assert os.path.isfile(os.path.join(self.output_dir, 'seg_output.tif'))
         assert os.path.isfile(os.path.join(self.output_dir, 'crossfield_output.tif'))

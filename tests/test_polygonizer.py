@@ -21,36 +21,22 @@
 """
 
 import os
-
-import geopandas
-from geopandas.testing import geom_almost_equals
-from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import VectorFileDataWriter
 import unittest
 
+import geopandas
 import hydra
-import numpy as np
-import pyproj
 import rasterio
-import segmentation_models_pytorch as smp
 import torch
+from geopandas.testing import geom_almost_equals
 from hydra.experimental import compose, initialize
-from matplotlib.testing.compare import compare_images
-from omegaconf import OmegaConf
-from parameterized import parameterized
-from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import \
-    save_to_file
-from pytorch_segmentation_models_trainer.tools.polygonization.methods import (
-    active_contours, active_skeletons, simple)
+from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import \
+    VectorFileDataWriter
 from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import (
-    ACMConfig, ACMPolygonizerProcessor, ASMConfig, ASMPolygonizerProcessor, SimplePolConfig, SimplePolygonizerProcessor)
-from pytorch_segmentation_models_trainer.tools.visualization import \
-    crossfield_plot
-from pytorch_segmentation_models_trainer.utils import (frame_field_utils,
-                                                       math_utils)
+    ACMConfig, ACMPolygonizerProcessor, ASMConfig, ASMPolygonizerProcessor,
+    SimplePolConfig, SimplePolygonizerProcessor)
+from pytorch_segmentation_models_trainer.utils import (frame_field_utils)
 from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
                                                                 remove_folder)
-from pytorch_segmentation_models_trainer.utils.polygon_utils import \
-    polygons_to_world_coords
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, 'testing_data')
