@@ -24,7 +24,7 @@ from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import 
 from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import SimplePolConfig, SimplePolygonizerProcessor
 
 import rasterio
-from pytorch_segmentation_models_trainer.model_loader.frame_field_model import FrameFieldModel
+from pytorch_segmentation_models_trainer.model_loader.frame_field_model import FrameFieldModel, FrameFieldSegmentationPLModel
 import unittest
 
 import hydra
@@ -40,6 +40,7 @@ from pytorch_segmentation_models_trainer.tools.inference.inference_processors im
     SingleImageFromFrameFieldProcessor, SingleImageInfereceProcessor)
 from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
                                                                 remove_folder)
+from torchvision.datasets.utils import download_url
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, 'testing_data')
@@ -48,6 +49,10 @@ frame_field_root_dir = os.path.join(
     current_dir, 'testing_data', 'data', 'frame_field_data')
 
 device = 'cpu'
+
+pretrained_checkpoints_download_links = {
+    'frame_field_resnet152_unet_200_epochs': 'https://github.com/phborba/pytorch_smt_pretrained_weights/releases/download/v0.1/frame_field_resnet152_unet_200_epochs.ckpt'
+}
 
 class Test_TestInference(unittest.TestCase):
 
@@ -100,6 +105,38 @@ class Test_TestInference(unittest.TestCase):
     def get_asm_polygonizer(self):
         pass
 
+    def get_model_for_eval(self):
+        csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="frame_field_for_inference.yaml",
+                overrides=[
+                    'train_dataset.input_csv_path='+csv_path,
+                    'train_dataset.root_dir='+frame_field_root_dir,
+                    'val_dataset.input_csv_path='+csv_path,
+                    'val_dataset.root_dir='+frame_field_root_dir,
+                ]
+            )
+        checkpoint_file_path = self.get_checkpoint_file('frame_field_resnet152_unet_200_epochs.ckpt')
+        pl_model = FrameFieldSegmentationPLModel.load_from_checkpoint(
+            checkpoint_file_path,
+            cfg=cfg
+        )
+        model = pl_model.model
+        model.eval()
+        return model
+    
+    def get_checkpoint_file(self, file_name):
+        checkpoint_folder = create_folder(os.path.join(root_dir, 'data', 'checkpoints'))
+        ckeckpoint_file_path = os.path.join(checkpoint_folder, file_name)
+        if not os.path.isfile(ckeckpoint_file_path):
+            download_url(
+                url=pretrained_checkpoints_download_links[file_name.split('.')[0]],
+                root=checkpoint_folder,
+                filename=file_name
+            )
+        return ckeckpoint_file_path
+
     def test_create_inference_from_inference_processor(self) -> None:
         
         output_file_path = os.path.join(self.output_dir, 'output.tif')
@@ -149,15 +186,27 @@ class Test_TestInference(unittest.TestCase):
         assert os.path.isfile(os.path.join(self.output_dir, 'seg_output.tif'))
         assert os.path.isfile(os.path.join(self.output_dir, 'crossfield_output.tif'))
 
+    @parameterized.expand(
+        [
+            ('simple',),
+        ]
+    )
     def test_create_frame_field_inference_from_pretrained_with_polygonize(self, polygonizer_key) -> None:
-        model = FrameFieldModel(
-            segmentation_model=smp.Unet(encoder_name='resnet152'),
-            seg_params={
-                "compute_interior": True,
-                "compute_edge": True,
-                "compute_vertex": False
-            }
+        inference_processor = SingleImageFromFrameFieldProcessor(
+            model=self.get_model_for_eval(),
+            device=device,
+            batch_size=8,
+            export_strategy=MultipleRasterExportInferenceStrategy(
+                input_raster_path=self.frame_field_ds[0]['path'],
+                output_folder=self.output_dir,
+                output_basename=f'{polygonizer_key}_output.tif'
+            ),
+            mask_bands=2,
+            polygonizer=self.polygonizers_dict[polygonizer_key]
         )
-        model.load_from_checkpoint(
-            os.path.join(root_dir, 'data', 'checkpoints', 'frame_field_resnet152_unet_200_epochs.ckpt')
+        inference_processor.process(
+            image_path=self.frame_field_ds[0]['path'],
+            threshold=0.1
         )
+        assert os.path.isfile(os.path.join(self.output_dir, f'seg_{polygonizer_key}_output.tif'))
+        assert os.path.isfile(os.path.join(self.output_dir, f'crossfield_{polygonizer_key}_output.tif'))

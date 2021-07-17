@@ -47,9 +47,9 @@ class AbstractInferenceProcessor(ABC):
         self.mask_bands = mask_bands
         self.normalize = A.Normalize()
     
-    def process(self, image_path: str) -> str:
+    def process(self, image_path: str, threshold: float=0.5) -> str:
         image = cv2.imread(image_path)
-        inference = self.make_inference(image)
+        inference = self.make_inference(image, threshold=threshold)
         if self.polygonizer is not None:
             self.polygonizer.process(
                 {
