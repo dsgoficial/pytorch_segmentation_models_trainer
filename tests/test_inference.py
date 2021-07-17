@@ -58,7 +58,11 @@ class Test_TestInference(unittest.TestCase):
             self.crs = raster_ds.crs
             self.profile = raster_ds.profile
             self.transform = raster_ds.transform
-        self.simple_polygonizer = self.get_simple_polygonizer()
+        self.polygonizers_dict = {
+            'simple': self.get_simple_polygonizer(),
+            'acm': self.get_acm_polygonizer(),
+            'asm': self.get_asm_polygonizer()
+        }
 
     def tearDown(self):
         remove_folder(self.output_dir)
@@ -89,6 +93,12 @@ class Test_TestInference(unittest.TestCase):
             data_writer=data_writer,
             config=config
         )
+    
+    def get_acm_polygonizer(self):
+        pass
+
+    def get_asm_polygonizer(self):
+        pass
 
     def test_create_inference_from_inference_processor(self) -> None:
         
@@ -131,10 +141,23 @@ class Test_TestInference(unittest.TestCase):
                 output_basename='output.tif'
             ),
             mask_bands=2,
-            polygonizer=self.simple_polygonizer if with_polygonizer else None
+            polygonizer=self.polygonizers_dict['simple'] if with_polygonizer else None
         )
         inference_processor.process(
             image_path=self.frame_field_ds[0]['path']
         )
         assert os.path.isfile(os.path.join(self.output_dir, 'seg_output.tif'))
         assert os.path.isfile(os.path.join(self.output_dir, 'crossfield_output.tif'))
+
+    def test_create_frame_field_inference_from_pretrained_with_polygonize(self, polygonizer_key) -> None:
+        model = FrameFieldModel(
+            segmentation_model=smp.Unet(encoder_name='resnet152'),
+            seg_params={
+                "compute_interior": True,
+                "compute_edge": True,
+                "compute_vertex": False
+            }
+        )
+        model.load_from_checkpoint(
+            os.path.join(root_dir, 'data', 'checkpoints', 'frame_field_resnet152_unet_200_epochs.ckpt')
+        )
