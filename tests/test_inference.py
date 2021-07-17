@@ -20,24 +20,28 @@
  ****
 """
 import os
-from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import VectorFileDataWriter
-from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import SimplePolConfig, SimplePolygonizerProcessor
-
-import rasterio
-from pytorch_segmentation_models_trainer.model_loader.frame_field_model import FrameFieldModel, FrameFieldSegmentationPLModel
 import unittest
 
+import albumentations as A
 import hydra
 import numpy as np
+import rasterio
 import segmentation_models_pytorch as smp
 import torch
 from hydra.experimental import compose, initialize
 from hydra.utils import instantiate
 from parameterized import parameterized
+from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
+    FrameFieldModel, FrameFieldSegmentationPLModel)
+from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import \
+    VectorFileDataWriter
 from pytorch_segmentation_models_trainer.tools.inference.export_inference import (
     MultipleRasterExportInferenceStrategy, RasterExportInferenceStrategy)
 from pytorch_segmentation_models_trainer.tools.inference.inference_processors import (
     SingleImageFromFrameFieldProcessor, SingleImageInfereceProcessor)
+from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import (
+    ACMConfig, ACMPolygonizerProcessor, ASMConfig, ASMPolygonizerProcessor,
+    SimplePolConfig, SimplePolygonizerProcessor)
 from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
                                                                 remove_folder)
 from torchvision.datasets.utils import download_url
@@ -68,6 +72,7 @@ class Test_TestInference(unittest.TestCase):
             'acm': self.get_acm_polygonizer(),
             'asm': self.get_asm_polygonizer()
         }
+        self.center_crop = A.CenterCrop(512,512)
 
     def tearDown(self):
         remove_folder(self.output_dir)
@@ -100,10 +105,32 @@ class Test_TestInference(unittest.TestCase):
         )
     
     def get_acm_polygonizer(self):
-        pass
+        config = ACMConfig()
+        self.output_file_path = os.path.join(self.output_dir, 'acm_polygonizer.geojson')
+        data_writer = VectorFileDataWriter(
+            output_file_path=self.output_file_path,
+            crs=self.crs
+        )
+        return ACMPolygonizerProcessor(
+            crs=self.crs,
+            transform=self.transform,
+            data_writer=data_writer,
+            config=config
+        )
 
     def get_asm_polygonizer(self):
-        pass
+        config = ASMConfig()
+        self.output_file_path = os.path.join(self.output_dir, 'asm_polygonizer.geojson')
+        data_writer = VectorFileDataWriter(
+            output_file_path=self.output_file_path,
+            crs=self.crs
+        )
+        return ASMPolygonizerProcessor(
+            crs=self.crs,
+            transform=self.transform,
+            data_writer=data_writer,
+            config=config
+        )
 
     def get_model_for_eval(self):
         csv_path = os.path.join(frame_field_root_dir, 'dsg_dataset.csv')
@@ -189,6 +216,8 @@ class Test_TestInference(unittest.TestCase):
     @parameterized.expand(
         [
             ('simple',),
+            ('acm',),
+            ('asm',),
         ]
     )
     def test_create_frame_field_inference_from_pretrained_with_polygonize(self, polygonizer_key) -> None:
@@ -206,7 +235,7 @@ class Test_TestInference(unittest.TestCase):
         )
         inference_processor.process(
             image_path=self.frame_field_ds[0]['path'],
-            threshold=0.1
+            threshold=0.5
         )
         assert os.path.isfile(os.path.join(self.output_dir, f'seg_{polygonizer_key}_output.tif'))
         assert os.path.isfile(os.path.join(self.output_dir, f'crossfield_{polygonizer_key}_output.tif'))

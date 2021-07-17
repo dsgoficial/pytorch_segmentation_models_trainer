@@ -49,17 +49,18 @@ class AbstractInferenceProcessor(ABC):
     
     def process(self, image_path: str, threshold: float=0.5) -> str:
         image = cv2.imread(image_path)
-        inference = self.make_inference(image, threshold=threshold)
+        inference = self.make_inference(image)
         if self.polygonizer is not None:
             self.polygonizer.process(
                 {
                     key: tensor_from_rgb_image(value).unsqueeze(0) for key, value in inference.items()
                 }
             )
+        inference['seg'] = (inference['seg'] > threshold).astype(np.uint8)
         return self.export_strategy.save_inference(inference)
 
     @abstractmethod
-    def make_inference(self, image: np.array, threshold=0.5)  -> Union[np.array, dict]:
+    def make_inference(self, image: np.array)  -> Union[np.array, dict]:
         """Makes model inference. Must be reimplemented in children classes
 
         Args:
@@ -77,7 +78,7 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
             step_shape=step_shape, mask_bands=mask_bands, config=config
         )
 
-    def make_inference(self, image: np.array, threshold=0.5) -> Union[np.array, dict]:
+    def make_inference(self, image: np.array) -> Union[np.array, dict]:
         """Makes model inference.
 
         Args:
@@ -91,17 +92,11 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
             tile_size=self.model_input_shape,
             tile_step=self.step_shape
         )
-        # image = self.normalize(image=reshape_as_image(image))['image']
-        # HCW -> CHW. Optionally, do normalization here
-        tiles = [tensor_from_rgb_image(tile)/255. for tile in tiler.split(image)]
-        # Allocate a CUDA buffer for holding entire mask
+        normalized_image = self.normalize(image=image)['image']
+        tiles = [tensor_from_rgb_image(tile) for tile in tiler.split(normalized_image)]
         merger_dict = self.get_merger_dict(tiler)
-        # Run predictions for tiles and accumulate them
         self.predict_and_merge(tiles, tiler, merger_dict)
-        # Normalize accumulated mask and convert back to numpy
-        merged_mask_dict = self.merge_masks(tiler, merger_dict)
-        merged_mask_dict['seg'] = (merged_mask_dict['seg'] > threshold).astype(np.uint8)
-        return merged_mask_dict
+        return self.merge_masks(tiler, merger_dict)
     
     def get_merger_dict(self, tiler: ImageSlicer):
         return {
@@ -121,7 +116,7 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
         merger_dict['seg'].integrate_batch(pred_batch, coords_batch)
 
     def merge_masks(self, tiler: ImageSlicer, merger_dict: Dict[str, TileMerger]):
-        merged_mask = np.moveaxis(to_numpy(merger_dict['seg'].merge()), 0, -1).astype(np.uint8)
+        merged_mask = np.moveaxis(to_numpy(merger_dict['seg'].merge()), 0, -1)
         return {
             'seg': tiler.crop_to_orignal_size(merged_mask)
         }
@@ -145,6 +140,6 @@ class SingleImageFromFrameFieldProcessor(SingleImageInfereceProcessor):
 
     def merge_masks(self, tiler: ImageSlicer, merger_dict: Dict[str, TileMerger]):
         return {
-            key: np.moveaxis(to_numpy(merger_dict[key].merge()), 0, -1).astype(np.uint8) \
+            key: np.moveaxis(to_numpy(merger_dict[key].merge()), 0, -1) \
                 for key in ['seg', 'crossfield']
         }
