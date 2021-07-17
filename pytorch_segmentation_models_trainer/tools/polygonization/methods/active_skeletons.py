@@ -34,15 +34,13 @@ import logging
 import skan
 import tqdm
 from pytorch_segmentation_models_trainer.optimizers.poly_optimizers import \
-    DEBUG, PolygonAlignLoss, TensorPolyOptimizer, TensorSkeletonOptimizer
+    PolygonAlignLoss, TensorPolyOptimizer, TensorSkeletonOptimizer
 from pytorch_segmentation_models_trainer.tools.visualization import crossfield_plot
 from pytorch_segmentation_models_trainer.utils.math_utils import compute_crossfield_uv
 from pytorch_segmentation_models_trainer.utils import frame_field_utils, math_utils, tensor_utils
 from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor_tools import \
     Paths, Skeleton, TensorSkeleton, skeletons_to_tensorskeleton, tensorskeleton_to_skeletons
 from pytorch_segmentation_models_trainer.tools.polygonization import polygonize_utils
-
-DEBUG = False
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +58,7 @@ def shapely_postprocess(polylines, np_indicator, tolerance, config):
     linestring_list = _get_linestring_list(polylines, width, height, tolerance)
     filtered_polygons, filtered_polygon_probs = [], []
     polygonize_lambda_func = lambda x: _polygonize_in_threshold(
-        x, config['min_area'], config['seg_threshold'],\
+        x, config.min_area, config.seg_threshold,\
         filtered_polygons, filtered_polygon_probs, np_indicator
     )
     list(
@@ -105,7 +103,7 @@ def post_process(polylines, np_indicator, np_crossfield, config):
     u, v = compute_crossfield_uv(np_crossfield)  # u, v are complex arrays
     corner_masks = frame_field_utils.detect_corners(polylines, u, v)
     polylines = polygonize_utils.split_polylines_corner(polylines, corner_masks)
-    polygons, probs = shapely_postprocess(polylines, np_indicator, config["tolerance"], config)
+    polygons, probs = shapely_postprocess(polylines, np_indicator, config.tolerance, config)
     return polygons, probs
 
 
@@ -138,14 +136,13 @@ def get_skeleton(np_edge_mask, config):
                 "They should be of same size."
             )
     except ValueError as e:
-        if DEBUG:
-            logger.warning(
-                f"WARNING: skan.Skeleton raised a ValueError({e}). "
-                "skeleton_image has {skeleton_image.sum()} true values. "
-                "Continuing without detecting skeleton in this image..."
-            )
-            skimage.io.imsave("np_edge_mask.png", np_edge_mask.astype(np.uint8) * 255)
-            skimage.io.imsave("skeleton_image.png", skeleton_image.astype(np.uint8) * 255)
+        logger.warning(
+            f"WARNING: skan.Skeleton raised a ValueError({e}). "
+            "skeleton_image has {skeleton_image.sum()} true values. "
+            "Continuing without detecting skeleton in this image..."
+        )
+        skimage.io.imsave("np_edge_mask.png", np_edge_mask.astype(np.uint8) * 255)
+        skimage.io.imsave("skeleton_image.png", skeleton_image.astype(np.uint8) * 255)
     return skeleton
 
 
@@ -157,14 +154,14 @@ def get_marching_squares_skeleton(np_int_prob, config):
     @return:
     """
     contours = skimage.measure.find_contours(
-        np_int_prob, config["data_level"],
+        np_int_prob, config.data_level,
         fully_connected='low',
         positive_orientation='high'
     )
     # Keep contours with more than 3 vertices and large enough area
     contours = [
         contour for contour in contours if contour.shape[0] >= 3 and \
-            shapely.geometry.Polygon(contour).area > config["min_area"]
+            shapely.geometry.Polygon(contour).area > config.min_area
     ]
 
     # If there are no contours, return empty skeleton
@@ -203,46 +200,49 @@ def get_marching_squares_skeleton(np_int_prob, config):
         degrees=np.concatenate(degrees, axis=0)
     )
 
-# @profile
 def compute_skeletons(seg_batch, config, spatial_gradient, pool=None) -> List[Skeleton]:
     assert len(seg_batch.shape) == 4 and seg_batch.shape[
         1] <= 3, "seg_batch should be (N, C, H, W) with C <= 3, not {}".format(seg_batch.shape)
-
-    int_prob_batch = seg_batch[:, 0, :, :]
-    if config["init_method"] == "marching_squares":
-        # Only interior segmentation is available, initialize with marching squares
-        np_int_prob_batch = int_prob_batch.cpu().numpy()
-        get_marching_squares_skeleton_partial = functools.partial(get_marching_squares_skeleton, config=config)
-        skeletons_batch = pool.map(
-            get_marching_squares_skeleton_partial, np_int_prob_batch
-        ) if pool is not None \
-            else list(map(get_marching_squares_skeleton_partial, np_int_prob_batch))
-    elif config["init_method"] == "skeleton":
-        corrected_edge_prob_batch = int_prob_batch > config["data_level"]
-        corrected_edge_prob_batch = corrected_edge_prob_batch[:, None, :, :].float()
-        corrected_edge_prob_batch = 2 * spatial_gradient(corrected_edge_prob_batch)[:, 0, :, :]
-        corrected_edge_prob_batch = corrected_edge_prob_batch.norm(dim=1)
-        if seg_batch.shape[1] >= 2:
-            corrected_edge_prob_batch = torch.clamp(
-                seg_batch[:, 1, :, :] + corrected_edge_prob_batch, 0, 1
-            )
-
-        # --- Init skeleton
-        corrected_edge_mask_batch = corrected_edge_prob_batch > config["data_level"]
-        np_corrected_edge_mask_batch = corrected_edge_mask_batch.cpu().numpy()
-
-        get_skeleton_partial = functools.partial(get_skeleton, config=config)
-        skeletons_batch = pool.map(
-            get_skeleton_partial, np_corrected_edge_mask_batch
-        ) if pool is not None \
-            else list(map(get_skeleton_partial, np_corrected_edge_mask_batch))
-    else:
+    if config.init_method not in ["marching_squares", "skeleton"]:
         raise NotImplementedError(
             f"init_method '{config['init_method']}' not recognized."
             " Valid init methods are 'skeleton' and 'marching_squares'"
         )
+    return _compute_skeletons_with_marching_squares(
+        seg_batch, config, pool) if config.init_method == "marching_squares" \
+            else _compute_seletons_with_skeletonize(seg_batch, config, spatial_gradient, pool)
 
+def _compute_seletons_with_skeletonize(seg_batch, config, spatial_gradient, pool):
+    int_prob_batch = seg_batch[:, 0, :, :]
+    corrected_edge_prob_batch = int_prob_batch > config.data_level
+    corrected_edge_prob_batch = corrected_edge_prob_batch[:, None, :, :].float()
+    corrected_edge_prob_batch = 2 * spatial_gradient(corrected_edge_prob_batch)[:, 0, :, :]
+    corrected_edge_prob_batch = corrected_edge_prob_batch.norm(dim=1)
+    if seg_batch.shape[1] >= 2:
+        corrected_edge_prob_batch = torch.clamp(
+                seg_batch[:, 1, :, :] + corrected_edge_prob_batch, 0, 1
+            )
+
+        # --- Init skeleton
+    corrected_edge_mask_batch = corrected_edge_prob_batch > config.data_level
+    np_corrected_edge_mask_batch = corrected_edge_mask_batch.cpu().numpy()
+
+    get_skeleton_partial = functools.partial(get_skeleton, config=config)
+    skeletons_batch = pool.map(
+            get_skeleton_partial, np_corrected_edge_mask_batch
+        ) if pool is not None \
+            else list(map(get_skeleton_partial, np_corrected_edge_mask_batch))
+        
     return skeletons_batch
+
+def _compute_skeletons_with_marching_squares(seg_batch, config, pool):
+    int_prob_batch = seg_batch[:, 0, :, :]
+    np_int_prob_batch = int_prob_batch.cpu().numpy()
+    get_marching_squares_skeleton_partial = functools.partial(get_marching_squares_skeleton, config=config)
+    return pool.map(
+            get_marching_squares_skeleton_partial, np_int_prob_batch
+        ) if pool is not None \
+            else list(map(get_marching_squares_skeleton_partial, np_int_prob_batch))
 
 
 def skeleton_to_polylines(skeleton: Skeleton) -> List[np.ndarray]:
@@ -263,7 +263,7 @@ class PolygonizerASM:
             mode="scharr",
             coord="ij",
             normalized=True,
-            device=self.config["device"],
+            device=self.config.device,
             dtype=torch.float
         )
 
@@ -276,10 +276,10 @@ class PolygonizerASM:
         assert seg_batch.shape[0] == crossfield_batch.shape[0],\
             "Batch size for seg and crossfield should match"
 
-        seg_batch = seg_batch.to(self.config["device"])
-        crossfield_batch = crossfield_batch.to(self.config["device"])
+        seg_batch = seg_batch.to(self.config.device)
+        crossfield_batch = crossfield_batch.to(self.config.device)
         skeletons_batch = compute_skeletons(seg_batch, self.config, self.spatial_gradient, pool=self.pool)
-        tensorskeleton = skeletons_to_tensorskeleton(skeletons_batch, device=self.config["device"])
+        tensorskeleton = skeletons_to_tensorskeleton(skeletons_batch, device=self.config.device)
 
         # --- Check if tensorskeleton is empty
         if tensorskeleton.num_paths == 0:
@@ -289,21 +289,23 @@ class PolygonizerASM:
             return polygons_batch, probs_batch
 
         int_prob_batch = seg_batch[:, 0, :, :]
-        # dist_batch = dist_batch.to(config["device"])
+        # dist_batch = dist_batch.to(config.device)
         tensorskeleton_optimizer = TensorSkeletonOptimizer(
             self.config,
             tensorskeleton,
             int_prob_batch,
             crossfield_batch
         )
-
         tensorskeleton = tensorskeleton_optimizer.optimize()
-
         out_skeletons_batch = tensorskeleton_to_skeletons(tensorskeleton)
+        polygons_batch, probs_batch = self._skeletons_to_polygons(
+            crossfield_batch, int_prob_batch, out_skeletons_batch)
+        return polygons_batch, probs_batch
 
-        # --- Convert the skeleton representation into polylines
-        polylines_batch = [skeleton_to_polylines(skeleton) for skeleton in out_skeletons_batch]
-
+    def _skeletons_to_polygons(self, crossfield_batch, int_prob_batch, out_skeletons_batch):
+        polylines_batch = [
+            skeleton_to_polylines(skeleton) for skeleton in out_skeletons_batch
+        ]
         np_crossfield_batch = np.transpose(crossfield_batch.cpu().numpy(), (0, 2, 3, 1))
         np_int_prob_batch = int_prob_batch.cpu().numpy()
         post_process_partial = partial(post_process, config=self.config)
@@ -314,86 +316,8 @@ class PolygonizerASM:
             post_process_partial, polylines_batch, np_int_prob_batch, np_crossfield_batch
         )
         polygons_batch, probs_batch = zip(*polygons_probs_batch)
-
-        return polygons_batch, probs_batch
-
+        return polygons_batch,probs_batch
 
 def polygonize(seg_batch, crossfield_batch, config, pool=None, pre_computed=None):
     polygonizer_asm = PolygonizerASM(config, pool=pool)
     return polygonizer_asm(seg_batch, crossfield_batch, pre_computed=pre_computed)
-
-def main():
-    
-    config = {
-        "init_method": "marching_squares",  # Can be either skeleton or marching_squares
-        "data_level": 0.5,
-        "loss_params": {
-            "coefs": {
-                "step_thresholds": [0, 100, 200, 300],  # From 0 to 500: gradually go from coefs[0] to coefs[1]
-                "data": [1.0, 0.1, 0.0, 0.0],
-                "crossfield": [0.0, 0.05, 0.0, 0.0],
-                "length": [0.1, 0.01, 0.0, 0.0],
-                "curvature": [0.0, 0.0, 0.0, 0.0],
-                "corner": [0.0, 0.0, 0.0, 0.0],
-                "junction": [0.0, 0.0, 0.0, 0.0],
-            },
-            "curvature_dissimilarity_threshold": 2,
-            # In pixels: for each sub-paths, if the dissimilarity (in the same sense as in the Ramer-Douglas-Peucker alg) is lower than straightness_threshold, then optimize the curve angles to be zero.
-            "corner_angles": [45, 90, 135],  # In degrees: target angles for corners.
-            "corner_angle_threshold": 22.5,
-            # If a corner angle is less than this threshold away from any angle in corner_angles, optimize it.
-            "junction_angles": [0, 45, 90, 135],  # In degrees: target angles for junction corners.
-            "junction_angle_weights": [1, 0.01, 0.1, 0.01],
-            # Order of decreassing importance: straight, right-angle, then 45° junction corners.
-            "junction_angle_threshold": 22.5,
-            # If a junction corner angle is less than this threshold away from any angle in junction_angles, optimize it.
-        },
-        "lr": 0.01,
-        "gamma": 0.995,
-        "device": "cpu",
-        "tolerance": 0.5,
-        "seg_threshold": 0.5,
-        "min_area": 10,
-    }
-
-    seg = np.zeros((6, 8, 1))
-    # Triangle:
-    seg[1, 4] = 1
-    seg[2, 3:5] = 1
-    seg[3, 2:5] = 1
-    seg[4, 1:5] = 1
-    # L extension:
-    seg[3:5, 5:7] = 1
-
-    u = np.zeros((6, 8), dtype=np.complex)
-    v = np.zeros((6, 8), dtype=np.complex)
-    # Init with grid
-    u.real = 1
-    v.imag = 1
-    # Add slope
-    u[:4, :4] *= np.exp(1j * np.pi / 4)
-    v[:4, :4] *= np.exp(1j * np.pi / 4)
-    # Add slope corners
-    # u[:2, 4:6] *= np.exp(1j * np.pi / 4)
-    # v[4:, :2] *= np.exp(- 1j * np.pi / 4)
-
-    crossfield = math_utils.compute_crossfield_c0c2(u, v)
-
-    seg_batch = torch.tensor(np.transpose(seg[:, :, :2], (2, 0, 1)), dtype=torch.float)[None, ...]
-    crossfield_batch = torch.tensor(np.transpose(crossfield, (2, 0, 1)), dtype=torch.float)[None, ...]
-
-    # Add samples to batch to increase batch size
-    batch_size = 16
-    seg_batch = seg_batch.repeat((batch_size, 1, 1, 1))
-    crossfield_batch = crossfield_batch.repeat((batch_size, 1, 1, 1))
-
-    out_contours_batch, out_probs_batch = polygonize(seg_batch, crossfield_batch, config)
-
-    polygons = out_contours_batch[0]
-
-    filepath = "demo_poly_asm.pdf"
-    crossfield_plot.save_poly_viz(seg[:, :, 0], polygons, filepath, linewidths=0.5, draw_vertices=True, crossfield=crossfield)
-
-
-if __name__ == '__main__':
-    main()

@@ -17,20 +17,22 @@
  *   (at your option) any later version.                                   *
  ****
 """
-import numpy as np
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Dict, List, Union
+
+import numpy as np
 from affine import Affine
 from omegaconf import MISSING
 from pyproj import CRS
-from shapely.geometry import Polygon
-
+from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
+    VectorDatabaseDataWriter, VectorFileDataWriter)
 from pytorch_segmentation_models_trainer.tools.polygonization.methods import (
     active_contours, active_skeletons, simple)
-from tools.data_handlers.data_writer import VectorDatabaseDataWriter, VectorFileDataWriter
-from utils.polygon_utils import polygons_to_world_coords
+from pytorch_segmentation_models_trainer.utils.polygon_utils import \
+    polygons_to_world_coords
+from shapely.geometry import Polygon
 
 
 @dataclass
@@ -163,12 +165,13 @@ class SimplePolygonizerProcessor(TemplatePolygonizerProcessor):
         self.polygonize_method = simple.polygonize
 
     def process(self, inference: Dict[str, np.array], pool: ThreadPoolExecutor=None):
-        """Processes the polygonization. Reimplemented from template due to signature differences.
+        """Processes the polygonization. Reimplemented from template due to signature 
+        differences on polygonize method.
 
         Args:
             inference (Dict[str, np.array]): numpy inference from the neural network.
-            pool (concurrent.futures.ThreadPool, optional): Thread object in case of parallel execution.
-                Defaults to None.
+            pool (concurrent.futures.ThreadPool, optional): Thread object in case of 
+            parallel execution. Defaults to None.
         """
         out_contours_batch, out_probs_batch = self.polygonize_method(
             inference['seg'],

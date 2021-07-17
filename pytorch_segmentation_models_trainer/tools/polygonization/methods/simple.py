@@ -66,16 +66,16 @@ def shapely_postprocess(out_contours, np_indicator, config):
     multi_line_string = shapely.ops.unary_union(line_string_list)
     polygons, dangles, cuts, invalids = shapely.ops.polygonize_full(multi_line_string)
     polygons = [polygon for polygon in list(polygons) if
-                config["min_area"] < polygon.area]
+                config.min_area < polygon.area]
 
     filtered_polygons, filtered_polygon_probs = [], []
     for polygon in polygons:
         prob = polygonize_utils.compute_geom_prob(polygon, np_indicator)
-        if config["seg_threshold"] < prob:
+        if config.seg_threshold < prob:
             filtered_polygons.append(polygon)
             filtered_polygon_probs.append(prob)
 
-    polygons, probs = simplify(filtered_polygons, filtered_polygon_probs, config["tolerance"])
+    polygons, probs = simplify(filtered_polygons, filtered_polygon_probs, config.tolerance)
     return polygons, probs
 
 
@@ -88,7 +88,7 @@ def polygonize(seg_batch, config, pool=None, pre_computed=None):
     np_indicator_batch = indicator_batch.cpu().numpy()
 
     init_contours_batch = polygonize_utils.compute_init_contours_batch(
-        np_indicator_batch, config["data_level"], pool=pool
+        np_indicator_batch, config.data_level, pool=pool
     ) if pre_computed is None or "init_contours_batch" not in pre_computed \
         else pre_computed["init_contours_batch"]
 

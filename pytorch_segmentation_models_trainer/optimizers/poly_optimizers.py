@@ -28,7 +28,6 @@ from pytorch_segmentation_models_trainer.utils import frame_field_utils
 from pytorch_segmentation_models_trainer.utils.math_utils import bilinear_interpolate
 from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor_tools import \
     TensorSkeleton
-DEBUG = False
 
 class TensorPolyOptimizer:
     def __init__(
@@ -60,7 +59,7 @@ class TensorPolyOptimizer:
 
         self.criterion = PolygonAlignLoss(
             indicator,
-            config["data_level"],
+            config.data_level,
             c0c2,
             data_coef,
             length_coef,
@@ -68,11 +67,11 @@ class TensorPolyOptimizer:
             dist=dist,
             dist_coef=dist_coef
         )
-        self.optimizer = torch.optim.SGD([tensorpoly.pos], lr=config["poly_lr"])
+        self.optimizer = torch.optim.SGD([tensorpoly.pos], lr=config.poly_lr)
 
         def lr_warmup_func(iter):
-            return 1 if iter >= config["warmup_iters"] else \
-                1 + (config["warmup_factor"] - 1) * (config["warmup_iters"] - iter) / config["warmup_iters"]
+            return 1 if iter >= config.warmup_iters else \
+                1 + (config.warmup_factor - 1) * (config.warmup_iters - iter) / config.warmup_iters
 
         self.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
             self.optimizer,
@@ -90,7 +89,7 @@ class TensorPolyOptimizer:
         return loss.item(), losses_dict
 
     def optimize(self):
-        for iter_num in range(self.config["steps"]):
+        for iter_num in range(self.config.steps):
             loss, losses_dict = self.step(iter_num)
         return self.tensorpoly
 
@@ -194,10 +193,10 @@ class TensorSkeletonOptimizer:
         # Require grads for graph.pos: this is what is optimized
         self.tensorskeleton.pos.requires_grad = True
 
-        level = config["data_level"]
-        self.criterion = AlignLoss(self.tensorskeleton, indicator, level, c0c2, config["loss_params"])
-        self.optimizer = torch.optim.RMSprop([tensorskeleton.pos], lr=config["lr"], alpha=0.9)
-        self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, config["gamma"])
+        level = config.data_level
+        self.criterion = AlignLoss(self.tensorskeleton, indicator, level, c0c2, config.loss_params)
+        self.optimizer = torch.optim.RMSprop([tensorskeleton.pos], lr=config.lr, alpha=0.9)
+        self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, config.gamma)
 
     def step(self, iter_num):
         self.optimizer.zero_grad()
@@ -216,13 +215,7 @@ class TensorSkeletonOptimizer:
         return loss.item(), losses_dict
 
     def optimize(self) -> TensorSkeleton:
-        if DEBUG:
-            optim_iter = tqdm(range(self.config["loss_params"]["coefs"]["step_thresholds"][-1]), desc="Gradient descent", leave=True)
-            for iter_num in optim_iter:
-                loss, losses_dict = self.step(iter_num)
-                optim_iter.set_postfix(loss=loss, **losses_dict)
-        else:
-            for iter_num in range(self.config["loss_params"]["coefs"]["step_thresholds"][-1]):
-                loss, losses_dict = self.step(iter_num)
+        for iter_num in range(self.config.loss_params.coefs.step_thresholds[-1]):
+            loss, losses_dict = self.step(iter_num)
         return self.tensorskeleton
 
