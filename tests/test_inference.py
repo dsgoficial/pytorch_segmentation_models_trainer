@@ -92,9 +92,9 @@ class Test_TestInference(unittest.TestCase):
     
     def get_simple_polygonizer(self):
         config = SimplePolConfig()
-        self.output_file_path = os.path.join(self.output_dir, 'simple_polygonizer.geojson')
+        self.simple_output_file_path = os.path.join(self.output_dir, 'simple_polygonizer.geojson')
         data_writer = VectorFileDataWriter(
-            output_file_path=self.output_file_path,
+            output_file_path=self.simple_output_file_path,
             crs=self.crs
         )
         return SimplePolygonizerProcessor(
@@ -106,9 +106,9 @@ class Test_TestInference(unittest.TestCase):
     
     def get_acm_polygonizer(self):
         config = ACMConfig()
-        self.output_file_path = os.path.join(self.output_dir, 'acm_polygonizer.geojson')
+        self.acm_output_file_path = os.path.join(self.output_dir, 'acm_polygonizer.geojson')
         data_writer = VectorFileDataWriter(
-            output_file_path=self.output_file_path,
+            output_file_path=self.acm_output_file_path,
             crs=self.crs
         )
         return ACMPolygonizerProcessor(
@@ -120,9 +120,9 @@ class Test_TestInference(unittest.TestCase):
 
     def get_asm_polygonizer(self):
         config = ASMConfig()
-        self.output_file_path = os.path.join(self.output_dir, 'asm_polygonizer.geojson')
+        self.asm_output_file_path = os.path.join(self.output_dir, 'asm_polygonizer.geojson')
         data_writer = VectorFileDataWriter(
-            output_file_path=self.output_file_path,
+            output_file_path=self.asm_output_file_path,
             crs=self.crs
         )
         return ASMPolygonizerProcessor(
@@ -239,3 +239,4 @@ class Test_TestInference(unittest.TestCase):
         )
         assert os.path.isfile(os.path.join(self.output_dir, f'seg_{polygonizer_key}_output.tif'))
         assert os.path.isfile(os.path.join(self.output_dir, f'crossfield_{polygonizer_key}_output.tif'))
+        assert os.path.isfile(getattr(self, f"{polygonizer_key}_output_file_path"))
