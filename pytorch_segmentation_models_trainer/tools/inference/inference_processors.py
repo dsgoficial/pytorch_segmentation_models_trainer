@@ -19,6 +19,7 @@
  ****
 """
 import os
+import math
 from abc import ABC, abstractmethod
 from typing import Dict, List, Union
 
@@ -87,16 +88,25 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
         Returns:
             Union[np.array, dict]: model inference
         """
+        normalized_image = self.normalize(image=image)['image']
+        pad_func = A.PadIfNeeded(
+            math.ceil(image.shape[0] / self.model_input_shape[0]) * self.model_input_shape[0],
+            math.ceil(image.shape[1] / self.model_input_shape[1]) * self.model_input_shape[1],
+        )
+        center_crop_func = A.CenterCrop(*image.shape[0:2])
+        normalized_image = pad_func(image=normalized_image)['image']
         tiler = ImageSlicer(
-            image.shape,
+            normalized_image.shape,
             tile_size=self.model_input_shape,
             tile_step=self.step_shape
         )
-        normalized_image = self.normalize(image=image)['image']
         tiles = [tensor_from_rgb_image(tile) for tile in tiler.split(normalized_image)]
         merger_dict = self.get_merger_dict(tiler)
         self.predict_and_merge(tiles, tiler, merger_dict)
-        return self.merge_masks(tiler, merger_dict)
+        merged_masks_dict = self.merge_masks(tiler, merger_dict)
+        return {
+            key: center_crop_func(image=value)['image'] for key, value in merged_masks_dict.items()
+        }
     
     def get_merger_dict(self, tiler: ImageSlicer):
         return {
