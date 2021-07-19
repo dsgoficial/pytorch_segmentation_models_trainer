@@ -19,6 +19,7 @@
  ****
 """
 import logging
+from pytorch_segmentation_models_trainer.utils.os_utils import import_module_from_cfg
 from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import TemplatePolygonizerProcessor
 from pytorch_segmentation_models_trainer.tools.inference.inference_processors import AbstractInferenceProcessor
 import hydra
@@ -28,24 +29,44 @@ from torch.utils.data import DataLoader
 import numpy as np
 from omegaconf import DictConfig, MISSING
 from dataclasses import dataclass, field
+from hydra.utils import instantiate
+
+@dataclass
+class InferenceParams:
+    threshold: float = 0.5
+    batch_size: int = 8
 
 @dataclass
 class PredictionConfig:
     training_cfg: dict = field(default_factory=dict)
+    inference_params: InferenceParams = field(default_factory=InferenceParams)
     checkpoint_path: str = MISSING
     polygonizer: TemplatePolygonizerProcessor = MISSING
     inference_processor: AbstractInferenceProcessor = MISSING
     image_reader: str = MISSING #TODO: define an object structure for this part
-    inference_threshold: float = 0.5
 
-def instantiate_model(model_cfg, checkpoint_path):
-    pass
+def instantiate_model(model_cfg, checkpoint_file_path):
+    pl_model = import_module_from_cfg(model_cfg).load_from_checkpoint(
+        checkpoint_file_path,
+        cfg=model_cfg
+    )
+    model = pl_model.model
+    model.eval()
+    return model
 
-def instantiate_inference_processor(inference_processor_cfg, polygonizer=None):
-    pass
+def instantiate_inference_processor(cfg, model, polygonizer=None):
+    inference_processor_class = import_module_from_cfg(cfg)
+    inference_processor = inference_processor_class(
+            model=model,
+            device=cfg.device,
+            batch_size=8,
+            export_strategy=instantiate(cfg.export_strategy),
+            polygonizer=None if polygonizer is None else instantiate(polygonizer)
+        )
+    return inference_processor
 
 def get_images(image_reader_cfg):
-    pass
+    return image_reader_cfg
 
 @hydra.main(config_path="conf", config_name="config")
 def predict(cfg: DictConfig):
