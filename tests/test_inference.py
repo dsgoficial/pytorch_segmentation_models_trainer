@@ -97,8 +97,6 @@ class Test_TestInference(unittest.TestCase):
             output_file_path=self.simple_output_file_path
         )
         return SimplePolygonizerProcessor(
-            crs=self.crs,
-            transform=self.transform,
             data_writer=data_writer,
             config=config
         )
