@@ -20,6 +20,7 @@
  ****
 """
 import os
+from pathlib import Path
 import unittest
 
 import albumentations as A
@@ -199,8 +200,9 @@ class Test_TestInference(unittest.TestCase):
         inference_processor.process(
             image_path=self.frame_field_ds[0]['path']
         )
-        assert os.path.isfile(os.path.join(self.output_dir, 'seg_output.tif'))
-        assert os.path.isfile(os.path.join(self.output_dir, 'crossfield_output.tif'))
+        name = Path(self.frame_field_ds[0]['path']).stem
+        assert os.path.isfile(os.path.join(self.output_dir, f'seg_{name}_output.tif'))
+        assert os.path.isfile(os.path.join(self.output_dir, f'crossfield_{name}_output.tif'))
 
     @parameterized.expand(
         [
@@ -225,6 +227,7 @@ class Test_TestInference(unittest.TestCase):
             image_path=self.frame_field_ds[0]['path'],
             threshold=0.5
         )
-        assert os.path.isfile(os.path.join(self.output_dir, f'seg_{polygonizer_key}_output.tif'))
-        assert os.path.isfile(os.path.join(self.output_dir, f'crossfield_{polygonizer_key}_output.tif'))
+        name = Path(self.frame_field_ds[0]['path']).stem
+        assert os.path.isfile(os.path.join(self.output_dir, f'seg_{polygonizer_key}_{name}_output.tif'))
+        assert os.path.isfile(os.path.join(self.output_dir, f'crossfield_{polygonizer_key}_{name}_output.tif'))
         assert os.path.isfile(getattr(self, f"{polygonizer_key}_output_file_path"))
