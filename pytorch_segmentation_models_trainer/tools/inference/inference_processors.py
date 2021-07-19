@@ -21,6 +21,7 @@
 import os
 import math
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Dict, List, Union
 
 import albumentations as A
@@ -29,7 +30,7 @@ import numpy as np
 import rasterio
 import torch
 from pytorch_toolbelt.inference.tiles import ImageSlicer, TileMerger
-from pytorch_toolbelt.utils.torch_utils import tensor_from_rgb_image, to_numpy
+from pytorch_toolbelt.utils.torch_utils import image_to_tensor, tensor_from_rgb_image, to_numpy
 from torch.utils.data import DataLoader
 
 class AbstractInferenceProcessor(ABC):
@@ -62,11 +63,11 @@ class AbstractInferenceProcessor(ABC):
         if self.polygonizer is not None:
             self.polygonizer.process(
                 {
-                    key: tensor_from_rgb_image(value).unsqueeze(0) for key, value in inference.items()
+                    key: image_to_tensor(value).unsqueeze(0) for key, value in inference.items()
                 },
                 profile
             )
-        
+        profile['input_name'] = Path(image_path).stem
         return self.export_strategy.save_inference(inference, profile)
 
     @abstractmethod
@@ -109,7 +110,7 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
             tile_size=self.model_input_shape,
             tile_step=self.step_shape
         )
-        tiles = [tensor_from_rgb_image(tile) for tile in tiler.split(normalized_image)]
+        tiles = [image_to_tensor(tile) for tile in tiler.split(normalized_image)]
         merger_dict = self.get_merger_dict(tiler)
         self.predict_and_merge(tiles, tiler, merger_dict)
         merged_masks_dict = self.merge_masks(tiler, merger_dict)
