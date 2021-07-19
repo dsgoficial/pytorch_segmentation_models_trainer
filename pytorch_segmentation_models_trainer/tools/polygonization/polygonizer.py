@@ -23,9 +23,6 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Union
 
 import numpy as np
-from affine import Affine
-from omegaconf import MISSING
-from pyproj import CRS
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
     VectorDatabaseDataWriter, VectorFileDataWriter)
 from pytorch_segmentation_models_trainer.tools.polygonization.methods import (
@@ -37,8 +34,6 @@ from shapely.geometry import Polygon
 
 @dataclass
 class TemplatePolygonizerProcessor(ABC):
-    crs: CRS = MISSING
-    transform: Affine = MISSING
     data_writer: Union[VectorFileDataWriter, VectorDatabaseDataWriter] = field(default_factory=VectorFileDataWriter)
     
     @abstractmethod

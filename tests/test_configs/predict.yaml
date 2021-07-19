@@ -1,113 +1,98 @@
-# @package _group_
-pl_model:
-  _target_: pytorch_segmentation_models_trainer.model_loader.frame_field_model.FrameFieldSegmentationPLModel
-
-model:
-  _target_: pytorch_segmentation_models_trainer.model_loader.frame_field_model.FrameFieldModel
-  segmentation_model:
-    _target_: segmentation_models_pytorch.Unet
-    encoder_name: ${backbone.name}
-    encoder_weights: imagenet
-    in_channels: 3
-    classes: ${hyperparameters.classes}
-    activation: 'sigmoid'
-  seg_params: ${seg_params}
-  compute_seg: ${compute_seg)
-  compute_crossfield: ${compute_crossfield}
-
-compute_seg: true
-compute_crossfield: true
-device: "cuda"
-
-seg_params:
-  compute_interior: true
-  compute_edge: true
-  compute_vertex: false
-
-loss_params:
-  multiloss:
-    normalization_params:
-      min_samples: 10
-      max_samples: 40000
-    coefs:
-      epoch_thresholds:
+checkpoint_path: teste
+inference_threshold: 0.5
+polygonizer:
+  _target_: pytorch_segmentation_models_trainer.tools.polygonization.polygonizer.ASMPolygonizerProcessor
+  config:
+    init_method: "skeleton"
+    data_level: 0.5
+    loss_params:
+      coefs:
+        step_thresholds:
+          - 0
+          - 100
+          - 200
+          - 300
+        data:
+          - 1.0
+          - 0.1
+          - 0.0
+          - 0.0
+        crossfield:
+          - 0.0
+          - 0.05
+          - 0.0
+          - 0.0
+        length:
+          - 0.1
+          - 0.01
+          - 0.0
+          - 0.0
+        curvature:
+          - 0.0
+          - 0.0
+          - 0.0
+          - 0.0
+        corner:
+          - 0.0
+          - 0.0
+          - 0.0
+          - 0.0
+        junction:
+          - 0.0
+          - 0.0
+          - 0.0
+          - 0.0
+      curvature_dissimilarity_threshold: 15
+      corner_angles:
+        - 45
+        - 90
+        - 135
+      corner_angle_threshold: 22.5
+      junction_angles:
         - 0
-        - 5
-        - 10
-      seg: 10
-      crossfield_align: 1.0
-      crossfield_align90: 0.2
-      crossfield_smooth: 0.005
-      seg_interior_crossfield:
-        - 0
-        - 0
-        - 0.2
-      seg_edge_crossfield:
-        - 0
-        - 0
-        - 0.2
-      seg_edge_interior:
-        - 0
-        - 0
-        - 0.2
-  seg_loss_params:
-    bce_coef: 0.75
-    dice_coef: 0.25
-    use_dist: true
-    use_size: false
-    w0: 50.0
-    sigma: 10.0
-
-optimizer:
-  _target_: torch.optim.AdamW
-  lr: ${hyperparameters.max_lr}
-  weight_decay: 1e-3
-
-hyperparameters:
-  model_name: unet
-  backbone: ${backbone.name}
-  batch_size: 16
-  epochs: 30
-  max_lr: 1e-2
-  classes: 1
-
-scheduler_list:
-  - scheduler:
-      _target_: torch.optim.lr_scheduler.OneCycleLR
-      max_lr: ${hyperparameters.max_lr}
-      steps_per_epoch: 5161
-      epochs: ${hyperparameters.epochs}
-    name: learning_rate
-    interval: step
-    frequency: 1
-    monitor: avg_val_loss
-
-callbacks:
-  - _target_: pytorch_lightning.callbacks.LearningRateMonitor
-    logging_interval: step
-  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.FrameFieldResultCallback
-
-pl_trainer:
-  stochastic_weight_avg: true
-  sync_batchnorm: true
-
-inference:
-  model_checkpoint: path/to/checkpoint
-  image_path: /data
-  threshold: 0.5
-  tile_size:
-    - 512
-    - 512
-  tile_step:
-    - 256
-    - 256
-
+        - 45
+        - 90
+        - 135
+      junction_angle_weights:
+        - 1
+        - 0.01
+        - 0.1
+        - 0.01
+      junction_angle_threshold: 22.5
+    lr: 0.001
+    gamma: 0.0001
+    device: ${device}
+    tolerance: 22
+    seg_threshold: 0.5
+    min_area: 12
+  data_writer:
+    _target_: pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.VectorFileDataWriter
+    output_file_path: /data/output.geojson
+    driver: GeoJSON
+    mode: a
+export_strategy:
+  _target_: pytorch_segmentation_models_trainer.tools.inference.export_inference.MultipleRasterExportInferenceStrategy
+  output_folder: /data
+  output_basename: inference.tif
+inference_processor:
+  _target_: pytorch_segmentation_models_trainer.tools.inference.inference_processors.SingleImageFromFrameFieldProcessor
+  model: ${pl_model}
+  device: ${device}
+  batch_size: ${hyperparameters.batch_size}
+  polygonizer: ${polygonizer}
+  export_strategy: ${export_strategy}
+  model_input_shape:
+    - 448
+    - 448
+  step_shape:
+    - 224
+    - 224
+inference_image_reader:
+  _target_: pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader.CSVImageReaderProcessor
+  input_csv_path: teste
+  key: image
+  root_dir: root
+  n_first_rows_to_read: 2
 
 defaults:
-  - backbone: resnet152
-  - pl_trainer: local
-  - train_dataset: dsg_dataset_frame_field_train
-  - train_dataset/data_loader: ${defaults.1.pl_trainer}
-  - val_dataset: dsg_dataset_frame_field_val
-  - val_dataset/data_loader: ${defaults.1.pl_trainer}
-  - metrics: pytorch_lightning_frame_field
+  - train_config_used_in_predict_test

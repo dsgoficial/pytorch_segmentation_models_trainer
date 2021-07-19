@@ -53,10 +53,12 @@ class MultipleRasterExportInferenceStrategy(ExportInferenceTemplate):
         self.output_basename = output_basename
     
     def save_inference(self, inference_dict: Dict[str, np.array], profile: dict) -> None:
+        name = '' if 'input_name' not in profile else f'_{profile.pop("input_name")}'
         for key, value in inference_dict.items():
+            file_name = f'{key}_{self.output_basename}' 
             output_file_path = os.path.join(
                 self.output_folder,
-                f'{key}_{self.output_basename}'
+                f'{key}{name}_{self.output_basename}'
             )
             writer = RasterDataWriter(
                 output_file_path=output_file_path

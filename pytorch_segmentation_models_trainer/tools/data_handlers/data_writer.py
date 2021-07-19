@@ -51,16 +51,25 @@ class RasterDataWriter(AbstractDataWriter):
 class VectorFileDataWriter(AbstractDataWriter):
     output_file_path: str = MISSING
     driver: str = "GeoJSON"
+    mode: str = "a"
+
 
     def write_data(self, input_data: List[Union[BaseGeometry, BaseMultipartGeometry]], profile: dict) -> None:
         geoseries = GeoSeries(input_data, crs=profile['crs'])
         gdf = GeoDataFrame.from_features(geoseries, crs=profile['crs'])
         if len(gdf) == 0:
             return
-        gdf.to_file(
-            self.output_file_path,
-            driver=self.driver
-        )
+        if not os.path.isfile(self.output_file_path) and self.mode == "a":
+            gdf.to_file(
+                self.output_file_path,
+                driver=self.driver
+            )
+        else:
+            gdf.to_file(
+                self.output_file_path,
+                driver=self.driver,
+                mode=self.mode
+            )
 
 @dataclass
 class VectorDatabaseDataWriter(AbstractDataWriter):

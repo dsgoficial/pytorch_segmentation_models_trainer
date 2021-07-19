@@ -18,60 +18,70 @@
  *                                                                         *
  ****
 """
-import logging
-from pytorch_segmentation_models_trainer.utils.os_utils import import_module_from_cfg
+from typing import Dict, List
+
 import hydra
-import omegaconf
-import rasterio
-from torch.utils.data import DataLoader
 import numpy as np
-from omegaconf import DictConfig, MISSING
-from dataclasses import dataclass, field
+import omegaconf
+import torch
 from hydra.utils import instantiate
+from omegaconf import DictConfig
+from tqdm import tqdm
+
+from pytorch_segmentation_models_trainer.tools.inference.inference_processors import \
+    AbstractInferenceProcessor
+from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import \
+    TemplatePolygonizerProcessor
+from pytorch_segmentation_models_trainer.utils.os_utils import \
+    import_module_from_cfg
 
 
-def instantiate_model(model_cfg, checkpoint_file_path):
-    pl_model = import_module_from_cfg(model_cfg).load_from_checkpoint(
-        checkpoint_file_path,
-        cfg=model_cfg
+def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
+    pl_model = import_module_from_cfg(cfg.pl_model).load_from_checkpoint(
+        cfg.checkpoint_path,
+        cfg=cfg
     )
     model = pl_model.model
     model.eval()
     return model
 
-def instantiate_inference_processor(cfg, model):
-    inference_processor_class = import_module_from_cfg(cfg)
-    inference_processor = inference_processor_class(
-            model=model,
-            device=cfg.device,
-            batch_size=cfg.batch_size,
-            export_strategy=instantiate(cfg.export_strategy),
-            polygonizer=None if "polygonizer" not in cfg else instantiate(cfg.polygonizer)
-        )
-    return inference_processor
+def instantiate_polygonizer(cfg: DictConfig) -> TemplatePolygonizerProcessor:
+    data_writer = instantiate(cfg.polygonizer.data_writer)
+    polygonizer = instantiate(
+        cfg.polygonizer,
+        data_writer=data_writer
+    )
+    polygonizer.data_writer = data_writer
+    return polygonizer
 
-def get_images(image_reader_cfg):
-    return image_reader_cfg
+def instantiate_inference_processor(cfg: DictConfig) -> AbstractInferenceProcessor:
+    obj_params = dict(cfg.inference_processor)
+    obj_params['model'] = instantiate_model_from_checkpoint(cfg)
+    obj_params['polygonizer'] = instantiate_polygonizer(cfg)
+    obj_params['export_strategy'] = instantiate(cfg.export_strategy)
+    obj_params['device'] = cfg.device
+    obj_params['batch_size'] = cfg.hyperparameters.batch_size
+    obj_params['mask_bands'] = sum(cfg.seg_params.values())
+    obj_params.pop('_target_')
+    for key, value in obj_params.items():
+        if isinstance(value, omegaconf.listconfig.ListConfig):
+            obj_params[key] = list(value)
+
+    return import_module_from_cfg(cfg.inference_processor)(**obj_params)
+
+def get_images(cfg: DictConfig) -> List[str]:
+    image_reader = instantiate(cfg.inference_image_reader)
+    return image_reader.get_images()
 
 @hydra.main(config_path="conf", config_name="config")
 def predict(cfg: DictConfig):
-    model = instantiate_model(
-        cfg.pl_model if "pl_model" in cfg else cfg.model,
-        cfg.checkpoint_path
-    )
-    inference_processor = instantiate_inference_processor(
-        cfg.inference_processor,
-        model
-    )
-    images = get_images(cfg.image_reader)
-    for image in images:
+    inference_processor = instantiate_inference_processor(cfg)
+    images = get_images(cfg)
+    for image in tqdm(images):
         inference_processor.process(
             image,
             threshold=cfg.inference_threshold
         )
-
-
-
 
 if __name__=="__main__":
     predict()
