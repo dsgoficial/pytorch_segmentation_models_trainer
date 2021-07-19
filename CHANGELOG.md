@@ -1,3 +1,8 @@
+# Version 0.8.0
+
+- Added inference features;
+- Improved polygon inference;
+
 # Version 0.7.2
 
 - Changed the versions of pytorch and torchvision.

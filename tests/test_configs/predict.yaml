@@ -1,0 +1,98 @@
+checkpoint_path: teste
+inference_threshold: 0.5
+polygonizer:
+  _target_: pytorch_segmentation_models_trainer.tools.polygonization.polygonizer.ASMPolygonizerProcessor
+  config:
+    init_method: "skeleton"
+    data_level: 0.5
+    loss_params:
+      coefs:
+        step_thresholds:
+          - 0
+          - 100
+          - 200
+          - 300
+        data:
+          - 1.0
+          - 0.1
+          - 0.0
+          - 0.0
+        crossfield:
+          - 0.0
+          - 0.05
+          - 0.0
+          - 0.0
+        length:
+          - 0.1
+          - 0.01
+          - 0.0
+          - 0.0
+        curvature:
+          - 0.0
+          - 0.0
+          - 0.0
+          - 0.0
+        corner:
+          - 0.0
+          - 0.0
+          - 0.0
+          - 0.0
+        junction:
+          - 0.0
+          - 0.0
+          - 0.0
+          - 0.0
+      curvature_dissimilarity_threshold: 15
+      corner_angles:
+        - 45
+        - 90
+        - 135
+      corner_angle_threshold: 22.5
+      junction_angles:
+        - 0
+        - 45
+        - 90
+        - 135
+      junction_angle_weights:
+        - 1
+        - 0.01
+        - 0.1
+        - 0.01
+      junction_angle_threshold: 22.5
+    lr: 0.001
+    gamma: 0.0001
+    device: ${device}
+    tolerance: 22
+    seg_threshold: 0.5
+    min_area: 12
+  data_writer:
+    _target_: pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.VectorFileDataWriter
+    output_file_path: /data/output.geojson
+    driver: GeoJSON
+    mode: a
+export_strategy:
+  _target_: pytorch_segmentation_models_trainer.tools.inference.export_inference.MultipleRasterExportInferenceStrategy
+  output_folder: /data
+  output_basename: inference.tif
+inference_processor:
+  _target_: pytorch_segmentation_models_trainer.tools.inference.inference_processors.SingleImageFromFrameFieldProcessor
+  model: ${pl_model}
+  device: ${device}
+  batch_size: ${hyperparameters.batch_size}
+  polygonizer: ${polygonizer}
+  export_strategy: ${export_strategy}
+  model_input_shape:
+    - 448
+    - 448
+  step_shape:
+    - 224
+    - 224
+inference_image_reader:
+  _target_: pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader.CSVImageReaderProcessor
+  input_csv_path: teste
+  key: image
+  root_dir: root
+  n_first_rows_to_read: 2
+
+defaults:
+  - train_config_used_in_predict_test

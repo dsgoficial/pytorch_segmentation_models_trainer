@@ -142,3 +142,4 @@ htmlcov/
 .cache
 
 *.pth
+*.ckpt

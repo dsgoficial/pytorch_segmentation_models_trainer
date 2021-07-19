@@ -1,6 +1,6 @@
 _target_: "pytorch_segmentation_models_trainer.tools.mask_building.mask_builder.MaskBuilder"
 geo_df:
-  _target_: "pytorch_segmentation_models_trainer.tools.data_readers.vector_reader.FileGeoDF"
+  _target_: "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.FileGeoDF"
   file_name: "../tests/testing_data/data/build_masks_data/buildings.geojson"
 root_dir: '/data'
 output_csv_path: '/data'

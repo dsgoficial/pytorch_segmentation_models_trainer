@@ -1,6 +1,6 @@
 _target_: "pytorch_segmentation_models_trainer.tools.mask_building.mask_builder.MaskBuilder"
 geo_df:
-  _target_: "pytorch_segmentation_models_trainer.tools.data_readers.vector_reader.PostgisGeoDF"
+  _target_: "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.PostgisGeoDF"
   user: postgres
   password: postgres
   database: test_db

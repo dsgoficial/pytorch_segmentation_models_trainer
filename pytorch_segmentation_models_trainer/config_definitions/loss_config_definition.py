@@ -84,6 +84,11 @@ class MultiLossConfig:
     coefs: CoefsConfig = MISSING
     seg_loss_params: SegLossParamsConfig = MISSING
 
+@dataclass
+class LossParamsConfig:
+    multi_loss: MultiLossConfig = field(default_factory=MultiLossConfig)
+    seg_loss_params: SegParamsConfig = field(default_factory=SegLossParamsConfig)
+
 logger = logging.getLogger(__name__)
 
 cs = ConfigStore.instance()

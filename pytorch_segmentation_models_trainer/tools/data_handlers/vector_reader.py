@@ -26,18 +26,18 @@ from collections import defaultdict
 from dataclasses import MISSING, dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import List, Union
 
 import fiona
 import geopandas
 import numpy as np
 import psycopg2
-import shapely
+from affine import Affine
 from bidict import bidict
 from geopandas import GeoDataFrame, GeoSeries
 from pycocotools.coco import COCO
 from shapely.geometry import (GeometryCollection, LineString, MultiLineString,
                               MultiPoint, MultiPolygon, Point, Polygon, base)
-from shapely.geometry.geo import shape
 
 
 class GeomType(Enum):
@@ -240,14 +240,12 @@ def handle_geometry(geom, output_type):
     else:
         raise Exception("Invalid geometry handling")
 
-def save_to_file(polygons, base_filepath, name, driver=None, epsg=None):
+def save_to_file(polygons, base_filepath, name, driver=None, crs=None):
     driver = 'GeoJSON' if driver is None else driver
     if driver not in suffix_dict:
         raise TypeError(f"Invalid driver. Supported drivers are: {', '.join(fiona.supported_drivers.keys())}")
-    geoseries = geopandas.GeoSeries(polygons)
-    gdf = geopandas.GeoDataFrame.from_features(geoseries)
-    if epsg is not None:
-        gdf.to_crs(epsg=epsg, inplace=True)
+    geoseries = geopandas.GeoSeries(polygons, crs=crs)
+    gdf = geopandas.GeoDataFrame.from_features(geoseries, crs=crs)
     gdf.to_file(
         os.path.join(base_filepath, name+suffix_dict[driver]),
         driver=driver

@@ -25,6 +25,7 @@ from functools import partial
 
 import cv2
 import numpy as np
+import rasterio
 import shapely.affinity
 import shapely.geometry
 import shapely.ops
@@ -90,4 +91,3 @@ def _fill_raster(prob_map, geom):
     cv2.fillPoly(raster, [exterior_array], color=1)
     cv2.fillPoly(raster, interior_array_list, color=0)
     return raster
-

@@ -18,18 +18,21 @@
  *                                                                         *
  ****
 """
-from collections import OrderedDict
 import os
+from abc import ABC, abstractmethod
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import List
 
 import numpy as np
+import pandas as pd
 import rasterio
 from bidict import bidict
 from geopandas.geoseries import GeoSeries
-from pytorch_segmentation_models_trainer.tools.data_readers.vector_reader import (
+from omegaconf.omegaconf import MISSING
+from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import (
     GeoDF, GeomType, GeomTypeEnum, handle_features)
 from pytorch_segmentation_models_trainer.utils.os_utils import create_folder
 from pytorch_segmentation_models_trainer.utils.polygon_utils import (
@@ -231,6 +234,47 @@ class RasterFile:
         }
         raster_ds.close()
         return return_dict
+
+@dataclass
+class AbstractRasterPathListGetter(ABC):
+    @abstractmethod
+    def get_images(self) -> List[str]:
+        pass
+
+@dataclass
+class SingleImageReaderProcessor(AbstractRasterPathListGetter):
+    file_name: str = MISSING
+
+    def get_images(self) -> List[str]:
+        return [self.file_name]
+
+@dataclass
+class FolderImageReaderProcessor(AbstractRasterPathListGetter):
+    folder_name: str = MISSING
+    recursive: bool = True
+    image_extension: str = "tif"
+
+    def get_images(self) -> List[str]:
+        return [
+            str(p) for p in Path(self.folder_name).glob(f'**/*.{self.image_extension}')
+        ]
+
+@dataclass
+class CSVImageReaderProcessor(AbstractRasterPathListGetter):
+    input_csv_path: str = MISSING
+    key: str = 'image'
+    root_dir: str = None
+    n_first_rows_to_read: str = None
+
+    def read_csv(self) -> pd.DataFrame:
+        return pd.read_csv(self.input_csv_path) if self.n_first_rows_to_read is None \
+            else pd.read_csv(self.input_csv_path, nrows=self.n_first_rows_to_read)
+
+    def get_images(self) -> List[str]:
+        df = self.read_csv()
+        root_dir = '/' if self.root_dir is None else self.root_dir
+        handle_input_path = lambda x: str(os.path.join(root_dir, x))
+        return list(map(handle_input_path, df[self.key].tolist()))
 
 def save_with_rasterio(output, profile, raster_iter, mask_types):
     raster_array = list(raster_iter)[0] if len(mask_types) == 1 \

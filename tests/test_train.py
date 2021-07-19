@@ -35,10 +35,10 @@ config_name_list = [
     "experiment_warmup.yaml",
     "experiment_warmup_and_img_callback.yaml"
 ]
-class Test_TestExperiment(CustomTestCase):
+class Test_TestTrain(CustomTestCase):
 
     @parameterized.expand(config_name_list)
-    def test_run_experiment_from_object(self, config_name: str) -> None:
+    def test_run_train_from_object(self, config_name: str) -> None:
         with initialize(config_path="./test_configs"):
             cfg = compose(
                 config_name=config_name,
