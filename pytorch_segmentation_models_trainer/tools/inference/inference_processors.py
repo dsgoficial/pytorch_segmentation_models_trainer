@@ -51,13 +51,14 @@ class AbstractInferenceProcessor(ABC):
     def process(self, image_path: str, threshold: float=0.5) -> str:
         image = cv2.imread(image_path)
         inference = self.make_inference(image)
+        inference['seg'] = (inference['seg'] > threshold).astype(np.uint8)
         if self.polygonizer is not None:
             self.polygonizer.process(
                 {
                     key: tensor_from_rgb_image(value).unsqueeze(0) for key, value in inference.items()
                 }
             )
-        inference['seg'] = (inference['seg'] > threshold).astype(np.uint8)
+        
         return self.export_strategy.save_inference(inference)
 
     @abstractmethod
