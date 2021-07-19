@@ -24,7 +24,7 @@ import unittest
 
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader import \
-    RasterFile, MaskOutputTypeEnum
+    CSVImageReaderProcessor, FolderImageReaderProcessor, RasterFile, MaskOutputTypeEnum, SingleImageReaderProcessor
 from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import \
     FileGeoDF, GeomTypeEnum
 from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
@@ -63,6 +63,26 @@ suffix_dict = {
     "JPEG": ".jpg"
 }
 
+expected_image_list = [
+    os.path.join(
+        root_dir, 'data', 'frame_field_data', 'images', 
+        'Ortoimagem_MI_2970-1-SO', image
+    ) for image in [
+        'Ortoimagem_MI_2970-1-SO_966.tif',
+        'Ortoimagem_MI_2970-1-SO_967.tif',
+        'Ortoimagem_MI_2970-1-SO_970.tif',
+        'Ortoimagem_MI_2970-1-SO_973.tif',
+        'Ortoimagem_MI_2970-1-SO_995.tif',
+        'Ortoimagem_MI_2970-1-SO_996.tif',
+        'Ortoimagem_MI_2970-1-SO_997.tif',
+        'Ortoimagem_MI_2970-1-SO_998.tif',
+        'Ortoimagem_MI_2970-1-SO_1033.tif',
+        'Ortoimagem_MI_2970-1-SO_1036.tif',
+        'Ortoimagem_MI_2970-1-SO_1039.tif',
+        'Ortoimagem_MI_2970-1-SO_1045.tif',
+    ]
+]
+
 class Test_TestRasterReader(unittest.TestCase):
 
     def setUp(self):
@@ -93,3 +113,32 @@ class Test_TestRasterReader(unittest.TestCase):
         self.assertEqual(
             hash_file(expected_output), hash_file(output_raster)
         )
+    
+    @parameterized.expand(
+        [
+            (
+                SingleImageReaderProcessor(
+                    file_name=os.path.join(root_dir, 'data', 'frame_field_data', 'images', 
+                    'Ortoimagem_MI_2970-1-SO', 'Ortoimagem_MI_2970-1-SO_966.tif')
+                ),
+                [os.path.join(root_dir, 'data', 'frame_field_data', 'images', 
+                'Ortoimagem_MI_2970-1-SO', 'Ortoimagem_MI_2970-1-SO_966.tif')]
+            ),
+            (
+                FolderImageReaderProcessor(
+                    folder_name=os.path.join(root_dir, 'data', 'frame_field_data', 'images')
+                    ),
+                expected_image_list
+            ),
+            (
+                CSVImageReaderProcessor(
+                    input_csv_path=os.path.join(root_dir, 'data', 'frame_field_data', 'dsg_dataset.csv'),
+                    root_dir=os.path.join(root_dir, 'data', 'frame_field_data')
+                ),
+                expected_image_list
+            ),
+        ]
+    )
+    def test_image_reader_processor(self, processor, expected_output):
+        output_list = processor.get_images()
+        self.assertListEqual(sorted(output_list), sorted(expected_output))
