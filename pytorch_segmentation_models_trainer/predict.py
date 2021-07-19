@@ -32,14 +32,8 @@ from dataclasses import dataclass, field
 from hydra.utils import instantiate
 
 @dataclass
-class InferenceParams:
-    threshold: float = 0.5
-    batch_size: int = 8
-
-@dataclass
 class PredictionConfig:
     training_cfg: dict = field(default_factory=dict)
-    inference_params: InferenceParams = field(default_factory=InferenceParams)
     checkpoint_path: str = MISSING
     polygonizer: TemplatePolygonizerProcessor = MISSING
     inference_processor: AbstractInferenceProcessor = MISSING
@@ -54,14 +48,14 @@ def instantiate_model(model_cfg, checkpoint_file_path):
     model.eval()
     return model
 
-def instantiate_inference_processor(cfg, model, polygonizer=None):
+def instantiate_inference_processor(cfg, model):
     inference_processor_class = import_module_from_cfg(cfg)
     inference_processor = inference_processor_class(
             model=model,
             device=cfg.device,
-            batch_size=8,
+            batch_size=cfg.batch_size,
             export_strategy=instantiate(cfg.export_strategy),
-            polygonizer=None if polygonizer is None else instantiate(polygonizer)
+            polygonizer=None if "polygonizer" not in cfg else instantiate(cfg.polygonizer)
         )
     return inference_processor
 
@@ -76,7 +70,7 @@ def predict(cfg: DictConfig):
     )
     inference_processor = instantiate_inference_processor(
         cfg.inference_processor,
-        polygonizer=None if "polygonizer" not in cfg else cfg.polygonizer
+        model
     )
     images = get_images(cfg.image_reader)
     for image in images:
