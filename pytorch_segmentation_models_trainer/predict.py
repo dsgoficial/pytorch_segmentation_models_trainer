@@ -18,11 +18,13 @@
  *                                                                         *
  ****
 """
+import logging
 from typing import Dict, List
 
 import hydra
 import numpy as np
 import omegaconf
+from omegaconf.omegaconf import OmegaConf
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
@@ -35,6 +37,7 @@ from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import
 from pytorch_segmentation_models_trainer.utils.os_utils import \
     import_module_from_cfg
 
+logger = logging.getLogger(__name__)
 
 def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
     pl_model = import_module_from_cfg(cfg.pl_model).load_from_checkpoint(
@@ -75,6 +78,10 @@ def get_images(cfg: DictConfig) -> List[str]:
 
 @hydra.main(config_path="conf", config_name="config")
 def predict(cfg: DictConfig):
+    logger.info(
+        "Starting the prediction of a model with the following configuration: \n%s",
+        OmegaConf.to_yaml(cfg)
+    )
     inference_processor = instantiate_inference_processor(cfg)
     images = get_images(cfg)
     for image in tqdm(images):
