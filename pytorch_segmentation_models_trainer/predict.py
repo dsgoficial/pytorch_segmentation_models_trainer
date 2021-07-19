@@ -20,8 +20,6 @@
 """
 import logging
 from pytorch_segmentation_models_trainer.utils.os_utils import import_module_from_cfg
-from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import TemplatePolygonizerProcessor
-from pytorch_segmentation_models_trainer.tools.inference.inference_processors import AbstractInferenceProcessor
 import hydra
 import omegaconf
 import rasterio
@@ -31,13 +29,6 @@ from omegaconf import DictConfig, MISSING
 from dataclasses import dataclass, field
 from hydra.utils import instantiate
 
-@dataclass
-class PredictionConfig:
-    training_cfg: dict = field(default_factory=dict)
-    checkpoint_path: str = MISSING
-    polygonizer: TemplatePolygonizerProcessor = MISSING
-    inference_processor: AbstractInferenceProcessor = MISSING
-    image_reader: str = MISSING #TODO: define an object structure for this part
 
 def instantiate_model(model_cfg, checkpoint_file_path):
     pl_model = import_module_from_cfg(model_cfg).load_from_checkpoint(
@@ -65,7 +56,7 @@ def get_images(image_reader_cfg):
 @hydra.main(config_path="conf", config_name="config")
 def predict(cfg: DictConfig):
     model = instantiate_model(
-        cfg.training_cfg.pl_model if "pl_model" in cfg.training_cfg else cfg.training_cfg.model,
+        cfg.pl_model if "pl_model" in cfg else cfg.model,
         cfg.checkpoint_path
     )
     inference_processor = instantiate_inference_processor(
