@@ -48,7 +48,7 @@ class TemplatePolygonizerProcessor(ABC):
         """
         pass
 
-    def process(self, inference: Dict[str, np.array], pool: ThreadPoolExecutor=None):
+    def process(self, inference: Dict[str, np.array], profile: dict, pool: ThreadPoolExecutor=None):
         """Processes the polygonization.
 
         Args:
@@ -62,9 +62,9 @@ class TemplatePolygonizerProcessor(ABC):
             self.config,
             pool=pool
         )
-        self.post_process(out_contours_batch[0])
+        self.post_process(out_contours_batch[0], profile)
     
-    def post_process(self, polygons: List[Polygon]):
+    def post_process(self, polygons: List[Polygon], profile: dict):
         """Post-processes generated polygons from process method.
 
         Args:
@@ -72,10 +72,10 @@ class TemplatePolygonizerProcessor(ABC):
         """
         projected_polygons = polygons_to_world_coords(
             polygons,
-            self.transform,
-            epsg_number=self.crs.to_epsg()
+            transform=profile['transform'],
+            epsg_number=profile['crs'].to_epsg()
         )
-        self.data_writer.write_data(projected_polygons)
+        self.data_writer.write_data(projected_polygons, profile)
 
 @dataclass
 class LossParamsCoefs:
@@ -164,7 +164,7 @@ class SimplePolygonizerProcessor(TemplatePolygonizerProcessor):
     def __post_init__(self):
         self.polygonize_method = simple.polygonize
 
-    def process(self, inference: Dict[str, np.array], pool: ThreadPoolExecutor=None):
+    def process(self, inference: Dict[str, np.array], profile: dict, pool: ThreadPoolExecutor=None):
         """Processes the polygonization. Reimplemented from template due to signature 
         differences on polygonize method.
 
@@ -178,4 +178,4 @@ class SimplePolygonizerProcessor(TemplatePolygonizerProcessor):
             self.config,
             pool=pool
         )
-        self.post_process(out_contours_batch[0])
+        self.post_process(out_contours_batch[0], profile)

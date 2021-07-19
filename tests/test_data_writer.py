@@ -68,10 +68,9 @@ class Test_TestDataWriter(unittest.TestCase):
         }
         output_file_path = os.path.join(self.output_dir, 'output.tif')
         data_writer = RasterDataWriter(
-            output_file_path=output_file_path,
-            profile=profile
+            output_file_path=output_file_path
         )
-        data_writer.write_data(input_data=input_data)
+        data_writer.write_data(input_data=input_data, profile=profile)
         assert os.path.isfile(output_file_path)
         with rasterio.open(output_file_path, 'r') as raster_ds:
             output_data = raster_ds.read()
@@ -83,10 +82,9 @@ class Test_TestDataWriter(unittest.TestCase):
         ]
         output_file_path = os.path.join(self.output_dir, 'output.geojson')
         data_writer = VectorFileDataWriter(
-            output_file_path=output_file_path,
-            crs="EPSG:4326"
+            output_file_path=output_file_path
         )
-        data_writer.write_data(input_data=input_data)
+        data_writer.write_data(input_data=input_data, profile={"crs": "EPSG:4326"})
         assert os.path.isfile(output_file_path)
         output_data = geopandas.read_file(filename=output_file_path)
         assert input_data[0].equals(output_data['geometry'][0])
@@ -99,11 +97,10 @@ class Test_TestDataWriter(unittest.TestCase):
             user="postgres",
             password="postgres",
             database="test_db",
-            crs="EPSG:4326",
             table_name="test",
             if_exists="replace"
         )
-        data_writer.write_data(input_data=input_data)
+        data_writer.write_data(input_data=input_data, profile={"crs": "EPSG:4326"})
         con = psycopg2.connect(
             host="localhost",
             port=5432,

@@ -76,19 +76,17 @@ class Test_TestPolygonize(unittest.TestCase):
         config = SimplePolConfig()
         output_file_path = os.path.join(self.output_dir, 'simple_polygonizer.geojson')
         data_writer = VectorFileDataWriter(
-            output_file_path=output_file_path,
-            crs=self.crs
+            output_file_path=output_file_path
         )
         processor = SimplePolygonizerProcessor(
-            crs=self.crs,
-            transform=self.transform,
             data_writer=data_writer,
             config=config
         )
         processor.process(
             {
                 'seg': torch.movedim(self.frame_field_ds[0]['gt_polygons_image'], -1, 0).unsqueeze(0)
-            }
+            },
+            self.profile
         )
         assert os.path.isfile(output_file_path)
         expected_output_gdf = geopandas.read_file(
@@ -103,12 +101,9 @@ class Test_TestPolygonize(unittest.TestCase):
         config = ACMConfig()
         output_file_path = os.path.join(self.output_dir, 'acm_polygonizer.geojson')
         data_writer = VectorFileDataWriter(
-            output_file_path=output_file_path,
-            crs=self.crs
+            output_file_path=output_file_path
         )
         processor = ACMPolygonizerProcessor(
-            crs=self.crs,
-            transform=self.transform,
             data_writer=data_writer,
             config=config
         )
@@ -118,7 +113,8 @@ class Test_TestPolygonize(unittest.TestCase):
                 'crossfield': frame_field_utils.compute_crossfield_to_plot(
                     self.frame_field_ds[0]['gt_crossfield_angle']
                 )
-            }
+            },
+            self.profile
         )
         assert os.path.isfile(output_file_path)
         expected_output_gdf = geopandas.read_file(
@@ -133,12 +129,9 @@ class Test_TestPolygonize(unittest.TestCase):
         config = ASMConfig()
         output_file_path = os.path.join(self.output_dir, 'asm_polygonizer.geojson')
         data_writer = VectorFileDataWriter(
-            output_file_path=output_file_path,
-            crs=self.crs
+            output_file_path=output_file_path
         )
         processor = ASMPolygonizerProcessor(
-            crs=self.crs,
-            transform=self.transform,
             data_writer=data_writer,
             config=config
         )
@@ -148,7 +141,8 @@ class Test_TestPolygonize(unittest.TestCase):
                 'crossfield': frame_field_utils.compute_crossfield_to_plot(
                     self.frame_field_ds[0]['gt_crossfield_angle']
                 )
-            }
+            },
+            self.profile
         )
         assert os.path.isfile(output_file_path)
         expected_output_gdf = geopandas.read_file(

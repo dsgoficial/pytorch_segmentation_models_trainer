@@ -30,67 +30,59 @@ from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import 
     RasterDataWriter, VectorDatabaseDataWriter, VectorFileDataWriter)
 
 class ExportInferenceTemplate(ABC):
-    def __init__(self, input_raster_path) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.input_raster_path = input_raster_path
-        with rasterio.open(input_raster_path) as src:
-            self.profile = src.profile
-            self.crs = src.crs
-    def save_inference(self, inference: Union[np.array, Dict[str, np.array]]) -> None:
-        self.writer.write_data(inference)
+    def save_inference(self, inference: Union[np.array, Dict[str, np.array]], profile: dict) -> None:
+        self.writer.write_data(inference, profile)
 
 class RasterExportInferenceStrategy(ExportInferenceTemplate):
-    def __init__(self, input_raster_path, output_file_path):
-        super(RasterExportInferenceStrategy, self).__init__(input_raster_path)
+    def __init__(self, output_file_path):
+        super(RasterExportInferenceStrategy, self).__init__()
         self.output_file_path = output_file_path
         self.writer = RasterDataWriter(
-            output_file_path=output_file_path,
-            profile=self.profile
+            output_file_path=output_file_path
         )
-    def save_inference(self, inference: Union[np.array, Dict[str, np.array]]) -> None:
+    def save_inference(self, inference: Union[np.array, Dict[str, np.array]], profile: dict) -> None:
         inference = inference['seg'] if isinstance(inference, dict) else inference
-        super(RasterExportInferenceStrategy, self).save_inference(inference)
+        super(RasterExportInferenceStrategy, self).save_inference(inference, profile)
 
 class MultipleRasterExportInferenceStrategy(ExportInferenceTemplate):
-    def __init__(self, input_raster_path, output_folder, output_basename):
-        super(MultipleRasterExportInferenceStrategy, self).__init__(input_raster_path)
+    def __init__(self, output_folder, output_basename):
+        super(MultipleRasterExportInferenceStrategy, self).__init__()
         self.output_folder = output_folder
         self.output_basename = output_basename
     
-    def save_inference(self, inference_dict: Dict[str, np.array]) -> None:
+    def save_inference(self, inference_dict: Dict[str, np.array], profile: dict) -> None:
         for key, value in inference_dict.items():
             output_file_path = os.path.join(
                 self.output_folder,
                 f'{key}_{self.output_basename}'
             )
             writer = RasterDataWriter(
-                output_file_path=output_file_path,
-                profile=self.profile
+                output_file_path=output_file_path
             )
-            writer.write_data(value)
+            writer.write_data(value, profile)
 
 
 class VectorFileExportInferenceStrategy(ExportInferenceTemplate):
-    def __init__(self, input_raster_path, output_file_path, driver="GeoJSON"):
-        super(VectorFileExportInferenceStrategy, self).__init__(input_raster_path)
+    def __init__(self, output_file_path, driver="GeoJSON"):
+        super(VectorFileExportInferenceStrategy, self).__init__()
         self.output_file_path = output_file_path
         self.driver = driver
         self.writer = VectorFileDataWriter(
             output_file_path=output_file_path,
-            crs=f"EPSG:{self.crs.to_epsg()}",
             driver=driver
         )
 
 class VectorDatabaseExportInferenceStrategy(ExportInferenceTemplate):
-    def __init__(self, input_raster_path, user: str, database: str, password: str, sql: str,\
+    def __init__(self, user: str, database: str, password: str, sql: str,\
         host: str, port: int, table_name: str = "buildings", geometry_column: str = "geom"):
-        super(VectorDatabaseExportInferenceStrategy, self).__init__(input_raster_path)
+        super(VectorDatabaseExportInferenceStrategy, self).__init__()
         self.writer = VectorDatabaseDataWriter(
             user=user,
             password=password,
             database=database,
             sql=sql,
-            crs=f"EPSG:{self.crs.to_epsg()}",
             host=host,
             port=port,
             table_name=table_name,

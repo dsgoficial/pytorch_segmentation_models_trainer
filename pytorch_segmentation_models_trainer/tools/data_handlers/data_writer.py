@@ -40,10 +40,9 @@ class AbstractDataWriter(ABC):
 @dataclass
 class RasterDataWriter(AbstractDataWriter):
     output_file_path: str = MISSING
-    profile: dict = field(default_factory=dict)
 
-    def write_data(self, input_data: np.array) -> None:
-        profile = deepcopy(self.profile)
+    def write_data(self, input_data: np.array, profile: dict) -> None:
+        profile = deepcopy(profile)
         profile['count'] = input_data.shape[-1]
         with rasterio.open(self.output_file_path, 'w', **profile) as out:
             out.write(reshape_as_raster(input_data))
@@ -51,12 +50,11 @@ class RasterDataWriter(AbstractDataWriter):
 @dataclass
 class VectorFileDataWriter(AbstractDataWriter):
     output_file_path: str = MISSING
-    crs: str = MISSING
     driver: str = "GeoJSON"
 
-    def write_data(self, input_data: List[Union[BaseGeometry, BaseMultipartGeometry]]) -> None:
-        geoseries = GeoSeries(input_data, crs=self.crs)
-        gdf = GeoDataFrame.from_features(geoseries, crs=self.crs)
+    def write_data(self, input_data: List[Union[BaseGeometry, BaseMultipartGeometry]], profile: dict) -> None:
+        geoseries = GeoSeries(input_data, crs=profile['crs'])
+        gdf = GeoDataFrame.from_features(geoseries, crs=profile['crs'])
         if len(gdf) == 0:
             return
         gdf.to_file(
@@ -70,16 +68,15 @@ class VectorDatabaseDataWriter(AbstractDataWriter):
     password: str = MISSING
     database: str = MISSING
     sql: str = MISSING
-    crs: str = MISSING
     host: str = "localhost"
     port: int = 5432
     table_name: str = "buildings"
     geometry_column: str = "geom"
     if_exists: str = "append"
 
-    def write_data(self, input_data: List[Union[BaseGeometry, BaseMultipartGeometry]]) -> None:
-        geoseries = GeoSeries(input_data, crs=self.crs)
-        gdf = GeoDataFrame.from_features(geoseries, crs=self.crs)
+    def write_data(self, input_data: List[Union[BaseGeometry, BaseMultipartGeometry]], profile: dict) -> None:
+        geoseries = GeoSeries(input_data, crs=profile['crs'])
+        gdf = GeoDataFrame.from_features(geoseries, crs=profile['crs'])
         if len(gdf) == 0:
             return
         gdf.rename_geometry(self.geometry_column, inplace=True)

@@ -94,8 +94,7 @@ class Test_TestInference(unittest.TestCase):
         config = SimplePolConfig()
         self.simple_output_file_path = os.path.join(self.output_dir, 'simple_polygonizer.geojson')
         data_writer = VectorFileDataWriter(
-            output_file_path=self.simple_output_file_path,
-            crs=self.crs
+            output_file_path=self.simple_output_file_path
         )
         return SimplePolygonizerProcessor(
             crs=self.crs,
@@ -108,12 +107,9 @@ class Test_TestInference(unittest.TestCase):
         config = ACMConfig()
         self.acm_output_file_path = os.path.join(self.output_dir, 'acm_polygonizer.geojson')
         data_writer = VectorFileDataWriter(
-            output_file_path=self.acm_output_file_path,
-            crs=self.crs
+            output_file_path=self.acm_output_file_path
         )
         return ACMPolygonizerProcessor(
-            crs=self.crs,
-            transform=self.transform,
             data_writer=data_writer,
             config=config
         )
@@ -123,11 +119,8 @@ class Test_TestInference(unittest.TestCase):
         self.asm_output_file_path = os.path.join(self.output_dir, 'asm_polygonizer.geojson')
         data_writer = VectorFileDataWriter(
             output_file_path=self.asm_output_file_path,
-            crs=self.crs
         )
         return ASMPolygonizerProcessor(
-            crs=self.crs,
-            transform=self.transform,
             data_writer=data_writer,
             config=config
         )
@@ -172,7 +165,6 @@ class Test_TestInference(unittest.TestCase):
             device=device,
             batch_size=8,
             export_strategy=RasterExportInferenceStrategy(
-                input_raster_path=self.frame_field_ds[0]['path'],
                 output_file_path=output_file_path
             )
         )
@@ -200,7 +192,6 @@ class Test_TestInference(unittest.TestCase):
             device=device,
             batch_size=8,
             export_strategy=MultipleRasterExportInferenceStrategy(
-                input_raster_path=self.frame_field_ds[0]['path'],
                 output_folder=self.output_dir,
                 output_basename='output.tif'
             ),
@@ -226,7 +217,6 @@ class Test_TestInference(unittest.TestCase):
             device=device,
             batch_size=8,
             export_strategy=MultipleRasterExportInferenceStrategy(
-                input_raster_path=self.frame_field_ds[0]['path'],
                 output_folder=self.output_dir,
                 output_basename=f'{polygonizer_key}_output.tif'
             ),

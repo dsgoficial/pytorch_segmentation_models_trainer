@@ -26,6 +26,7 @@ from typing import Dict, List, Union
 import albumentations as A
 import cv2
 import numpy as np
+import rasterio
 import torch
 from pytorch_toolbelt.inference.tiles import ImageSlicer, TileMerger
 from pytorch_toolbelt.utils.torch_utils import tensor_from_rgb_image, to_numpy
@@ -48,18 +49,25 @@ class AbstractInferenceProcessor(ABC):
         self.mask_bands = mask_bands
         self.normalize = A.Normalize()
     
+    def get_profile(self, image_path):
+        with rasterio.open(image_path, 'r') as raster_ds:
+            profile = raster_ds.profile
+        return profile
+    
     def process(self, image_path: str, threshold: float=0.5) -> str:
         image = cv2.imread(image_path)
+        profile = self.get_profile(image_path)
         inference = self.make_inference(image)
         inference['seg'] = (inference['seg'] > threshold).astype(np.uint8)
         if self.polygonizer is not None:
             self.polygonizer.process(
                 {
                     key: tensor_from_rgb_image(value).unsqueeze(0) for key, value in inference.items()
-                }
+                },
+                profile
             )
         
-        return self.export_strategy.save_inference(inference)
+        return self.export_strategy.save_inference(inference, profile)
 
     @abstractmethod
     def make_inference(self, image: np.array)  -> Union[np.array, dict]:
