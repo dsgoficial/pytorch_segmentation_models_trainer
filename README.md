@@ -10,7 +10,7 @@
 [![PyPI](https://img.shields.io/pypi/v/pytorch-segmentation-models-trainer)](https://pypi.org/project/pytorch-segmentation-models-trainer/)
 [![Publish Docker image](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/docker-publish.yml)
 [![maintainer](https://img.shields.io/badge/maintainer-phborba-blue.svg)](https://github.com/phborba)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4574256.svg)](https://doi.org/10.5281/zenodo.4574256)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4573996.svg)](https://doi.org/10.5281/zenodo.4573996)
 [![codecov](https://codecov.io/gh/phborba/pytorch_segmentation_models_trainer/branch/main/graph/badge.svg?token=PRJL5GVOL2)](https://codecov.io/gh/phborba/pytorch_segmentation_models_trainer)
 [![Open in Visual Studio Code](https://open.vscode.dev/badges/open-in-vscode.svg)](https://open.vscode.dev/phborba/pytorch_segmentation_models_trainer)
 
@@ -122,14 +122,14 @@ docker pull phborba/pytorch_segmentation_models_trainer:latest
 
 ```
 
-@software{philipe_borba_2021_4574256,
+@software{philipe_borba_2021_5115127,
   author       = {Philipe Borba},
   title        = {{phborba/pytorch\_segmentation\_models\_trainer: 
-                   Version 0.1.2}},
-  month        = mar,
+                   Version 0.8.0}},
+  month        = jul,
   year         = 2021,
   publisher    = {Zenodo},
-  version      = {v0.1.2},
-  doi          = {10.5281/zenodo.4574256},
-  url          = {https://doi.org/10.5281/zenodo.4574256}
+  version      = {v0.8.0},
+  doi          = {10.5281/zenodo.5115127},
+  url          = {https://doi.org/10.5281/zenodo.5115127}
 }
