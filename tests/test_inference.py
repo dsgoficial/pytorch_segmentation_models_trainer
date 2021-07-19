@@ -228,6 +228,6 @@ class Test_TestInference(unittest.TestCase):
             threshold=0.5
         )
         name = Path(self.frame_field_ds[0]['path']).stem
-        assert os.path.isfile(os.path.join(self.output_dir, f'seg_{polygonizer_key}_{name}_output.tif'))
-        assert os.path.isfile(os.path.join(self.output_dir, f'crossfield_{polygonizer_key}_{name}_output.tif'))
+        assert os.path.isfile(os.path.join(self.output_dir, f'seg_{name}_{polygonizer_key}_output.tif'))
+        assert os.path.isfile(os.path.join(self.output_dir, f'crossfield_{name}_{polygonizer_key}_output.tif'))
         assert os.path.isfile(getattr(self, f"{polygonizer_key}_output_file_path"))
