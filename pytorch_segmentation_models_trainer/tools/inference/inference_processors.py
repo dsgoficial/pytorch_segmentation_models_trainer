@@ -56,7 +56,7 @@ class AbstractInferenceProcessor(ABC):
             profile = raster_ds.profile
         return profile
     
-    def process(self, image_path: str, threshold: float=0.5, save_inference_raster: bool = True, pool: ThreadPoolExecutor = None) -> str:
+    def process(self, image_path: str, threshold: float=0.5, save_inference_raster: bool = True) -> str:
         image = cv2.imread(image_path)
         profile = self.get_profile(image_path)
         inference = self.make_inference(image)
@@ -66,8 +66,7 @@ class AbstractInferenceProcessor(ABC):
                 {
                     key: image_to_tensor(value).unsqueeze(0) for key, value in inference.items()
                 },
-                profile,
-                pool
+                profile
             )
         if save_inference_raster:
             profile['input_name'] = Path(image_path).stem

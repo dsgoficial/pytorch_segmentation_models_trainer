@@ -91,11 +91,8 @@ def predict(cfg: DictConfig):
         threshold=cfg.inference_threshold,
         save_inference_raster=cfg.save_inference if "save_inference" in cfg else True
     )
-    executor = Executor(
-        compute_func,
-        simultaneous_tasks=1 if "simultaneous_tasks" not in cfg else cfg.simultaneous_tasks
-    )
-    executor.execute_tasks(images, len(images))
+    for image in tqdm(images):
+        compute_func(image)
 
 if __name__=="__main__":
     predict()
