@@ -201,7 +201,7 @@ class COCOGeoDF:
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = set(
                 executor.submit(build_coco_memory_geodf_item, image_id_chunk) \
-                    for image_id_chunk in get_chunks(self.image_id_list), self.chunk_size)
+                    for image_id_chunk in get_chunks(self.image_id_list), self.chunk_size
             )
             kwargs = {
                 'total': len(futures),
