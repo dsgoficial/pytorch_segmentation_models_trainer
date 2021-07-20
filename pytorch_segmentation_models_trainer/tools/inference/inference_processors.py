@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+from concurrent.futures.thread import ThreadPoolExecutor
 import os
 import math
 from abc import ABC, abstractmethod
@@ -55,7 +56,7 @@ class AbstractInferenceProcessor(ABC):
             profile = raster_ds.profile
         return profile
     
-    def process(self, image_path: str, threshold: float=0.5) -> str:
+    def process(self, image_path: str, threshold: float=0.5, save_inference_raster: bool = True) -> str:
         image = cv2.imread(image_path)
         profile = self.get_profile(image_path)
         inference = self.make_inference(image)
@@ -67,8 +68,9 @@ class AbstractInferenceProcessor(ABC):
                 },
                 profile
             )
-        profile['input_name'] = Path(image_path).stem
-        return self.export_strategy.save_inference(inference, profile)
+        if save_inference_raster:
+            profile['input_name'] = Path(image_path).stem
+            return self.export_strategy.save_inference(inference, profile)
 
     @abstractmethod
     def make_inference(self, image: np.array)  -> Union[np.array, dict]:

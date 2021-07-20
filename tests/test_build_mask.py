@@ -97,10 +97,10 @@ class Test_TestBuildMask(unittest.TestCase):
             cfg = compose(
                 config_name="build_mask.yaml",
                 overrides=[
-                    'root_dir='+self.output_dir,
-                    'output_csv_path='+self.output_dir,
-                    'image_root_dir='+image_dir,
-                    'geo_df.file_name='+os.path.join(
+                    'mask_builder.root_dir='+self.output_dir,
+                    'mask_builder.output_csv_path='+self.output_dir,
+                    'mask_builder.image_root_dir='+image_dir,
+                    'mask_builder.geo_df.file_name='+os.path.join(
                         root_dir, 'data', 'build_masks_data', 'buildings.geojson'
                     )
                 ]
@@ -120,9 +120,9 @@ class Test_TestBuildMask(unittest.TestCase):
             cfg = compose(
                 config_name="build_mask_postgis.yaml",
                 overrides=[
-                    'root_dir='+self.output_dir,
-                    'output_csv_path='+self.output_dir,
-                    'image_root_dir='+image_dir,
+                    'mask_builder.root_dir='+self.output_dir,
+                    'mask_builder.output_csv_path='+self.output_dir,
+                    'mask_builder.image_root_dir='+image_dir,
                 ]
             )
             print(cfg)
@@ -141,12 +141,37 @@ class Test_TestBuildMask(unittest.TestCase):
             cfg = compose(
                 config_name="build_coco_mask.yaml",
                 overrides=[
-                    'root_dir='+self.output_dir,
-                    'output_csv_path='+self.output_dir,
-                    'image_root_dir='+image_dir,
-                    'geo_df.file_name='+os.path.join(
+                    'mask_builder.root_dir='+self.output_dir,
+                    'mask_builder.output_csv_path='+self.output_dir,
+                    'mask_builder.image_root_dir='+image_dir,
+                    'mask_builder.geo_df.file_name='+os.path.join(
                         root_dir, 'data', 'build_masks_data', 'annotation.json'
                     )
+                ]
+            )
+            print(cfg)
+            csv_output = build_masks(cfg)
+            expected_df = pd.read_csv(os.path.join(expected_output_path, 'coco_dataset.csv')).sort_values('image')
+            output_df = pd.read_csv(csv_output).sort_values('image')
+            pd.testing.assert_frame_equal(
+                expected_df.reset_index(drop=True),
+                output_df.reset_index(drop=True)
+            )
+    
+    def test_build_masks_coco_no_prebuild(self):
+        with initialize(config_path="./test_configs"):
+            image_dir = os.path.join(root_dir, 'data', 'build_masks_data', 'coco_images')
+            expected_output_path = os.path.join(root_dir, 'expected_outputs', 'build_masks')
+            cfg = compose(
+                config_name="build_coco_mask.yaml",
+                overrides=[
+                    'mask_builder.root_dir='+self.output_dir,
+                    'mask_builder.output_csv_path='+self.output_dir,
+                    'mask_builder.image_root_dir='+image_dir,
+                    'mask_builder.geo_df.file_name='+os.path.join(
+                        root_dir, 'data', 'build_masks_data', 'annotation.json'
+                    ),
+                    '+mask_builder.geo_df.pre_build_vector_dict=False'
                 ]
             )
             print(cfg)

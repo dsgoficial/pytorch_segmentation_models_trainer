@@ -1,27 +1,28 @@
-_target_: "pytorch_segmentation_models_trainer.tools.mask_building.mask_builder.COCOMaskBuilder"
-geo_df:
-  _target_: "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.COCOGeoDF"
-  file_name: "../tests/testing_data/data/build_masks_data/annotation.json"
-root_dir: '/data'
-output_csv_path: '/data'
-dataset_name: 'coco_dataset'
-dataset_has_relative_path: True
-image_root_dir: 'coco_images'
-image_extension: 'jpg'
-image_dir_is_relative_to_root_dir: False
-replicate_image_folder_structure: True
-relative_path_on_csv: True
-build_polygon_mask: True
-polygon_mask_folder_name: 'polygon_masks'
-build_boundary_mask: True
-boundary_mask_folder_name: 'boundary_masks'
-build_vertex_mask: True
-vertex_mask_folder_name: 'vertex_masks'
-build_crossfield_mask: True
-crossfield_mask_folder_name: 'crossfield_masks'
-build_distance_mask: True
-distance_mask_folder_name: 'distance_masks'
-build_size_mask: True
-size_mask_folder_name: 'size_masks'
-min_polygon_area: 50.0
-mask_output_extension: 'tif'
+mask_builder:
+  _target_: "pytorch_segmentation_models_trainer.tools.mask_building.mask_builder.COCOMaskBuilder"
+  geo_df:
+    _target_: "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.COCOGeoDF"
+    file_name: "../tests/testing_data/data/build_masks_data/annotation.json"
+  root_dir: '/data'
+  output_csv_path: '/data'
+  dataset_name: 'coco_dataset'
+  dataset_has_relative_path: True
+  image_root_dir: 'coco_images'
+  image_extension: 'jpg'
+  image_dir_is_relative_to_root_dir: False
+  replicate_image_folder_structure: True
+  relative_path_on_csv: True
+  build_polygon_mask: True
+  polygon_mask_folder_name: 'polygon_masks'
+  build_boundary_mask: True
+  boundary_mask_folder_name: 'boundary_masks'
+  build_vertex_mask: True
+  vertex_mask_folder_name: 'vertex_masks'
+  build_crossfield_mask: True
+  crossfield_mask_folder_name: 'crossfield_masks'
+  build_distance_mask: True
+  distance_mask_folder_name: 'distance_masks'
+  build_size_mask: True
+  size_mask_folder_name: 'size_masks'
+  min_polygon_area: 50.0
+  mask_output_extension: 'tif'

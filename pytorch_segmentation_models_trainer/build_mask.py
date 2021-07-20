@@ -55,15 +55,15 @@ def build_masks(cfg: DictConfig) -> str:
         "Starting the process of building masks with the following configuration: \n%s",
         OmegaConf.to_yaml(cfg)
     )
-    if 'root_dir' in cfg.geo_df and cfg.geo_df.root_dir.startswith(".."):
-        cfg.geo_df.root_dir = str(
+    if 'root_dir' in cfg.mask_builder.geo_df and cfg.mask_builder.geo_df.root_dir.startswith(".."):
+        cfg.mask_builder.geo_df.root_dir = str(
             os.path.join(
                 os.path.dirname( __file__ ),
-                cfg.geo_df.root_dir
+                cfg.mask_builder.geo_df.root_dir
             )
         )
     logger.info("Reading vectors and preparing structure...")
-    mask_builder_obj = instantiate(cfg)
+    mask_builder_obj = instantiate(cfg.mask_builder)
     mask_func = mask_builder_obj.build_mask_func()
     tasks = os.cpu_count() if "simultaneous_tasks" not in cfg \
         else cfg.simultaneous_tasks
@@ -76,15 +76,8 @@ def build_masks(cfg: DictConfig) -> str:
         n_tasks
     )
     csv_file = build_csv_file_from_concurrent_futures_output(
-        cfg,
+        cfg.mask_builder,
         result_list=output_list
     )
     print(f"Dataset saved at {csv_file}")
     return csv_file
-
-if __name__=="__main__":
-    with initialize(config_path="../../mestrado_experimentos_dissertacao/build_mask/"):
-        cfg = compose(
-            config_name="build_mask_postgis.yaml"
-        )
-        build_masks(cfg)
