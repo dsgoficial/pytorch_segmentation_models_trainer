@@ -2,6 +2,7 @@
 
 - Minor improvements and bug fixes on polygon building inference;
 - Bug fixes on mask builder;
+- Performance improvement on mask builder using coco format;
 
 # Version 0.8.0
 
