@@ -19,17 +19,18 @@
  ****
 """
 import abc
+import concurrent.futures
 import functools
+import itertools
 import operator
 import os
 from collections import defaultdict
-from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import Executor
 from dataclasses import MISSING, dataclass, field
 from enum import Enum
+from multiprocessing import Manager
 from pathlib import Path
 from typing import List, Union
 
-import concurrent.futures
 import fiona
 import geopandas
 import numpy as np
@@ -38,7 +39,8 @@ from affine import Affine
 from bidict import bidict
 from geopandas import GeoDataFrame, GeoSeries
 from pycocotools.coco import COCO
-from multiprocessing import Manager
+from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import \
+    Executor
 from shapely.geometry import (GeometryCollection, LineString, MultiLineString,
                               MultiPoint, MultiPolygon, Point, Polygon, base)
 from tqdm import tqdm
@@ -54,6 +56,13 @@ suffix_dict = bidict({
     "GeoJSON": ".geojson",
     "ESRI Shapefile": ".shp"
 })
+
+def get_chunks(iterable, size, filler=None):
+    it = itertools.chain(iterable, itertools.repeat(filler,size-1))
+    chunk = tuple(itertools.islice(it,size))
+    while len(chunk) == size:
+        yield chunk
+        chunk = tuple(itertools.islice(it,size))
 
 @dataclass
 class GeoDF(abc.ABC):
@@ -174,27 +183,28 @@ class COCOMemoryGeoDF(GeoDF):
 class COCOGeoDF:
     file_name: str = MISSING
     max_workers: int = os.cpu_count()
+    chunk_size: int = 1000
 
     def __post_init__(self):
         self.coco = COCO(self.file_name)
         self.vector_dict = dict()
-        def build_coco_memory_geodf_item(image_id):
+        def build_coco_memory_geodf_item(image_id_chunk):
             return {
                 image_id: COCOMemoryGeoDF(
                     map(
                         self._build_polygon_from_annotation,
                         self.coco.loadAnns(ids=self.coco.getAnnIds(imgIds=image_id))
                     )
-                )
+                ) for image_id in image_id_chunk if image_id is not None
             }
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = set(
-                executor.submit(build_coco_memory_geodf_item, image_id) \
-                    for image_id in self.coco.getImgIds(catIds=self.coco.getCatIds())
+                executor.submit(build_coco_memory_geodf_item, image_id_chunk) \
+                    for image_id_chunk in get_chunks(self.coco.getImgIds(catIds=self.coco.getCatIds()), self.chunk_size)
             )
             kwargs = {
                 'total': len(futures),
-                'unit': 'images',
+                'unit': 'image chunks',
                 'unit_scale': True,
                 'leave': True,
                 'desc': "Building geodf from coco dataset"
