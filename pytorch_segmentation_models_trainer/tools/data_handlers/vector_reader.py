@@ -184,19 +184,17 @@ class COCOGeoDF:
     file_name: str = MISSING
     max_workers: int = os.cpu_count()
     chunk_size: int = 1000
+    pre_build_vector_dict: bool = True
 
     def __post_init__(self):
         self.coco = COCO(self.file_name)
         self.image_id_list = [id for id in self.coco.getImgIds(catIds=self.coco.getCatIds())]
         self.vector_dict = dict()
+        if not self.pre_build_vector_dict:
+            return
         def build_coco_memory_geodf_item(image_id_chunk):
             return {
-                image_id: COCOMemoryGeoDF(
-                    map(
-                        self._build_polygon_from_annotation,
-                        self.coco.loadAnns(ids=self.coco.getAnnIds(imgIds=image_id))
-                    )
-                ) for image_id in image_id_chunk if image_id is not None
+                image_id: self.build_item(image_id) for image_id in image_id_chunk if image_id is not None
             }
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = set(
@@ -212,10 +210,22 @@ class COCOGeoDF:
             }
             for r in tqdm(concurrent.futures.as_completed(futures), **kwargs):
                 self.vector_dict.update(r.result())
-        
+    
+    def build_item(self, image_id):
+        return COCOMemoryGeoDF(
+            map(
+                self._build_polygon_from_annotation,
+                self.coco.loadAnns(ids=self.coco.getAnnIds(imgIds=image_id))
+            )
+        )
     
     def get_geodf_item(self, key: str) -> GeoDataFrame:
-        return self.vector_dict[int(key)]
+        int_key = int(key)
+        if int_key not in self.image_id_list:
+            raise KeyError("key not in image list")
+        if int_key not in self.vector_dict:
+            self.vector_dict[int_key] = self.build_item(int_key)
+        return self.vector_dict[int_key]
 
 
     def _build_polygon_from_annotation(self, annotation):
