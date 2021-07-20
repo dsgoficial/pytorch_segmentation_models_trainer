@@ -187,6 +187,7 @@ class COCOGeoDF:
 
     def __post_init__(self):
         self.coco = COCO(self.file_name)
+        self.image_id_list = [id for id in self.coco.getImgIds(catIds=self.coco.getCatIds())]
         self.vector_dict = dict()
         def build_coco_memory_geodf_item(image_id_chunk):
             return {
@@ -200,11 +201,11 @@ class COCOGeoDF:
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = set(
                 executor.submit(build_coco_memory_geodf_item, image_id_chunk) \
-                    for image_id_chunk in get_chunks(self.coco.getImgIds(catIds=self.coco.getCatIds()), self.chunk_size)
+                    for image_id_chunk in get_chunks(self.image_id_list), self.chunk_size)
             )
             kwargs = {
                 'total': len(futures),
-                'unit': 'image chunks',
+                'unit': 'chunks',
                 'unit_scale': True,
                 'leave': True,
                 'desc': "Building geodf from coco dataset"
