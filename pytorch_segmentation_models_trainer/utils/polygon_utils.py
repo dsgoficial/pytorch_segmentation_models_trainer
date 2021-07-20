@@ -181,7 +181,7 @@ def _compute_raster_bounds_coods(polygon, polygons_raster, line_width):
     return mini, minj, maxi, maxj
 
 def _compute_distance_and_sizes(i, distance_maps, sizes, polygon, image_area, shape, mini, maxi, minj, maxj, bbox_mask, line_width):
-    polygon_mask = np.zeros(shape, dtype=np.bool)
+    polygon_mask = np.zeros(shape, dtype=np.bool_)
     polygon_mask[mini:maxi, minj:maxj] = bbox_mask
     polygon_dist = cv.distanceTransform(1 - polygon_mask.astype(np.uint8), distanceType=cv.DIST_L2, maskSize=cv.DIST_MASK_5,
                                 dstType=cv.CV_64F)
