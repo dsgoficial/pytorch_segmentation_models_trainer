@@ -23,11 +23,13 @@ import functools
 import operator
 import os
 from collections import defaultdict
+from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import Executor
 from dataclasses import MISSING, dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import List, Union
 
+import concurrent.futures
 import fiona
 import geopandas
 import numpy as np
@@ -36,8 +38,10 @@ from affine import Affine
 from bidict import bidict
 from geopandas import GeoDataFrame, GeoSeries
 from pycocotools.coco import COCO
+from multiprocessing import Manager
 from shapely.geometry import (GeometryCollection, LineString, MultiLineString,
                               MultiPoint, MultiPolygon, Point, Polygon, base)
+from tqdm import tqdm
 
 
 class GeomType(Enum):
@@ -169,32 +173,50 @@ class COCOMemoryGeoDF(GeoDF):
 @dataclass
 class COCOGeoDF:
     file_name: str = MISSING
+    max_workers: int = os.cpu_count()
 
     def __post_init__(self):
         self.coco = COCO(self.file_name)
-        self.vector_dict = {
-            image_id: COCOMemoryGeoDF(
-                map(
-                    _build_polygon_from_annotation,
-                    self.coco.loadAnns(ids=self.coco.getAnnIds(imgIds=image_id))
+        self.vector_dict = dict()
+        def build_coco_memory_geodf_item(image_id):
+            return {
+                image_id: COCOMemoryGeoDF(
+                    map(
+                        self._build_polygon_from_annotation,
+                        self.coco.loadAnns(ids=self.coco.getAnnIds(imgIds=image_id))
+                    )
                 )
-            ) for image_id in self.coco.getImgIds(catIds=self.coco.getCatIds())
-        }
+            }
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = set(
+                executor.submit(build_coco_memory_geodf_item, image_id) \
+                    for image_id in self.coco.getImgIds(catIds=self.coco.getCatIds())
+            )
+            kwargs = {
+                'total': len(futures),
+                'unit': 'images',
+                'unit_scale': True,
+                'leave': True,
+                'desc': "Building geodf from coco dataset"
+            }
+            for r in tqdm(concurrent.futures.as_completed(futures), **kwargs):
+                self.vector_dict.update(r.result())
+        
     
     def get_geodf_item(self, key: str) -> GeoDataFrame:
         return self.vector_dict[int(key)]
 
 
-def _build_polygon_from_annotation(annotation):
-    seg_list = annotation["segmentation"]
-    if len(seg_list) != 1:
-        print(f"len(seg_list) = {len(seg_list)}, but it should be 1.")
-        raise NotImplementedError
-    coords = np.reshape(
-        np.array(seg_list),
-        (-1, 2)
-    )
-    return Polygon(coords)
+    def _build_polygon_from_annotation(self, annotation):
+        seg_list = annotation["segmentation"]
+        if len(seg_list) != 1:
+            print(f"len(seg_list) = {len(seg_list)}, but it should be 1.")
+            raise NotImplementedError
+        coords = np.reshape(
+            np.array(seg_list),
+            (-1, 2)
+        )
+        return Polygon(coords)
 
 def handle_features(input_features, output_type: GeomType = None, return_list: bool = False) -> list:
     if output_type is None:

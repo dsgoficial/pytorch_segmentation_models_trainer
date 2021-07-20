@@ -97,10 +97,10 @@ class Test_TestBuildMask(unittest.TestCase):
             cfg = compose(
                 config_name="build_mask.yaml",
                 overrides=[
-                    'root_dir='+self.output_dir,
-                    'output_csv_path='+self.output_dir,
-                    'image_root_dir='+image_dir,
-                    'geo_df.file_name='+os.path.join(
+                    'mask_builder.root_dir='+self.output_dir,
+                    'mask_builder.output_csv_path='+self.output_dir,
+                    'mask_builder.image_root_dir='+image_dir,
+                    'mask_builder.geo_df.file_name='+os.path.join(
                         root_dir, 'data', 'build_masks_data', 'buildings.geojson'
                     )
                 ]
@@ -120,9 +120,9 @@ class Test_TestBuildMask(unittest.TestCase):
             cfg = compose(
                 config_name="build_mask_postgis.yaml",
                 overrides=[
-                    'root_dir='+self.output_dir,
-                    'output_csv_path='+self.output_dir,
-                    'image_root_dir='+image_dir,
+                    'mask_builder.root_dir='+self.output_dir,
+                    'mask_builder.output_csv_path='+self.output_dir,
+                    'mask_builder.image_root_dir='+image_dir,
                 ]
             )
             print(cfg)
@@ -141,10 +141,10 @@ class Test_TestBuildMask(unittest.TestCase):
             cfg = compose(
                 config_name="build_coco_mask.yaml",
                 overrides=[
-                    'root_dir='+self.output_dir,
-                    'output_csv_path='+self.output_dir,
-                    'image_root_dir='+image_dir,
-                    'geo_df.file_name='+os.path.join(
+                    'mask_builder.root_dir='+self.output_dir,
+                    'mask_builder.output_csv_path='+self.output_dir,
+                    'mask_builder.image_root_dir='+image_dir,
+                    'mask_builder.geo_df.file_name='+os.path.join(
                         root_dir, 'data', 'build_masks_data', 'annotation.json'
                     )
                 ]

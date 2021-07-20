@@ -76,7 +76,7 @@ def build_masks(cfg: DictConfig) -> str:
         n_tasks
     )
     csv_file = build_csv_file_from_concurrent_futures_output(
-        cfg,
+        cfg.mask_builder,
         result_list=output_list
     )
     print(f"Dataset saved at {csv_file}")

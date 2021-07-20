@@ -1,6 +1,7 @@
 # Version 0.8.1
 
-- Minor improvements and bug fixes;
+- Minor improvements and bug fixes on polygon building inference;
+- Bug fixes on mask builder;
 
 # Version 0.8.0
 
