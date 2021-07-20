@@ -19,7 +19,6 @@
 """
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from multiprocess import Pool
 from dataclasses import dataclass, field
 from typing import Dict, List, Union
 

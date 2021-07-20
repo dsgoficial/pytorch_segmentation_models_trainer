@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+from concurrent.futures.thread import ThreadPoolExecutor
 import os
 import math
 from abc import ABC, abstractmethod
@@ -32,7 +33,6 @@ import torch
 from pytorch_toolbelt.inference.tiles import ImageSlicer, TileMerger
 from pytorch_toolbelt.utils.torch_utils import image_to_tensor, tensor_from_rgb_image, to_numpy
 from torch.utils.data import DataLoader
-from multiprocess import Pool
 
 class AbstractInferenceProcessor(ABC):
     """
@@ -56,7 +56,7 @@ class AbstractInferenceProcessor(ABC):
             profile = raster_ds.profile
         return profile
     
-    def process(self, image_path: str, threshold: float=0.5, save_inference_raster: bool = True, pool: Pool = None) -> str:
+    def process(self, image_path: str, threshold: float=0.5, save_inference_raster: bool = True, pool: ThreadPoolExecutor = None) -> str:
         image = cv2.imread(image_path)
         profile = self.get_profile(image_path)
         inference = self.make_inference(image)

@@ -39,8 +39,6 @@ from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import
 from pytorch_segmentation_models_trainer.utils.os_utils import \
     import_module_from_cfg
 
-from multiprocess import Pool
-
 logger = logging.getLogger(__name__)
 
 def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
