@@ -32,6 +32,7 @@ import torch
 from pytorch_toolbelt.inference.tiles import ImageSlicer, TileMerger
 from pytorch_toolbelt.utils.torch_utils import image_to_tensor, tensor_from_rgb_image, to_numpy
 from torch.utils.data import DataLoader
+from multiprocess import Pool
 
 class AbstractInferenceProcessor(ABC):
     """
@@ -55,7 +56,7 @@ class AbstractInferenceProcessor(ABC):
             profile = raster_ds.profile
         return profile
     
-    def process(self, image_path: str, threshold: float=0.5) -> str:
+    def process(self, image_path: str, threshold: float=0.5, save_inference_raster: bool = True, pool: Pool = None) -> str:
         image = cv2.imread(image_path)
         profile = self.get_profile(image_path)
         inference = self.make_inference(image)
@@ -65,10 +66,12 @@ class AbstractInferenceProcessor(ABC):
                 {
                     key: image_to_tensor(value).unsqueeze(0) for key, value in inference.items()
                 },
-                profile
+                profile,
+                pool
             )
-        profile['input_name'] = Path(image_path).stem
-        return self.export_strategy.save_inference(inference, profile)
+        if save_inference_raster:
+            profile['input_name'] = Path(image_path).stem
+            return self.export_strategy.save_inference(inference, profile)
 
     @abstractmethod
     def make_inference(self, image: np.array)  -> Union[np.array, dict]:

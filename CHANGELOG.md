@@ -1,3 +1,7 @@
+# Version 0.8.1
+
+- Minor improvements and bug fixes;
+
 # Version 0.8.0
 
 - Added inference features;

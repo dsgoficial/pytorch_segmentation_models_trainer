@@ -19,6 +19,7 @@
 """
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
+from multiprocess import Pool
 from dataclasses import dataclass, field
 from typing import Dict, List, Union
 
@@ -159,7 +160,7 @@ class SimplePolygonizerProcessor(TemplatePolygonizerProcessor):
     def __post_init__(self):
         self.polygonize_method = simple.polygonize
 
-    def process(self, inference: Dict[str, np.array], profile: dict, pool: ThreadPoolExecutor=None):
+    def process(self, inference: Dict[str, np.array], profile: dict, pool: Pool=None):
         """Processes the polygonization. Reimplemented from template due to signature 
         differences on polygonize method.
 

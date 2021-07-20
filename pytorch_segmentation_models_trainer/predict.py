@@ -18,16 +18,17 @@
  *                                                                         *
  ****
 """
+import concurrent.futures
 import logging
 from typing import Dict, List
 
 import hydra
 import numpy as np
 import omegaconf
-from omegaconf.omegaconf import OmegaConf
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
+from omegaconf.omegaconf import OmegaConf
 from tqdm import tqdm
 
 from pytorch_segmentation_models_trainer.tools.inference.inference_processors import \
@@ -36,6 +37,8 @@ from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import
     TemplatePolygonizerProcessor
 from pytorch_segmentation_models_trainer.utils.os_utils import \
     import_module_from_cfg
+
+from multiprocess import Pool
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +79,7 @@ def get_images(cfg: DictConfig) -> List[str]:
     image_reader = instantiate(cfg.inference_image_reader)
     return image_reader.get_images()
 
-@hydra.main(config_path="conf", config_name="config")
+@hydra.main()
 def predict(cfg: DictConfig):
     logger.info(
         "Starting the prediction of a model with the following configuration: \n%s",
@@ -87,8 +90,11 @@ def predict(cfg: DictConfig):
     for image in tqdm(images):
         inference_processor.process(
             image,
-            threshold=cfg.inference_threshold
+            threshold=cfg.inference_threshold,
+            save_inference_raster=cfg.save_inference if "save_inference" in cfg else True,
+            pool=Pool(cfg.thread_count) if "thread_count" in cfg and cfg.thread_count > 1 else None
         )
+        
 
 if __name__=="__main__":
     predict()

@@ -30,3 +30,4 @@ Cython
 ninja
 pyyaml
 pycocotools
+multiprocess
