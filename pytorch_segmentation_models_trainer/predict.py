@@ -20,6 +20,7 @@
 """
 import concurrent.futures
 import logging
+from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import Executor
 from typing import Dict, List
 
 import hydra
@@ -87,14 +88,16 @@ def predict(cfg: DictConfig):
     )
     inference_processor = instantiate_inference_processor(cfg)
     images = get_images(cfg)
-    for image in tqdm(images):
-        inference_processor.process(
-            image,
-            threshold=cfg.inference_threshold,
-            save_inference_raster=cfg.save_inference if "save_inference" in cfg else True,
-            pool=Pool(cfg.thread_count) if "thread_count" in cfg and cfg.thread_count > 1 else None
-        )
-        
+    compute_func = lambda image: inference_processor.process(
+        image,
+        threshold=cfg.inference_threshold,
+        save_inference_raster=cfg.save_inference if "save_inference" in cfg else True
+    )
+    executor = Executor(
+        compute_func,
+        simultaneous_tasks=1 if "simultaneous_tasks" not in cfg else cfg.simultaneous_tasks
+    )
+    executor.execute_tasks(images, len(images))
 
 if __name__=="__main__":
     predict()
