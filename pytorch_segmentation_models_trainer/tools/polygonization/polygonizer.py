@@ -159,7 +159,7 @@ class SimplePolygonizerProcessor(TemplatePolygonizerProcessor):
     def __post_init__(self):
         self.polygonize_method = simple.polygonize
 
-    def process(self, inference: Dict[str, np.array], profile: dict, pool: Pool=None):
+    def process(self, inference: Dict[str, np.array], profile: dict, pool: ThreadPoolExecutor=None):
         """Processes the polygonization. Reimplemented from template due to signature 
         differences on polygonize method.
 
