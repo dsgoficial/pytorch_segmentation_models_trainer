@@ -1,3 +1,7 @@
+# Version 0.8.2
+
+- Fixes on requirements;
+
 # Version 0.8.1
 
 - Minor improvements and bug fixes on polygon building inference;
