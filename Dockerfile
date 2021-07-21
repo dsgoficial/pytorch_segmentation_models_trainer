@@ -1,10 +1,11 @@
-FROM pytorch/pytorch:1.9.0-cuda11.1-cudnn8-runtime
+FROM pytorch/pytorch:latest
 ENV DEBIAN_FRONTEND=noninteractive 
 WORKDIR /code
 COPY requirements.txt requirements.txt
 RUN apt update \
     && apt install -y git htop nano libpq-dev python3-dev build-essential python3-opencv \
     && pip3 install -U debugpy jupyter flake8 pytest parameterized \
+    && pip3 install torch==1.9.0+cu111 torchvision==0.10.0+cu111 -f https://download.pytorch.org/whl/torch_stable.html \
     && pip3 install torch-scatter -f https://pytorch-geometric.com/whl/torch-1.9.0+cu111.html \
     && pip3 install -r requirements.txt
 COPY . .
