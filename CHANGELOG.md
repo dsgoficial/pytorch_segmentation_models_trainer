@@ -1,3 +1,8 @@
+# Version 0.9.0
+
+- Added the option of choosing the number of images on ImageCallback;
+- Added the option of adding created masks to existing csv;
+
 # Version 0.8.1
 
 - Minor improvements and bug fixes on polygon building inference;

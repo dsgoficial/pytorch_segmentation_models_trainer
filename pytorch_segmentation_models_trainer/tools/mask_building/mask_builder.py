@@ -23,6 +23,7 @@ from collections import OrderedDict
 import csv
 import dataclasses
 import os
+import pandas as pd
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, List
@@ -78,7 +79,10 @@ def build_output_raster_list(input_raster_path, cfg):
     ]
 
 def build_csv_file_from_concurrent_futures_output(cfg, result_list):
-    output_file = os.path.join(cfg.output_csv_path, f'{cfg.dataset_name}.csv')
+    output_file = os.path.join(
+        cfg.output_csv_path,
+        'temp.csv' if "merge_existing" in cfg and cfg.merge_existing else f'{cfg.dataset_name}.csv' 
+    )
     with open(output_file, 'w') as data_file:
         csv_writer = csv.writer(data_file)
         for i, result in enumerate(result_list):
@@ -87,9 +91,28 @@ def build_csv_file_from_concurrent_futures_output(cfg, result_list):
                 # writes header
                 csv_writer.writerow(data.keys())
             csv_writer.writerow(data.values())
+    if "merge_existing" in cfg and cfg.merge_existing:
+        output_file = os.path.join(cfg.output_csv_path, f'{cfg.dataset_name}.csv' )
+        merge_csv_datasets(
+            output_file,
+            os.path.join(cfg.output_csv_path, f'temp.csv' ),
+            'image'
+        )
+        os.remove(os.path.join(cfg.output_csv_path, f'temp.csv' ))
+
     return output_file
 
-
+def merge_csv_datasets(file1, file2, key_column, output_file_name=None):
+    output_file_name = file1 if output_file_name is None \
+        else output_file_name
+    df1 = pd.read_csv(file1)
+    df2 = pd.read_csv(file2)
+    df1=df1.sort_values(by=key_column, ignore_index=True)
+    df2=df2.sort_values(by=key_column, ignore_index=True)
+    df2.dropna(axis=1, how='all', inplace=True)
+    df1.update(df2)
+    df1.replace({0: False, 1: True}, inplace=True)
+    df1.to_csv(output_file_name, index=False)
 
 @dataclass
 class VectorReaderConfig:
@@ -128,6 +151,7 @@ class TemplateMaskBuilder(ABC):
     root_dir: str = '/data'
     output_csv_path: str = '/data'
     dataset_name: str = 'dsg_dataset'
+    merge_existing: bool = False
     dataset_has_relative_path: bool = True
     image_root_dir: str = 'images'
     image_extension: str = 'tif'

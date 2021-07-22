@@ -171,6 +171,9 @@ class RasterFile:
         subfolders = str(self.file_name.parents[0]).split(folder_basename)[-1] if replicate_input_structure else ''
         subfolders = subfolders[1::] if subfolders.startswith(os.sep) else subfolders
         for key, path in output_dir_dict.items():
+            if key not in raster_dict:
+                path_dict[key] = None
+                continue
             profile['count'] = 1 if len(raster_dict[key].shape) == 2\
                 else min(raster_dict[key].shape)
             output = os.path.join(path, subfolders, output_filename+'.'+output_extension)

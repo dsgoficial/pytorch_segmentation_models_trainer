@@ -159,8 +159,8 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
         val_ds = pl_module.val_dataloader().dataset
         device = pl_module.device
         logger = trainer.logger
-        if self.n_samples is None:
-            self.n_samples = pl_module.val_dataloader().batch_size
+        self.n_samples = pl_module.val_dataloader().batch_size \
+            if self.n_samples is None else self.n_samples
         for i in range(self.n_samples):
             image, mask = val_ds[i].values()
             image = image.unsqueeze(0)
@@ -201,8 +201,8 @@ class FrameFieldResultCallback(ImageSegmentationResultCallback):
         batch = next(iter(val_ds))
         image_display = batch_denormalize_tensor(batch["image"]).to('cpu')
         pred =  pl_module(batch["image"].to(device))
-        if self.n_samples is None:
-            self.n_samples = pl_module.val_dataloader().batch_size
+        self.n_samples = pl_module.val_dataloader().batch_size \
+            if self.n_samples is None else self.n_samples
         for i in range(self.n_samples):
             image = image_display[i].numpy()
             mask = batch['gt_polygons_image'][i]
