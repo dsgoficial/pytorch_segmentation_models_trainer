@@ -36,6 +36,7 @@ from matplotlib.patches import PathPatch
 from matplotlib.path import Path
 from tqdm import tqdm
 from matplotlib.collections import PatchCollection
+import multiprocess
 
 
 def polygon_remove_holes(polygon):
