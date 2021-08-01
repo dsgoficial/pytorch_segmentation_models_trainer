@@ -243,7 +243,8 @@ class RasterFile:
         if compute_bbox:
             return_dict['bounding_boxes'] = self.build_image_bb_annotations_from_vector_layer(
                 polygons,
-                transform=transform,
+                transform=transform
+            )
         return return_dict
     
     def get_image_stats(self):
