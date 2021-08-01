@@ -2,6 +2,8 @@
 
 - Added the option of choosing the number of images on ImageCallback;
 - Added the option of adding created masks to existing csv;
+- Added the option of generating bounding boxes in create masks;
+- Added the option of converting csv dataset to coco dataset;
 
 # Version 0.8.1
 
