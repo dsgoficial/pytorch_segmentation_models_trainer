@@ -59,11 +59,11 @@ def build_destination_dirs(input_base_path: str, output_base_path: str):
         ).mkdir(parents=True, exist_ok=True) for dirpath, _, __ in os.walk(input_base_path)
     ]
 
-def build_output_raster_list(input_raster_path, cfg):
+def build_output_raster_list(input_raster_path: str, cfg: DictConfig) -> List[str]:
     image_dir_name = os.path.basename(
         os.path.normpath(cfg.image_root_dir)
     )
-    return [
+    output_list = [
         str(
             os.path.join(
                 getattr(cfg, f"{mask_type}_folder_name"),
@@ -77,6 +77,18 @@ def build_output_raster_list(input_raster_path, cfg):
              'polygon_mask', 'boundary_mask', 'vertex_mask',
              'crossfield_mask', 'distance_mask', 'size_mask'] if getattr(cfg, f"build_{mask_type}")
     ]
+    if getattr(cfg, "build_bounding_box_list"):
+        output_list.append(
+            str(os.path.join(
+                getattr(cfg, "bounding_box_list_folder_name"),
+                os.path.dirname(
+                    os.path.normpath(
+                        str(input_raster_path).split(f'{image_dir_name}/')[-1]
+                    )
+                )
+            ))
+        )
+    return output_list
 
 def build_csv_file_from_concurrent_futures_output(cfg, result_list):
     output_file = os.path.join(
@@ -197,6 +209,11 @@ class TemplateMaskBuilder(ABC):
             if self.dataset_has_relative_path else x[0]
         args_dict = dict()
         for mask_key, file_path in built_mask_dict.items():
+            if mask_key == 'bounding_boxes':
+                args_dict['bounding_boxes'] = lambda_func(
+                    [file_path, getattr(self, 'bounding_box_list_folder_name')]
+                )
+                continue
             arg_name = mask_key.split('_')[0] + '_mask'
             args_dict[arg_name] = lambda_func(
                 [file_path, getattr(self, f'{arg_name}_folder_name')]
@@ -204,10 +221,6 @@ class TemplateMaskBuilder(ABC):
         args_dict.update(
             raster_df.get_image_stats()
         )
-        if 'bounding_boxes' in built_mask_dict:
-            args_dict['bounding_boxes'] = lambda_func(
-                [file_path, getattr(self, 'bounding_box_list_folder_name')]
-            )
         return DatasetEntry(
                 image=make_path_relative(
                         input_raster_path,
@@ -251,6 +264,16 @@ class TemplateMaskBuilder(ABC):
                         input_base_path=input_base_path,
                         output_base_path=output_base_path
                     )
+        if self.build_bounding_box_list:
+            output_base_path = str(
+                    os.path.join(self.root_dir, self.bounding_box_list_folder_name)
+                )
+            dir_dict[self.bounding_box_list_folder_name] = output_base_path
+            if self.replicate_image_folder_structure:
+                build_destination_dirs(
+                    input_base_path=input_base_path,
+                    output_base_path=output_base_path
+                )
         return dir_dict
     
     def build_generator(self):
@@ -284,7 +307,8 @@ class TemplateMaskBuilder(ABC):
             output_extension=self.mask_output_extension,
             compute_crossfield=self.build_crossfield_mask,
             compute_distances=self.build_distance_mask,
-            compute_sizes=self.build_size_mask
+            compute_sizes=self.build_size_mask,
+            compute_bbox=self.build_bounding_box_list,
         )
         ds_entry = self.build_dataset_entry(
             input_raster_path=input_raster_path,

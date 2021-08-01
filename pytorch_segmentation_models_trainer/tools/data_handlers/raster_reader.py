@@ -132,7 +132,8 @@ class RasterFile:
             mask_types=mask_types,
             compute_distances=compute_distances,
             compute_sizes=compute_sizes,
-            compute_crossfield=compute_crossfield
+            compute_crossfield=compute_crossfield,
+            compute_bbox=compute_bbox
         )
         bbox_list = self.build_image_bb_annotations_from_vector_layer(
             mask_feats, profile['transform']
@@ -183,10 +184,12 @@ class RasterFile:
                 path_dict[key] = None
                 continue
             if key == 'bounding_boxes':
+                output = os.path.join(path, subfolders, f'{output_filename}.json')
                 self.save_bounding_boxes_to_disk(
                     raster_dict['bounding_boxes'],
-                    output=os.path.join(path, subfolders, f'{output_filename}.json')
+                    output=output
                 )
+                path_dict[key] = output
                 continue
             profile['count'] = 1 if len(raster_dict[key].shape) == 2\
                 else min(raster_dict[key].shape)
@@ -262,7 +265,7 @@ class RasterFile:
         return return_dict
 
     def build_image_bb_annotations_from_vector_layer(
-            self, vector_feats: GeoSeries, transform: Affine=None
+            self, vector_feats: GeoSeries, transform: Affine=None, class_idx: int=1
         ) -> List[Dict[str, Any]]:
         """Builds bounding box annotations from vector layer.
 
@@ -276,12 +279,30 @@ class RasterFile:
         if transform is None:
             with rasterio.open(self.file_name) as raster_ds:
                 transform = raster_ds.transform
-        for feat in vector_feats:
+        for geom in vector_feats:
             return_list.append({
-                'class': feat.geometry.type,
-                'bbox': [~transform * point for point in np.array(feat.geometry.bounds)],
+                'class': class_idx,
+                'bbox': self.get_coco_bbox_on_image_coords(
+                    *geom.bounds,
+                    transform
+                ),
             })
         return return_list
+    
+    def get_coco_bbox_on_image_coords(self, minx, miny, maxx, maxy, transform):
+        """Converts vector coordinates to image coordinates.
+
+        Args:
+            minx (float): [description]
+        """
+        (row1, col1) = rasterio.transform.rowcol(transform, minx, maxy)
+        (row2, col2) = rasterio.transform.rowcol(transform, maxx, miny)
+        return [
+            min(row1, row2),
+            min(col1, col2),
+            abs(row1 - row2),
+            abs(col1 - col2),
+        ]
 
 @dataclass
 class AbstractRasterPathListGetter(ABC):
