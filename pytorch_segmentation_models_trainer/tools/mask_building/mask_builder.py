@@ -170,6 +170,8 @@ class TemplateMaskBuilder(ABC):
     distance_mask_folder_name: str = 'distance_masks'
     build_size_mask: bool = True
     size_mask_folder_name: str = 'size_masks'
+    build_bounding_box_list: bool = False
+    bounding_box_list_folder_name: str = 'bounding_boxes'
     min_polygon_area: float = 50.0
     mask_output_extension: str = 'png'
 
@@ -202,6 +204,10 @@ class TemplateMaskBuilder(ABC):
         args_dict.update(
             raster_df.get_image_stats()
         )
+        if 'bounding_boxes' in built_mask_dict:
+            args_dict['bounding_boxes'] = lambda_func(
+                [file_path, getattr(self, 'bounding_box_list_folder_name')]
+            )
         return DatasetEntry(
                 image=make_path_relative(
                         input_raster_path,

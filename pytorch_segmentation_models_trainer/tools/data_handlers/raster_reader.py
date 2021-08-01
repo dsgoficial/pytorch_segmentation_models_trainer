@@ -67,6 +67,7 @@ class DatasetEntry:
     distance_mask: str = None
     size_mask: str = None
     mask_is_single_band: bool = False
+    bounding_boxes: str = None
 
 @dataclass
 class RasterFile:
