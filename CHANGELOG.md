@@ -1,5 +1,6 @@
 # Version 0.9.0
 
+- PolygonRNN model added;
 - Added the option of choosing the number of images on ImageCallback;
 - Added the option of adding created masks to existing csv;
 - Added the option of generating bounding boxes in create masks;
