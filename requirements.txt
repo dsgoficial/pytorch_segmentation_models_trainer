@@ -31,3 +31,4 @@ ninja
 pyyaml
 pycocotools
 multiprocess
+wget
