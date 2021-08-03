@@ -32,13 +32,15 @@ from pytorch_segmentation_models_trainer.config_definitions.coco_dataset_config 
     AnnotationConfig, CategoryConfig, CocoDatasetConfig, CocoDatasetInfoConfig,
     ImageConfig, LicenseConfig)
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
-    SegmentationDataset, load_augmentation_object)
+    PolygonRNNDataset, SegmentationDataset, load_augmentation_object)
 
 from tests.utils import CustomTestCase
 
 current_dir = os.path.dirname(__file__)
 frame_field_root_dir = os.path.join(
     current_dir, 'testing_data', 'data', 'frame_field_data')
+polygon_rnn_root_dir = os.path.join(
+    current_dir, 'testing_data', 'data', 'polygon_rnn_data')
 
 class Test_TestDataset(CustomTestCase):
 
@@ -210,3 +212,23 @@ class Test_TestDataset(CustomTestCase):
         ) as f:
             expected_output = json.load(f)
         self.assertDictEqual(dataclasses.asdict(coco_ds), expected_output)
+
+    def test_polygon_rnn_dataset(self):
+        csv_path = os.path.join(polygon_rnn_root_dir, 'training_dataset_from_cityscapes.csv')
+        polygon_rnn_ds = PolygonRNNDataset(
+            input_csv_path=csv_path,
+            sequence_length=60,
+            root_dir=polygon_rnn_root_dir,
+            augmentation_list=[
+                A.Normalize(),
+                A.pytorch.ToTensorV2()
+            ]
+        )
+        self.assertEqual(len(polygon_rnn_ds), 21)
+        for idx in range(len(polygon_rnn_ds)):
+            ds_item = polygon_rnn_ds[idx]
+            self.assertEqual(ds_item['image'].shape, (3, 224, 224))
+            self.assertEqual(ds_item['x1'].shape, (787,))
+            self.assertEqual(ds_item['x2'].shape, (58, 787))
+            self.assertEqual(ds_item['x3'].shape, (58, 787))
+            self.assertEqual(ds_item['ta'].shape, (58,))

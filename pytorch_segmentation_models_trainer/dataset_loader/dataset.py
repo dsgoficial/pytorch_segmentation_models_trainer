@@ -23,7 +23,7 @@ from albumentations.pytorch import ToTensorV2
 from albumentations.augmentations.transforms import Normalize
 import torch
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import albumentations as A
 import numpy as np
@@ -31,6 +31,7 @@ import pandas as pd
 from hydra.utils import instantiate
 from PIL import Image
 from torch.utils.data import Dataset
+import json
 
 
 def load_augmentation_object(input_list):
@@ -277,6 +278,111 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
             ds_item_dict["sizes"] = self.to_tensor(transformed['masks'][mask_idx]).float().unsqueeze(0)
         return ds_item_dict
         
+
+class PolygonRNNDataset(Dataset):
+    def __init__(
+        self,
+        input_csv_path: Path,
+        sequence_length: int,
+        root_dir=None,
+        augmentation_list=None,
+        data_loader=None,
+        image_key=None,
+        mask_key=None,
+        n_first_rows_to_read=None
+    ) -> None:
+        super().__init__()
+        self.input_csv_path = input_csv_path
+        self.root_dir = root_dir
+        self.sequence_length = sequence_length
+        self.df = pd.read_csv(input_csv_path) if n_first_rows_to_read is None \
+            else pd.read_csv(input_csv_path, nrows=n_first_rows_to_read)
+        self.transform = None if augmentation_list is None \
+            else load_augmentation_object(augmentation_list)
+        self.data_loader = data_loader
+        self.len = len(self.df)
+        self.image_key = image_key if image_key is not None else 'image'
+        self.mask_key = mask_key if mask_key is not None else 'mask'
+    
+    def __len__(self) -> int:
+        return self.len
+    
+    def load_image(self, idx):
+        image_name = os.path.join(self.root_dir, self.df.iloc[idx][self.image_key])
+        image = Image.open(image_name).convert('RGB')
+        return np.array(image)
+
+    def load_polygon(self, idx):
+        mask_name = os.path.join(self.root_dir, self.df.iloc[idx][self.mask_key])
+        with open(mask_name, 'r') as f:
+            json_file = json.load(f)
+        polygon = np.array(json_file['polygon'])
+        point_num = len(json_file['polygon'])
+        return polygon, point_num
+
+    def to_tensor(self, x):
+        return x if isinstance(x, torch.Tensor) \
+            else torch.from_numpy(x)
+    
+    def __getitem__(self, index) -> Dict[str, torch.Tensor]:
+        image = self.load_image(index)
+        polygon, num_vertexes = self.load_polygon(index)
+        label_array, label_index_array = self.build_arrays(
+            polygon, num_vertexes)
+
+        if self.transform is not None:
+            augmented = self.transform(image=image)
+            image = augmented['image']
+        return {
+            'image': self.to_tensor(image).float(),
+            'x1': self.to_tensor(label_array[2]).float(),
+            'x2': self.to_tensor(label_array[:-2]).float(),
+            'x3': self.to_tensor(label_array[1:-1]).float(),
+            'ta': self.to_tensor(label_index_array[2:]).long(),
+        }
+
+    def build_arrays(self, polygon, num_vertexes):
+        point_count = 2
+        label_array = np.zeros([self.sequence_length, 28 * 28 + 3])
+        label_index_array = np.zeros([self.sequence_length])
+        if num_vertexes < self.sequence_length - 3:
+            for points in polygon:
+                self.populate_label_index_array(
+                    point_count, label_array, label_index_array, points)
+                point_count += 1
+            label_array[point_count, 28 * 28] = 1
+            label_index_array[point_count] = 28 * 28
+            for kkk in range(point_count + 1, self.sequence_length):
+                if kkk % (num_vertexes + 3) == num_vertexes + 2:
+                    index = 28 * 28
+                elif kkk % (num_vertexes + 3) == 0:
+                    index = 28 * 28 + 1
+                elif kkk % (num_vertexes + 3) == 1:
+                    index = 28 * 28 + 2
+                else:
+                    index_a = int(polygon[kkk % (num_vertexes + 3) - 2][0] / 8)
+                    index_b = int(polygon[kkk % (num_vertexes + 3) - 2][1] / 8)
+                    index = index_b * 28 + index_a
+                label_array[kkk, index] = 1
+                label_index_array[kkk] = index
+        else:
+            scale = num_vertexes * 1.0 / (self.sequence_length - 3)
+            index_list = (np.arange(0, self.sequence_length - 3) * scale).astype(int)
+            for points in polygon[index_list]:
+                self.populate_label_index_array(point_count, label_array, label_index_array, points)
+                point_count += 1
+            for kkk in range(point_count, self.sequence_length):
+                index = 28 * 28
+                label_array[kkk, index] = 1
+                label_index_array[kkk] = index
+        return label_array,label_index_array
+
+    def populate_label_index_array(self, point_count, label_array, label_index_array, points):
+        index_a = int(points[0] / 8)
+        index_b = int(points[1] / 8)
+        index = index_b * 28 + index_a
+        label_array[point_count, index] = 1
+        label_index_array[point_count] = index
 
 if __name__ == '__main__':
     pass

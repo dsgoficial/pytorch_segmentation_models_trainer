@@ -98,9 +98,9 @@ class ConvLSTMCell(nn.Module):
 
     def init_hidden(self, batch_size):
         return (Variable(torch.zeros(batch_size, self.hidden_dim, self.height,
-                                     self.width)).cuda(),
+                                     self.width)),
                 Variable(torch.zeros(batch_size, self.hidden_dim, self.height,
-                                     self.width)).cuda())
+                                     self.width)))
 
 
 class ConvLSTM(nn.Module):
@@ -294,8 +294,8 @@ class PolygonRNN(nn.Module):
         self.convlayer3 = _make_basic(512, 128, 3, 1, 1)
         self.convlayer4 = _make_basic(512, 128, 3, 1, 1)
         self.convlayer5 = _make_basic(512, 128, 3, 1, 1)
-        self.poollayer = nn.MaxPool2d(2, 2).cuda()
-        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear').cuda()
+        self.poollayer = nn.MaxPool2d(2, 2)
+        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear')
         self.convlstm = ConvLSTM(input_size=(28, 28),
                                  input_dim=131,
                                  hidden_dim=[32, 8],
@@ -360,23 +360,24 @@ class PolygonRNN(nn.Module):
                     
         return vgg16_dict
 
-    def compute_output(self, model, convlayer, x, apply_pooling=True):
+    def compute_output(self, model, x, convlayer=None, apply_pooling=True):
         output_k = model(x)
         output_kk = self.poollayer(output_k) if apply_pooling else output_k
-        output_kk = convlayer(output_kk)
+        output_kk = convlayer(output_kk) if convlayer is not None else output_kk
         return output_k, output_kk
 
     def forward(self, input_data1, first, second, third):
         bs, length_s = second.shape[0], second.shape[1]
         output1, output11 = self.compute_output(self.model1, input_data1)
-        output2, output22 = self.compute_output(self.model2, self.convlayer2, output1)
-        output3, output33 = self.compute_output(self.model3, self.convlayer3, output2, apply_pooling=False)
-        output4, output44 = self.compute_output(self.model4, self.convlayer4, output3, apply_pooling=False)
+        output2, output22 = self.compute_output(self.model2, output1, convlayer=self.convlayer2, apply_pooling=False)
+        output3, output33 = self.compute_output(self.model3, output2, convlayer=self.convlayer3, apply_pooling=False)
+        output4, output44 = self.compute_output(self.model4, output3, convlayer=self.convlayer4, apply_pooling=False)
+        output44 = self.upsample(output44)
         output = torch.cat([output11, output22, output33, output44], dim=1)
         output = self.convlayer5(output)
         output = output.unsqueeze(1)
         output = output.repeat(1, length_s, 1, 1, 1)
-        padding_f = torch.zeros([bs, 1, 1, 28, 28]).cuda()
+        padding_f = torch.zeros([bs, 1, 1, 28, 28])
 
         input_f = first[:, :-3].view(-1, 1, 28, 28).unsqueeze(1).repeat(1,
                                                                         length_s - 1,
@@ -401,18 +402,18 @@ class PolygonRNN(nn.Module):
 
     def test(self, input_data1, len_s):
         bs = input_data1.shape[0]
-        result = torch.zeros([bs, len_s]).cuda()
+        result = torch.zeros([bs, len_s])
         output1, output11 = self.compute_output(self.model1, input_data1)
-        output2, output22 = self.compute_output(self.model2, self.convlayer2, output1, apply_pooling=False)
-        output3, output33 = self.compute_output(self.model3, self.convlayer3, output2, apply_pooling=False)
-        output4, output44 = self.compute_output(self.model4, self.convlayer4, output3, apply_pooling=False)
+        output2, output22 = self.compute_output(self.model2, output1, convlayer=self.convlayer2, apply_pooling=False)
+        output3, output33 = self.compute_output(self.model3, output2, convlayer=self.convlayer3, apply_pooling=False)
+        output4, output44 = self.compute_output(self.model4, output3, convlayer=self.convlayer4, apply_pooling=False)
         output44 = self.upsample(output44)
         output = torch.cat([output11, output22, output33, output44], dim=1)
         feature = self.convlayer5(output)
 
-        padding_f = torch.zeros([bs, 1, 1, 28, 28]).float().cuda()
-        input_s = torch.zeros([bs, 1, 1, 28, 28]).float().cuda()
-        input_t = torch.zeros([bs, 1, 1, 28, 28]).float().cuda()
+        padding_f = torch.zeros([bs, 1, 1, 28, 28]).float()
+        input_s = torch.zeros([bs, 1, 1, 28, 28]).float()
+        input_t = torch.zeros([bs, 1, 1, 28, 28]).float()
 
         output = torch.cat([feature.unsqueeze(1), padding_f, input_s, input_t],
                            dim=2)
@@ -420,9 +421,9 @@ class PolygonRNN(nn.Module):
         output, hidden1 = self.convlstm(output)
         output = output[-1]
         output = output.contiguous().view(bs, 1, -1)
-        second = torch.zeros([bs, 1, 28 * 28 + 3]).cuda()
+        second = torch.zeros([bs, 1, 28 * 28 + 3])
         second[:, 0, 28 * 28 + 1] = 1
-        third = torch.zeros([bs, 1, 28 * 28 + 3]).cuda()
+        third = torch.zeros([bs, 1, 28 * 28 + 3])
         third[:, 0, 28 * 28 + 2] = 1
         output = torch.cat([output, second, third], dim=2)
 
@@ -459,10 +460,26 @@ class PolygonRNN(nn.Module):
 class PolygonRNNPLModel(Model):
     def __init__(self, cfg):
         super(PolygonRNNPLModel, self).__init__(cfg)
+        self.model = PolygonRNN(
+            load_vgg=cfg.model.load_vgg \
+                if "load_vgg" in cfg.model else True)
     
     def training_step(self, batch, batch_idx):
-        #TODO
-        pass
+        x = Variable(batch['image'])
+        x1 = Variable(batch['x1'])
+        x2 = Variable(batch['x2'])
+        x3 = Variable(batch['x3'])
+        ta = Variable(batch['ta'])
+        output = self.model(x, x1, x2, x3)
+        result = output.contiguous().view(-1, 28 * 28 + 3)
+        target = ta.contiguous().view(-1)
+        loss = self.loss_function(result, target)
+        result_index = torch.argmax(result, 1)
+        correct = (target == result_index).float().sum().item()
+        acc = correct * 1.0 / target.shape[0]
+        tensorboard_logs = {'acc': {'train': acc}}
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        return {'loss': loss, 'log': tensorboard_logs}
     
     def validation_step(self, batch, batch_idx):
         #TODO
