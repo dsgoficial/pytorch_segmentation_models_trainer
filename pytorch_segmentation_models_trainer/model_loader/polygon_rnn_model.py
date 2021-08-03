@@ -96,11 +96,19 @@ class ConvLSTMCell(nn.Module):
 
         return h_next, c_next
 
-    def init_hidden(self, batch_size):
-        return (Variable(torch.zeros(batch_size, self.hidden_dim, self.height,
-                                     self.width)),
-                Variable(torch.zeros(batch_size, self.hidden_dim, self.height,
-                                     self.width)))
+    def init_hidden(self, batch_size, device=torch.device('cpu')):
+        return (
+            Variable(
+                torch.zeros(
+                    batch_size, self.hidden_dim, self.height, self.width
+                ).to(device)
+            ),
+            Variable(
+                torch.zeros(
+                    batch_size, self.hidden_dim, self.height, self.width
+                ).to(device)
+            )
+        )
 
 
 class ConvLSTM(nn.Module):
@@ -167,7 +175,7 @@ class ConvLSTM(nn.Module):
         if hidden_state is not None:
             pass
         else:
-            hidden_state = self._init_hidden(batch_size=input_tensor.size(0))
+            hidden_state = self._init_hidden(batch_size=input_tensor.size(0), device=input_tensor.device)
 
         layer_output_list = []
         last_state_list = []
@@ -199,10 +207,10 @@ class ConvLSTM(nn.Module):
 
         return layer_output_list, last_state_list
 
-    def _init_hidden(self, batch_size):
+    def _init_hidden(self, batch_size, device=torch.device('cpu')):
         init_states = []
         for i in range(self.num_layers):
-            init_states.append(self.cell_list[i].init_hidden(batch_size))
+            init_states.append(self.cell_list[i].init_hidden(batch_size, device=device))
         return init_states
 
     @staticmethod
@@ -377,7 +385,8 @@ class PolygonRNN(nn.Module):
         output = self.convlayer5(output)
         output = output.unsqueeze(1)
         output = output.repeat(1, length_s, 1, 1, 1)
-        padding_f = torch.zeros([bs, 1, 1, 28, 28])
+        device = output.device
+        padding_f = torch.zeros([bs, 1, 1, 28, 28]).to(device)
 
         input_f = first[:, :-3].view(-1, 1, 28, 28).unsqueeze(1).repeat(1,
                                                                         length_s - 1,
@@ -402,7 +411,7 @@ class PolygonRNN(nn.Module):
 
     def test(self, input_data1, len_s):
         bs = input_data1.shape[0]
-        result = torch.zeros([bs, len_s])
+        result = torch.zeros([bs, len_s]).to(input_data1.device)
         output1, output11 = self.compute_output(self.model1, input_data1)
         output2, output22 = self.compute_output(self.model2, output1, convlayer=self.convlayer2, apply_pooling=False)
         output3, output33 = self.compute_output(self.model3, output2, convlayer=self.convlayer3, apply_pooling=False)
@@ -411,9 +420,9 @@ class PolygonRNN(nn.Module):
         output = torch.cat([output11, output22, output33, output44], dim=1)
         feature = self.convlayer5(output)
 
-        padding_f = torch.zeros([bs, 1, 1, 28, 28]).float()
-        input_s = torch.zeros([bs, 1, 1, 28, 28]).float()
-        input_t = torch.zeros([bs, 1, 1, 28, 28]).float()
+        padding_f = torch.zeros([bs, 1, 1, 28, 28]).float().to(input_data1.device)
+        input_s = torch.zeros([bs, 1, 1, 28, 28]).float().to(input_data1.device)
+        input_t = torch.zeros([bs, 1, 1, 28, 28]).float().to(input_data1.device)
 
         output = torch.cat([feature.unsqueeze(1), padding_f, input_s, input_t],
                            dim=2)
@@ -421,9 +430,9 @@ class PolygonRNN(nn.Module):
         output, hidden1 = self.convlstm(output)
         output = output[-1]
         output = output.contiguous().view(bs, 1, -1)
-        second = torch.zeros([bs, 1, 28 * 28 + 3])
+        second = torch.zeros([bs, 1, 28 * 28 + 3]).to(input_data1.device)
         second[:, 0, 28 * 28 + 1] = 1
-        third = torch.zeros([bs, 1, 28 * 28 + 3])
+        third = torch.zeros([bs, 1, 28 * 28 + 3]).to(input_data1.device)
         third[:, 0, 28 * 28 + 2] = 1
         output = torch.cat([output, second, third], dim=2)
 
@@ -460,11 +469,22 @@ class PolygonRNN(nn.Module):
 class PolygonRNNPLModel(Model):
     def __init__(self, cfg):
         super(PolygonRNNPLModel, self).__init__(cfg)
-        self.model = PolygonRNN(
-            load_vgg=cfg.model.load_vgg \
-                if "load_vgg" in cfg.model else True)
+    
+    def get_model(self):
+        return PolygonRNN(
+            load_vgg=self.cfg.model.load_vgg \
+                if "load_vgg" in self.cfg.model else True)
+    
+    def get_loss_function(self):
+        return nn.CrossEntropyLoss()
     
     def training_step(self, batch, batch_idx):
+        loss, acc = self.compute(batch)
+        tensorboard_logs = {'acc': {'train': acc}}
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        return {'loss': loss, 'log': tensorboard_logs}
+
+    def compute(self, batch):
         x = Variable(batch['image'])
         x1 = Variable(batch['x1'])
         x2 = Variable(batch['x2'])
@@ -477,18 +497,30 @@ class PolygonRNNPLModel(Model):
         result_index = torch.argmax(result, 1)
         correct = (target == result_index).float().sum().item()
         acc = correct * 1.0 / target.shape[0]
-        tensorboard_logs = {'acc': {'train': acc}}
-        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
-        return {'loss': loss, 'log': tensorboard_logs}
+        return loss,acc
     
     def validation_step(self, batch, batch_idx):
-        #TODO
-        pass
+        loss, acc = self.compute(batch)
+        tensorboard_logs = {'acc': {'val': acc}}
+        self.log('validation_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        return {'val_loss': loss, 'log': tensorboard_logs}
 
     def training_epoch_end(self, outputs):
-        #TODO
-        return super().training_epoch_end(outputs)
+        avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
+        avg_acc = torch.stack([
+            torch.tensor(x['log']['acc']['train']) for x in outputs]).mean()
+        tensorboard_logs = {
+            'avg_loss': {'train' : avg_loss},
+            'avg_acc': {'train' : avg_acc},
+        }
+        self.log_dict(tensorboard_logs, logger=True)
     
     def validation_epoch_end(self, outputs):
-        #TODO
-        return super().validation_epoch_end(outputs)
+        avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
+        avg_acc = torch.stack([
+            torch.tensor(x['log']['acc']['val']) for x in outputs]).mean()
+        tensorboard_logs = {
+            'avg_loss': {'val' : avg_loss},
+            'avg_acc': {'val' : avg_acc},
+        }
+        self.log_dict(tensorboard_logs, logger=True)

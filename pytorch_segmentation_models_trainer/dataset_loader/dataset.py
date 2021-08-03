@@ -283,7 +283,7 @@ class PolygonRNNDataset(Dataset):
     def __init__(
         self,
         input_csv_path: Path,
-        sequence_length: int,
+        sequence_length: int=60,
         root_dir=None,
         augmentation_list=None,
         data_loader=None,
