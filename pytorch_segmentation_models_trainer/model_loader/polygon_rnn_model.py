@@ -20,23 +20,25 @@
  *   https://github.com/AlexMa011/pytorch-polygon-rnn                      *
  ****
 """
-from logging import log
 from collections import OrderedDict
-import torch
-import torch.nn as nn
-import segmentation_models_pytorch as smp
-from hydra.utils import instantiate
-from omegaconf.dictconfig import DictConfig
-from pytorch_segmentation_models_trainer.model_loader.model import Model
-from pytorch_segmentation_models_trainer.custom_metrics import metrics
-from pytorch_segmentation_models_trainer.utils import tensor_utils
-from tqdm import tqdm
+from logging import log
 from pathlib import Path
 
+import segmentation_models_pytorch as smp
 import torch
+import torch.nn as nn
 import torch.nn.init
 import torch.utils.model_zoo as model_zoo
 import wget
+from hydra.utils import instantiate
+from omegaconf.dictconfig import DictConfig
+from pytorch_segmentation_models_trainer.custom_metrics import metrics
+from pytorch_segmentation_models_trainer.model_loader.model import Model
+from pytorch_segmentation_models_trainer.utils import tensor_utils
+from torch import nn
+from torch.autograd import Variable
+from tqdm import tqdm
+
 
 class ConvLSTMCell(nn.Module):
 
