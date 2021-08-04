@@ -6,6 +6,11 @@
 - Added the option of generating bounding boxes in create masks;
 - Added the option of converting csv dataset to coco dataset;
 
+# Version 0.8.2
+
+- Fixes on requirements;
+
+
 # Version 0.8.1
 
 - Minor improvements and bug fixes on polygon building inference;
