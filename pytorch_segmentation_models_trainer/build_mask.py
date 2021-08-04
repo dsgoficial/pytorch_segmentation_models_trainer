@@ -28,7 +28,7 @@ from typing import Any, List
 import hydra
 from hydra.core.config_store import ConfigStore
 from hydra.utils import instantiate
-from hydra.experimental import compose, initialize
+from hydra import compose, initialize
 from omegaconf import MISSING, DictConfig, OmegaConf
 
 from pytorch_segmentation_models_trainer.tools.mask_building.mask_builder import (
@@ -49,7 +49,7 @@ cs.store(group="geo_df", name='file', node=FileGeoDFConfig)
 cs.store(group="geo_df", name='postgis', node=PostgisConfig)
 cs.store(group="geo_df", name='coco', node=COCOGeoDFConfig)
 
-@hydra.main(config_name="mask_config")
+@hydra.main(config_path=None)
 def build_masks(cfg: DictConfig) -> str:
     logger.info(
         "Starting the process of building masks with the following configuration: \n%s",
@@ -63,7 +63,7 @@ def build_masks(cfg: DictConfig) -> str:
             )
         )
     logger.info("Reading vectors and preparing structure...")
-    mask_builder_obj = instantiate(cfg.mask_builder)
+    mask_builder_obj = instantiate(cfg.mask_builder, _recursive_=False)
     mask_func = mask_builder_obj.build_mask_func()
     tasks = os.cpu_count() if "simultaneous_tasks" not in cfg \
         else cfg.simultaneous_tasks

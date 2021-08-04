@@ -38,7 +38,7 @@ import json
 def load_augmentation_object(input_list):
     try:
         aug_list = [
-            instantiate(i) for i in input_list
+            instantiate(i, _recursive_=False) for i in input_list
         ]
     except:
         aug_list = input_list

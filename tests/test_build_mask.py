@@ -25,7 +25,7 @@ import unittest
 import hydra
 import numpy as np
 import pandas as pd
-from hydra.experimental import compose, initialize
+from hydra import compose, initialize
 from parameterized import parameterized
 from sqlalchemy import create_engine
 import psycopg2

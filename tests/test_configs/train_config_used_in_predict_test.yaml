@@ -11,7 +11,7 @@ model:
     classes: ${hyperparameters.classes}
     activation: sigmoid
   seg_params: ${seg_params}
-  compute_seg: ${compute_seg)
+  compute_seg: ${compute_seg}
   compute_crossfield: ${compute_crossfield}
 compute_seg: true
 compute_crossfield: true

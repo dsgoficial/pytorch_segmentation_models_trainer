@@ -29,7 +29,7 @@ import numpy as np
 import rasterio
 import segmentation_models_pytorch as smp
 import torch
-from hydra.experimental import compose, initialize
+from hydra import compose, initialize
 from hydra.utils import instantiate
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
@@ -88,7 +88,7 @@ class Test_TestInference(unittest.TestCase):
                     'root_dir='+frame_field_root_dir
                 ]
             )
-            frame_field_ds = hydra.utils.instantiate(cfg)
+            frame_field_ds = hydra.utils.instantiate(cfg, _recursive_=False)
         return frame_field_ds
     
     def get_simple_polygonizer(self):

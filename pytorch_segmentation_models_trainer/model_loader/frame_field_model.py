@@ -78,7 +78,7 @@ class FrameFieldModel(nn.Module):
                 if not isinstance(value, bool):
                     raise ValueError(f"Parameter {param} must be boolean!")
                 self.seg_params[param] = value
-        self.segmentation_model = instantiate(segmentation_model) \
+        self.segmentation_model = instantiate(segmentation_model, _recursive_=False) \
             if isinstance(segmentation_model, (str, DictConfig)) else segmentation_model
         self.replace_seg_head = replace_seg_head
         self.compute_seg = compute_seg
@@ -140,14 +140,14 @@ class FrameFieldModel(nn.Module):
             torch.nn.BatchNorm2d(self.backbone_output) if self.use_batchnorm \
                 else nn.Identity(),
             torch.nn.ELU() if self.module_activation is None \
-                else instantiate(self.module_activation),
+                else instantiate(self.module_activation, _recursive_=False),
             torch.nn.Conv2d(
                 self.backbone_output,
                 self.crossfield_channels,
                 kernel_size=1
             ),
             torch.nn.Tanh() if self.frame_field_activation is None \
-                else instantiate(self.frame_field_activation)
+                else instantiate(self.frame_field_activation, _recursive_=False)
         )
     
     def get_output(self, x):

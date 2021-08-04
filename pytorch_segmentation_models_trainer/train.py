@@ -48,8 +48,8 @@ def train(cfg: DictConfig):
         OmegaConf.to_yaml(cfg)
     )
     model = Model(cfg) if "pl_model" not in cfg else import_module_from_cfg(cfg.pl_model)(cfg)
-    trainer_logger = instantiate(cfg.logger) if "logger" in cfg else True
-    callback_list = [instantiate(i) for i in cfg.callbacks] if "callbacks" in cfg else []
+    trainer_logger = instantiate(cfg.logger, _recursive_=False) if "logger" in cfg else True
+    callback_list = [instantiate(i, _recursive_=False) for i in cfg.callbacks] if "callbacks" in cfg else []
     if isinstance(model, FrameFieldSegmentationPLModel):
         is_norm_loss_added = False
         for callback in callback_list:

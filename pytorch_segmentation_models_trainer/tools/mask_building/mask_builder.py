@@ -188,7 +188,7 @@ class TemplateMaskBuilder(ABC):
     mask_output_extension: str = 'png'
 
     def __post_init__(self):
-        self.geo_df = instantiate(self.geo_df)
+        self.geo_df = instantiate(self.geo_df, _recursive_=False)
         self.output_dir_dict = self.build_dir_dict()
         self.mask_type_list = self.build_mask_type_list()
 

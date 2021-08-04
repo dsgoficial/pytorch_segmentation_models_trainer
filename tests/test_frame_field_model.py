@@ -28,7 +28,7 @@ import hydra
 import numpy as np
 import segmentation_models_pytorch as smp
 import torch
-from hydra.experimental import compose, initialize
+from hydra import compose, initialize
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
     FrameFieldModel, FrameFieldSegmentationPLModel)
@@ -141,7 +141,7 @@ class Test_TestFrameFieldModel(CustomTestCase):
             cfg = compose(
                 config_name="frame_field_pl_model.yaml"
             )
-            frame_field_model = hydra.utils.instantiate(cfg)
+            frame_field_model = hydra.utils.instantiate(cfg, _recursive_=False)
         self.make_inference(
             torch.ones([2, 3, 256, 256]),
             frame_field_model

@@ -27,7 +27,7 @@ import albumentations as A
 import dataclasses
 import hydra
 import numpy as np
-from hydra.experimental import compose, initialize
+from hydra import compose, initialize
 from pytorch_segmentation_models_trainer.config_definitions.coco_dataset_config import (
     AnnotationConfig, CategoryConfig, CocoDatasetConfig, CocoDatasetInfoConfig,
     ImageConfig, LicenseConfig)
@@ -50,7 +50,7 @@ class Test_TestDataset(CustomTestCase):
                 config_name="dataset.yaml",
                 overrides=['input_csv_path='+self.csv_ds_file]
             )
-            ds_from_cfg = hydra.utils.instantiate(cfg)
+            ds_from_cfg = hydra.utils.instantiate(cfg, _recursive_=False)
             ds_from_ref = SegmentationDataset(input_csv_path=self.csv_ds_file)
             self.assertEqual(
                 ds_from_cfg.input_csv_path,
@@ -63,7 +63,7 @@ class Test_TestDataset(CustomTestCase):
                 config_name="dataset.yaml",
                 overrides=['input_csv_path='+self.csv_ds_file]
             )
-            ds_from_cfg = hydra.utils.instantiate(cfg)
+            ds_from_cfg = hydra.utils.instantiate(cfg, _recursive_=False)
             ds_from_ref = SegmentationDataset(input_csv_path=self.csv_ds_file)
             assert(
                 np.array_equal(ds_from_cfg[0]['image'], ds_from_ref[0]['image']) and \
@@ -79,7 +79,7 @@ class Test_TestDataset(CustomTestCase):
                     '+root_dir='+self.root_dir
                 ]
             )
-            ds_from_cfg = hydra.utils.instantiate(cfg)
+            ds_from_cfg = hydra.utils.instantiate(cfg, _recursive_=False)
             ds_from_ref = SegmentationDataset(
                 input_csv_path=self.csv_ds_file_without_root,
                 root_dir=self.root_dir
@@ -105,7 +105,7 @@ class Test_TestDataset(CustomTestCase):
                     '+n_first_rows_to_read=2'
                 ]
             )
-            ds_from_cfg = hydra.utils.instantiate(cfg)
+            ds_from_cfg = hydra.utils.instantiate(cfg, _recursive_=False)
             self.assertEqual(len(ds_from_cfg), 2)
     
     def test_create_frame_field_dataset_instance(self):
@@ -118,7 +118,7 @@ class Test_TestDataset(CustomTestCase):
                     'root_dir='+frame_field_root_dir
                 ]
             )
-            frame_field_ds = hydra.utils.instantiate(cfg)
+            frame_field_ds = hydra.utils.instantiate(cfg, _recursive_=False)
         self.assertEqual(len(frame_field_ds), 12)
         self.assertEqual(frame_field_ds[0]['image'].shape,(571, 571, 3))
         self.assertEqual(frame_field_ds[0]['gt_polygons_image'].shape,(571, 571, 3))

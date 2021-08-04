@@ -7,7 +7,7 @@ model:
   segmentation_model:
     _target_: "pytorch_segmentation_models_trainer.custom_models.models.DeepLab101"
   seg_params: ${seg_params}
-  compute_seg: ${compute_seg)
+  compute_seg: ${compute_seg}
   compute_crossfield: ${compute_crossfield}
 
 compute_seg: true

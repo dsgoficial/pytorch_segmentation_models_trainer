@@ -83,7 +83,7 @@ class BaseSegmentationModel(torch.nn.Module):
         self.features = features
     
     def __post_init__(self):
-        self.backbone = instantiate(self.backbone)
+        self.backbone = instantiate(self.backbone, _recursive_=False)
         if self.output_conv_kernel is not None:
             self.backbone.classifier = torch.nn.Sequential(
                 *list(self.backbone.classifier.children())[:-1],
@@ -130,7 +130,7 @@ class UNetResNet(BaseSegmentationModel):
 
     def __post_init__(self):
         self.backbone = _SimpleSegmentationModel(
-            instantiate(self.backbone),
+            instantiate(self.backbone, _recursive_=False),
             classifier=torch.nn.Identity()
         )
     
@@ -164,7 +164,7 @@ class HRNetOCRW48(torch.nn.Module):
             if pretrained is not None and pretrained in self.pretrained_dataset_outputs \
                 else self.cfg.n_classes
         self.out_channels = self.cfg.n_classes
-        self.backbone = instantiate(self.cfg)
+        self.backbone = instantiate(self.cfg, _recursive_=False)
         self.segmentation_head = SegmentationHead(
             in_channels=self.cfg.n_classes,
             out_channels=classes,
