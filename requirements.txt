@@ -30,3 +30,5 @@ Cython
 ninja
 pyyaml
 pycocotools
+multiprocess
+wget

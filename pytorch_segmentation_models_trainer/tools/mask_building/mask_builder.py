@@ -23,6 +23,7 @@ from collections import OrderedDict
 import csv
 import dataclasses
 import os
+import pandas as pd
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, List
@@ -58,11 +59,11 @@ def build_destination_dirs(input_base_path: str, output_base_path: str):
         ).mkdir(parents=True, exist_ok=True) for dirpath, _, __ in os.walk(input_base_path)
     ]
 
-def build_output_raster_list(input_raster_path, cfg):
+def build_output_raster_list(input_raster_path: str, cfg: DictConfig) -> List[str]:
     image_dir_name = os.path.basename(
         os.path.normpath(cfg.image_root_dir)
     )
-    return [
+    output_list = [
         str(
             os.path.join(
                 getattr(cfg, f"{mask_type}_folder_name"),
@@ -76,9 +77,24 @@ def build_output_raster_list(input_raster_path, cfg):
              'polygon_mask', 'boundary_mask', 'vertex_mask',
              'crossfield_mask', 'distance_mask', 'size_mask'] if getattr(cfg, f"build_{mask_type}")
     ]
+    if getattr(cfg, "build_bounding_box_list"):
+        output_list.append(
+            str(os.path.join(
+                getattr(cfg, "bounding_box_list_folder_name"),
+                os.path.dirname(
+                    os.path.normpath(
+                        str(input_raster_path).split(f'{image_dir_name}/')[-1]
+                    )
+                )
+            ))
+        )
+    return output_list
 
 def build_csv_file_from_concurrent_futures_output(cfg, result_list):
-    output_file = os.path.join(cfg.output_csv_path, f'{cfg.dataset_name}.csv')
+    output_file = os.path.join(
+        cfg.output_csv_path,
+        'temp.csv' if "merge_existing" in cfg and cfg.merge_existing else f'{cfg.dataset_name}.csv' 
+    )
     with open(output_file, 'w') as data_file:
         csv_writer = csv.writer(data_file)
         for i, result in enumerate(result_list):
@@ -87,9 +103,28 @@ def build_csv_file_from_concurrent_futures_output(cfg, result_list):
                 # writes header
                 csv_writer.writerow(data.keys())
             csv_writer.writerow(data.values())
+    if "merge_existing" in cfg and cfg.merge_existing:
+        output_file = os.path.join(cfg.output_csv_path, f'{cfg.dataset_name}.csv' )
+        merge_csv_datasets(
+            output_file,
+            os.path.join(cfg.output_csv_path, f'temp.csv' ),
+            'image'
+        )
+        os.remove(os.path.join(cfg.output_csv_path, f'temp.csv' ))
+
     return output_file
 
-
+def merge_csv_datasets(file1, file2, key_column, output_file_name=None):
+    output_file_name = file1 if output_file_name is None \
+        else output_file_name
+    df1 = pd.read_csv(file1)
+    df2 = pd.read_csv(file2)
+    df1=df1.sort_values(by=key_column, ignore_index=True)
+    df2=df2.sort_values(by=key_column, ignore_index=True)
+    df2.dropna(axis=1, how='all', inplace=True)
+    df1.update(df2)
+    df1.replace({0: False, 1: True}, inplace=True)
+    df1.to_csv(output_file_name, index=False)
 
 @dataclass
 class VectorReaderConfig:
@@ -128,6 +163,7 @@ class TemplateMaskBuilder(ABC):
     root_dir: str = '/data'
     output_csv_path: str = '/data'
     dataset_name: str = 'dsg_dataset'
+    merge_existing: bool = False
     dataset_has_relative_path: bool = True
     image_root_dir: str = 'images'
     image_extension: str = 'tif'
@@ -146,6 +182,8 @@ class TemplateMaskBuilder(ABC):
     distance_mask_folder_name: str = 'distance_masks'
     build_size_mask: bool = True
     size_mask_folder_name: str = 'size_masks'
+    build_bounding_box_list: bool = False
+    bounding_box_list_folder_name: str = 'bounding_boxes'
     min_polygon_area: float = 50.0
     mask_output_extension: str = 'png'
 
@@ -171,6 +209,11 @@ class TemplateMaskBuilder(ABC):
             if self.dataset_has_relative_path else x[0]
         args_dict = dict()
         for mask_key, file_path in built_mask_dict.items():
+            if mask_key == 'bounding_boxes':
+                args_dict['bounding_boxes'] = lambda_func(
+                    [file_path, getattr(self, 'bounding_box_list_folder_name')]
+                )
+                continue
             arg_name = mask_key.split('_')[0] + '_mask'
             args_dict[arg_name] = lambda_func(
                 [file_path, getattr(self, f'{arg_name}_folder_name')]
@@ -221,6 +264,16 @@ class TemplateMaskBuilder(ABC):
                         input_base_path=input_base_path,
                         output_base_path=output_base_path
                     )
+        if self.build_bounding_box_list:
+            output_base_path = str(
+                    os.path.join(self.root_dir, self.bounding_box_list_folder_name)
+                )
+            dir_dict[self.bounding_box_list_folder_name] = output_base_path
+            if self.replicate_image_folder_structure:
+                build_destination_dirs(
+                    input_base_path=input_base_path,
+                    output_base_path=output_base_path
+                )
         return dir_dict
     
     def build_generator(self):
@@ -254,7 +307,8 @@ class TemplateMaskBuilder(ABC):
             output_extension=self.mask_output_extension,
             compute_crossfield=self.build_crossfield_mask,
             compute_distances=self.build_distance_mask,
-            compute_sizes=self.build_size_mask
+            compute_sizes=self.build_size_mask,
+            compute_bbox=self.build_bounding_box_list,
         )
         ds_entry = self.build_dataset_entry(
             input_raster_path=input_raster_path,

@@ -24,7 +24,9 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
+from affine import Affine
+import json
 
 import numpy as np
 import pandas as pd
@@ -65,6 +67,7 @@ class DatasetEntry:
     distance_mask: str = None
     size_mask: str = None
     mask_is_single_band: bool = False
+    bounding_boxes: str = None
 
 @dataclass
 class RasterFile:
@@ -94,7 +97,8 @@ class RasterFile:
     def build_mask(self, input_vector_layer: GeoDF,\
             output_dir: Path, output_dir_dict: OrderedDict, output_filename: str =None,\
             mask_types: List[GeomType] = None, filter_area: float = None, output_extension: str = None,\
-            compute_crossfield: bool = False, compute_distances: bool = False, compute_sizes: bool = False
+            compute_crossfield: bool = False, compute_distances: bool = False, compute_sizes: bool = False,
+            compute_bbox: bool = False
         ) -> List[str]:
         """Build segmentation mask according to parameters.
 
@@ -128,15 +132,20 @@ class RasterFile:
             mask_types=mask_types,
             compute_distances=compute_distances,
             compute_sizes=compute_sizes,
-            compute_crossfield=compute_crossfield
+            compute_crossfield=compute_crossfield,
+            compute_bbox=compute_bbox
         )
+        bbox_list = self.build_image_bb_annotations_from_vector_layer(
+            mask_feats, profile['transform']
+        ) if compute_bbox else None
         raster_ds.close()
         return self.write_masks_to_disk(
             raster_dict=raster_dict,
             profile=profile,
             output_dir_dict=output_dir_dict,
             output_filename=output_filename,
-            output_extension=output_extension
+            output_extension=output_extension,
+            bbox_list=bbox_list
         )
     
     def _prepare_profile(self, raster_ds, output_extension: str):
@@ -162,7 +171,7 @@ class RasterFile:
     
     def write_masks_to_disk(self, raster_dict, profile,\
             output_dir_dict, output_filename, output_extension,\
-            folder_basename=None, replicate_input_structure=True
+            folder_basename=None, replicate_input_structure=True, bbox_list=None
         ) -> List[str]:
         path_dict = OrderedDict()
         input_name, _ = os.path.basename(self.file_name).split('.')
@@ -171,6 +180,17 @@ class RasterFile:
         subfolders = str(self.file_name.parents[0]).split(folder_basename)[-1] if replicate_input_structure else ''
         subfolders = subfolders[1::] if subfolders.startswith(os.sep) else subfolders
         for key, path in output_dir_dict.items():
+            if key not in raster_dict:
+                path_dict[key] = None
+                continue
+            if key == 'bounding_boxes':
+                output = os.path.join(path, subfolders, f'{output_filename}.json')
+                self.save_bounding_boxes_to_disk(
+                    raster_dict['bounding_boxes'],
+                    output=output
+                )
+                path_dict[key] = output
+                continue
             profile['count'] = 1 if len(raster_dict[key].shape) == 2\
                 else min(raster_dict[key].shape)
             output = os.path.join(path, subfolders, output_filename+'.'+output_extension)
@@ -184,10 +204,14 @@ class RasterFile:
                     out.write(reshape_as_raster(raster_dict[key]))
             path_dict[key] = output
         return path_dict
+    
+    def save_bounding_boxes_to_disk(self, bounding_boxes, output: str):
+        with open(output, 'w') as out:
+            json.dump(bounding_boxes, out)
 
     def build_numpy_mask_from_vector_layer(self, mask_feats: GeoSeries, output_shape:tuple,\
         transform, mask_types: List[GeomType], compute_distances=True, compute_sizes=True,\
-        compute_crossfield=False
+        compute_crossfield=False, compute_bbox=False
     ) -> np.ndarray:
         """Builds numpy mask from vector layer using rasterio.
 
@@ -220,6 +244,11 @@ class RasterFile:
                 transform,
                 line_width=4
             )
+        if compute_bbox:
+            return_dict['bounding_boxes'] = self.build_image_bb_annotations_from_vector_layer(
+                polygons,
+                transform=transform
+            )
         return return_dict
     
     def get_image_stats(self):
@@ -234,6 +263,46 @@ class RasterFile:
         }
         raster_ds.close()
         return return_dict
+
+    def build_image_bb_annotations_from_vector_layer(
+            self, vector_feats: GeoSeries, transform: Affine=None, class_idx: int=1
+        ) -> List[Dict[str, Any]]:
+        """Builds bounding box annotations from vector layer.
+
+        Args:
+            vector_feats ([type]): [description]    
+
+        Returns:
+            [type]: [description]
+        """
+        return_list = []
+        if transform is None:
+            with rasterio.open(self.file_name) as raster_ds:
+                transform = raster_ds.transform
+        for geom in vector_feats:
+            return_list.append({
+                'class': class_idx,
+                'bbox': self.get_coco_bbox_on_image_coords(
+                    *geom.bounds,
+                    transform
+                ),
+            })
+        return return_list
+    
+    def get_coco_bbox_on_image_coords(self, minx, miny, maxx, maxy, transform):
+        """Converts vector coordinates to image coordinates.
+
+        Args:
+            minx (float): [description]
+        """
+        (row1, col1) = rasterio.transform.rowcol(transform, minx, maxy)
+        (row2, col2) = rasterio.transform.rowcol(transform, maxx, miny)
+        return [
+            min(row1, row2),
+            min(col1, col2),
+            abs(row1 - row2),
+            abs(col1 - col2),
+        ]
 
 @dataclass
 class AbstractRasterPathListGetter(ABC):
