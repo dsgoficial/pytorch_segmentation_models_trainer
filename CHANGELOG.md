@@ -1,3 +1,7 @@
+# Version 0.10.0
+
+- Instance segmentation added;
+
 # Version 0.9.0
 
 - PolygonRNN model added;

@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+from abc import abstractmethod
 import os
 from albumentations.pytorch import ToTensorV2
 from albumentations.augmentations.transforms import Normalize
@@ -43,12 +44,7 @@ def load_augmentation_object(input_list):
         aug_list = input_list
     return A.Compose(aug_list)
 
-class SegmentationDataset(Dataset):
-    """[summary]
-
-    Args:
-        Dataset ([type]): [description]
-    """
+class AbstractDataset(Dataset):
     def __init__(
         self,
         input_csv_path: Path,
@@ -73,19 +69,17 @@ class SegmentationDataset(Dataset):
     def __len__(self) -> int:
         return self.len
 
+    @abstractmethod
     def __getitem__(self, idx: int) -> Dict[str, Any]:
-        idx = idx % self.len
+        """Item getter. Must be reimplemented in each subclass.
 
-        image = self.load_image(idx, key=self.image_key)
-        mask = self.load_image(idx, key=self.mask_key, is_mask=True)
-        result = {
-            'image': image,
-            'mask': mask
-        } if self.transform is None else self.transform(
-                image=image,
-                mask=mask
-            )
-        return result
+        Args:
+            idx (int): index of the item to be returned
+
+        Returns:
+            Dict[str, Any]: Loaded item.
+        """
+        pass
 
     def get_path(self, idx, key=None):
         key = self.image_key if key is None else key
@@ -107,6 +101,50 @@ class SegmentationDataset(Dataset):
             image = image.convert('RGB')
         image = np.array(image)
         return (image > 0).astype(np.uint8) if is_mask else image
+    
+    def to_tensor(self, x):
+        return x if isinstance(x, torch.Tensor) \
+            else torch.from_numpy(x)
+
+class SegmentationDataset(AbstractDataset):
+    """[summary]
+
+    Args:
+        Dataset ([type]): [description]
+    """
+    def __init__(
+        self,
+        input_csv_path: Path,
+        root_dir=None,
+        augmentation_list=None,
+        data_loader=None,
+        image_key=None,
+        mask_key=None,
+        n_first_rows_to_read=None
+    ) -> None:
+        super(SegmentationDataset, self).__init__(
+            input_csv_path=input_csv_path,
+            root_dir=root_dir,
+            augmentation_list=augmentation_list,
+            data_loader=data_loader,
+            image_key=image_key,
+            mask_key=mask_key,
+            n_first_rows_to_read=n_first_rows_to_read
+        )
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        idx = idx % self.len
+
+        image = self.load_image(idx, key=self.image_key)
+        mask = self.load_image(idx, key=self.mask_key, is_mask=True)
+        result = {
+            'image': image,
+            'mask': mask
+        } if self.transform is None else self.transform(
+                image=image,
+                mask=mask
+            )
+        return result
 
 class FrameFieldSegmentationDataset(SegmentationDataset):
     def __init__(
@@ -134,9 +172,11 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
         gpu_augmentation_list=None
     ) -> None:
         mask_key = 'polygon_mask' if mask_key is None else mask_key
-        super().__init__(input_csv_path, root_dir=root_dir, augmentation_list=augmentation_list,
-                         data_loader=data_loader, image_key=image_key, mask_key=mask_key,
-                         n_first_rows_to_read=n_first_rows_to_read)
+        super(FrameFieldSegmentationDataset, self).__init__(
+            input_csv_path, root_dir=root_dir, augmentation_list=augmentation_list,
+            data_loader=data_loader, image_key=image_key, mask_key=mask_key,
+            n_first_rows_to_read=n_first_rows_to_read
+        )
         self.multi_band_mask = multi_band_mask
         self.boundary_mask_key = boundary_mask_key if boundary_mask_key is not None else 'boundary_mask'
         self.vertex_mask_key = vertex_mask_key if vertex_mask_key is not None else 'vertex_mask'
@@ -184,9 +224,6 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
     def compute_class_freq(self, gt_polygons_image):
         pass
 
-    def to_tensor(self, x):
-        return x if isinstance(x, torch.Tensor) \
-            else torch.from_numpy(x)
     
     def get_mean_axis(self, mask):
         if len(mask.shape) > 2:
@@ -279,7 +316,7 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
         return ds_item_dict
         
 
-class PolygonRNNDataset(Dataset):
+class PolygonRNNDataset(AbstractDataset):
     def __init__(
         self,
         input_csv_path: Path,
@@ -291,26 +328,16 @@ class PolygonRNNDataset(Dataset):
         mask_key=None,
         n_first_rows_to_read=None
     ) -> None:
-        super().__init__()
-        self.input_csv_path = input_csv_path
-        self.root_dir = root_dir
+        super(PolygonRNNDataset, self).__init__(
+            input_csv_path=input_csv_path,
+            root_dir=root_dir,
+            augmentation_list=augmentation_list,
+            data_loader=data_loader,
+            image_key=image_key,
+            mask_key=mask_key,
+            n_first_rows_to_read=n_first_rows_to_read
+        )
         self.sequence_length = sequence_length
-        self.df = pd.read_csv(input_csv_path) if n_first_rows_to_read is None \
-            else pd.read_csv(input_csv_path, nrows=n_first_rows_to_read)
-        self.transform = None if augmentation_list is None \
-            else load_augmentation_object(augmentation_list)
-        self.data_loader = data_loader
-        self.len = len(self.df)
-        self.image_key = image_key if image_key is not None else 'image'
-        self.mask_key = mask_key if mask_key is not None else 'mask'
-    
-    def __len__(self) -> int:
-        return self.len
-    
-    def load_image(self, idx):
-        image_name = os.path.join(self.root_dir, self.df.iloc[idx][self.image_key])
-        image = Image.open(image_name).convert('RGB')
-        return np.array(image)
 
     def load_polygon(self, idx):
         mask_name = os.path.join(self.root_dir, self.df.iloc[idx][self.mask_key])
@@ -319,13 +346,10 @@ class PolygonRNNDataset(Dataset):
         polygon = np.array(json_file['polygon'])
         point_num = len(json_file['polygon'])
         return polygon, point_num
-
-    def to_tensor(self, x):
-        return x if isinstance(x, torch.Tensor) \
-            else torch.from_numpy(x)
     
     def __getitem__(self, index) -> Dict[str, torch.Tensor]:
-        image = self.load_image(index)
+        image = self.load_image(
+            index, key=self.image_key, is_mask=False, force_rgb=True)
         polygon, num_vertexes = self.load_polygon(index)
         label_array, label_index_array = self.build_arrays(
             polygon, num_vertexes)
@@ -383,6 +407,32 @@ class PolygonRNNDataset(Dataset):
         index = index_b * 28 + index_a
         label_array[point_count, index] = 1
         label_index_array[point_count] = index
+
+class ObjectDetectionDataset(AbstractDataset):
+    def __init__(
+        self,
+        input_csv_path: Path,
+        root_dir=None,
+        augmentation_list=None,
+        data_loader=None,
+        image_key=None,
+        mask_key=None,
+        n_first_rows_to_read=None
+    ) -> None:
+        super(ObjectDetectionDataset, self).__init__(
+            input_csv_path=input_csv_path,
+            root_dir=root_dir,
+            augmentation_list=augmentation_list,
+            data_loader=data_loader,
+            image_key=image_key,
+            mask_key=mask_key,
+            n_first_rows_to_read=n_first_rows_to_read
+        )
+    
+    def __getitem__(self, index) -> Dict[str, torch.Tensor]:
+        image = self.load_image(
+            index, key=self.image_key, is_mask=False, force_rgb=True)
+        
 
 if __name__ == '__main__':
     pass
