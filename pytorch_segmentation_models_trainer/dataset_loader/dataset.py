@@ -416,7 +416,7 @@ class ObjectDetectionDataset(AbstractDataset):
         augmentation_list=None,
         data_loader=None,
         image_key=None,
-        mask_key=None,
+        bounding_box_key=None,
         n_first_rows_to_read=None
     ) -> None:
         super(ObjectDetectionDataset, self).__init__(
@@ -425,13 +425,24 @@ class ObjectDetectionDataset(AbstractDataset):
             augmentation_list=augmentation_list,
             data_loader=data_loader,
             image_key=image_key,
-            mask_key=mask_key,
+            mask_key=None,
             n_first_rows_to_read=n_first_rows_to_read
         )
+        self.bounding_box_key = 'bounding_boxes' if bounding_box_key is None else bounding_box_key
+    
+    def load_bounding_boxes(self, idx):
+        bbox_path = self.get_path(idx, key=self.bounding_box_key)
+        with open(bbox_path, 'r') as f:
+            json_file = json.load(f)
+        bbox_list = [
+            box for box in json_file
+        ] # TODO: review this
+        return bbox_list
     
     def __getitem__(self, index) -> Dict[str, torch.Tensor]:
         image = self.load_image(
             index, key=self.image_key, is_mask=False, force_rgb=True)
+        bbox_list = self.load_bounding_boxes(index)
         
 
 if __name__ == '__main__':
