@@ -249,4 +249,3 @@ class Test_TestDataset(CustomTestCase):
         self.assertEqual(obj_det_ds[0]['image'].shape, (3, 571, 571))
         self.assertEqual(obj_det_ds[0]['bboxes'].shape, (2, 4))
         self.assertEqual(obj_det_ds[0]['labels'].shape, (2,))
-        

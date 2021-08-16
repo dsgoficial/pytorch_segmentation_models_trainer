@@ -197,6 +197,18 @@ class HRNetOCRW48(torch.nn.Module):
         return self.backbone(x)['out'] if not apply_segmentation_head \
             else self.segmentation_head(self.backbone(x)['out'])
 
+class ObjectDetectionModel(torch.nn.Module):
+    def __init__(self, model, head):
+        super().__init__()
+        self.model = instantiate(model)
+        in_features = self.model.roi_heads.box_predictor.cls_score.in_features
+        self.head = instantiate(head, in_channels=in_features)
+        self.model.roi_heads.box_predictor = self.head
+    
+    def forward(self, x):
+        return self.model(x)
+        
+
 if __name__ == "__main__":
     x = HRNetOCRW48()
     print(x)

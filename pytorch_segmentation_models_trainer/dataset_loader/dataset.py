@@ -469,8 +469,15 @@ class ObjectDetectionDataset(AbstractDataset):
         if self.return_mask:
             ds_item_dict['masks'] = [self.load_image(
                 index, key=self.mask_key, is_mask=True)]
-        return ds_item_dict if self.transform is None \
-            else self.transform(**ds_item_dict)
+        if self.transform is not None:
+            ds_item_dict = self.transform(**ds_item_dict)
+        ds_item_dict.update(
+            {
+                'index': index,
+                'path': self.get_path(index),
+            }
+        )
+        return ds_item_dict
 
 if __name__ == '__main__':
     pass

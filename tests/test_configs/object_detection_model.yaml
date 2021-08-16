@@ -1,0 +1,7 @@
+_target_: pytorch_segmentation_models_trainer.custom_models.models.ObjectDetectionModel
+model:
+  _target_: torchvision.models.detection.fasterrcnn_resnet50_fpn
+  pretrained: true
+head:
+  _target_: torchvision.models.detection.faster_rcnn.FastRCNNPredictor
+  num_classes: 1
