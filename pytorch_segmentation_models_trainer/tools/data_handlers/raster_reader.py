@@ -267,13 +267,15 @@ class RasterFile:
     def build_image_bb_annotations_from_vector_layer(
             self, vector_feats: GeoSeries, transform: Affine=None, class_idx: int=1
         ) -> List[Dict[str, Any]]:
-        """Builds bounding box annotations from vector layer.
+        """[summary]
 
         Args:
-            vector_feats ([type]): [description]    
+            vector_feats (GeoSeries): [description]
+            transform (Affine, optional): [description]. Defaults to None.
+            class_idx (int, optional): [description]. Defaults to 1.
 
         Returns:
-            [type]: [description]
+            List[Dict[str, Any]]: List of dictionaries {'class': class_idx, 'bbox': [x, y, w, h]}
         """
         return_list = []
         if transform is None:

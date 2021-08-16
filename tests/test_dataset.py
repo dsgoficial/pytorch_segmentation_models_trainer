@@ -32,7 +32,7 @@ from pytorch_segmentation_models_trainer.config_definitions.coco_dataset_config 
     AnnotationConfig, CategoryConfig, CocoDatasetConfig, CocoDatasetInfoConfig,
     ImageConfig, LicenseConfig)
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
-    PolygonRNNDataset, SegmentationDataset, load_augmentation_object)
+    ObjectDetectionDataset, PolygonRNNDataset, SegmentationDataset, load_augmentation_object)
 
 from tests.utils import CustomTestCase
 
@@ -41,6 +41,8 @@ frame_field_root_dir = os.path.join(
     current_dir, 'testing_data', 'data', 'frame_field_data')
 polygon_rnn_root_dir = os.path.join(
     current_dir, 'testing_data', 'data', 'polygon_rnn_data')
+object_detection_root_dir = os.path.join(
+    current_dir, 'testing_data', 'data', 'object_detection_data')
 
 class Test_TestDataset(CustomTestCase):
 
@@ -232,3 +234,19 @@ class Test_TestDataset(CustomTestCase):
             self.assertEqual(ds_item['x2'].shape, (58, 787))
             self.assertEqual(ds_item['x3'].shape, (58, 787))
             self.assertEqual(ds_item['ta'].shape, (58,))
+
+    def test_object_detection_dataset(self):
+        csv_path = os.path.join(object_detection_root_dir, 'geo', 'dsg_dataset.csv')
+        obj_det_ds = ObjectDetectionDataset(
+            input_csv_path=csv_path,
+            root_dir=os.path.dirname(csv_path),
+            augmentation_list=[
+                A.Normalize(),
+                A.pytorch.ToTensorV2()
+            ]
+        )
+        self.assertEqual(len(obj_det_ds), 12)
+        self.assertEqual(obj_det_ds[0]['image'].shape, (3, 571, 571))
+        self.assertEqual(obj_det_ds[0]['bboxes'].shape, (2, 4))
+        self.assertEqual(obj_det_ds[0]['labels'].shape, (2,))
+        

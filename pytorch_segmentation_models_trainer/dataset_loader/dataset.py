@@ -20,6 +20,7 @@
 """
 from abc import abstractmethod
 import os
+from pytorch_segmentation_models_trainer.utils.object_detection_utils import bbox_xywh_to_xyxy, bbox_xyxy_to_xywh
 from albumentations.pytorch import ToTensorV2
 from albumentations.augmentations.transforms import Normalize
 import torch
@@ -417,7 +418,10 @@ class ObjectDetectionDataset(AbstractDataset):
         data_loader=None,
         image_key=None,
         bounding_box_key=None,
-        n_first_rows_to_read=None
+        n_first_rows_to_read=None,
+        bbox_format='xywh',
+        bbox_output_format='xyxy',
+        return_mask=False,
     ) -> None:
         super(ObjectDetectionDataset, self).__init__(
             input_csv_path=input_csv_path,
@@ -429,21 +433,44 @@ class ObjectDetectionDataset(AbstractDataset):
             n_first_rows_to_read=n_first_rows_to_read
         )
         self.bounding_box_key = 'bounding_boxes' if bounding_box_key is None else bounding_box_key
+        self.bbox_format = bbox_format
+        self.bbox_output_format = bbox_output_format
+        self.return_mask = return_mask
     
-    def load_bounding_boxes(self, idx):
+    def convert_bbox(self, bbox):
+        if self.bbox_format == self.bbox_output_format:
+            return bbox
+        elif self.bbox_format == 'xywh' and self.bbox_output_format == 'xyxy':
+            return bbox_xywh_to_xyxy(bbox)
+        elif self.bbox_format == 'xyxy' and self.bbox_output_format == 'xywh':
+            return bbox_xyxy_to_xywh(bbox)
+        else:
+            raise NotImplementedError
+    
+    def load_bounding_boxes_and_labels(self, idx):
         bbox_path = self.get_path(idx, key=self.bounding_box_key)
         with open(bbox_path, 'r') as f:
             json_file = json.load(f)
-        bbox_list = [
-            box for box in json_file
-        ] # TODO: review this
-        return bbox_list
+        bbox_list, label_list = [], []
+        for box_item in json_file:
+            bbox_list.append(self.convert_bbox(box_item['bbox']))
+            label_list.append(box_item['class'])
+        return torch.as_tensor(bbox_list, dtype=torch.float32), torch.as_tensor(label_list, dtype=torch.int64)
     
     def __getitem__(self, index) -> Dict[str, torch.Tensor]:
         image = self.load_image(
             index, key=self.image_key, is_mask=False, force_rgb=True)
-        bbox_list = self.load_bounding_boxes(index)
-        
+        bbox_list, label_list = self.load_bounding_boxes_and_labels(index)
+        ds_item_dict = {
+            'image': image,
+            'bboxes': bbox_list,
+            'labels': label_list,
+        }
+        if self.return_mask:
+            ds_item_dict['masks'] = [self.load_image(
+                index, key=self.mask_key, is_mask=True)]
+        return ds_item_dict if self.transform is None \
+            else self.transform(**ds_item_dict)
 
 if __name__ == '__main__':
     pass
