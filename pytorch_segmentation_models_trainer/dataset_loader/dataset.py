@@ -420,11 +420,11 @@ class ObjectDetectionDataset(AbstractDataset):
         augmentation_list=None,
         data_loader=None,
         image_key=None,
+        mask_key=None,
         bounding_box_key=None,
         n_first_rows_to_read=None,
         bbox_format='xywh',
         bbox_output_format='xyxy',
-        return_mask=False,
         bbox_params=None,
     ) -> None:
         super(ObjectDetectionDataset, self).__init__(
@@ -433,7 +433,7 @@ class ObjectDetectionDataset(AbstractDataset):
             augmentation_list=None,
             data_loader=data_loader,
             image_key=image_key,
-            mask_key=None,
+            mask_key=mask_key,
             n_first_rows_to_read=n_first_rows_to_read
         )
         self.transform = None if augmentation_list is None \
@@ -441,7 +441,6 @@ class ObjectDetectionDataset(AbstractDataset):
         self.bounding_box_key = 'bounding_boxes' if bounding_box_key is None else bounding_box_key
         self.bbox_format = bbox_format
         self.bbox_output_format = bbox_output_format
-        self.return_mask = return_mask
     
     def convert_bbox(self, bbox):
         if self.bbox_format == self.bbox_output_format:
@@ -472,6 +471,59 @@ class ObjectDetectionDataset(AbstractDataset):
             'bboxes': bbox_list,
             'labels': label_list,
         }
+        if self.transform is not None:
+            ds_item_dict = self.transform(**ds_item_dict)
+        image = ds_item_dict.pop('image')
+        ds_item_dict['boxes'] = torch.as_tensor(
+            [
+                self.convert_bbox(bbox) for bbox in ds_item_dict.pop('bboxes')
+            ], dtype=torch.float32)
+        ds_item_dict['labels'] = torch.as_tensor(
+            ds_item_dict['labels'], dtype=torch.int64
+        )
+        return image, ds_item_dict, index
+
+class InstanceSegmentationDataset(ObjectDetectionDataset):
+    def __init__(
+        self,
+        input_csv_path: Path,
+        root_dir=None,
+        augmentation_list=None,
+        data_loader=None,
+        image_key=None,
+        mask_key=None,
+        bounding_box_key=None,
+        n_first_rows_to_read=None,
+        bbox_format='xywh',
+        bbox_output_format='xyxy',
+        return_mask=True,
+        bbox_params=None,
+    ) -> None:
+        mask_key = 'polygon_mask' if mask_key is None else mask_key
+        super(InstanceSegmentationDataset, self).__init__(
+            input_csv_path=input_csv_path,
+            root_dir=root_dir,
+            augmentation_list=augmentation_list,
+            data_loader=data_loader,
+            image_key=image_key,
+            mask_key=mask_key,
+            bounding_box_key=bounding_box_key,
+            n_first_rows_to_read=n_first_rows_to_read,
+            bbox_format=bbox_format,
+            bbox_output_format=bbox_output_format,
+            bbox_params=bbox_params
+        )
+        self.return_mask = return_mask
+
+    def __getitem__(self, index) -> Dict[str, torch.Tensor]:
+        image = self.load_image(
+            index, key=self.image_key, is_mask=False, force_rgb=True)
+        bbox_list, label_list = self.load_bounding_boxes_and_labels(index)
+        ds_item_dict = {
+            'image': image,
+            'bboxes': bbox_list,
+            'labels': label_list,
+        }
         if self.return_mask:
             ds_item_dict['masks'] = [self.load_image(
                 index, key=self.mask_key, is_mask=True)]
@@ -485,6 +537,10 @@ class ObjectDetectionDataset(AbstractDataset):
         ds_item_dict['labels'] = torch.as_tensor(
             ds_item_dict['labels'], dtype=torch.int64
         )
+        if self.return_mask:
+            ds_item_dict['masks'] = torch.as_tensor(
+                ds_item_dict['masks'], dtype=torch.uint8
+            )
         return image, ds_item_dict, index
 
 if __name__ == '__main__':

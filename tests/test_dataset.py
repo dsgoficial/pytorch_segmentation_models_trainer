@@ -20,11 +20,11 @@
  ****
 """
 
+import dataclasses
 import json
 import os
 
 import albumentations as A
-import dataclasses
 import hydra
 import numpy as np
 from hydra import compose, initialize
@@ -32,7 +32,8 @@ from pytorch_segmentation_models_trainer.config_definitions.coco_dataset_config 
     AnnotationConfig, CategoryConfig, CocoDatasetConfig, CocoDatasetInfoConfig,
     ImageConfig, LicenseConfig)
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
-    ObjectDetectionDataset, PolygonRNNDataset, SegmentationDataset, load_augmentation_object)
+    InstanceSegmentationDataset, ObjectDetectionDataset, PolygonRNNDataset,
+    SegmentationDataset, load_augmentation_object)
 
 from tests.utils import CustomTestCase
 
@@ -41,8 +42,8 @@ frame_field_root_dir = os.path.join(
     current_dir, 'testing_data', 'data', 'frame_field_data')
 polygon_rnn_root_dir = os.path.join(
     current_dir, 'testing_data', 'data', 'polygon_rnn_data')
-object_detection_root_dir = os.path.join(
-    current_dir, 'testing_data', 'data', 'object_detection_data')
+detection_root_dir = os.path.join(
+    current_dir, 'testing_data', 'data', 'detection_data')
 
 class Test_TestDataset(CustomTestCase):
 
@@ -236,7 +237,7 @@ class Test_TestDataset(CustomTestCase):
             self.assertEqual(ds_item['ta'].shape, (58,))
 
     def test_object_detection_dataset(self):
-        csv_path = os.path.join(object_detection_root_dir, 'geo', 'dsg_dataset.csv')
+        csv_path = os.path.join(detection_root_dir, 'geo', 'dsg_dataset.csv')
         obj_det_ds = ObjectDetectionDataset(
             input_csv_path=csv_path,
             root_dir=os.path.dirname(csv_path),
@@ -248,5 +249,22 @@ class Test_TestDataset(CustomTestCase):
         self.assertEqual(len(obj_det_ds), 12)
         image, target, id = obj_det_ds[0]
         self.assertEqual(image.shape, (3, 571, 571))
-        self.assertEqual(target['bboxes'].shape, (2, 4))
+        self.assertEqual(target['boxes'].shape, (2, 4))
         self.assertEqual(target['labels'].shape, (2,))
+
+    def test_instance_segmentation_dataset(self):
+        csv_path = os.path.join(detection_root_dir, 'geo', 'dsg_dataset.csv')
+        obj_det_ds = InstanceSegmentationDataset(
+            input_csv_path=csv_path,
+            root_dir=os.path.dirname(csv_path),
+            augmentation_list=[
+                A.Normalize(),
+                A.pytorch.ToTensorV2()
+            ]
+        )
+        self.assertEqual(len(obj_det_ds), 12)
+        image, target, id = obj_det_ds[0]
+        self.assertEqual(image.shape, (3, 571, 571))
+        self.assertEqual(target['boxes'].shape, (2, 4))
+        self.assertEqual(target['labels'].shape, (2,))
+        self.assertEqual(target['masks'].shape, (1, 571, 571))

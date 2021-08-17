@@ -1,6 +1,6 @@
 # @package _group_
 pl_model:
-  _target_: pytorch_segmentation_models_trainer.model_loader.object_detection_model.ObjectDetectionPLModel
+  _target_: pytorch_segmentation_models_trainer.model_loader.detection_model.ObjectDetectionPLModel
 
 model:
   _target_: pytorch_segmentation_models_trainer.custom_models.models.ObjectDetectionModel
@@ -25,7 +25,7 @@ metrics:
 
 hyperparameters:
   batch_size: 2
-  epochs: 2
+  epochs: 1
   max_lr: 0.1
 
 pl_trainer:

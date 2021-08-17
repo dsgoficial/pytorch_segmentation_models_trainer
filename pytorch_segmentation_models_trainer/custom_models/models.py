@@ -207,6 +207,22 @@ class ObjectDetectionModel(torch.nn.Module):
     
     def forward(self, x, targets=None):
         return self.model(x, targets=targets)
+
+class InstanceSegmentationModel(torch.nn.Module):
+    def __init__(self, base_model, box_predictor, mask_predictor):
+        super().__init__()
+        self.model = instantiate(base_model)
+        in_features = self.model.roi_heads.box_predictor.cls_score.in_features
+        self.box_predictor = instantiate(
+            box_predictor, in_channels=in_features)
+        self.model.roi_heads.box_predictor = self.box_predictor
+        in_features_mask = self.model.roi_heads.mask_predictor.conv5_mask.in_channels
+        self.mask_predictor = instantiate(
+            mask_predictor, in_channels=in_features_mask)
+        self.model.roi_heads.mask_predictor = self.mask_predictor
+    
+    def forward(self, x, targets=None):
+        return self.model(x, targets=targets)
         
 
 if __name__ == "__main__":

@@ -66,7 +66,7 @@ metrics:
 
 hyperparameters:
   batch_size: 2
-  epochs: 3
+  epochs: 1
   max_lr: 0.1
 
 pl_trainer:

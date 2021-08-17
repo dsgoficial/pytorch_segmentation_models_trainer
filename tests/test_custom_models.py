@@ -71,3 +71,17 @@ class Test_TestCustomModels(unittest.TestCase):
             len(out),
             2
         )
+    def test_instance_segmentation_model(self) -> None:
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="instance_segmentation_model.yaml"
+            )
+            model = hydra.utils.instantiate(cfg, _recursive_=False)
+        sample = torch.ones([2, 3, 256, 256])
+        model.eval()
+        with torch.no_grad():
+            out = model(sample)
+        self.assertEqual(
+            len(out),
+            2
+        )

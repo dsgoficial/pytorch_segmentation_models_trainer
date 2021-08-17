@@ -16,8 +16,6 @@
  *   the Free Software Foundation; either version 2 of the License, or     *
  *   (at your option) any later version.                                   *
  *                                                                         *
- *   Part of the code is from                                              *
- *   https://github.com/AlexMa011/pytorch-polygon-rnn                      *
  ****
 """
 
@@ -116,3 +114,8 @@ class ObjectDetectionPLModel(Model):
         avg_iou = torch.stack([o["val_iou"] for o in outs]).mean()
         logs = {"val_iou": avg_iou}
         return {"avg_val_iou": avg_iou, "log": logs}
+
+
+class InstanceSegmentationPLModel(ObjectDetectionPLModel):
+    def __init__(self, cfg):
+        super(InstanceSegmentationPLModel, self).__init__(cfg)

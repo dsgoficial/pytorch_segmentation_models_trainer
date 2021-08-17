@@ -1,9 +1,19 @@
 # @package _group_
 pl_model:
-  _target_: pytorch_segmentation_models_trainer.model_loader.polygon_rnn_model.PolygonRNNPLModel
+  _target_: pytorch_segmentation_models_trainer.model_loader.detection_model.InstanceSegmentationPLModel
 
 model:
-  load_vgg: True
+  _target_: pytorch_segmentation_models_trainer.custom_models.models.InstanceSegmentationModel
+  base_model:
+    _target_: torchvision.models.detection.maskrcnn_resnet50_fpn
+    pretrained: true
+  box_predictor:
+    _target_: torchvision.models.detection.faster_rcnn.FastRCNNPredictor
+    num_classes: ${hyperparameters.num_classes}
+  mask_predictor:
+    _target_: torchvision.models.detection.mask_rcnn.MaskRCNNPredictor
+    dim_reduced: 256
+    num_classes: ${hyperparameters.num_classes}
 
 optimizer:
   _target_: torch.optim.AdamW
@@ -18,25 +28,30 @@ metrics:
   - _target_: torchmetrics.Recall
 
 hyperparameters:
-  batch_size: 1
+  batch_size: 2
   epochs: 1
   max_lr: 0.1
+  num_classes: 2
 
 pl_trainer:
   max_epochs: ${hyperparameters.epochs}
   gpus: 0
 
 train_dataset:
-  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.PolygonRNNDataset
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.InstanceSegmentationDataset
   input_csv_path: teste
   root_dir: teste
-  sequence_length: 60
   data_loader:
     shuffle: True
     num_workers: 4
     pin_memory: True
     drop_last: True
     prefetch_factor: 2
+  bbox_params:
+    format: coco
+    min_visibility: 0.3
+    label_fields:
+      - labels
   augmentation_list:
     - _target_: albumentations.HueSaturationValue
       always_apply: false
@@ -52,10 +67,14 @@ train_dataset:
       always_apply: true
 
 val_dataset:
-  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.PolygonRNNDataset
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.InstanceSegmentationDataset
   input_csv_path: teste
   root_dir: teste
-  sequence_length: 60
+  bbox_params:
+    format: coco
+    min_visibility: 0.2
+    label_fields:
+      - labels
   data_loader:
     shuffle: False
     num_workers: 4

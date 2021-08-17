@@ -44,21 +44,42 @@ from pytorch_segmentation_models_trainer.train import train
 from tests.utils import CustomTestCase
 
 current_dir = os.path.dirname(__file__)
-object_detection_root_dir = os.path.join(
-    current_dir, 'testing_data', 'data', 'object_detection_data', 'geo')
+detection_root_dir = os.path.join(
+    current_dir, 'testing_data', 'data', 'detection_data', 'geo')
 
-class Test_TestObjectDetectionModel(CustomTestCase):
+class Test_TestDetectionModel(CustomTestCase):
     
     def test_train_object_detection_model(self) -> None:
-        csv_path = os.path.join(object_detection_root_dir,  'dsg_dataset.csv')
+        csv_path = os.path.join(detection_root_dir,  'dsg_dataset.csv')
         with initialize(config_path="./test_configs"):
             cfg = compose(
                 config_name="experiment_object_detection.yaml",
                 overrides=[
                     'train_dataset.input_csv_path='+csv_path,
-                    'train_dataset.root_dir='+object_detection_root_dir,
+                    'train_dataset.root_dir='+detection_root_dir,
                     'val_dataset.input_csv_path='+csv_path,
-                    'val_dataset.root_dir='+object_detection_root_dir,
+                    'val_dataset.root_dir='+detection_root_dir,
+                    # 'pl_trainer.gpus=1',
+                    # 'device=cuda',
+                    # 'optimizer.lr=0.00001',
+                    # 'hyperparameters.batch_size=4',
+                    # 'hyperparameters.epochs=10'
+                ]
+            )
+            trainer = train(cfg)
+    
+    def test_train_instance_segmentation_model(self) -> None:
+        csv_path = os.path.join(detection_root_dir,  'dsg_dataset.csv')
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_instance_segmentation.yaml",
+                overrides=[
+                    'train_dataset.input_csv_path='+csv_path,
+                    'train_dataset.root_dir='+detection_root_dir,
+                    '+train_dataset.return_mask=True',
+                    'val_dataset.input_csv_path='+csv_path,
+                    'val_dataset.root_dir='+detection_root_dir,
+                    '+val_dataset.return_mask=True',
                     # 'pl_trainer.gpus=1',
                     # 'device=cuda',
                     # 'optimizer.lr=0.00001',

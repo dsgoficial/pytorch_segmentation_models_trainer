@@ -4,4 +4,4 @@ base_model:
   pretrained: true
 head:
   _target_: torchvision.models.detection.faster_rcnn.FastRCNNPredictor
-  num_classes: 1
+  num_classes: 2
