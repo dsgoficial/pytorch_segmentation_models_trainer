@@ -246,6 +246,7 @@ class Test_TestDataset(CustomTestCase):
             ]
         )
         self.assertEqual(len(obj_det_ds), 12)
-        self.assertEqual(obj_det_ds[0]['image'].shape, (3, 571, 571))
-        self.assertEqual(obj_det_ds[0]['bboxes'].shape, (2, 4))
-        self.assertEqual(obj_det_ds[0]['labels'].shape, (2,))
+        image, target, id = obj_det_ds[0]
+        self.assertEqual(image.shape, (3, 571, 571))
+        self.assertEqual(target['bboxes'].shape, (2, 4))
+        self.assertEqual(target['labels'].shape, (2,))

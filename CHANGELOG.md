@@ -1,6 +1,7 @@
 # Version 0.10.0
 
-- Instance segmentation added;
+- Object Detection added;
+- Instance Segmentation added;
 
 # Version 0.9.0
 

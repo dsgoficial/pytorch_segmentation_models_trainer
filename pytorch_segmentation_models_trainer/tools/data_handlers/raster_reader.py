@@ -300,10 +300,10 @@ class RasterFile:
         (row1, col1) = rasterio.transform.rowcol(transform, minx, maxy)
         (row2, col2) = rasterio.transform.rowcol(transform, maxx, miny)
         return [
-            min(row1, row2),
             min(col1, col2),
-            abs(row1 - row2),
+            min(row1, row2),
             abs(col1 - col2),
+            abs(row1 - row2),
         ]
 
 @dataclass

@@ -57,7 +57,7 @@ class Model(pl.LightningModule):
             else self.get_gpu_augmentations(self.cfg.val_dataset.gpu_augmentation_list)
 
     def get_model(self):
-        model = instantiate(self.cfg.model)
+        model = instantiate(self.cfg.model, _recursive_=False)
         if 'replace_model_activation' in self.cfg:
             old_activation = instantiate(self.cfg.replace_model_activation.old_activation, _recursive_=False)
             new_activation = instantiate(self.cfg.replace_model_activation.new_activation, _recursive_=False)

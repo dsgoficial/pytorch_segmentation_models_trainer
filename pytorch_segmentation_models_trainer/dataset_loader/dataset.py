@@ -35,15 +35,18 @@ from PIL import Image
 from torch.utils.data import Dataset
 import json
 
+from omegaconf import DictConfig, OmegaConf
 
-def load_augmentation_object(input_list):
+
+def load_augmentation_object(input_list, bbox_params=None):
     try:
         aug_list = [
             instantiate(i, _recursive_=False) for i in input_list
         ]
     except:
         aug_list = input_list
-    return A.Compose(aug_list)
+    return A.Compose(aug_list) if bbox_params is None \
+        else A.Compose(aug_list, bbox_params=OmegaConf.to_container(bbox_params))
 
 class AbstractDataset(Dataset):
     def __init__(
@@ -422,16 +425,19 @@ class ObjectDetectionDataset(AbstractDataset):
         bbox_format='xywh',
         bbox_output_format='xyxy',
         return_mask=False,
+        bbox_params=None,
     ) -> None:
         super(ObjectDetectionDataset, self).__init__(
             input_csv_path=input_csv_path,
             root_dir=root_dir,
-            augmentation_list=augmentation_list,
+            augmentation_list=None,
             data_loader=data_loader,
             image_key=image_key,
             mask_key=None,
             n_first_rows_to_read=n_first_rows_to_read
         )
+        self.transform = None if augmentation_list is None \
+            else load_augmentation_object(augmentation_list, bbox_params=bbox_params)
         self.bounding_box_key = 'bounding_boxes' if bounding_box_key is None else bounding_box_key
         self.bbox_format = bbox_format
         self.bbox_output_format = bbox_output_format
@@ -453,7 +459,7 @@ class ObjectDetectionDataset(AbstractDataset):
             json_file = json.load(f)
         bbox_list, label_list = [], []
         for box_item in json_file:
-            bbox_list.append(self.convert_bbox(box_item['bbox']))
+            bbox_list.append(box_item['bbox'])
             label_list.append(box_item['class'])
         return torch.as_tensor(bbox_list, dtype=torch.float32), torch.as_tensor(label_list, dtype=torch.int64)
     
@@ -471,13 +477,15 @@ class ObjectDetectionDataset(AbstractDataset):
                 index, key=self.mask_key, is_mask=True)]
         if self.transform is not None:
             ds_item_dict = self.transform(**ds_item_dict)
-        ds_item_dict.update(
-            {
-                'index': index,
-                'path': self.get_path(index),
-            }
+        image = ds_item_dict.pop('image')
+        ds_item_dict['boxes'] = torch.as_tensor(
+            [
+                self.convert_bbox(bbox) for bbox in ds_item_dict.pop('bboxes')
+            ], dtype=torch.float32)
+        ds_item_dict['labels'] = torch.as_tensor(
+            ds_item_dict['labels'], dtype=torch.int64
         )
-        return ds_item_dict
+        return image, ds_item_dict, index
 
 if __name__ == '__main__':
     pass
