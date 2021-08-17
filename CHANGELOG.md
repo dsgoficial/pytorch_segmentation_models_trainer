@@ -1,3 +1,8 @@
+# Version 0.10.0
+
+- Object Detection added;
+- Instance Segmentation added;
+
 # Version 0.9.0
 
 - PolygonRNN model added;

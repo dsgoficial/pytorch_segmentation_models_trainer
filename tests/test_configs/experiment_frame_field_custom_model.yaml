@@ -7,7 +7,7 @@ model:
   segmentation_model:
     _target_: "pytorch_segmentation_models_trainer.custom_models.models.DeepLab101"
   seg_params: ${seg_params}
-  compute_seg: ${compute_seg)
+  compute_seg: ${compute_seg}
   compute_crossfield: ${compute_crossfield}
 
 compute_seg: true
@@ -66,7 +66,7 @@ metrics:
 
 hyperparameters:
   batch_size: 2
-  epochs: 3
+  epochs: 1
   max_lr: 0.1
 
 pl_trainer:

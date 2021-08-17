@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import skimage.io
 import torch
-from hydra.experimental import compose, initialize
+from hydra import compose, initialize
 from matplotlib.testing.compare import compare_images
 from pytorch_segmentation_models_trainer.tools.visualization.crossfield_plot import \
     get_tensorboard_image_seg_display
@@ -66,7 +66,7 @@ class Test_TestVisualization(unittest.TestCase):
                     'root_dir='+frame_field_root_dir
                 ]
             )
-            frame_field_ds = hydra.utils.instantiate(cfg)
+            frame_field_ds = hydra.utils.instantiate(cfg, _recursive_=False)
         crossfield = compute_crossfield_to_plot(
             frame_field_ds[0]['gt_crossfield_angle']
         )

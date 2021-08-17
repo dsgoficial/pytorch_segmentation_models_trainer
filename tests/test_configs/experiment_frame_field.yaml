@@ -12,7 +12,7 @@ model:
     classes: 1
     activation: 'sigmoid'
   seg_params: ${seg_params}
-  compute_seg: ${compute_seg)
+  compute_seg: ${compute_seg}
   compute_crossfield: ${compute_crossfield}
 
 compute_seg: true
@@ -71,7 +71,7 @@ metrics:
 
 hyperparameters:
   batch_size: 2
-  epochs: 3
+  epochs: 1
   max_lr: 0.1
 
 pl_trainer:

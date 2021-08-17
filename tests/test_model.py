@@ -31,5 +31,5 @@ class Test_TestSegmentationModel(unittest.TestCase):
     def test_create_instance(self) -> None:
         with initialize(config_path="./test_configs"):
             cfg = compose(config_name="model.yaml")
-            model_obj = hydra.utils.instantiate(cfg)
+            model_obj = hydra.utils.instantiate(cfg, _recursive_=False)
             assert isinstance(model_obj, smp.Unet)

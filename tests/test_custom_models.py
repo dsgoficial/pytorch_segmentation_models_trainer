@@ -26,7 +26,7 @@ import hydra
 import numpy as np
 import segmentation_models_pytorch as smp
 import torch
-from hydra.experimental import compose, initialize
+from hydra import compose, initialize
 from hydra.utils import instantiate
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.custom_models import models
@@ -55,4 +55,33 @@ class Test_TestCustomModels(unittest.TestCase):
         self.assertEqual(
             out.shape,
             expected_output_shape
+        )
+    
+    def test_object_detection_model(self) -> None:
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="object_detection_model.yaml"
+            )
+            model = hydra.utils.instantiate(cfg, _recursive_=False)
+        sample = torch.ones([2, 3, 256, 256])
+        model.eval()
+        with torch.no_grad():
+            out = model(sample)
+        self.assertEqual(
+            len(out),
+            2
+        )
+    def test_instance_segmentation_model(self) -> None:
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="instance_segmentation_model.yaml"
+            )
+            model = hydra.utils.instantiate(cfg, _recursive_=False)
+        sample = torch.ones([2, 3, 256, 256])
+        model.eval()
+        with torch.no_grad():
+            out = model(sample)
+        self.assertEqual(
+            len(out),
+            2
         )

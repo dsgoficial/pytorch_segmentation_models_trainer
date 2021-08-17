@@ -28,7 +28,7 @@ import hydra
 import rasterio
 import torch
 from geopandas.testing import geom_almost_equals
-from hydra.experimental import compose, initialize
+from hydra import compose, initialize
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import \
     VectorFileDataWriter
 from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import (
@@ -69,7 +69,7 @@ class Test_TestPolygonize(unittest.TestCase):
                     'root_dir='+frame_field_root_dir
                 ]
             )
-            frame_field_ds = hydra.utils.instantiate(cfg)
+            frame_field_ds = hydra.utils.instantiate(cfg, _recursive_=False)
         return frame_field_ds
 
     def test_polygonizer_simple_processor(self) -> None:

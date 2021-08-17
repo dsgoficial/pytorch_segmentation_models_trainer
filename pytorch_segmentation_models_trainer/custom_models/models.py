@@ -83,7 +83,7 @@ class BaseSegmentationModel(torch.nn.Module):
         self.features = features
     
     def __post_init__(self):
-        self.backbone = instantiate(self.backbone)
+        self.backbone = instantiate(self.backbone, _recursive_=False)
         if self.output_conv_kernel is not None:
             self.backbone.classifier = torch.nn.Sequential(
                 *list(self.backbone.classifier.children())[:-1],
@@ -130,7 +130,7 @@ class UNetResNet(BaseSegmentationModel):
 
     def __post_init__(self):
         self.backbone = _SimpleSegmentationModel(
-            instantiate(self.backbone),
+            instantiate(self.backbone, _recursive_=False),
             classifier=torch.nn.Identity()
         )
     
@@ -164,7 +164,7 @@ class HRNetOCRW48(torch.nn.Module):
             if pretrained is not None and pretrained in self.pretrained_dataset_outputs \
                 else self.cfg.n_classes
         self.out_channels = self.cfg.n_classes
-        self.backbone = instantiate(self.cfg)
+        self.backbone = instantiate(self.cfg, _recursive_=False)
         self.segmentation_head = SegmentationHead(
             in_channels=self.cfg.n_classes,
             out_channels=classes,
@@ -196,6 +196,34 @@ class HRNetOCRW48(torch.nn.Module):
     def forward(self, x, apply_segmentation_head=False):
         return self.backbone(x)['out'] if not apply_segmentation_head \
             else self.segmentation_head(self.backbone(x)['out'])
+
+class ObjectDetectionModel(torch.nn.Module):
+    def __init__(self, base_model, head):
+        super().__init__()
+        self.model = instantiate(base_model)
+        in_features = self.model.roi_heads.box_predictor.cls_score.in_features
+        self.head = instantiate(head, in_channels=in_features)
+        self.model.roi_heads.box_predictor = self.head
+    
+    def forward(self, x, targets=None):
+        return self.model(x, targets=targets)
+
+class InstanceSegmentationModel(torch.nn.Module):
+    def __init__(self, base_model, box_predictor, mask_predictor):
+        super().__init__()
+        self.model = instantiate(base_model)
+        in_features = self.model.roi_heads.box_predictor.cls_score.in_features
+        self.box_predictor = instantiate(
+            box_predictor, in_channels=in_features)
+        self.model.roi_heads.box_predictor = self.box_predictor
+        in_features_mask = self.model.roi_heads.mask_predictor.conv5_mask.in_channels
+        self.mask_predictor = instantiate(
+            mask_predictor, in_channels=in_features_mask)
+        self.model.roi_heads.mask_predictor = self.mask_predictor
+    
+    def forward(self, x, targets=None):
+        return self.model(x, targets=targets)
+        
 
 if __name__ == "__main__":
     x = HRNetOCRW48()

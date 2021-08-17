@@ -28,7 +28,7 @@ import unittest
 import hydra
 import pytorch_lightning as pl
 import torch
-from hydra.experimental import compose, initialize
+from hydra import compose, initialize
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.model_loader.frame_field_model import \
     FrameFieldModel
@@ -80,7 +80,7 @@ class Test_TestPredict(unittest.TestCase):
                     'root_dir='+frame_field_root_dir
                 ]
             )
-            frame_field_ds = hydra.utils.instantiate(cfg)
+            frame_field_ds = hydra.utils.instantiate(cfg, _recursive_=False)
         return frame_field_ds
     
     def get_checkpoint_file(self, file_name):

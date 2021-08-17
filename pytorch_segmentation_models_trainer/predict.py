@@ -51,10 +51,11 @@ def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
     return model
 
 def instantiate_polygonizer(cfg: DictConfig) -> TemplatePolygonizerProcessor:
-    data_writer = instantiate(cfg.polygonizer.data_writer)
+    data_writer = instantiate(cfg.polygonizer.data_writer, _recursive_=False)
     polygonizer = instantiate(
         cfg.polygonizer,
-        data_writer=data_writer
+        data_writer=data_writer,
+        _recursive_=False
     )
     polygonizer.data_writer = data_writer
     return polygonizer
@@ -63,7 +64,7 @@ def instantiate_inference_processor(cfg: DictConfig) -> AbstractInferenceProcess
     obj_params = dict(cfg.inference_processor)
     obj_params['model'] = instantiate_model_from_checkpoint(cfg)
     obj_params['polygonizer'] = instantiate_polygonizer(cfg)
-    obj_params['export_strategy'] = instantiate(cfg.export_strategy)
+    obj_params['export_strategy'] = instantiate(cfg.export_strategy, _recursive_=False)
     obj_params['device'] = cfg.device
     obj_params['batch_size'] = cfg.hyperparameters.batch_size
     obj_params['mask_bands'] = sum(cfg.seg_params.values())
@@ -75,7 +76,7 @@ def instantiate_inference_processor(cfg: DictConfig) -> AbstractInferenceProcess
     return import_module_from_cfg(cfg.inference_processor)(**obj_params)
 
 def get_images(cfg: DictConfig) -> List[str]:
-    image_reader = instantiate(cfg.inference_image_reader)
+    image_reader = instantiate(cfg.inference_image_reader, _recursive_=False)
     return image_reader.get_images()
 
 @hydra.main()

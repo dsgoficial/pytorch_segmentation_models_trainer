@@ -41,11 +41,11 @@ class Model(pl.LightningModule):
         super(Model, self).__init__()
         self.cfg = cfg
         self.model = self.get_model()
-        self.train_ds = instantiate(self.cfg.train_dataset)
-        self.val_ds = instantiate(self.cfg.val_dataset)
+        self.train_ds = instantiate(self.cfg.train_dataset, _recursive_=False)
+        self.val_ds = instantiate(self.cfg.val_dataset, _recursive_=False)
         self.loss_function = self.get_loss_function()
         metrics = torchmetrics.MetricCollection(
-            [instantiate(i) for i in self.cfg.metrics]
+            [instantiate(i, _recursive_=False) for i in self.cfg.metrics]
         )
         self.train_metrics = metrics.clone(prefix='train_')
         self.val_metrics = metrics.clone(prefix='val_')
@@ -57,22 +57,22 @@ class Model(pl.LightningModule):
             else self.get_gpu_augmentations(self.cfg.val_dataset.gpu_augmentation_list)
 
     def get_model(self):
-        model = instantiate(self.cfg.model)
+        model = instantiate(self.cfg.model, _recursive_=False)
         if 'replace_model_activation' in self.cfg:
-            old_activation = instantiate(self.cfg.replace_model_activation.old_activation)
-            new_activation = instantiate(self.cfg.replace_model_activation.new_activation)
+            old_activation = instantiate(self.cfg.replace_model_activation.old_activation, _recursive_=False)
+            new_activation = instantiate(self.cfg.replace_model_activation.new_activation, _recursive_=False)
             replace_activation(model, old_activation, new_activation)
         return model
 
     def get_metrics(self):
-        return nn.ModuleDict([[self.get_metric_name(i), instantiate(i)] for i in self.cfg.metrics])
+        return nn.ModuleDict([[self.get_metric_name(i), instantiate(i, _recursive_=False)] for i in self.cfg.metrics])
 
     def get_metric_name(self, x):
         return x['_target_'].split('.')[-1]
 
     def get_gpu_augmentations(self, augmentation_list):
         return torch.nn.Sequential(*[
-            instantiate(aug) for aug in augmentation_list
+            instantiate(aug, _recursive_=False) for aug in augmentation_list
         ])
 
     def evaluate_metrics(self, predicted_masks, masks, step_type='train'):
@@ -86,10 +86,10 @@ class Model(pl.LightningModule):
         }
 
     def get_loss_function(self):
-        return instantiate(self.cfg.loss)
+        return instantiate(self.cfg.loss, _recursive_=False)
 
     def get_optimizer(self):
-        return instantiate(self.cfg.optimizer, params=self.parameters())
+        return instantiate(self.cfg.optimizer, params=self.parameters(), _recursive_=False)
 
     def set_encoder_trainable(self, trainable=False):
         """Freezes or unfreezes the model encoder.
@@ -115,7 +115,7 @@ class Model(pl.LightningModule):
             return [optimizer], scheduler_list
         for item in self.cfg.scheduler_list:
             dict_item = dict(item)
-            dict_item['scheduler'] = instantiate(item.scheduler, optimizer=optimizer)
+            dict_item['scheduler'] = instantiate(item.scheduler, optimizer=optimizer, _recursive_=False)
             scheduler_list.append(dict_item)
         return [optimizer], scheduler_list
 

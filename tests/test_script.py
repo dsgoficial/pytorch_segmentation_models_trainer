@@ -26,7 +26,7 @@ from typing import List
 
 import pytorch_lightning as pl
 from parameterized import parameterized
-from hydra.experimental import compose, initialize
+from hydra import compose, initialize
 from pytorch_segmentation_models_trainer.train import train
 
 from tests.utils import CustomTestCase
