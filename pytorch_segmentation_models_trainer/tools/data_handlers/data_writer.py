@@ -41,11 +41,19 @@ class AbstractDataWriter(ABC):
 @dataclass
 class RasterDataWriter(AbstractDataWriter):
     output_file_path: str = MISSING
+    output_profile: dict = None
 
     def write_data(self, input_data: np.array, profile: dict) -> None:
-        profile = deepcopy(profile)
-        profile['count'] = input_data.shape[-1]
-        with rasterio.open(self.output_file_path, 'w', **profile) as out:
+        output_profile = deepcopy(profile) if self.output_profile is None else dict(self.output_profile)
+        if 'transform' not in output_profile:
+            output_profile['transform'] = profile['transform']
+        if output_profile['driver'] == 'JPEG' and input_data.shape[-1] == 2:
+            input_data = np.dstack(
+                (input_data[..., 0], input_data[..., 1], np.zeros(input_data.shape[:-1] + (1,)) )
+            )
+        output_profile['count'] = input_data.shape[-1] if output_profile['count'] != input_data.shape[-1] \
+            else output_profile['count']
+        with rasterio.open(self.output_file_path, 'w', **output_profile) as out:
             out.write(reshape_as_raster(input_data))
 
 @dataclass

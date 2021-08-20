@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Union
 
 import numpy as np
+from affine import Affine
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
     AbstractDataWriter, VectorDatabaseDataWriter, VectorFileDataWriter)
 from pytorch_segmentation_models_trainer.tools.polygonization.methods import (
@@ -67,8 +68,8 @@ class TemplatePolygonizerProcessor(ABC):
         """
         projected_polygons = polygons_to_world_coords(
             polygons,
-            transform=profile['transform'],
-            epsg_number=profile['crs'].to_epsg()
+            transform=profile['transform'] if profile['crs'] is not None else Affine(1,0,0,0,-1,0),
+            epsg_number=profile['crs'].to_epsg() if profile['crs'] is not None else None
         )
         self.data_writer.write_data(projected_polygons, profile)
 
