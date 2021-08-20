@@ -24,7 +24,7 @@ from typing import Dict, List, Union
 
 import numpy as np
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
-    VectorDatabaseDataWriter, VectorFileDataWriter)
+    AbstractDataWriter, VectorDatabaseDataWriter, VectorFileDataWriter)
 from pytorch_segmentation_models_trainer.tools.polygonization.methods import (
     active_contours, active_skeletons, simple)
 from pytorch_segmentation_models_trainer.utils.polygon_utils import \
@@ -34,7 +34,7 @@ from shapely.geometry import Polygon
 
 @dataclass
 class TemplatePolygonizerProcessor(ABC):
-    data_writer: Union[VectorFileDataWriter, VectorDatabaseDataWriter] = field(default_factory=VectorFileDataWriter)
+    data_writer: AbstractDataWriter = field(default_factory=VectorFileDataWriter)
     
     @abstractmethod
     def __post_init__(self):

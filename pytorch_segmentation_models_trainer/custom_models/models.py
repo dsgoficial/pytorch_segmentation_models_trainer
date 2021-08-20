@@ -200,9 +200,9 @@ class HRNetOCRW48(torch.nn.Module):
 class ObjectDetectionModel(torch.nn.Module):
     def __init__(self, base_model, head):
         super().__init__()
-        self.model = instantiate(base_model)
+        self.model = instantiate(base_model, _recursive_=False)
         in_features = self.model.roi_heads.box_predictor.cls_score.in_features
-        self.head = instantiate(head, in_channels=in_features)
+        self.head = instantiate(head, in_channels=in_features, _recursive_=False)
         self.model.roi_heads.box_predictor = self.head
     
     def forward(self, x, targets=None):
@@ -211,14 +211,14 @@ class ObjectDetectionModel(torch.nn.Module):
 class InstanceSegmentationModel(torch.nn.Module):
     def __init__(self, base_model, box_predictor, mask_predictor):
         super().__init__()
-        self.model = instantiate(base_model)
+        self.model = instantiate(base_model, _recursive_=False)
         in_features = self.model.roi_heads.box_predictor.cls_score.in_features
         self.box_predictor = instantiate(
-            box_predictor, in_channels=in_features)
+            box_predictor, in_channels=in_features, _recursive_=False)
         self.model.roi_heads.box_predictor = self.box_predictor
         in_features_mask = self.model.roi_heads.mask_predictor.conv5_mask.in_channels
         self.mask_predictor = instantiate(
-            mask_predictor, in_channels=in_features_mask)
+            mask_predictor, in_channels=in_features_mask, _recursive_=False)
         self.model.roi_heads.mask_predictor = self.mask_predictor
     
     def forward(self, x, targets=None):

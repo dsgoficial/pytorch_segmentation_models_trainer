@@ -51,13 +51,9 @@ def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
     return model
 
 def instantiate_polygonizer(cfg: DictConfig) -> TemplatePolygonizerProcessor:
-    data_writer = instantiate(cfg.polygonizer.data_writer, _recursive_=False)
     polygonizer = instantiate(
-        cfg.polygonizer,
-        data_writer=data_writer,
-        _recursive_=False
+        cfg.polygonizer
     )
-    polygonizer.data_writer = data_writer
     return polygonizer
 
 def instantiate_inference_processor(cfg: DictConfig) -> AbstractInferenceProcessor:
