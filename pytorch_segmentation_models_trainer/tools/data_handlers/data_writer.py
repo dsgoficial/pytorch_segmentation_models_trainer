@@ -19,6 +19,7 @@
  ****
 """
 from copy import deepcopy
+import pathlib
 from typing import List, Union
 import numpy as np
 import os
@@ -70,6 +71,34 @@ class VectorFileDataWriter(AbstractDataWriter):
                 driver=self.driver,
                 mode=self.mode
             )
+
+@dataclass
+class BatchVectorFileDataWriter(VectorFileDataWriter):
+    current_index: int = 0
+
+    def _get_current_file_path(self) -> str:
+        suffix = pathlib.Path(self.output_file_path).suffix
+        return self.output_file_path.replace(suffix, f"_{self.current_index}{suffix}")
+
+    def write_data(self, input_data: List[Union[BaseGeometry, BaseMultipartGeometry]], profile: dict) -> None:
+        geoseries = GeoSeries(input_data, crs=profile['crs'])
+        gdf = GeoDataFrame.from_features(geoseries, crs=profile['crs'])
+        if len(gdf) == 0:
+            self.current_index += 1
+            return
+        current_file_path = self._get_current_file_path()
+        if not os.path.isfile(current_file_path) and self.mode == "a":
+            gdf.to_file(
+                current_file_path,
+                driver=self.driver
+            )
+        else:
+            gdf.to_file(
+                current_file_path,
+                driver=self.driver,
+                mode=self.mode
+            )
+        self.current_index += 1
 
 @dataclass
 class VectorDatabaseDataWriter(AbstractDataWriter):

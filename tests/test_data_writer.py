@@ -33,7 +33,7 @@ from geopandas.testing import geom_almost_equals, geom_equals
 from numpy.testing import assert_array_equal
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
-    RasterDataWriter, VectorDatabaseDataWriter, VectorFileDataWriter)
+    BatchVectorFileDataWriter, RasterDataWriter, VectorDatabaseDataWriter, VectorFileDataWriter)
 from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
                                                                 remove_folder)
 from rasterio.plot import reshape_as_raster
@@ -89,6 +89,21 @@ class Test_TestDataWriter(unittest.TestCase):
         output_data = geopandas.read_file(filename=output_file_path)
         assert input_data[0].equals(output_data['geometry'][0])
     
+    def test_batch_vector_file_data_writer(self) -> None:
+        input_data = [
+            Polygon([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]])
+        ]
+        output_file_path = os.path.join(self.output_dir, 'output.geojson')
+        data_writer = BatchVectorFileDataWriter(
+            output_file_path=output_file_path
+        )
+        for i in range(4):
+            data_writer.write_data(input_data=input_data, profile={"crs": "EPSG:4326"})
+            current_output_file_path = os.path.join(self.output_dir, f'output_{i}.geojson')
+            assert os.path.isfile(current_output_file_path)
+            output_data = geopandas.read_file(filename=current_output_file_path)
+            assert input_data[0].equals(output_data['geometry'][0])
+
     def test_vector_database_data_writer(self) -> None:
         input_data = [
             Polygon([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]])
