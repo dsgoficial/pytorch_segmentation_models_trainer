@@ -1,5 +1,5 @@
 FROM pytorch/pytorch:1.8.1-cuda11.1-cudnn8-runtime
-ENV DEBIAN_FRONTEND=noninteractive 
+ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /code
 COPY requirements.txt requirements.txt
 RUN apt update \

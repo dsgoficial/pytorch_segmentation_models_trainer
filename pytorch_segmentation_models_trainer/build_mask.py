@@ -21,8 +21,12 @@
 import logging
 import os
 from dataclasses import dataclass, field
-from pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader import MaskOutputTypeEnum
-from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import Executor
+from pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader import (
+    MaskOutputTypeEnum,
+)
+from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import (
+    Executor,
+)
 from typing import Any, List
 
 import hydra
@@ -44,40 +48,38 @@ logger = logging.getLogger(__name__)
 
 cs = ConfigStore.instance()
 cs.store(name="mask_config", node=MaskBuilder)
-cs.store(group="geo_df", name='batch_file', node=BatchFileGeoDFConfig)
-cs.store(group="geo_df", name='file', node=FileGeoDFConfig)
-cs.store(group="geo_df", name='postgis', node=PostgisConfig)
-cs.store(group="geo_df", name='coco', node=COCOGeoDFConfig)
+cs.store(group="geo_df", name="batch_file", node=BatchFileGeoDFConfig)
+cs.store(group="geo_df", name="file", node=FileGeoDFConfig)
+cs.store(group="geo_df", name="postgis", node=PostgisConfig)
+cs.store(group="geo_df", name="coco", node=COCOGeoDFConfig)
+
 
 @hydra.main(config_path=None)
 def build_masks(cfg: DictConfig) -> str:
     logger.info(
         "Starting the process of building masks with the following configuration: \n%s",
-        OmegaConf.to_yaml(cfg)
+        OmegaConf.to_yaml(cfg),
     )
-    if 'root_dir' in cfg.mask_builder.geo_df and cfg.mask_builder.geo_df.root_dir.startswith(".."):
+    if (
+        "root_dir" in cfg.mask_builder.geo_df
+        and cfg.mask_builder.geo_df.root_dir.startswith("..")
+    ):
         cfg.mask_builder.geo_df.root_dir = str(
-            os.path.join(
-                os.path.dirname( __file__ ),
-                cfg.mask_builder.geo_df.root_dir
-            )
+            os.path.join(os.path.dirname(__file__), cfg.mask_builder.geo_df.root_dir)
         )
     logger.info("Reading vectors and preparing structure...")
     mask_builder_obj = instantiate(cfg.mask_builder, _recursive_=False)
     mask_func = mask_builder_obj.build_mask_func()
-    tasks = os.cpu_count() if "simultaneous_tasks" not in cfg \
-        else cfg.simultaneous_tasks
+    tasks = (
+        os.cpu_count() if "simultaneous_tasks" not in cfg else cfg.simultaneous_tasks
+    )
     executor = Executor(mask_func, simultaneous_tasks=tasks)
     generator = mask_builder_obj.build_generator()
     n_tasks = mask_builder_obj.get_number_of_tasks()
     logger.info("Starting tasks!")
-    output_list = executor.execute_tasks(
-        generator,
-        n_tasks
-    )
+    output_list = executor.execute_tasks(generator, n_tasks)
     csv_file = build_csv_file_from_concurrent_futures_output(
-        cfg.mask_builder,
-        result_list=output_list
+        cfg.mask_builder, result_list=output_list
     )
     print(f"Dataset saved at {csv_file}")
     return csv_file

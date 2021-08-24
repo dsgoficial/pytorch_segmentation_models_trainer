@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-07-19
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer 
+        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -27,20 +27,27 @@ import torch
 from hydra.core.config_store import ConfigStore
 from hydra.utils import instantiate
 from omegaconf import MISSING, DictConfig, OmegaConf
-from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import \
-    FrameFieldComputeWeightNormLossesCallback
-from pytorch_segmentation_models_trainer.custom_losses.loss_config_definition import \
-    LossParamsConfig
-from pytorch_segmentation_models_trainer.model_loader.frame_field_model import \
-    FrameFieldSegmentationPLModel
+from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
+    FrameFieldComputeWeightNormLossesCallback,
+)
+from pytorch_segmentation_models_trainer.custom_losses.loss_config_definition import (
+    LossParamsConfig,
+)
+from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
+    FrameFieldSegmentationPLModel,
+)
 from pytorch_segmentation_models_trainer.model_loader.model import Model
-from pytorch_segmentation_models_trainer.config_definitions.dataset_config import DatasetConfig
+from pytorch_segmentation_models_trainer.config_definitions.dataset_config import (
+    DatasetConfig,
+)
+
 
 @dataclass
 class BackboneConfig:
     name: str = "resnet152"
     input_width: int = 224
     input_height: int = 224
+
 
 @dataclass
 class PLTrainerConfig:
@@ -49,17 +56,20 @@ class PLTrainerConfig:
     precision: int = 32
     default_root_dir: str = "/experiment_data/${backbone.name}_${hyperparameters.model_name}"
 
+
 @dataclass
 class SegParams:
     compute_interior: bool = True
     compute_edge: bool = True
     compute_vertex: bool = False
 
+
 @dataclass
 class OptimizerConfig:
     _target_: str = "torch.optim.AdamW"
     lr: str = "${hyperparameters.max_lr}"
     weight_decay: float = 1e-3
+
 
 @dataclass
 class Hyperparameters:
@@ -70,12 +80,14 @@ class Hyperparameters:
     max_lr: float = 1e-2
     classes: int = 1
 
+
 @dataclass
 class SchedulerConfig:
     _target_: str = "torch.optim.lr_scheduler.OneCycleLR"
     max_lr: str = "${hyperparameters.max_lr}"
     steps_per_epoch: int = 5161
     epochs: str = "${hyperparameters.epochs}"
+
 
 @dataclass
 class SchedulerItemConfig:
@@ -85,13 +97,16 @@ class SchedulerItemConfig:
     frequency: int = 1
     monitor: str = "avg_val_loss"
 
+
 @dataclass
 class CallbackConfig:
     _target_: str = "pytorch_lightning.callbacks.LearningRateMonitor"
 
+
 @dataclass
 class MetricConfig:
     _target_: str = MISSING
+
 
 @dataclass
 class TrainConfig:
@@ -103,9 +118,13 @@ class TrainConfig:
     device: str = "cpu"
     seg_params: SegParams = field(default_factory=SegParams)
     loss_params: LossParamsConfig = field(default_factory=LossParamsConfig)
-    optimizer: List[OptimizerConfig] = field(default_factory=lambda : [OptimizerConfig()])
+    optimizer: List[OptimizerConfig] = field(
+        default_factory=lambda: [OptimizerConfig()]
+    )
     hyperparameters: Hyperparameters = field(default_factory=Hyperparameters)
-    scheduler_list: List[SchedulerItemConfig] = field(default_factory=lambda : [SchedulerItemConfig()])
+    scheduler_list: List[SchedulerItemConfig] = field(
+        default_factory=lambda: [SchedulerItemConfig()]
+    )
     callbacks: List[CallbackConfig] = field(default_factory=[CallbackConfig()])
     pl_trainer: PLTrainerConfig = field(default_factory=PLTrainerConfig)
     train_dataset: DatasetConfig = field(default_factory=DatasetConfig)

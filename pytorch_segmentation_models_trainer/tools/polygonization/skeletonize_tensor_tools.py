@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-04-07
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer 
+        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -31,19 +31,23 @@ import torch
 
 class Skeleton:
     def __init__(self, coordinates=None, paths=None, degrees=None):
-        self.coordinates = np.empty((0, 2), dtype=np.float) \
-            if coordinates is None else coordinates
+        self.coordinates = (
+            np.empty((0, 2), dtype=np.float) if coordinates is None else coordinates
+        )
         self.paths = Paths() if paths is None else paths
-        self.degrees = np.empty(0, dtype=np.int64) if degrees is None \
-        else degrees
+        self.degrees = np.empty(0, dtype=np.int64) if degrees is None else degrees
+
 
 class Paths:
     def __init__(self, indices=None, indptr=None):
         self.indices = np.empty(0, dtype=np.int64) if indices is None else indices
         self.indptr = np.empty(0, dtype=np.int64) if indptr is None else indptr
 
+
 class TensorSkeleton(object):
-    def __init__(self, pos, degrees, path_index, path_delim, batch, batch_delim, batch_size):
+    def __init__(
+        self, pos, degrees, path_index, path_delim, batch, batch_delim, batch_size
+    ):
         """
         In the text below, we use the following notation:
         - B: batch size
@@ -85,7 +89,9 @@ class TensorSkeleton(object):
         self.batch_delim = self.batch_delim.to(device)
 
 
-def skeletons_to_tensorskeleton(skeletons_batch: List[Skeleton], device: str=None) -> TensorSkeleton:
+def skeletons_to_tensorskeleton(
+    skeletons_batch: List[Skeleton], device: str = None
+) -> TensorSkeleton:
     """
     In the text below, we use the following notation:
     - B: batch size
@@ -109,12 +115,11 @@ def skeletons_to_tensorskeleton(skeletons_batch: List[Skeleton], device: str=Non
     if batch_size > 0:
         batch_delim_list.append(0)
     for batch_i, skeleton in enumerate(skeletons_batch):
-        path_index_list.append(
-            skeleton.paths.indices + path_index_offset
-        )
+        path_index_list.append(skeleton.paths.indices + path_index_offset)
         path_delim_list.append(
-            path_delim_offset + skeleton.paths.indptr[:-1] if batch_i < batch_size - 1 \
-                else path_delim_offset + skeleton.paths.indptr
+            path_delim_offset + skeleton.paths.indptr[:-1]
+            if batch_i < batch_size - 1
+            else path_delim_offset + skeleton.paths.indptr
         )
         n_points = skeleton.coordinates.shape[0]
         batch_list.append(batch_i * np.ones(n_points, dtype=np.int64))
@@ -126,37 +131,43 @@ def skeletons_to_tensorskeleton(skeletons_batch: List[Skeleton], device: str=Non
     return TensorSkeleton(
         pos=torch.from_numpy(
             np.concatenate([i.coordinates for i in skeletons_batch], axis=0)
-        ).float().to(device),
+        )
+        .float()
+        .to(device),
         degrees=torch.from_numpy(
-            np.concatenate([i.degrees for i in skeletons_batch], axis=0),
-        ).long().to(device),
-        path_index=torch.from_numpy(
-            np.concatenate(path_index_list, axis=0)
-        ).long().to(device),
-        path_delim=torch.from_numpy(
-            np.concatenate(path_delim_list, axis=0)
-        ).long().to(device),
-        batch=torch.from_numpy(
-            np.concatenate(batch_list, axis=0)
-        ).long().to(device),
-        batch_delim=torch.tensor(
-            batch_delim_list,
-            dtype=torch.long,
-            device=device
-        ),
-        batch_size=batch_size
+            np.concatenate([i.degrees for i in skeletons_batch], axis=0)
+        )
+        .long()
+        .to(device),
+        path_index=torch.from_numpy(np.concatenate(path_index_list, axis=0))
+        .long()
+        .to(device),
+        path_delim=torch.from_numpy(np.concatenate(path_delim_list, axis=0))
+        .long()
+        .to(device),
+        batch=torch.from_numpy(np.concatenate(batch_list, axis=0)).long().to(device),
+        batch_delim=torch.tensor(batch_delim_list, dtype=torch.long, device=device),
+        batch_size=batch_size,
     )
+
 
 def tensorskeleton_to_skeletons(tensorskeleton: TensorSkeleton) -> List[Skeleton]:
     skeletons_list = []
     path_index_offset = 0
     path_delim_offset = 0
     for batch_i in range(tensorskeleton.batch_size):
-        batch_slice = tensorskeleton.batch_delim[batch_i:batch_i+2]
-        indptr = tensorskeleton.path_delim[batch_slice[0]:batch_slice[1] + 1].cpu().numpy()
-        indices = tensorskeleton.path_index[indptr[0]:indptr[-1]].cpu().numpy()
+        batch_slice = tensorskeleton.batch_delim[batch_i : batch_i + 2]
+        indptr = (
+            tensorskeleton.path_delim[batch_slice[0] : batch_slice[1] + 1].cpu().numpy()
+        )
+        indices = tensorskeleton.path_index[indptr[0] : indptr[-1]].cpu().numpy()
         if indptr.shape[0] >= 2:
-            coordinates = tensorskeleton.pos[tensorskeleton.batch == batch_i].detach().cpu().numpy()
+            coordinates = (
+                tensorskeleton.pos[tensorskeleton.batch == batch_i]
+                .detach()
+                .cpu()
+                .numpy()
+            )
             indices = indices - path_index_offset
             indptr = indptr - path_delim_offset
             skeleton = Skeleton(coordinates, Paths(indices, indptr))
@@ -170,10 +181,11 @@ def tensorskeleton_to_skeletons(tensorskeleton: TensorSkeleton) -> List[Skeleton
             skeletons_list.append(skeleton)
     return skeletons_list
 
+
 def plot_skeleton(skeleton: Skeleton):
     fig1, ax1 = plt.subplots()
     for path_i in range(skeleton.paths.indptr.shape[0] - 1):
-        start, stop = skeleton.paths.indptr[path_i:path_i + 2]
+        start, stop = skeleton.paths.indptr[path_i : path_i + 2]
         path_indices = skeleton.paths.indices[start:stop]
         path_coordinates = skeleton.coordinates[path_indices]
         ax1.plot(path_coordinates[:, 1], path_coordinates[:, 0])

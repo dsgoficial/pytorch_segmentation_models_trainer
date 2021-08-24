@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-03-25
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer 
+        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -19,6 +19,7 @@
  ****
 """
 from copy import deepcopy
+
 
 def replace_activation(model, old_activation, new_activation):
     for child_name, child in model.named_children():

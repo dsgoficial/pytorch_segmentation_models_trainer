@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-03-30
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - 
+        copyright            : (C) 2021 by Philipe Borba -
                                     Cartographic Engineer @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -28,11 +28,10 @@ import matplotlib.pyplot as plt
 
 from pytorch_segmentation_models_trainer.utils.math_utils import (
     compute_crossfield_c0c2,
-    compute_crossfield_uv
+    compute_crossfield_uv,
 )
 
 
 class Test_TestMathUtils(unittest.TestCase):
-    
     def test_compute_crossfield_c0c2(self) -> None:
         return True

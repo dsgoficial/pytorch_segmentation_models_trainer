@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-06-29
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer 
+        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -57,19 +57,20 @@ class DecoderBlockV2(nn.Module):
 
             self.block = nn.Sequential(
                 ConvRelu(in_channels, middle_channels),
-                nn.ConvTranspose2d(middle_channels, out_channels, kernel_size=4, stride=2,
-                                   padding=1),
-                nn.ReLU(inplace=True)
+                nn.ConvTranspose2d(
+                    middle_channels, out_channels, kernel_size=4, stride=2, padding=1
+                ),
+                nn.ReLU(inplace=True),
             )
         else:
             self.block = nn.Sequential(
-                nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+                nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
                 nn.Conv2d(in_channels, middle_channels, 3, padding=1, bias=True),
                 nn.BatchNorm2d(middle_channels),
                 nn.ELU(),
                 nn.Conv2d(middle_channels, out_channels, 3, padding=1, bias=True),
                 nn.BatchNorm2d(out_channels),
-                nn.ELU()
+                nn.ELU(),
             )
 
     def forward(self, x):
@@ -109,8 +110,14 @@ class UNetResNetBackbone(nn.Module):
                 Defaults to False.
     """
 
-    def __init__(self, encoder_depth, num_filters=32, dropout_2d=0.2,
-                 pretrained=False, is_deconv=False):
+    def __init__(
+        self,
+        encoder_depth,
+        num_filters=32,
+        dropout_2d=0.2,
+        pretrained=False,
+        is_deconv=False,
+    ):
         super().__init__()
         self.dropout_2d = dropout_2d
 
@@ -124,16 +131,17 @@ class UNetResNetBackbone(nn.Module):
             self.encoder = torchvision.models.resnet152(pretrained=pretrained)
             bottom_channel_nr = 2048
         else:
-            raise NotImplementedError('only 34, 101, 152 version of ResNet are implemented')
+            raise NotImplementedError(
+                "only 34, 101, 152 version of ResNet are implemented"
+            )
 
         self.pool = nn.MaxPool2d(2, 2)
 
         self.relu = nn.ReLU(inplace=True)
 
-        self.conv1 = nn.Sequential(self.encoder.conv1,
-                                   self.encoder.bn1,
-                                   self.encoder.relu,
-                                   self.pool)
+        self.conv1 = nn.Sequential(
+            self.encoder.conv1, self.encoder.bn1, self.encoder.relu, self.pool
+        )
 
         self.conv2 = self.encoder.layer1
 
@@ -143,15 +151,36 @@ class UNetResNetBackbone(nn.Module):
 
         self.conv5 = self.encoder.layer4
 
-        self.center = DecoderBlockV2(bottom_channel_nr, num_filters * 8 * 2, num_filters * 8, is_deconv)
-        self.dec5 = DecoderBlockV2(bottom_channel_nr + num_filters * 8, num_filters * 8 * 2, num_filters * 8, is_deconv)
-        self.dec4 = DecoderBlockV2(bottom_channel_nr // 2 + num_filters * 8, num_filters * 8 * 2, num_filters * 8,
-                                   is_deconv)
-        self.dec3 = DecoderBlockV2(bottom_channel_nr // 4 + num_filters * 8, num_filters * 4 * 2, num_filters * 2,
-                                   is_deconv)
-        self.dec2 = DecoderBlockV2(bottom_channel_nr // 8 + num_filters * 2, num_filters * 2 * 2, num_filters * 2 * 2,
-                                   is_deconv)
-        self.dec1 = DecoderBlockV2(num_filters * 2 * 2, num_filters * 2 * 2, num_filters, is_deconv)
+        self.center = DecoderBlockV2(
+            bottom_channel_nr, num_filters * 8 * 2, num_filters * 8, is_deconv
+        )
+        self.dec5 = DecoderBlockV2(
+            bottom_channel_nr + num_filters * 8,
+            num_filters * 8 * 2,
+            num_filters * 8,
+            is_deconv,
+        )
+        self.dec4 = DecoderBlockV2(
+            bottom_channel_nr // 2 + num_filters * 8,
+            num_filters * 8 * 2,
+            num_filters * 8,
+            is_deconv,
+        )
+        self.dec3 = DecoderBlockV2(
+            bottom_channel_nr // 4 + num_filters * 8,
+            num_filters * 4 * 2,
+            num_filters * 2,
+            is_deconv,
+        )
+        self.dec2 = DecoderBlockV2(
+            bottom_channel_nr // 8 + num_filters * 2,
+            num_filters * 2 * 2,
+            num_filters * 2 * 2,
+            is_deconv,
+        )
+        self.dec1 = DecoderBlockV2(
+            num_filters * 2 * 2, num_filters * 2 * 2, num_filters, is_deconv
+        )
 
     def forward(self, x):
         conv1 = self.conv1(x)

@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-07-19
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer 
+        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -27,15 +27,18 @@ import torch
 from hydra.core.config_store import ConfigStore
 from hydra.utils import instantiate
 from omegaconf import MISSING, DictConfig, OmegaConf
-from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import \
-    FrameFieldComputeWeightNormLossesCallback
-from pytorch_segmentation_models_trainer.custom_losses.loss_config_definition import \
-    LossParamsConfig
-from pytorch_segmentation_models_trainer.model_loader.frame_field_model import \
-    FrameFieldSegmentationPLModel
+from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
+    FrameFieldComputeWeightNormLossesCallback,
+)
+from pytorch_segmentation_models_trainer.custom_losses.loss_config_definition import (
+    LossParamsConfig,
+)
+from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
+    FrameFieldSegmentationPLModel,
+)
 from pytorch_segmentation_models_trainer.model_loader.model import Model
-from pytorch_segmentation_models_trainer.utils.os_utils import \
-    import_module_from_cfg
+from pytorch_segmentation_models_trainer.utils.os_utils import import_module_from_cfg
+
 
 @dataclass
 class DataLoaderConfig:
@@ -45,6 +48,7 @@ class DataLoaderConfig:
     drop_last: bool = True
     prefetch_factor: str = "${hyperparameters.batch_size}"
 
+
 @dataclass
 class DatasetConfig:
     _target_: str = "pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset"
@@ -53,6 +57,7 @@ class DatasetConfig:
     gpu_augmentation_list: List = field(default_factory=list)
     augmentation_list: List = field(default_factory=list)
     data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+
 
 @dataclass
 class FrameFieldDatasetConfig(DatasetConfig):

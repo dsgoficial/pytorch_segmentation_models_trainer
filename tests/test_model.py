@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-02-25
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - 
+        copyright            : (C) 2021 by Philipe Borba -
                                     Cartographic Engineer @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -26,8 +26,8 @@ import hydra
 import segmentation_models_pytorch as smp
 from hydra.experimental import initialize, compose
 
+
 class Test_TestSegmentationModel(unittest.TestCase):
-    
     def test_create_instance(self) -> None:
         with initialize(config_path="./test_configs"):
             cfg = compose(config_name="model.yaml")

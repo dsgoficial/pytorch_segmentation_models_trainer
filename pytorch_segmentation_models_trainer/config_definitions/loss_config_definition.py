@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-05-08
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer 
+        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -35,6 +35,7 @@ class SegParamsConfig:
     compute_edge: bool = True
     compute_vertex: bool = True
 
+
 @dataclass
 class SegLossConfig:
     _target_: str = "pytorch_segmentation_models_trainer.custom_losses.base_loss.SegLoss"
@@ -43,10 +44,12 @@ class SegLossConfig:
     bce_coef: float = 0.5
     dice_coef: float = 0.5
 
+
 @dataclass
 class CrossfieldAlignLossConfig:
     _target_: str = "pytorch_segmentation_models_trainer.custom_losses.base_loss.CrossfieldAlignLoss"
     name: str = "crossfield_align"
+
 
 @dataclass
 class CoefsConfig:
@@ -57,7 +60,8 @@ class CoefsConfig:
     crossfield_smooth: float = 0.005
     seg_interior_crossfield: List[float] = field(default_factory=lambda: [0, 0, 0.2])
     seg_edge_crossfield: List[float] = field(default_factory=lambda: [0, 0, 0.2])
-    seg_edge_interior: List[float] = field(default_factory= lambda: [0, 0, 0.2])
+    seg_edge_interior: List[float] = field(default_factory=lambda: [0, 0, 0.2])
+
 
 @dataclass
 class SegLossParamsConfig:
@@ -68,26 +72,32 @@ class SegLossParamsConfig:
     w0: float = 50
     sigma: float = 10
 
+
 @dataclass
 class NormalizationParams:
     min_samples: int = 10
     max_samples: int = 1000
 
+
 @dataclass
 class MultiLossConfig:
-    defaults: List[Any] = field(default_factory=lambda: [
-        {"normalization_params": "norm"},
-        {"coefs": "coefs"},
-        {"seg_loss_params": "seg_loss_params"}
-    ])
+    defaults: List[Any] = field(
+        default_factory=lambda: [
+            {"normalization_params": "norm"},
+            {"coefs": "coefs"},
+            {"seg_loss_params": "seg_loss_params"},
+        ]
+    )
     normalization_params: NormalizationParams = MISSING
     coefs: CoefsConfig = MISSING
     seg_loss_params: SegLossParamsConfig = MISSING
+
 
 @dataclass
 class LossParamsConfig:
     multi_loss: MultiLossConfig = field(default_factory=MultiLossConfig)
     seg_loss_params: SegParamsConfig = field(default_factory=SegLossParamsConfig)
+
 
 logger = logging.getLogger(__name__)
 
@@ -98,11 +108,11 @@ cs.store(group="coefs", name="coefs", node=CoefsConfig)
 cs.store(group="seg_loss_params", name="seg_loss_params", node=SegLossParamsConfig)
 cs.store(name="multi_loss", node=MultiLossConfig)
 
+
 @hydra.main(config_name="multi_loss")
 def build_config(cfg: DictConfig) -> None:
-    logger.info(
-        OmegaConf.to_yaml(cfg)
-    )
+    logger.info(OmegaConf.to_yaml(cfg))
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     build_config()

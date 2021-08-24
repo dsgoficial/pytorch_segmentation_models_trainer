@@ -29,16 +29,17 @@ from pytorch_segmentation_models_trainer.config_utils import validate_config
 
 @hydra.main(config_path="conf")
 def main(cfg: DictConfig):
-    if cfg.mode == 'train':
+    if cfg.mode == "train":
         return train(cfg)
-    elif cfg.mode == 'predict':
+    elif cfg.mode == "predict":
         return predict(cfg)
-    elif cfg.mode == 'validate-config':
+    elif cfg.mode == "validate-config":
         return validate_config(cfg)
-    elif cfg.mode == 'build-mask':
+    elif cfg.mode == "build-mask":
         return build_masks(cfg)
     else:
         raise NotImplementedError
+
 
 # this function is required to allow automatic detection of the module name when running
 # from a binary script.
@@ -46,5 +47,6 @@ def main(cfg: DictConfig):
 def entry():
     main()
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     main()

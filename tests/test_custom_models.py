@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-02-25
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - 
+        copyright            : (C) 2021 by Philipe Borba -
                                     Cartographic Engineer @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -38,50 +38,39 @@ input_model_list = [
     (models.FCN50, {}, torch.Size([2, 256, 256, 256])),
     (models.UNetResNet, {}, torch.Size([2, 32, 256, 256])),
     (models.HRNetOCRW48, {}, torch.Size([2, 1, 64, 64])),
-    (models.HRNetOCRW48, {'pretrained': 'cityscapes'}, torch.Size([2, 19, 64, 64])),
-    (models.HRNetOCRW48, {'pretrained': 'lip'}, torch.Size([2, 20, 64, 64])),
-    (models.HRNetOCRW48, {'pretrained': 'pascal'}, torch.Size([2, 59, 64, 64])),
+    (models.HRNetOCRW48, {"pretrained": "cityscapes"}, torch.Size([2, 19, 64, 64])),
+    (models.HRNetOCRW48, {"pretrained": "lip"}, torch.Size([2, 20, 64, 64])),
+    (models.HRNetOCRW48, {"pretrained": "pascal"}, torch.Size([2, 59, 64, 64])),
 ]
 
-class Test_TestCustomModels(unittest.TestCase):
-    
 
+class Test_TestCustomModels(unittest.TestCase):
     @parameterized.expand(input_model_list)
-    def test_create_inference_from_model(self, input_model, model_args, expected_output_shape) -> None:
+    def test_create_inference_from_model(
+        self, input_model, model_args, expected_output_shape
+    ) -> None:
         model = input_model(**model_args)
         sample = torch.ones([2, 3, 256, 256])
         with torch.no_grad():
             out = model(sample)
-        self.assertEqual(
-            out.shape,
-            expected_output_shape
-        )
-    
+        self.assertEqual(out.shape, expected_output_shape)
+
     def test_object_detection_model(self) -> None:
         with initialize(config_path="./test_configs"):
-            cfg = compose(
-                config_name="object_detection_model.yaml"
-            )
+            cfg = compose(config_name="object_detection_model.yaml")
             model = hydra.utils.instantiate(cfg, _recursive_=False)
         sample = torch.ones([2, 3, 256, 256])
         model.eval()
         with torch.no_grad():
             out = model(sample)
-        self.assertEqual(
-            len(out),
-            2
-        )
+        self.assertEqual(len(out), 2)
+
     def test_instance_segmentation_model(self) -> None:
         with initialize(config_path="./test_configs"):
-            cfg = compose(
-                config_name="instance_segmentation_model.yaml"
-            )
+            cfg = compose(config_name="instance_segmentation_model.yaml")
             model = hydra.utils.instantiate(cfg, _recursive_=False)
         sample = torch.ones([2, 3, 256, 256])
         model.eval()
         with torch.no_grad():
             out = model(sample)
-        self.assertEqual(
-            len(out),
-            2
-        )
+        self.assertEqual(len(out), 2)
