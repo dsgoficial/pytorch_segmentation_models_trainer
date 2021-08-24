@@ -4,7 +4,7 @@ services:
   db:
     image: postgis/postgis
     container_name: postgis
-    volumes: 
+    volumes:
       - ./postgres-data:/var/lib/postgresql/data
     environment:
       # If you need to create multiple database you can add coma separated databases eg gis,data

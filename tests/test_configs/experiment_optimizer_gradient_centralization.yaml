@@ -7,19 +7,13 @@ model:
   classes: 1
   activation: 'sigmoid'
 
-callbacks:
-  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks.WarmupCallback
-    warmup_epochs: 1
-  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.ImageSegmentationResultCallback
-    n_samples: 1
-
 loss:
   _target_: segmentation_models_pytorch.utils.losses.DiceLoss
 
 optimizer:
-  _target_: torch.optim.AdamW
+  _target_: pytorch_segmentation_models_trainer.optimizers.gradient_centralization.Adam
   lr: 0.001
-  weight_decay: 1e-4
+  use_gc: True
 
 metrics:
   - _target_: torchmetrics.F1
@@ -27,8 +21,8 @@ metrics:
   - _target_: torchmetrics.Recall
 
 hyperparameters:
-  batch_size: 1
-  epochs: 3
+  batch_size: 2
+  epochs: 1
   max_lr: 0.1
 
 pl_trainer:
@@ -45,21 +39,11 @@ train_dataset:
     drop_last: True
     prefetch_factor: 2
   augmentation_list:
-    - _target_: albumentations.HueSaturationValue
-      always_apply: false
-      hue_shift_limit: 0.2
-      p: 0.5
-    - _target_: albumentations.RandomBrightnessContrast
-      brightness_limit: 0.2
-      contrast_limit: 0.2
-      p: 0.5
     - _target_: albumentations.RandomCrop
       always_apply: true
       height: 256
       width: 256
       p: 1.0
-    - _target_: albumentations.Flip
-      always_apply: true
     - _target_: albumentations.Normalize
       p: 1.0
     - _target_: albumentations.pytorch.transforms.ToTensorV2

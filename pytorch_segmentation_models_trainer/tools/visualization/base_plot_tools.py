@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-03-31
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - 
+        copyright            : (C) 2021 by Philipe Borba -
                                     Cartographic Engineer @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -19,4 +19,3 @@
  *                                                                         *
  ****
 """
-

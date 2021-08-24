@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-04-09
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer 
+        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -23,8 +23,11 @@
 
 import torch
 
+
 def iou(y_pred, y_true, threshold):
-    assert len(y_pred.shape) == len(y_true.shape) == 2, "Input tensor shapes should be (N, .)"
+    assert (
+        len(y_pred.shape) == len(y_true.shape) == 2
+    ), "Input tensor shapes should be (N, .)"
     mask_pred = threshold < y_pred
     mask_true = threshold < y_true
     intersection = torch.sum(mask_pred * mask_true, dim=-1)

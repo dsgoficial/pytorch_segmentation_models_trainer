@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-03-04
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - 
+        copyright            : (C) 2021 by Philipe Borba -
                                     Cartographic Engineer @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -32,31 +32,31 @@ from pytorch_segmentation_models_trainer.train import train
 from tests.utils import CustomTestCase
 
 config_path_list = [
-    ('./tests/test_configs'),
-    (str(os.path.abspath(
-        os.path.join(os.path.dirname(__file__) , 'test_configs')
-    )))
+    ("./tests/test_configs"),
+    (str(os.path.abspath(os.path.join(os.path.dirname(__file__), "test_configs")))),
 ]
+
+
 class Test_TestScript(CustomTestCase):
     def test_run_train_from_python_script(self) -> None:
         script_path = os.path.join(
             os.path.dirname(__file__),
-            '..',
-            'pytorch_segmentation_models_trainer',
-            'train.py'
+            "..",
+            "pytorch_segmentation_models_trainer",
+            "train.py",
         )
         return_from_process = subprocess.run(
             [
-                'python3',
+                "python3",
                 script_path,
-                '--config-path',
-                '../tests/test_configs',
-                '--config-name',
-                'experiment',
-                'train_dataset.input_csv_path='+self.csv_ds_file,
-                'val_dataset.input_csv_path='+self.csv_ds_file
+                "--config-path",
+                "../tests/test_configs",
+                "--config-name",
+                "experiment",
+                "train_dataset.input_csv_path=" + self.csv_ds_file,
+                "val_dataset.input_csv_path=" + self.csv_ds_file,
             ],
-            check=True
+            check=True,
         )
         self.assertEqual(return_from_process.returncode, 0)
 
@@ -64,31 +64,31 @@ class Test_TestScript(CustomTestCase):
     def test_run_train_from_command_line(self, config_path: str) -> None:
         return_from_process = subprocess.run(
             [
-                'pytorch-smt',
-                '--config-dir',
+                "pytorch-smt",
+                "--config-dir",
                 config_path,
-                '--config-name',
-                'experiment',
-                '+mode=train',
-                'train_dataset.input_csv_path='+self.csv_ds_file,
-                'val_dataset.input_csv_path='+self.csv_ds_file
+                "--config-name",
+                "experiment",
+                "+mode=train",
+                "train_dataset.input_csv_path=" + self.csv_ds_file,
+                "val_dataset.input_csv_path=" + self.csv_ds_file,
             ],
-            check=True
+            check=True,
         )
         self.assertEqual(return_from_process.returncode, 0)
-    
+
     @parameterized.expand(config_path_list)
     def test_run_validate_config_from_command_line(self, config_path: str) -> None:
         return_from_process = subprocess.run(
             [
-                'pytorch-smt',
-                '--config-dir',
+                "pytorch-smt",
+                "--config-dir",
                 config_path,
-                '--config-name',
-                'experiment',
-                '+mode=validate-config'
+                "--config-name",
+                "experiment",
+                "+mode=validate-config",
             ],
-            check=True
+            check=True,
         )
         self.assertEqual(return_from_process.returncode, 0)
 
@@ -96,20 +96,20 @@ class Test_TestScript(CustomTestCase):
     def test_run_validate_config_from_python_script(self, config_path: str) -> None:
         script_path = os.path.join(
             os.path.dirname(__file__),
-            '..',
-            'pytorch_segmentation_models_trainer',
-            'config_utils.py'
+            "..",
+            "pytorch_segmentation_models_trainer",
+            "config_utils.py",
         )
         return_from_process = subprocess.run(
             [
-                'python3',
+                "python3",
                 script_path,
-                '--config-dir',
+                "--config-dir",
                 config_path,
-                '--config-name',
-                'experiment',
-                '+mode=validate-config'
+                "--config-name",
+                "experiment",
+                "+mode=validate-config",
             ],
-            check=True
+            check=True,
         )
         self.assertEqual(return_from_process.returncode, 0)

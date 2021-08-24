@@ -106,7 +106,7 @@ This module suports hydra features such as configuration composition. For furthe
 
 # Install
 
-If you are not using docker and if you want to enable gpu acceleration, before installing this package, you should install pytorch_scatter as instructed in https://github.com/rusty1s/pytorch_scatter 
+If you are not using docker and if you want to enable gpu acceleration, before installing this package, you should install pytorch_scatter as instructed in https://github.com/rusty1s/pytorch_scatter
 
 After installing pytorch_scatter, just do
 
@@ -126,7 +126,7 @@ docker pull phborba/pytorch_segmentation_models_trainer:latest
 
 @software{philipe_borba_2021_5115127,
   author       = {Philipe Borba},
-  title        = {{phborba/pytorch\_segmentation\_models\_trainer: 
+  title        = {{phborba/pytorch\_segmentation\_models\_trainer:
                    Version 0.8.0}},
   month        = jul,
   year         = 2021,

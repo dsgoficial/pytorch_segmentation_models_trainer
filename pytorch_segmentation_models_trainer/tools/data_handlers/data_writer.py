@@ -19,6 +19,7 @@
  ****
 """
 from copy import deepcopy
+import pathlib
 from typing import List, Union
 import numpy as np
 import os
@@ -32,20 +33,42 @@ from rasterio.plot import reshape_as_raster
 from sqlalchemy.engine import create_engine
 from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
 
+
 class AbstractDataWriter(ABC):
     @abstractmethod
     def write_data(self, input_data: np.array) -> None:
         pass
 
+
 @dataclass
 class RasterDataWriter(AbstractDataWriter):
     output_file_path: str = MISSING
+    output_profile: dict = None
 
     def write_data(self, input_data: np.array, profile: dict) -> None:
-        profile = deepcopy(profile)
-        profile['count'] = input_data.shape[-1]
-        with rasterio.open(self.output_file_path, 'w', **profile) as out:
+        output_profile = (
+            deepcopy(profile)
+            if self.output_profile is None
+            else dict(self.output_profile)
+        )
+        if "transform" not in output_profile:
+            output_profile["transform"] = profile["transform"]
+        if output_profile["driver"] == "JPEG" and input_data.shape[-1] == 2:
+            input_data = np.dstack(
+                (
+                    input_data[..., 0],
+                    input_data[..., 1],
+                    np.zeros(input_data.shape[:-1] + (1,)),
+                )
+            )
+        output_profile["count"] = (
+            input_data.shape[-1]
+            if output_profile["count"] != input_data.shape[-1]
+            else output_profile["count"]
+        )
+        with rasterio.open(self.output_file_path, "w", **output_profile) as out:
             out.write(reshape_as_raster(input_data))
+
 
 @dataclass
 class VectorFileDataWriter(AbstractDataWriter):
@@ -53,23 +76,46 @@ class VectorFileDataWriter(AbstractDataWriter):
     driver: str = "GeoJSON"
     mode: str = "a"
 
-
-    def write_data(self, input_data: List[Union[BaseGeometry, BaseMultipartGeometry]], profile: dict) -> None:
-        geoseries = GeoSeries(input_data, crs=profile['crs'])
-        gdf = GeoDataFrame.from_features(geoseries, crs=profile['crs'])
+    def write_data(
+        self,
+        input_data: List[Union[BaseGeometry, BaseMultipartGeometry]],
+        profile: dict,
+    ) -> None:
+        geoseries = GeoSeries(input_data, crs=profile["crs"])
+        gdf = GeoDataFrame.from_features(geoseries, crs=profile["crs"])
         if len(gdf) == 0:
             return
         if not os.path.isfile(self.output_file_path) and self.mode == "a":
-            gdf.to_file(
-                self.output_file_path,
-                driver=self.driver
-            )
+            gdf.to_file(self.output_file_path, driver=self.driver)
         else:
-            gdf.to_file(
-                self.output_file_path,
-                driver=self.driver,
-                mode=self.mode
-            )
+            gdf.to_file(self.output_file_path, driver=self.driver, mode=self.mode)
+
+
+@dataclass
+class BatchVectorFileDataWriter(VectorFileDataWriter):
+    current_index: int = 0
+
+    def _get_current_file_path(self) -> str:
+        suffix = pathlib.Path(self.output_file_path).suffix
+        return self.output_file_path.replace(suffix, f"_{self.current_index}{suffix}")
+
+    def write_data(
+        self,
+        input_data: List[Union[BaseGeometry, BaseMultipartGeometry]],
+        profile: dict,
+    ) -> None:
+        geoseries = GeoSeries(input_data, crs=profile["crs"])
+        gdf = GeoDataFrame.from_features(geoseries, crs=profile["crs"])
+        if len(gdf) == 0:
+            self.current_index += 1
+            return
+        current_file_path = self._get_current_file_path()
+        if not os.path.isfile(current_file_path) and self.mode == "a":
+            gdf.to_file(current_file_path, driver=self.driver)
+        else:
+            gdf.to_file(current_file_path, driver=self.driver, mode=self.mode)
+        self.current_index += 1
+
 
 @dataclass
 class VectorDatabaseDataWriter(AbstractDataWriter):
@@ -83,11 +129,17 @@ class VectorDatabaseDataWriter(AbstractDataWriter):
     geometry_column: str = "geom"
     if_exists: str = "append"
 
-    def write_data(self, input_data: List[Union[BaseGeometry, BaseMultipartGeometry]], profile: dict) -> None:
-        geoseries = GeoSeries(input_data, crs=profile['crs'])
-        gdf = GeoDataFrame.from_features(geoseries, crs=profile['crs'])
+    def write_data(
+        self,
+        input_data: List[Union[BaseGeometry, BaseMultipartGeometry]],
+        profile: dict,
+    ) -> None:
+        geoseries = GeoSeries(input_data, crs=profile["crs"])
+        gdf = GeoDataFrame.from_features(geoseries, crs=profile["crs"])
         if len(gdf) == 0:
             return
         gdf.rename_geometry(self.geometry_column, inplace=True)
-        engine = create_engine(f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}")
+        engine = create_engine(
+            f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+        )
         gdf.to_postgis(self.table_name, engine, if_exists=self.if_exists)

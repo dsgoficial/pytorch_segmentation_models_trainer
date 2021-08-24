@@ -24,11 +24,13 @@ import os
 from typing import Iterator
 from tqdm import tqdm
 
+
 class Executor:
     def __init__(self, compute_func, simultaneous_tasks=None) -> None:
         self.compute_func = compute_func
-        self.simultaneous_tasks = os.cpu_count() if simultaneous_tasks is None \
-            else simultaneous_tasks
+        self.simultaneous_tasks = (
+            os.cpu_count() if simultaneous_tasks is None else simultaneous_tasks
+        )
 
     def execute_tasks(self, tasks, n_tasks):
         result_list = []

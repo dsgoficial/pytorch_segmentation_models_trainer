@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-03-30
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer 
+        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -24,11 +24,13 @@
 import numpy as np
 import torch
 import kornia
-from kornia.filters.kernels import (get_diff_kernel2d,
-                                    get_diff_kernel2d_2nd_order,
-                                    get_sobel_kernel2d,
-                                    get_sobel_kernel2d_2nd_order,
-                                    normalize_kernel2d)
+from kornia.filters.kernels import (
+    get_diff_kernel2d,
+    get_diff_kernel2d_2nd_order,
+    get_sobel_kernel2d,
+    get_sobel_kernel2d_2nd_order,
+    normalize_kernel2d,
+)
 
 
 class TensorPoly(object):
@@ -62,6 +64,7 @@ class TensorPoly(object):
             self.to_padded_index = self.to_padded_index.to(device)
         if self.to_unpadded_poly_slice is not None:
             self.to_unpadded_poly_slice = self.to_unpadded_poly_slice.to(device)
+
 
 def polygons_to_tensorpoly(polygons_batch):
     """
@@ -107,7 +110,13 @@ def polygons_to_tensorpoly(polygons_batch):
     is_endpoint = torch.tensor(is_endpoint, dtype=torch.bool)
     poly_slice = torch.tensor(poly_slice, dtype=torch.long)
     batch = torch.tensor(batch, dtype=torch.long)
-    tensorpoly = TensorPoly(pos=pos, poly_slice=poly_slice, batch=batch, batch_size=batch_size, is_endpoint=is_endpoint)
+    tensorpoly = TensorPoly(
+        pos=pos,
+        poly_slice=poly_slice,
+        batch=batch,
+        batch_size=batch_size,
+        is_endpoint=is_endpoint,
+    )
     return tensorpoly
 
 
@@ -120,21 +129,20 @@ def _get_to_padded_index(poly_slice, node_count, padding):
     :param padding:
     :return:
     """
-    assert len(poly_slice.shape) == 2, "poly_slice should have shape (poly_count, 2), not {}".format(poly_slice.shape)
+    assert (
+        len(poly_slice.shape) == 2
+    ), "poly_slice should have shape (poly_count, 2), not {}".format(poly_slice.shape)
     poly_count = poly_slice.shape[0]
-    range_tensor = torch.arange(
-        node_count,
-        device=poly_slice.device
-    )
+    range_tensor = torch.arange(node_count, device=poly_slice.device)
     to_padded_index = torch.empty(
-        (node_count + (padding[0] + padding[1])*poly_count, ),
+        (node_count + (padding[0] + padding[1]) * poly_count,),
         dtype=torch.long,
-        device=poly_slice.device
+        device=poly_slice.device,
     )
     to_unpadded_poly_slice = torch.empty_like(poly_slice)
     start = 0
     for poly_i in range(poly_count):
-        poly_indices = range_tensor[poly_slice[poly_i, 0]:poly_slice[poly_i, 1]]
+        poly_indices = range_tensor[poly_slice[poly_i, 0] : poly_slice[poly_i, 1]]
 
         # Repeat poly_indices if necessary when padding exceeds polygon length
         vertex_count = poly_indices.shape[0]
@@ -143,13 +151,20 @@ def _get_to_padded_index(poly_slice, node_count, padding):
         right_repeats = padding[1] // vertex_count
         right_padding_remaining = padding[1] % vertex_count
         total_repeats = left_repeats + right_repeats
-        poly_indices = poly_indices.repeat(total_repeats + 1)  # +1 includes the original polygon
+        poly_indices = poly_indices.repeat(
+            total_repeats + 1
+        )  # +1 includes the original polygon
 
-        poly_indices = torch.cat(
-            [poly_indices[-left_padding_remaining:], poly_indices, poly_indices[:right_padding_remaining]
-            ]
-        ) if left_padding_remaining else torch.cat(
-            [poly_indices, poly_indices[:right_padding_remaining]]
+        poly_indices = (
+            torch.cat(
+                [
+                    poly_indices[-left_padding_remaining:],
+                    poly_indices,
+                    poly_indices[:right_padding_remaining],
+                ]
+            )
+            if left_padding_remaining
+            else torch.cat([poly_indices, poly_indices[:right_padding_remaining]])
         )
 
         end = start + poly_indices.shape[0]
@@ -157,16 +172,23 @@ def _get_to_padded_index(poly_slice, node_count, padding):
         to_unpadded_poly_slice[poly_i, 0] = start  # Init value
         to_unpadded_poly_slice[poly_i, 1] = end  # Init value
         start = end
-    to_unpadded_poly_slice[:, 0] += padding[0]  # Shift all inited values to the right one
-    to_unpadded_poly_slice[:, 1] -= padding[1]  # Shift all inited values to the right one
+    to_unpadded_poly_slice[:, 0] += padding[
+        0
+    ]  # Shift all inited values to the right one
+    to_unpadded_poly_slice[:, 1] -= padding[
+        1
+    ]  # Shift all inited values to the right one
     return to_padded_index, to_unpadded_poly_slice
 
 
 def tensorpoly_pad(tensorpoly, padding):
-    to_padded_index, to_unpadded_poly_slice = _get_to_padded_index(tensorpoly.poly_slice, tensorpoly.num_nodes, padding)
+    to_padded_index, to_unpadded_poly_slice = _get_to_padded_index(
+        tensorpoly.poly_slice, tensorpoly.num_nodes, padding
+    )
     tensorpoly.to_padded_index = to_padded_index
     tensorpoly.to_unpadded_poly_slice = to_unpadded_poly_slice
     return tensorpoly
+
 
 class SpatialGradient(torch.nn.Module):
     r"""Computes the first order image derivative in both x and y using a Sobel or Scharr
@@ -184,13 +206,15 @@ class SpatialGradient(torch.nn.Module):
         output = kornia.filters.SpatialGradient()(input)  # 1x3x2x4x4
     """
 
-    def __init__(self,
-                 mode: str = 'sobel',
-                 order: int = 1,
-                 normalized: bool = True,
-                 coord: str = "xy",
-                 device: str = "cpu",
-                 dtype: torch.dtype = torch.float) -> None:
+    def __init__(
+        self,
+        mode: str = "sobel",
+        order: int = 1,
+        normalized: bool = True,
+        coord: str = "xy",
+        device: str = "cpu",
+        dtype: torch.dtype = torch.float,
+    ) -> None:
         super(SpatialGradient, self).__init__()
         self.normalized: bool = normalized
         self.order: int = order
@@ -200,16 +224,18 @@ class SpatialGradient(torch.nn.Module):
         if self.normalized:
             self.kernel = normalize_kernel2d(self.kernel)
         # Pad with "replicate for spatial dims, but with zeros for channel
-        self.spatial_pad = [self.kernel.size(1) // 2,
-                            self.kernel.size(1) // 2,
-                            self.kernel.size(2) // 2,
-                            self.kernel.size(2) // 2]
+        self.spatial_pad = [
+            self.kernel.size(1) // 2,
+            self.kernel.size(1) // 2,
+            self.kernel.size(2) // 2,
+            self.kernel.size(2) // 2,
+        ]
         # # Prepare kernel
         # self.kernel: torch.Tensor = self.kernel.to(device).to(dtype).detach()
         # self.kernel: torch.Tensor = self.kernel.unsqueeze(1).unsqueeze(1)
         # self.kernel: torch.Tensor = self.kernel.flip(-3)
         return
-    
+
     def prepare_kernel(self, device, dtype):
         kernel = self.kernel.to(device).to(dtype).detach()
         kernel = kernel.unsqueeze(1).unsqueeze(1)
@@ -217,35 +243,45 @@ class SpatialGradient(torch.nn.Module):
         return kernel
 
     def __repr__(self) -> str:
-        return self.__class__.__name__ + '('\
-            'order=' + str(self.order) + ', ' + \
-            'normalized=' + str(self.normalized) + ', ' + \
-            'mode=' + self.mode + ')'
+        return (
+            self.__class__.__name__ + "("
+            "order="
+            + str(self.order)
+            + ", "
+            + "normalized="
+            + str(self.normalized)
+            + ", "
+            + "mode="
+            + self.mode
+            + ")"
+        )
 
     def forward(self, inp: torch.Tensor) -> torch.Tensor:  # type: ignore
         if not torch.is_tensor(inp):
-            raise TypeError("Input type is not a torch.Tensor. Got {}"
-                            .format(type(inp)))
+            raise TypeError(
+                "Input type is not a torch.Tensor. Got {}".format(type(inp))
+            )
         if not len(inp.shape) == 4:
-            raise ValueError("Invalid input shape, we expect BxCxHxW. Got: {}"
-                             .format(inp.shape))
+            raise ValueError(
+                "Invalid input shape, we expect BxCxHxW. Got: {}".format(inp.shape)
+            )
         # prepare kernel
         b, c, h, w = inp.shape
 
         # convolve inp tensor with sobel kernel
         out_channels: int = 3 if self.order == 2 else 2
-        padded_inp: torch.Tensor = torch.nn.functional.pad(inp.reshape(b * c, 1, h, w),
-                                                           self.spatial_pad, 'replicate')[:, :, None]
+        padded_inp: torch.Tensor = torch.nn.functional.pad(
+            inp.reshape(b * c, 1, h, w), self.spatial_pad, "replicate"
+        )[:, :, None]
         kernel = self.prepare_kernel(padded_inp.device, self.dtype)
-        return torch.nn.functional.conv3d(padded_inp, kernel, padding=0).view(b, c, out_channels, h, w)
+        return torch.nn.functional.conv3d(padded_inp, kernel, padding=0).view(
+            b, c, out_channels, h, w
+        )
+
 
 def get_scharr_kernel_3x3() -> torch.Tensor:
     """Utility function that returns a sobel kernel of 3x3"""
-    return torch.tensor([
-        [-47., 0., 47.],
-        [-162., 0., 162.],
-        [-47., 0., 47.],
-    ])
+    return torch.tensor([[-47.0, 0.0, 47.0], [-162.0, 0.0, 162.0], [-47.0, 0.0, 47.0]])
 
 
 def get_scharr_kernel2d(coord: str = "xy") -> torch.Tensor:
@@ -258,27 +294,36 @@ def get_scharr_kernel2d(coord: str = "xy") -> torch.Tensor:
         return torch.stack([kernel_y, kernel_x])
 
 
-def get_spatial_gradient_kernel2d(mode: str, order: int, coord: str = "xy") -> torch.Tensor:
+def get_spatial_gradient_kernel2d(
+    mode: str, order: int, coord: str = "xy"
+) -> torch.Tensor:
     r"""Function that returns kernel for 1st or 2nd order image gradients,
     using one of the following operators: sobel, diff"""
-    if mode not in ['sobel', 'diff', 'scharr']:
-        raise TypeError("mode should be either sobel, diff or scharr. Got {}".format(mode))
+    if mode not in ["sobel", "diff", "scharr"]:
+        raise TypeError(
+            "mode should be either sobel, diff or scharr. Got {}".format(mode)
+        )
     if order not in [1, 2]:
-        raise TypeError("order should be either 1 or 2\
-                         Got {}".format(order))
-    if mode == 'sobel' and order == 1:
+        raise TypeError(
+            "order should be either 1 or 2\
+                         Got {}".format(
+                order
+            )
+        )
+    if mode == "sobel" and order == 1:
         kernel: torch.Tensor = get_sobel_kernel2d()
-    elif mode == 'sobel' and order == 2:
+    elif mode == "sobel" and order == 2:
         kernel = get_sobel_kernel2d_2nd_order()
-    elif mode == 'diff' and order == 1:
+    elif mode == "diff" and order == 1:
         kernel = get_diff_kernel2d()
-    elif mode == 'diff' and order == 2:
+    elif mode == "diff" and order == 2:
         kernel = get_diff_kernel2d_2nd_order()
-    elif mode == 'scharr' and order == 1:
+    elif mode == "scharr" and order == 1:
         kernel = get_scharr_kernel2d(coord)
     else:
         raise NotImplementedError("")
     return kernel
+
 
 def batch_to_cuda(batch):
     # Send data to computing device:

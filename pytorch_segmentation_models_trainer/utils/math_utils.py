@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-03-30
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer 
+        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -28,14 +28,19 @@ import matplotlib.pyplot as plt
 import skimage.io
 
 from pytorch_segmentation_models_trainer.tools.visualization.crossfield_plot import (
-    get_tensorboard_image_seg_display, get_image_plot_crossfield, plot_crossfield, save_poly_viz
+    get_tensorboard_image_seg_display,
+    get_image_plot_crossfield,
+    plot_crossfield,
+    save_poly_viz,
 )
+
 
 def compute_crossfield_c0c2(u, v):
     c0 = np.power(u, 2) * np.power(v, 2)
-    c2 = - (np.power(u, 2) + np.power(v, 2))
+    c2 = -(np.power(u, 2) + np.power(v, 2))
     crossfield = np.stack([c0.real, c0.imag, c2.real, c2.imag], axis=-1)
     return crossfield
+
 
 def compute_crossfield_uv(c0c2):
     c0 = c0c2[..., 0] + 1j * c0c2[..., 1]
@@ -46,6 +51,7 @@ def compute_crossfield_uv(c0c2):
     u = np.sqrt(u_squared)
     v = np.sqrt(v_squared)
     return u, v
+
 
 def bilinear_interpolate(im, pos, batch=None):
     # From https://gist.github.com/peteflorence/a1da2c759ca1ac2b74af9a83f69ce20e
@@ -87,10 +93,11 @@ def bilinear_interpolate(im, pos, batch=None):
 
     return out
 
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 
-    def __init__(self, name="", init_val=0, fmt=':f'):
+    def __init__(self, name="", init_val=0, fmt=":f"):
         self.name = name
         self.init_val = init_val
         self.fmt = fmt
@@ -111,13 +118,15 @@ class AverageMeter(object):
         return self.avg
 
     def __str__(self):
-        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
+        fmtstr = "{name} {val" + self.fmt + "} ({avg" + self.fmt + "})"
         return fmtstr.format(**self.__dict__)
+
 
 class RunningDecayingAverage(object):
     """
     Updates average with val*(1 - decay) + avg*decay
     """
+
     def __init__(self, decay, init_val=0):
         assert 0 < decay < 1
         self.decay = decay
@@ -129,12 +138,13 @@ class RunningDecayingAverage(object):
 
     def update(self, val):
         self.val = val
-        self.avg = (1 - self.decay)*val + self.decay*self.avg
+        self.avg = (1 - self.decay) * val + self.decay * self.avg
 
     def get_avg(self):
         return self.avg
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     image = torch.zeros((2, 3, 512, 512)) + 0.5
     seg = torch.zeros((2, 2, 512, 512))
     seg[:, 0, 100:200, 100:200] = 1
@@ -144,7 +154,7 @@ if __name__=="__main__":
     u = np.cos(u_angle) + 1j * np.sin(u_angle)
     v = np.cos(v_angle) + 1j * np.sin(v_angle)
     c0 = np.power(u, 2) * np.power(v, 2)
-    c2 = - (np.power(u, 2) + np.power(v, 2))
+    c2 = -(np.power(u, 2) + np.power(v, 2))
 
     crossfield[:, 0, :, :] = c0.real
     crossfield[:, 1, :, :] = c0.imag
@@ -161,4 +171,12 @@ if __name__=="__main__":
     # skimage.io.imsave("image_seg_display.png", image_seg_display[0])
     # skimage.io.imsave("image_cross_display.png", image_seg_display[1])
     img = np.moveaxis(image[0].numpy(), 0, -1)
-    save_poly_viz(img, [], 'teste.png', seg=seg[0], crossfield=new_crossfield[0], dpi=10, crossfield_stride=100)
+    save_poly_viz(
+        img,
+        [],
+        "teste.png",
+        seg=seg[0],
+        crossfield=new_crossfield[0],
+        dpi=10,
+        crossfield_stride=100,
+    )

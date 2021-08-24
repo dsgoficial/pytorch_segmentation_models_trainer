@@ -4,7 +4,7 @@
                               -------------------
         begin                : 2021-06-29
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer 
+        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -23,8 +23,9 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+
 class _SimpleSegmentationModel(nn.Module):
-    __constants__ = ['aux_classifier']
+    __constants__ = ["aux_classifier"]
 
     def __init__(self, backbone, classifier, aux_classifier=None):
         super(_SimpleSegmentationModel, self).__init__()
@@ -40,4 +41,4 @@ class _SimpleSegmentationModel(nn.Module):
         result = OrderedDict()
         x = features["out"]
         x = self.classifier(x)
-        return F.interpolate(x, size=input_shape, mode='bilinear', align_corners=False)
+        return F.interpolate(x, size=input_shape, mode="bilinear", align_corners=False)

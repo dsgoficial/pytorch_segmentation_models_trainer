@@ -25,12 +25,11 @@ from omegaconf import DictConfig, OmegaConf
 
 logger = logging.getLogger(__name__)
 
+
 @hydra.main()
 def validate_config(cfg: DictConfig) -> None:
-    logger.info(
-        "Input configuration: \n%s",
-        OmegaConf.to_yaml(cfg)
-    )
+    logger.info("Input configuration: \n%s", OmegaConf.to_yaml(cfg))
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     validate_config()

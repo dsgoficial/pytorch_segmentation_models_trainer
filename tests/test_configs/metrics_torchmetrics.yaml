@@ -6,4 +6,3 @@ metrics:
     num_classes: ${model.classes}
   - _target_: torchmetrics.Precision
   - _target_: torchmetrics.Recall
-    

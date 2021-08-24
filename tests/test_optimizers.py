@@ -3,7 +3,7 @@
 /***************************************************************************
  segmentation_models_trainer
                               -------------------
-        begin                : 2021-03-01
+        begin                : 2021-08-19
         git sha              : $Format:%H$
         copyright            : (C) 2021 by Philipe Borba -
                                     Cartographic Engineer @ Brazilian Army
@@ -30,22 +30,19 @@ from pytorch_segmentation_models_trainer.train import train
 
 from tests.utils import CustomTestCase
 
-config_name_list = [
-    "experiment.yaml",
-    "experiment_warmup.yaml",
-    "experiment_warmup_and_img_callback.yaml",
-]
+optimizer_name_list = ["Adam", "AdamW", "RAdam", "PlainRAdam", "SGD"]
 
 
-class Test_TestTrain(CustomTestCase):
-    @parameterized.expand(config_name_list)
-    def test_run_train_from_object(self, config_name: str) -> None:
+class Test_TestOptimizers(CustomTestCase):
+    @parameterized.expand(optimizer_name_list)
+    def test_run_train_using_optimizer(self, optimizer_class_name: str) -> None:
         with initialize(config_path="./test_configs"):
             cfg = compose(
-                config_name=config_name,
+                config_name="experiment_optimizer_gradient_centralization.yaml",
                 overrides=[
                     "train_dataset.input_csv_path=" + self.csv_ds_file,
                     "val_dataset.input_csv_path=" + self.csv_ds_file,
+                    f"optimizer._target_=pytorch_segmentation_models_trainer.optimizers.gradient_centralization.{optimizer_class_name}",
                 ],
             )
             train_obj = train(cfg)

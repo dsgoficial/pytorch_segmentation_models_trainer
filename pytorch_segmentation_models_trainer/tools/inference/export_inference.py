@@ -27,41 +27,55 @@ import albumentations as A
 import numpy as np
 import rasterio
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
-    RasterDataWriter, VectorDatabaseDataWriter, VectorFileDataWriter)
+    RasterDataWriter,
+    VectorDatabaseDataWriter,
+    VectorFileDataWriter,
+)
+
 
 class ExportInferenceTemplate(ABC):
     def __init__(self) -> None:
         super().__init__()
-    def save_inference(self, inference: Union[np.array, Dict[str, np.array]], profile: dict) -> None:
+
+    def save_inference(
+        self, inference: Union[np.array, Dict[str, np.array]], profile: dict
+    ) -> None:
         self.writer.write_data(inference, profile)
 
+
 class RasterExportInferenceStrategy(ExportInferenceTemplate):
-    def __init__(self, output_file_path):
+    def __init__(self, output_file_path, output_profile=None):
         super(RasterExportInferenceStrategy, self).__init__()
         self.output_file_path = output_file_path
         self.writer = RasterDataWriter(
-            output_file_path=output_file_path
+            output_file_path=output_file_path, output_profile=output_profile
         )
-    def save_inference(self, inference: Union[np.array, Dict[str, np.array]], profile: dict) -> None:
-        inference = inference['seg'] if isinstance(inference, dict) else inference
+
+    def save_inference(
+        self, inference: Union[np.array, Dict[str, np.array]], profile: dict
+    ) -> None:
+        inference = inference["seg"] if isinstance(inference, dict) else inference
         super(RasterExportInferenceStrategy, self).save_inference(inference, profile)
 
+
 class MultipleRasterExportInferenceStrategy(ExportInferenceTemplate):
-    def __init__(self, output_folder, output_basename):
+    def __init__(self, output_folder, output_basename, output_profile=None):
         super(MultipleRasterExportInferenceStrategy, self).__init__()
         self.output_folder = output_folder
         self.output_basename = output_basename
-    
-    def save_inference(self, inference_dict: Dict[str, np.array], profile: dict) -> None:
-        name = '' if 'input_name' not in profile else f'_{profile.pop("input_name")}'
+        self.output_profile = output_profile
+
+    def save_inference(
+        self, inference_dict: Dict[str, np.array], profile: dict
+    ) -> None:
+        name = "" if "input_name" not in profile else f'_{profile.pop("input_name")}'
         for key, value in inference_dict.items():
-            file_name = f'{key}_{self.output_basename}' 
+            file_name = f"{key}_{self.output_basename}"
             output_file_path = os.path.join(
-                self.output_folder,
-                f'{key}{name}_{self.output_basename}'
+                self.output_folder, f"{key}{name}_{self.output_basename}"
             )
             writer = RasterDataWriter(
-                output_file_path=output_file_path
+                output_file_path=output_file_path, output_profile=self.output_profile
             )
             writer.write_data(value, profile)
 
@@ -72,13 +86,22 @@ class VectorFileExportInferenceStrategy(ExportInferenceTemplate):
         self.output_file_path = output_file_path
         self.driver = driver
         self.writer = VectorFileDataWriter(
-            output_file_path=output_file_path,
-            driver=driver
+            output_file_path=output_file_path, driver=driver
         )
 
+
 class VectorDatabaseExportInferenceStrategy(ExportInferenceTemplate):
-    def __init__(self, user: str, database: str, password: str, sql: str,\
-        host: str, port: int, table_name: str = "buildings", geometry_column: str = "geom"):
+    def __init__(
+        self,
+        user: str,
+        database: str,
+        password: str,
+        sql: str,
+        host: str,
+        port: int,
+        table_name: str = "buildings",
+        geometry_column: str = "geom",
+    ):
         super(VectorDatabaseExportInferenceStrategy, self).__init__()
         self.writer = VectorDatabaseDataWriter(
             user=user,
@@ -88,5 +111,5 @@ class VectorDatabaseExportInferenceStrategy(ExportInferenceTemplate):
             host=host,
             port=port,
             table_name=table_name,
-            geometry_column=geometry_column
+            geometry_column=geometry_column,
         )

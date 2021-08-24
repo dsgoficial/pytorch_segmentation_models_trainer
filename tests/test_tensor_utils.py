@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-04-08
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - 
+        copyright            : (C) 2021 by Philipe Borba -
                                     Cartographic Engineer @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -29,18 +29,21 @@ import matplotlib.pyplot as plt
 from matplotlib.testing.compare import compare_images
 from parameterized.parameterized import parameterized
 from pytorch_segmentation_models_trainer.utils.tensor_utils import (
-    polygons_to_tensorpoly, tensorpoly_pad
+    polygons_to_tensorpoly,
+    tensorpoly_pad,
 )
-from pytorch_segmentation_models_trainer.utils.os_utils import (create_folder,
-                                                                remove_folder)
+from pytorch_segmentation_models_trainer.utils.os_utils import (
+    create_folder,
+    remove_folder,
+)
 
 current_dir = os.path.dirname(__file__)
-root_dir = os.path.join(current_dir, 'testing_data')
+root_dir = os.path.join(current_dir, "testing_data")
+
 
 class Test_TestTensorUtils(unittest.TestCase):
-
     def setUp(self):
-        self.output_dir = create_folder(os.path.join(root_dir, 'test_output'))
+        self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
         return super().setUp()
 
     def tearDown(self) -> None:
@@ -70,43 +73,54 @@ class Test_TestTensorUtils(unittest.TestCase):
             tensorpoly.batch,
             torch.tensor(
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-            )
+            ),
         )
-        self.assertEqual(
-            tensorpoly.pos.shape,
-            torch.Size([24, 2])
-        )
-        self.assertEqual(
-            tensorpoly.poly_slice.shape,
-            torch.Size([6, 2])
-        )
+        self.assertEqual(tensorpoly.pos.shape, torch.Size([24, 2]))
+        self.assertEqual(tensorpoly.poly_slice.shape, torch.Size([6, 2]))
         assert torch.equal(
             tensorpoly.poly_slice,
-            torch.tensor(
-                [
-                    [ 0,  4],
-                    [ 4,  8],
-                    [ 8, 12],
-                    [12, 16],
-                    [16, 20],
-                    [20, 24]
-                ]
-            )
+            torch.tensor([[0, 4], [4, 8], [8, 12], [12, 16], [16, 20], [20, 24]]),
         )
 
         tensorpoly.to(device)
 
         tensorpoly = tensorpoly_pad(tensorpoly, padding)
         to_padded_index = tensorpoly.to_padded_index
-        self.assertEqual(
-            to_padded_index.shape,
-            torch.Size([30])
-        )
+        self.assertEqual(to_padded_index.shape, torch.Size([30]))
         assert torch.equal(
             to_padded_index,
-            torch.tensor([
-                    0,  1,  2,  3,  0,  4,  5,  6,  7,  4,  
-                    8,  9, 10, 11,  8, 12, 13, 14, 15, 12, 
-                    16, 17, 18, 19, 16, 20, 21, 22, 23, 20
-            ])
+            torch.tensor(
+                [
+                    0,
+                    1,
+                    2,
+                    3,
+                    0,
+                    4,
+                    5,
+                    6,
+                    7,
+                    4,
+                    8,
+                    9,
+                    10,
+                    11,
+                    8,
+                    12,
+                    13,
+                    14,
+                    15,
+                    12,
+                    16,
+                    17,
+                    18,
+                    19,
+                    16,
+                    20,
+                    21,
+                    22,
+                    23,
+                    20,
+                ]
+            ),
         )

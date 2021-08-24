@@ -14,6 +14,7 @@ import shapely.geometry
 
 from pytorch_segmentation_models_trainer.utils import math_utils
 
+
 def get_seg_display(seg):
     dtype = seg.dtype
     seg_display = np.zeros([seg.shape[0], seg.shape[1], 4], dtype=dtype)
@@ -28,24 +29,47 @@ def get_seg_display(seg):
     return seg_display
 
 
-def get_tensorboard_image_seg_display(image, seg, crossfield=None, crossfield_stride=10, alpha=None, width=0.2):
-    assert len(image.shape) == 4 and image.shape[1] == 3, f"image should be (N, 3, H, W), not {image.shape}."
-    assert len(seg.shape) == 4 and seg.shape[1] <= 3, f"image should be (N, C<=3, H, W), not {seg.shape}."
-    assert image.shape[0] == seg.shape[0], "image and seg should have the same batch size."
-    assert image.shape[2] == seg.shape[2], "image and seg should have the same image height."
-    assert image.shape[3] == seg.shape[3], "image and seg should have the same image width."
+def get_tensorboard_image_seg_display(
+    image, seg, crossfield=None, crossfield_stride=10, alpha=None, width=0.2
+):
+    assert (
+        len(image.shape) == 4 and image.shape[1] == 3
+    ), f"image should be (N, 3, H, W), not {image.shape}."
+    assert (
+        len(seg.shape) == 4 and seg.shape[1] <= 3
+    ), f"image should be (N, C<=3, H, W), not {seg.shape}."
+    assert (
+        image.shape[0] == seg.shape[0]
+    ), "image and seg should have the same batch size."
+    assert (
+        image.shape[2] == seg.shape[2]
+    ), "image and seg should have the same image height."
+    assert (
+        image.shape[3] == seg.shape[3]
+    ), "image and seg should have the same image width."
     if crossfield is not None:
-        assert len(crossfield.shape) == 4 and crossfield.shape[
-            1] == 4, f"crossfield should be (N, 4, H, W), not {crossfield.shape}."
-        assert image.shape[0] == crossfield.shape[0], "image and crossfield should have the same batch size."
-        assert image.shape[2] == crossfield.shape[2], "image and crossfield should have the same image height."
-        assert image.shape[3] == crossfield.shape[3], "image and crossfield should have the same image width."
+        assert (
+            len(crossfield.shape) == 4 and crossfield.shape[1] == 4
+        ), f"crossfield should be (N, 4, H, W), not {crossfield.shape}."
+        assert (
+            image.shape[0] == crossfield.shape[0]
+        ), "image and crossfield should have the same batch size."
+        assert (
+            image.shape[2] == crossfield.shape[2]
+        ), "image and crossfield should have the same image height."
+        assert (
+            image.shape[3] == crossfield.shape[3]
+        ), "image and crossfield should have the same image width."
 
-    alpha = torch.clamp(torch.sum(seg, dim=1, keepdim=True), 0, 1) if alpha is None else alpha
+    alpha = (
+        torch.clamp(torch.sum(seg, dim=1, keepdim=True), 0, 1)
+        if alpha is None
+        else alpha
+    )
 
     # Add missing seg channels
     seg_display = torch.zeros_like(image)
-    seg_display[:, :seg.shape[1], ...] = seg
+    seg_display[:, : seg.shape[1], ...] = seg
 
     image_seg_display = (1 - alpha) * image + alpha * seg_display
     image_seg_display = image_seg_display.cpu()
@@ -53,21 +77,37 @@ def get_tensorboard_image_seg_display(image, seg, crossfield=None, crossfield_st
     if crossfield is not None:
         np_crossfield = crossfield.cpu().detach().numpy().transpose(0, 2, 3, 1)
         image_plot_crossfield_list = [
-            get_image_plot_crossfield(_crossfield, crossfield_stride=crossfield_stride, width=width) \
-                for _crossfield in np_crossfield]
-        image_plot_crossfield_list = [torchvision.transforms.functional.to_tensor(image_plot_crossfield).float() / 255
-                                      for image_plot_crossfield in image_plot_crossfield_list]
+            get_image_plot_crossfield(
+                _crossfield, crossfield_stride=crossfield_stride, width=width
+            )
+            for _crossfield in np_crossfield
+        ]
+        image_plot_crossfield_list = [
+            torchvision.transforms.functional.to_tensor(image_plot_crossfield).float()
+            / 255
+            for image_plot_crossfield in image_plot_crossfield_list
+        ]
         image_plot_crossfield = torch.stack(image_plot_crossfield_list, dim=0)
-        alpha_band = 255*image_plot_crossfield[:, 3:4, :, :]
-        crossfield_image_plot = 255*image_plot_crossfield[:, :3, :, :]
-        image_seg_display = (1 - alpha_band) * image_seg_display +  alpha_band * crossfield_image_plot
+        alpha_band = 255 * image_plot_crossfield[:, 3:4, :, :]
+        crossfield_image_plot = 255 * image_plot_crossfield[:, :3, :, :]
+        image_seg_display = (
+            1 - alpha_band
+        ) * image_seg_display + alpha_band * crossfield_image_plot
         # image_seg_display = image_seg_display * crossfield_image_plot.int()
         # image_seg_display = (1-alpha)*image_seg_display + alpha * image_seg_display * crossfield_image_plot.int()
 
     return image_seg_display.int()
 
 
-def plot_crossfield(axis, crossfield, crossfield_stride, alpha=0.5, width=0.5, add_scale=1, invert_y=True):
+def plot_crossfield(
+    axis,
+    crossfield,
+    crossfield_stride,
+    alpha=0.5,
+    width=0.5,
+    add_scale=1,
+    invert_y=True,
+):
     x = np.arange(0, crossfield.shape[1], crossfield_stride)
     y = np.arange(0, crossfield.shape[0], crossfield_stride)
     x, y = np.meshgrid(x, y)
@@ -85,21 +125,34 @@ def plot_crossfield(axis, crossfield, crossfield_stride, alpha=0.5, width=0.5, a
     # u.imag = np.sin(u_angle)
     # v *= 0
 
-    quiveropts = dict(color=(0, 0, 1, alpha), headaxislength=0, headlength=0, pivot='middle', angles="xy", units='xy',
-                      scale=scale, width=width, headwidth=0.1)
+    quiveropts = dict(
+        color=(0, 0, 1, alpha),
+        headaxislength=0,
+        headlength=0,
+        pivot="middle",
+        angles="xy",
+        units="xy",
+        scale=scale,
+        width=width,
+        headwidth=0.1,
+    )
     axis.quiver(x, y, u.imag, -u.real, **quiveropts)
     axis.quiver(x, y, v.imag, -v.real, **quiveropts)
     return axis
 
 
 def get_image_plot_crossfield(crossfield, crossfield_stride, width=2.0):
-    fig = Figure(figsize=(crossfield.shape[1] / 100, crossfield.shape[0] / 100), dpi=100)
+    fig = Figure(
+        figsize=(crossfield.shape[1] / 100, crossfield.shape[0] / 100), dpi=100
+    )
     canvas = FigureCanvasAgg(fig)
     ax = fig.gca()
 
-    plot_crossfield(ax, crossfield, crossfield_stride, alpha=1.0, width=width, add_scale=1)
+    plot_crossfield(
+        ax, crossfield, crossfield_stride, alpha=1.0, width=width, add_scale=1
+    )
 
-    ax.axis('off')
+    ax.axis("off")
     fig.tight_layout(pad=0)
     # To remove the huge white borders
     ax.margins(0)
@@ -118,8 +171,16 @@ def get_image_plot_crossfield(crossfield, crossfield_stride, width=2.0):
     return image_from_plot
 
 
-def plot_polygons(axis, polygons, polygon_probs=None, draw_vertices=True, linewidths=2, markersize=10, alpha=0.2,
-                  color_choices=None):
+def plot_polygons(
+    axis,
+    polygons,
+    polygon_probs=None,
+    draw_vertices=True,
+    linewidths=2,
+    markersize=10,
+    alpha=0.2,
+    color_choices=None,
+):
     if len(polygons) == 0:
         return
     patches = []
@@ -151,17 +212,28 @@ def plot_polygons(axis, polygons, polygon_probs=None, draw_vertices=True, linewi
         facecolors[:, -1] = alpha * np.array(polygon_probs) + 0.1
     else:
         facecolors[:, -1] = alpha
-    p = PatchCollection(patches, facecolors=facecolors, edgecolors=edgecolors, linewidths=linewidths)
+    p = PatchCollection(
+        patches, facecolors=facecolors, edgecolors=edgecolors, linewidths=linewidths
+    )
     axis.add_collection(p)
 
     if draw_vertices:
         for i, polygon in enumerate(polygons):
-            axis.plot(*polygon.exterior.xy, marker="o", color=edgecolors[i], markersize=markersize)
+            axis.plot(
+                *polygon.exterior.xy,
+                marker="o",
+                color=edgecolors[i],
+                markersize=markersize,
+            )
             for interior in polygon.interiors:
-                axis.plot(*interior.xy, marker="o", color=edgecolors[i], markersize=markersize)
+                axis.plot(
+                    *interior.xy, marker="o", color=edgecolors[i], markersize=markersize
+                )
 
 
-def plot_line_strings(axis, line_strings, draw_vertices=True, linewidths=2, markersize=5):
+def plot_line_strings(
+    axis, line_strings, draw_vertices=True, linewidths=2, markersize=5
+):
     artists = []
     marker = "o" if draw_vertices else None
     for line_string in line_strings:
@@ -185,23 +257,56 @@ def plot_geometries(axis, geometries, draw_vertices=True, linewidths=2, markersi
             raise NotImplementedError(f"Geometry type {type(geometry)} not implemented")
 
     if len(polygons):
-        plot_polygons(axis, polygons, draw_vertices=draw_vertices, linewidths=linewidths, markersize=markersize)
+        plot_polygons(
+            axis,
+            polygons,
+            draw_vertices=draw_vertices,
+            linewidths=linewidths,
+            markersize=markersize,
+        )
 
     if len(line_strings):
-        artists = plot_line_strings(axis, line_strings, draw_vertices=draw_vertices, linewidths=linewidths, markersize=markersize)
+        artists = plot_line_strings(
+            axis,
+            line_strings,
+            draw_vertices=draw_vertices,
+            linewidths=linewidths,
+            markersize=markersize,
+        )
         return artists
 
 
-def save_poly_viz(image, polygons, out_filepath, linewidths=2, markersize=20, alpha=0.2, draw_vertices=True,
-                  corners=None, crossfield=None, polygon_probs=None, seg=None, color_choices=None, dpi=10, crossfield_stride=10):
-    assert isinstance(polygons, list), f"polygons should be of type list, not {type(polygons)}"
+def save_poly_viz(
+    image,
+    polygons,
+    out_filepath,
+    linewidths=2,
+    markersize=20,
+    alpha=0.2,
+    draw_vertices=True,
+    corners=None,
+    crossfield=None,
+    polygon_probs=None,
+    seg=None,
+    color_choices=None,
+    dpi=10,
+    crossfield_stride=10,
+):
+    assert isinstance(
+        polygons, list
+    ), f"polygons should be of type list, not {type(polygons)}"
     if len(polygons):
-        assert (type(polygons[0]) == np.ndarray or type(polygons[0]) == shapely.geometry.Polygon), \
-            f"Item of the polygons list should be of type ndarray or shapely Polygon, not {type(polygons[0])}"
+        assert (
+            type(polygons[0]) == np.ndarray
+            or type(polygons[0]) == shapely.geometry.Polygon
+        ), f"Item of the polygons list should be of type ndarray or shapely Polygon, not {type(polygons[0])}"
     if polygon_probs is not None:
         assert type(polygon_probs) == list
-        assert len(polygons) == len(polygon_probs), \
-            "len(polygons)={} should be equal to len(polygon_probs)={}".format(len(polygons), len(polygon_probs))
+        assert len(polygons) == len(
+            polygon_probs
+        ), "len(polygons)={} should be equal to len(polygon_probs)={}".format(
+            len(polygons), len(polygon_probs)
+        )
     # Setup plot
     height = image.shape[0]
     width = image.shape[1]
@@ -214,19 +319,42 @@ def save_poly_viz(image, polygons, out_filepath, linewidths=2, markersize=20, al
         axis.imshow(seg)
 
     if crossfield is not None:
-        plot_crossfield(axis, crossfield, crossfield_stride=crossfield_stride, alpha=0.5, width=0.3, add_scale=1.1, invert_y=False)
+        plot_crossfield(
+            axis,
+            crossfield,
+            crossfield_stride=crossfield_stride,
+            alpha=0.5,
+            width=0.3,
+            add_scale=1.1,
+            invert_y=False,
+        )
 
-    plot_polygons(axis, polygons, polygon_probs=polygon_probs, draw_vertices=draw_vertices, linewidths=linewidths,
-                  markersize=markersize, alpha=alpha, color_choices=color_choices)
+    plot_polygons(
+        axis,
+        polygons,
+        polygon_probs=polygon_probs,
+        draw_vertices=draw_vertices,
+        linewidths=linewidths,
+        markersize=markersize,
+        alpha=alpha,
+        color_choices=color_choices,
+    )
 
     if corners is not None and len(corners):
         assert len(corners[0].shape) == 2
         for corner_array in corners:
-            plt.plot(corner_array[:, 0], corner_array[:, 1], marker="o", linewidth=0, markersize=20, color="red")
+            plt.plot(
+                corner_array[:, 0],
+                corner_array[:, 1],
+                marker="o",
+                linewidth=0,
+                markersize=20,
+                color="red",
+            )
 
     axis.autoscale(False)
-    axis.axis('equal')
-    axis.axis('off')
+    axis.axis("equal")
+    axis.axis("off")
     plt.subplots_adjust(left=0, right=1, top=1, bottom=0)  # Plot without margins
     plt.show()
     plt.savefig(out_filepath, transparent=True, dpi=dpi)

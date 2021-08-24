@@ -1,3 +1,8 @@
+# Version 0.11.0
+
+- Gradient Centralization added;
+
+
 # Version 0.10.0
 
 - Object Detection added;

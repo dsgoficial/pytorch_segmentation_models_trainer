@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-04-08
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer 
+        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -23,19 +23,27 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Union
 
 import numpy as np
+from affine import Affine
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
-    VectorDatabaseDataWriter, VectorFileDataWriter)
+    AbstractDataWriter,
+    VectorDatabaseDataWriter,
+    VectorFileDataWriter,
+)
 from pytorch_segmentation_models_trainer.tools.polygonization.methods import (
-    active_contours, active_skeletons, simple)
-from pytorch_segmentation_models_trainer.utils.polygon_utils import \
-    polygons_to_world_coords
+    active_contours,
+    active_skeletons,
+    simple,
+)
+from pytorch_segmentation_models_trainer.utils.polygon_utils import (
+    polygons_to_world_coords,
+)
 from shapely.geometry import Polygon
 
 
 @dataclass
 class TemplatePolygonizerProcessor(ABC):
-    data_writer: Union[VectorFileDataWriter, VectorDatabaseDataWriter] = field(default_factory=VectorFileDataWriter)
-    
+    data_writer: AbstractDataWriter = field(default_factory=VectorFileDataWriter)
+
     @abstractmethod
     def __post_init__(self):
         """Must be reimplemented in each child.
@@ -43,7 +51,12 @@ class TemplatePolygonizerProcessor(ABC):
         """
         pass
 
-    def process(self, inference: Dict[str, np.array], profile: dict, pool: ThreadPoolExecutor=None):
+    def process(
+        self,
+        inference: Dict[str, np.array],
+        profile: dict,
+        pool: ThreadPoolExecutor = None,
+    ):
         """Processes the polygonization.
 
         Args:
@@ -52,13 +65,10 @@ class TemplatePolygonizerProcessor(ABC):
                 Defaults to None.
         """
         out_contours_batch, out_probs_batch = self.polygonize_method(
-            inference['seg'],
-            inference['crossfield'],
-            self.config,
-            pool=pool
+            inference["seg"], inference["crossfield"], self.config, pool=pool
         )
         self.post_process(out_contours_batch[0], profile)
-    
+
     def post_process(self, polygons: List[Polygon], profile: dict):
         """Post-processes generated polygons from process method.
 
@@ -67,10 +77,15 @@ class TemplatePolygonizerProcessor(ABC):
         """
         projected_polygons = polygons_to_world_coords(
             polygons,
-            transform=profile['transform'],
-            epsg_number=profile['crs'].to_epsg()
+            transform=profile["transform"]
+            if profile["crs"] is not None
+            else Affine(1, 0, 0, 0, -1, 0),
+            epsg_number=profile["crs"].to_epsg()
+            if profile["crs"] is not None
+            else None,
         )
         self.data_writer.write_data(projected_polygons, profile)
+
 
 @dataclass
 class LossParamsCoefs:
@@ -82,6 +97,7 @@ class LossParamsCoefs:
     corner: list = field(default_factory=lambda: [0.0, 0.0, 0.0, 0.0])
     junction: list = field(default_factory=lambda: [0.0, 0.0, 0.0, 0.0])
 
+
 @dataclass
 class LossParams:
     coefs: LossParamsCoefs = field(default_factory=LossParamsCoefs)
@@ -92,9 +108,10 @@ class LossParams:
     junction_angle_weights: list = field(default_factory=lambda: [1, 0.01, 0.1, 0.01])
     junction_angle_threshold: float = 22.5
 
+
 @dataclass
 class ASMConfig:
-    init_method: str = "skeleton" #skeleton or marching_squares
+    init_method: str = "skeleton"  # skeleton or marching_squares
     data_level: float = 0.5
     loss_params: LossParams = field(default_factory=LossParams)
     lr: float = 0.001
@@ -104,13 +121,15 @@ class ASMConfig:
     seg_threshold: float = 0.5
     min_area: float = 12
 
+
 @dataclass
 class ASMPolygonizerProcessor(TemplatePolygonizerProcessor):
     config: ASMConfig = field(default_factory=ASMConfig)
-    
+
     def __post_init__(self):
         self.polygonize_method = active_skeletons.polygonize
-        
+
+
 @dataclass
 class InnerPolylinesParams:
     enable: bool = False
@@ -120,6 +139,7 @@ class InnerPolylinesParams:
     min_width: int = 2
     max_width: int = 8
     step_size: int = 1
+
 
 @dataclass
 class ACMConfig:
@@ -136,14 +156,18 @@ class ACMConfig:
     tolerance: float = 0.5
     seg_threshold: float = 0.5
     min_area: int = 1
-    inner_polylines_params: InnerPolylinesParams = field(default_factory=InnerPolylinesParams)
+    inner_polylines_params: InnerPolylinesParams = field(
+        default_factory=InnerPolylinesParams
+    )
+
 
 @dataclass
 class ACMPolygonizerProcessor(TemplatePolygonizerProcessor):
     config: ACMConfig = field(default_factory=ACMConfig)
-    
+
     def __post_init__(self):
         self.polygonize_method = active_contours.polygonize
+
 
 @dataclass
 class SimplePolConfig:
@@ -152,25 +176,29 @@ class SimplePolConfig:
     seg_threshold: float = 0.5
     min_area: float = 10
 
+
 @dataclass
 class SimplePolygonizerProcessor(TemplatePolygonizerProcessor):
     config: SimplePolConfig = field(default_factory=SimplePolConfig)
-    
+
     def __post_init__(self):
         self.polygonize_method = simple.polygonize
 
-    def process(self, inference: Dict[str, np.array], profile: dict, pool: ThreadPoolExecutor=None):
-        """Processes the polygonization. Reimplemented from template due to signature 
+    def process(
+        self,
+        inference: Dict[str, np.array],
+        profile: dict,
+        pool: ThreadPoolExecutor = None,
+    ):
+        """Processes the polygonization. Reimplemented from template due to signature
         differences on polygonize method.
 
         Args:
             inference (Dict[str, np.array]): numpy inference from the neural network.
-            pool (concurrent.futures.ThreadPool, optional): Thread object in case of 
+            pool (concurrent.futures.ThreadPool, optional): Thread object in case of
             parallel execution. Defaults to None.
         """
         out_contours_batch, out_probs_batch = self.polygonize_method(
-            inference['seg'],
-            self.config,
-            pool=pool
+            inference["seg"], self.config, pool=pool
         )
         self.post_process(out_contours_batch[0], profile)

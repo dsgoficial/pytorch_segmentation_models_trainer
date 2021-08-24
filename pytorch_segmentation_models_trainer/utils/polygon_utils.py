@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-05-08
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer 
+        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -42,35 +42,48 @@ import multiprocess
 def polygon_remove_holes(polygon):
     return np.array(polygon.exterior.coords)
 
+
 def polygons_remove_holes(polygons):
     gt_polygons_no_holes = []
     for polygon in polygons:
         gt_polygons_no_holes.append(polygon_remove_holes(polygon))
     return gt_polygons_no_holes
 
+
 def _draw_circle(draw, center, radius, fill):
-    draw.ellipse([center[0] - radius,
-                  center[1] - radius,
-                  center[0] + radius,
-                  center[1] + radius], fill=fill, outline=None)
+    draw.ellipse(
+        [
+            center[0] - radius,
+            center[1] - radius,
+            center[0] + radius,
+            center[1] + radius,
+        ],
+        fill=fill,
+        outline=None,
+    )
+
 
 def polygons_to_pixel_coords(polygons, transform):
     item_list = []
     for polygon in polygons:
-        item_list += polygon.geoms if polygon.geom_type == 'MultiPolygon' else [polygon]
+        item_list += polygon.geoms if polygon.geom_type == "MultiPolygon" else [polygon]
     return [
-        np.array([~transform * point for point in np.array(polygon.exterior.coords)]) for polygon in item_list
+        np.array([~transform * point for point in np.array(polygon.exterior.coords)])
+        for polygon in item_list
     ]
+
 
 def polygons_to_world_coords(polygons, transform, epsg_number):
     item_list = []
     for polygon in polygons:
-        item_list += polygon.geoms if polygon.geom_type == 'MultiPolygon' else [polygon]
+        item_list += polygon.geoms if polygon.geom_type == "MultiPolygon" else [polygon]
     return [
         shapely.geometry.asPolygon(
             np.array([transform * point for point in np.array(polygon.exterior.coords)])
-        ) for polygon in item_list
+        )
+        for polygon in item_list
     ]
+
 
 def build_crossfield(polygons, shape, transform, line_width=2):
     """
@@ -112,7 +125,19 @@ def build_crossfield(polygons, shape, transform, line_width=2):
     array = np.array(im)
     return array.transpose()
 
-def compute_raster_masks(polygons, shape, transform, fill=True, edges=True, vertices=True, compute_distances=True, compute_sizes=True, line_width=3, antialiasing=False):
+
+def compute_raster_masks(
+    polygons,
+    shape,
+    transform,
+    fill=True,
+    edges=True,
+    vertices=True,
+    compute_distances=True,
+    compute_sizes=True,
+    line_width=3,
+    antialiasing=False,
+):
     """
     Returns:
          - distances: sum of distance to closest and second-closest annotation for each pixel.
@@ -124,19 +149,44 @@ def compute_raster_masks(polygons, shape, transform, fill=True, edges=True, vert
     polygons = [polygon for polygon in polygons if polygon.area > 0]
     channel_count = fill + edges + vertices
     polygons_raster = np.zeros((*shape, channel_count), dtype=np.uint8)
-    distance_maps = np.ones((*shape, len(polygons)))  # Init with max value (distances are normed)
+    distance_maps = np.ones(
+        (*shape, len(polygons))
+    )  # Init with max value (distances are normed)
     sizes = np.ones(shape)  # Init with max value (sizes are normed)
     image_area = shape[0] * shape[1]
     for i, polygon in enumerate(polygons):
-        if polygon.geom_type == 'Polygon':
-            _process_polygon(polygon, shape, transform, fill, edges, vertices, line_width,\
-                antialiasing, polygons_raster, distance_maps, sizes, image_area, i)
+        if polygon.geom_type == "Polygon":
+            _process_polygon(
+                polygon,
+                shape,
+                transform,
+                fill,
+                edges,
+                vertices,
+                line_width,
+                antialiasing,
+                polygons_raster,
+                distance_maps,
+                sizes,
+                image_area,
+                i,
+            )
         else:
             for single_polygon in polygon.geoms:
                 _process_polygon(
-                    single_polygon, shape, transform, fill, edges, vertices,\
-                    line_width, antialiasing, polygons_raster, distance_maps,\
-                    sizes, image_area, i
+                    single_polygon,
+                    shape,
+                    transform,
+                    fill,
+                    edges,
+                    vertices,
+                    line_width,
+                    antialiasing,
+                    polygons_raster,
+                    distance_maps,
+                    sizes,
+                    image_area,
+                    i,
                 )
 
     polygons_raster = np.clip(polygons_raster, 0, 255)
@@ -149,9 +199,10 @@ def compute_raster_masks(polygons, shape, transform, fill=True, edges=True, vert
     distances = distances.astype(np.float32)
     sizes = sizes.astype(np.float32)
     return_dict = {
-       key:mask.transpose() for mask, key in zip(
-           np.swapaxes(polygons_raster, -1, 0),
-           ["polygon_masks", "boundary_masks", "vertex_masks"]
+        key: mask.transpose()
+        for mask, key in zip(
+            np.swapaxes(polygons_raster, -1, 0),
+            ["polygon_masks", "boundary_masks", "vertex_masks"],
         )
     }
     if compute_distances:
@@ -160,40 +211,92 @@ def compute_raster_masks(polygons, shape, transform, fill=True, edges=True, vert
         return_dict["size_masks"] = sizes
     return return_dict
 
-def _process_polygon(polygon, shape, transform, fill, edges, vertices, line_width,\
-    antialiasing, polygons_raster, distance_maps, sizes, image_area, i):
-    polygon = shapely.geometry.Polygon(np.array(
-            [~transform * point for point in np.array(polygon.exterior.coords)]
-        ))
-    mini, minj, maxi, maxj = _compute_raster_bounds_coods(polygon, polygons_raster, line_width)
+
+def _process_polygon(
+    polygon,
+    shape,
+    transform,
+    fill,
+    edges,
+    vertices,
+    line_width,
+    antialiasing,
+    polygons_raster,
+    distance_maps,
+    sizes,
+    image_area,
+    i,
+):
+    polygon = shapely.geometry.Polygon(
+        np.array([~transform * point for point in np.array(polygon.exterior.coords)])
+    )
+    mini, minj, maxi, maxj = _compute_raster_bounds_coods(
+        polygon, polygons_raster, line_width
+    )
     bbox_shape = (maxi - mini, maxj - minj)
     bbox_polygon = shapely.affinity.translate(polygon, xoff=-minj, yoff=-mini)
-    bbox_raster = _draw_polygons([bbox_polygon], bbox_shape, fill, edges, vertices, line_width, antialiasing)
-    polygons_raster[mini:maxi, minj:maxj] = np.maximum(polygons_raster[mini:maxi, minj:maxj], bbox_raster)
+    bbox_raster = _draw_polygons(
+        [bbox_polygon], bbox_shape, fill, edges, vertices, line_width, antialiasing
+    )
+    polygons_raster[mini:maxi, minj:maxj] = np.maximum(
+        polygons_raster[mini:maxi, minj:maxj], bbox_raster
+    )
     bbox_mask = np.sum(bbox_raster, axis=2) > 0
     # Polygon interior + edge + vertexif bbox_mask.max():  # Make sure mask is not empty
     _compute_distance_and_sizes(
-            i, distance_maps, sizes, polygon, image_area, shape, mini, maxi, minj, maxj, bbox_mask, line_width)
+        i,
+        distance_maps,
+        sizes,
+        polygon,
+        image_area,
+        shape,
+        mini,
+        maxi,
+        minj,
+        maxj,
+        bbox_mask,
+        line_width,
+    )
+
 
 def _compute_raster_bounds_coods(polygon, polygons_raster, line_width):
     minx, miny, maxx, maxy = polygon.bounds
-    mini = max(0, math.floor(miny) - 2*line_width)
-    minj = max(0, math.floor(minx) - 2*line_width)
-    maxi = min(polygons_raster.shape[0], math.ceil(maxy) + 2*line_width)
-    maxj = min(polygons_raster.shape[1], math.ceil(maxx) + 2*line_width)
+    mini = max(0, math.floor(miny) - 2 * line_width)
+    minj = max(0, math.floor(minx) - 2 * line_width)
+    maxi = min(polygons_raster.shape[0], math.ceil(maxy) + 2 * line_width)
+    maxj = min(polygons_raster.shape[1], math.ceil(maxx) + 2 * line_width)
     return mini, minj, maxi, maxj
 
-def _compute_distance_and_sizes(i, distance_maps, sizes, polygon, image_area, shape, mini, maxi, minj, maxj, bbox_mask, line_width):
+
+def _compute_distance_and_sizes(
+    i,
+    distance_maps,
+    sizes,
+    polygon,
+    image_area,
+    shape,
+    mini,
+    maxi,
+    minj,
+    maxj,
+    bbox_mask,
+    line_width,
+):
     polygon_mask = np.zeros(shape, dtype=np.bool_)
     polygon_mask[mini:maxi, minj:maxj] = bbox_mask
-    polygon_dist = cv.distanceTransform(1 - polygon_mask.astype(np.uint8), distanceType=cv.DIST_L2, maskSize=cv.DIST_MASK_5,
-                                dstType=cv.CV_64F)
-    polygon_dist /= (polygon_mask.shape[0] + polygon_mask.shape[1])  # Normalize dist
+    polygon_dist = cv.distanceTransform(
+        1 - polygon_mask.astype(np.uint8),
+        distanceType=cv.DIST_L2,
+        maskSize=cv.DIST_MASK_5,
+        dstType=cv.CV_64F,
+    )
+    polygon_dist /= polygon_mask.shape[0] + polygon_mask.shape[1]  # Normalize dist
     distance_maps[:, :, i] = polygon_dist
 
     selem = skimage.morphology.disk(line_width)
     bbox_dilated_mask = skimage.morphology.binary_dilation(bbox_mask, selem=selem)
     sizes[mini:maxi, minj:maxj][bbox_dilated_mask] = polygon.area / image_area
+
 
 def _compute_edges(fill, edges, polygons_raster, line_width):
     edge_channels = -1 + fill + edges
@@ -210,19 +313,35 @@ def _compute_distances(distance_maps):
     distances = np.sum(distance_maps, axis=2)
     return distances
 
-def _draw_polygons(polygons, shape, fill=True, edges=True, vertices=True, line_width=3, antialiasing=False):
+
+def _draw_polygons(
+    polygons,
+    shape,
+    fill=True,
+    edges=True,
+    vertices=True,
+    line_width=3,
+    antialiasing=False,
+):
     assert type(polygons) == list, "polygons should be a list"
-    assert type(polygons[0]) == shapely.geometry.Polygon, "polygon should be a shapely.geometry.Polygon"
+    assert (
+        type(polygons[0]) == shapely.geometry.Polygon
+    ), "polygon should be a shapely.geometry.Polygon"
 
     if antialiasing:
         draw_shape = (2 * shape[0], 2 * shape[1])
-        polygons = [shapely.affinity.scale(polygon, xfact=2.0, yfact=2.0, origin=(0, 0)) for polygon in polygons]
+        polygons = [
+            shapely.affinity.scale(polygon, xfact=2.0, yfact=2.0, origin=(0, 0))
+            for polygon in polygons
+        ]
         line_width *= 2
     else:
         draw_shape = shape
     # Channels
     fill_channel_index = 0  # Always first channel
-    edges_channel_index = fill  # If fill == True, take second channel. If not then take first
+    edges_channel_index = (
+        fill
+    )  # If fill == True, take second channel. If not then take first
     vertices_channel_index = fill + edges  # Same principle as above
     channel_count = fill + edges + vertices
     im_draw_list = []
@@ -266,7 +385,16 @@ def _draw_polygons(polygons, shape, fill=True, edges=True, vertices=True, line_w
     array = np.stack(array_list, axis=-1)
     return array
 
-def compute_polygon_contour_measures(pred_polygons: list, gt_polygons: list, sampling_spacing: float, min_precision: float, max_stretch: float, metric_name: str="cosine", progressbar=False):
+
+def compute_polygon_contour_measures(
+    pred_polygons: list,
+    gt_polygons: list,
+    sampling_spacing: float,
+    min_precision: float,
+    max_stretch: float,
+    metric_name: str = "cosine",
+    progressbar=False,
+):
     """
     pred_polygons are sampled with sampling_spacing before projecting those sampled points to gt_polygons.
     Then the
@@ -283,28 +411,59 @@ def compute_polygon_contour_measures(pred_polygons: list, gt_polygons: list, sam
     assert isinstance(gt_polygons, list), "gt_polygons should be a list"
     if len(pred_polygons) == 0 or len(gt_polygons) == 0:
         return np.array([]), [], []
-    assert isinstance(pred_polygons[0], shapely.geometry.Polygon), \
-        f"Items of pred_polygons should be of type shapely.geometry.Polygon, not {type(pred_polygons[0])}"
-    assert isinstance(gt_polygons[0], shapely.geometry.Polygon), \
-        f"Items of gt_polygons should be of type shapely.geometry.Polygon, not {type(gt_polygons[0])}"
+    assert isinstance(
+        pred_polygons[0], shapely.geometry.Polygon
+    ), f"Items of pred_polygons should be of type shapely.geometry.Polygon, not {type(pred_polygons[0])}"
+    assert isinstance(
+        gt_polygons[0], shapely.geometry.Polygon
+    ), f"Items of gt_polygons should be of type shapely.geometry.Polygon, not {type(gt_polygons[0])}"
     gt_polygons = shapely.geometry.collection.GeometryCollection(gt_polygons)
     pred_polygons = shapely.geometry.collection.GeometryCollection(pred_polygons)
     # Filter pred_polygons to have at least a precision with gt_polygons of min_precision
-    filtered_pred_polygons = [pred_polygon for pred_polygon in pred_polygons if min_precision < pred_polygon.intersection(gt_polygons).area / pred_polygon.area]
+    filtered_pred_polygons = [
+        pred_polygon
+        for pred_polygon in pred_polygons
+        if min_precision
+        < pred_polygon.intersection(gt_polygons).area / pred_polygon.area
+    ]
     # Extract contours of gt polygons
-    gt_contours = shapely.geometry.collection.GeometryCollection([contour for polygon in gt_polygons for contour in [polygon.exterior, *polygon.interiors]])
+    gt_contours = shapely.geometry.collection.GeometryCollection(
+        [
+            contour
+            for polygon in gt_polygons
+            for contour in [polygon.exterior, *polygon.interiors]
+        ]
+    )
     # Measure metric for each pred polygon
     if progressbar:
         process_id = int(multiprocess.current_process().name[-1])
-        iterator = tqdm(filtered_pred_polygons, desc="Contour measure", leave=False, position=process_id)
+        iterator = tqdm(
+            filtered_pred_polygons,
+            desc="Contour measure",
+            leave=False,
+            position=process_id,
+        )
     else:
         iterator = filtered_pred_polygons
-    half_tangent_max_angles = [compute_contour_measure(pred_polygon, gt_contours, sampling_spacing=sampling_spacing, max_stretch=max_stretch, metric_name=metric_name)
-                               for pred_polygon in iterator]
+    half_tangent_max_angles = [
+        compute_contour_measure(
+            pred_polygon,
+            gt_contours,
+            sampling_spacing=sampling_spacing,
+            max_stretch=max_stretch,
+            metric_name=metric_name,
+        )
+        for pred_polygon in iterator
+    ]
     return half_tangent_max_angles
 
-def compute_contour_measure(pred_polygon, gt_contours, sampling_spacing, max_stretch, metric_name="cosine"):
-    pred_contours = shapely.geometry.GeometryCollection([pred_polygon.exterior, *pred_polygon.interiors])
+
+def compute_contour_measure(
+    pred_polygon, gt_contours, sampling_spacing, max_stretch, metric_name="cosine"
+):
+    pred_contours = shapely.geometry.GeometryCollection(
+        [pred_polygon.exterior, *pred_polygon.interiors]
+    )
     sampled_pred_contours = sample_geometry(pred_contours, sampling_spacing)
     # Project sampled contour points to ground truth contours
     projected_pred_contours = project_onto_geometry(sampled_pred_contours, gt_contours)
@@ -324,7 +483,9 @@ def compute_contour_measure(pred_polygon, gt_contours, sampling_spacing, max_str
         proj_edge_norms = proj_edge_norms[norm_valid_mask]
         # Remove edge that have stretched more than max_stretch (invalid projection)
         stretch = edge_norms / proj_edge_norms
-        stretch_valid_mask = np.logical_and(1 / max_stretch < stretch, stretch < max_stretch)
+        stretch_valid_mask = np.logical_and(
+            1 / max_stretch < stretch, stretch < max_stretch
+        )
         edges = edges[stretch_valid_mask]
         if edges.shape[0] == 0:
             # Invalid projection for the whole contour, skip it
@@ -332,12 +493,18 @@ def compute_contour_measure(pred_polygon, gt_contours, sampling_spacing, max_str
         proj_edges = proj_edges[stretch_valid_mask]
         edge_norms = edge_norms[stretch_valid_mask]
         proj_edge_norms = proj_edge_norms[stretch_valid_mask]
-        scalar_products = np.abs(np.sum(np.multiply(edges, proj_edges), axis=1) / (edge_norms * proj_edge_norms))
+        scalar_products = np.abs(
+            np.sum(np.multiply(edges, proj_edges), axis=1)
+            / (edge_norms * proj_edge_norms)
+        )
         try:
             contour_measures.append(scalar_products.min())
         except ValueError:
             import matplotlib.pyplot as plt
-            fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(8, 4), sharex=True, sharey=True)
+
+            fig, axes = plt.subplots(
+                nrows=1, ncols=3, figsize=(8, 4), sharex=True, sharey=True
+            )
             ax = axes.ravel()
             plot_geometries(ax[0], [contour])
             plot_geometries(ax[1], [proj_contour])
@@ -350,6 +517,7 @@ def compute_contour_measure(pred_polygon, gt_contours, sampling_spacing, max_str
         return measure
     else:
         return None
+
 
 def sample_geometry(geom, density):
     """
@@ -373,6 +541,7 @@ def sample_geometry(geom, density):
     else:
         raise TypeError(f"geom of type {type(geom)} not supported!")
     return sampled_geom
+
 
 def _sample_linestring(geom, density):
     sampled_x, sampled_y = [], []
@@ -409,29 +578,39 @@ def plot_geometries(axis, geometries, linewidths=1, markersize=3):
                 axis.plot(*polygon.exterior.xy, marker="o", markersize=markersize)
                 for interior in polygon.interiors:
                     axis.plot(*interior.xy, marker="o", markersize=markersize)
-            elif geometry.geom_type == "LineString" or geometry.geom_type == "LinearRing":
+            elif (
+                geometry.geom_type == "LineString" or geometry.geom_type == "LinearRing"
+            ):
                 axis.plot(*geometry.xy, marker="o", markersize=markersize)
             else:
-                raise NotImplementedError(f"Geom type {geometry.geom_type} not recognized.")
+                raise NotImplementedError(
+                    f"Geom type {geometry.geom_type} not recognized."
+                )
         random.seed(1)
-        colors = random.choices([
-            [0, 0, 1, 1],
-            [0, 1, 0, 1],
-            [1, 0, 0, 1],
-            [1, 1, 0, 1],
-            [1, 0, 1, 1],
-            [0, 1, 1, 1],
-            [0.5, 1, 0, 1],
-            [1, 0.5, 0, 1],
-            [0.5, 0, 1, 1],
-            [1, 0, 0.5, 1],
-            [0, 0.5, 1, 1],
-            [0, 1, 0.5, 1],
-        ], k=len(patches))
+        colors = random.choices(
+            [
+                [0, 0, 1, 1],
+                [0, 1, 0, 1],
+                [1, 0, 0, 1],
+                [1, 1, 0, 1],
+                [1, 0, 1, 1],
+                [0, 1, 1, 1],
+                [0.5, 1, 0, 1],
+                [1, 0.5, 0, 1],
+                [0.5, 0, 1, 1],
+                [1, 0, 0.5, 1],
+                [0, 0.5, 1, 1],
+                [0, 1, 0.5, 1],
+            ],
+            k=len(patches),
+        )
         edgecolors = np.array(colors)
         facecolors = edgecolors.copy()
-        p = PatchCollection(patches, facecolors=facecolors, edgecolors=edgecolors, linewidths=linewidths)
+        p = PatchCollection(
+            patches, facecolors=facecolors, edgecolors=edgecolors, linewidths=linewidths
+        )
         axis.add_collection(p)
+
 
 def PolygonPath(polygon):
     """Constructs a compound matplotlib path from a Shapely or GeoJSON-like
@@ -440,39 +619,45 @@ def PolygonPath(polygon):
     def coding(ob):
         # The codes will be all "LINETO" commands, except for "MOVETO"s at the
         # beginning of each subpath
-        n = len(getattr(ob, 'coords', None) or ob)
+        n = len(getattr(ob, "coords", None) or ob)
         vals = np.ones(n, dtype=Path.code_type) * Path.LINETO
         vals[0] = Path.MOVETO
         return vals
 
-    if hasattr(polygon, 'geom_type'):  # Shapely
+    if hasattr(polygon, "geom_type"):  # Shapely
         ptype = polygon.geom_type
-        if ptype == 'Polygon':
+        if ptype == "Polygon":
             polygon = [Polygon(polygon)]
-        elif ptype == 'MultiPolygon':
+        elif ptype == "MultiPolygon":
             polygon = [Polygon(p) for p in polygon]
         else:
-            raise ValueError(
-                "A polygon or multi-polygon representation is required")
+            raise ValueError("A polygon or multi-polygon representation is required")
 
     else:  # GeoJSON
-        polygon = getattr(polygon, '__geo_interface__', polygon)
+        polygon = getattr(polygon, "__geo_interface__", polygon)
         ptype = polygon["type"]
-        if ptype == 'Polygon':
+        if ptype == "Polygon":
             polygon = [Polygon(polygon)]
-        elif ptype == 'MultiPolygon':
-            polygon = [Polygon(p) for p in polygon['coordinates']]
+        elif ptype == "MultiPolygon":
+            polygon = [Polygon(p) for p in polygon["coordinates"]]
         else:
-            raise ValueError(
-                "A polygon or multi-polygon representation is required")
+            raise ValueError("A polygon or multi-polygon representation is required")
 
-    vertices = np.concatenate([
-        np.concatenate([np.asarray(t.exterior)[:, :2]] +
-                    [np.asarray(r)[:, :2] for r in t.interiors])
-        for t in polygon])
-    codes = np.concatenate([
-        np.concatenate([coding(t.exterior)] +
-                    [coding(r) for r in t.interiors]) for t in polygon])
+    vertices = np.concatenate(
+        [
+            np.concatenate(
+                [np.asarray(t.exterior)[:, :2]]
+                + [np.asarray(r)[:, :2] for r in t.interiors]
+            )
+            for t in polygon
+        ]
+    )
+    codes = np.concatenate(
+        [
+            np.concatenate([coding(t.exterior)] + [coding(r) for r in t.interiors])
+            for t in polygon
+        ]
+    )
 
     return Path(vertices, codes)
 
@@ -492,6 +677,7 @@ def PolygonPatch(polygon, **kwargs):
 
     """
     return PathPatch(PolygonPath(polygon), **kwargs)
+
 
 def point_project_onto_geometry(coord, target):
     point = shapely.geometry.Point(coord)
@@ -514,7 +700,9 @@ def project_onto_geometry(geom, target, pool=None):
         if pool is None:
             projected_geom = [project_onto_geometry(g, target, pool=pool) for g in geom]
         else:
-            partial_project_onto_geometry = partial(project_onto_geometry, target=target)
+            partial_project_onto_geometry = partial(
+                project_onto_geometry, target=target
+            )
             projected_geom = pool.map(partial_project_onto_geometry, geom)
         projected_geom = shapely.geometry.GeometryCollection(projected_geom)
 
@@ -522,12 +710,19 @@ def project_onto_geometry(geom, target, pool=None):
         # print(f"project_onto_geometry: {toc - tic}s")
     elif isinstance(geom, shapely.geometry.Polygon):
         projected_exterior = project_onto_geometry(geom.exterior, target)
-        projected_interiors = [project_onto_geometry(interior, target) for interior in geom.interiors]
+        projected_interiors = [
+            project_onto_geometry(interior, target) for interior in geom.interiors
+        ]
         try:
-            projected_geom = shapely.geometry.Polygon(projected_exterior, projected_interiors)
+            projected_geom = shapely.geometry.Polygon(
+                projected_exterior, projected_interiors
+            )
         except shapely.errors.TopologicalError as e:
             import matplotlib.pyplot as plt
-            fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(8, 4), sharex=True, sharey=True)
+
+            fig, axes = plt.subplots(
+                nrows=1, ncols=3, figsize=(8, 4), sharex=True, sharey=True
+            )
             ax = axes.ravel()
             plot_geometries(ax[0], [geom])
             plot_geometries(ax[1], target)
@@ -536,7 +731,9 @@ def project_onto_geometry(geom, target, pool=None):
             plt.show()
             raise e
     elif isinstance(geom, shapely.geometry.LineString):
-        projected_coords = [point_project_onto_geometry(coord, target) for coord in geom.coords]
+        projected_coords = [
+            point_project_onto_geometry(coord, target) for coord in geom.coords
+        ]
         projected_geom = shapely.geometry.LineString(projected_coords)
     else:
         raise TypeError(f"geom of type {type(geom)} not supported!")

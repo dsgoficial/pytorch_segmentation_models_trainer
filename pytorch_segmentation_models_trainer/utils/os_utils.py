@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-04-02
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer 
+        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -24,6 +24,7 @@ import os
 import shutil
 from pathlib import Path
 
+
 def remove_folder(folder):
     try:
         if os.path.exists(folder):
@@ -32,36 +33,35 @@ def remove_folder(folder):
     except:
         return False
 
+
 def create_folder(path_to_folder):
     if os.path.exists(path_to_folder):
         return path_to_folder
     os.makedirs(path_to_folder)
     return path_to_folder
 
+
 def hash_file(filename):
     """"This function returns the SHA-1 hash
     of the file passed into it"""
     h = hashlib.sha1()
-    with open(filename, 'rb') as file:
+    with open(filename, "rb") as file:
         chunk = 0
-        while chunk != b'':
+        while chunk != b"":
             chunk = file.read(1024)
             h.update(chunk)
     return h.hexdigest()
+
 
 def make_path_relative(input_path, base_path):
     if input_path is None:
         return None
     fixed_path = str(input_path).split(base_path)[-1]
     fixed_path = fixed_path[1::] if fixed_path.startswith(os.path.sep) else fixed_path
-    return str(
-        os.path.join(
-            base_path,
-            fixed_path
-        )
-    )
+    return str(os.path.join(base_path, fixed_path))
+
 
 def import_module_from_cfg(module_full_path):
-    module_path, class_name = module_full_path._target_.rsplit('.', 1)
+    module_path, class_name = module_full_path._target_.rsplit(".", 1)
     module = import_module(module_path)
     return getattr(module, class_name)

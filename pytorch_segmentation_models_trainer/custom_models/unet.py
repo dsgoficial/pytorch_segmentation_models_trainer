@@ -5,7 +5,7 @@
                               -------------------
         begin                : 2021-06-29
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer 
+        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
         email                : philipeborba at gmail dot com
  ***************************************************************************/
@@ -33,15 +33,21 @@ class UNetBackbone(nn.Module):
         super(UNetBackbone, self).__init__()
         self.no_padding = no_padding
         self.inc = InConv(n_channels, n_hidden_base, no_padding)
-        self.down1 = Down(n_hidden_base, n_hidden_base*2, no_padding)
-        self.down2 = Down(n_hidden_base*2, n_hidden_base*4, no_padding)
-        self.down3 = Down(n_hidden_base*4, n_hidden_base*8, no_padding)
-        self.down4 = Down(n_hidden_base*8, n_hidden_base*16, no_padding)
+        self.down1 = Down(n_hidden_base, n_hidden_base * 2, no_padding)
+        self.down2 = Down(n_hidden_base * 2, n_hidden_base * 4, no_padding)
+        self.down3 = Down(n_hidden_base * 4, n_hidden_base * 8, no_padding)
+        self.down4 = Down(n_hidden_base * 8, n_hidden_base * 16, no_padding)
 
-        self.up1 = Up(n_hidden_base*16, n_hidden_base*8, n_hidden_base*8, no_padding)
-        self.up2 = Up(n_hidden_base*8, n_hidden_base*4, n_hidden_base*4, no_padding)
-        self.up3 = Up(n_hidden_base*4, n_hidden_base*2, n_hidden_base*2, no_padding)
-        self.up4 = Up(n_hidden_base*2, n_hidden_base, n_hidden_base, no_padding)
+        self.up1 = Up(
+            n_hidden_base * 16, n_hidden_base * 8, n_hidden_base * 8, no_padding
+        )
+        self.up2 = Up(
+            n_hidden_base * 8, n_hidden_base * 4, n_hidden_base * 4, no_padding
+        )
+        self.up3 = Up(
+            n_hidden_base * 4, n_hidden_base * 2, n_hidden_base * 2, no_padding
+        )
+        self.up4 = Up(n_hidden_base * 2, n_hidden_base, n_hidden_base, no_padding)
 
     def forward(self, x):
         x0 = self.inc.forward(x)
@@ -71,7 +77,7 @@ class DoubleConv(nn.Module):
             nn.ELU(),
             nn.Conv2d(out_ch, out_ch, 3, padding=0 if no_padding else 1, bias=True),
             nn.BatchNorm2d(out_ch),
-            nn.ELU()
+            nn.ELU(),
         )
 
     def forward(self, x):
@@ -93,8 +99,7 @@ class Down(nn.Module):
     def __init__(self, in_ch, out_ch, no_padding):
         super(Down, self).__init__()
         self.mpconv = nn.Sequential(
-            nn.MaxPool2d(2),
-            DoubleConv(in_ch, out_ch, no_padding)
+            nn.MaxPool2d(2), DoubleConv(in_ch, out_ch, no_padding)
         )
 
     def forward(self, x):
@@ -108,14 +113,13 @@ class Up(nn.Module):
         self.conv = DoubleConv(in_ch_1 + in_ch_2, out_ch, no_padding)
 
     def forward(self, x1, x2):
-        x1 = F.interpolate(x1, scale_factor=2, mode='bilinear', align_corners=False)
+        x1 = F.interpolate(x1, scale_factor=2, mode="bilinear", align_corners=False)
 
         # input is CHW
         diffY = x2.size()[2] - x1.size()[2]
         diffX = x2.size()[3] - x1.size()[3]
 
-        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
-                        diffY // 2, diffY - diffY // 2])
+        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2])
 
         x = torch.cat([x2, x1], dim=1)
         x = self.conv.forward(x)
