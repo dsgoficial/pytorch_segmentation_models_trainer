@@ -1,6 +1,6 @@
 torch>=1.8.1
 torchvision>=0.9.0
-pytorch-lightning==1.4.3
+pytorch-lightning==1.4.4
 torchmetrics>=0.4.0
 segmentation-models-pytorch>=0.2.0
 hydra-core==1.1.1
