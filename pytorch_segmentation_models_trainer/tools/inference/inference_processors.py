@@ -84,7 +84,6 @@ class AbstractInferenceProcessor(ABC):
         image = cv2.imread(image_path)
         profile = self.get_profile(image_path)
         inference = self.make_inference(image)
-        inference["seg"] = (inference["seg"] > threshold).astype(np.uint8)
         if self.polygonizer is not None:
             self.polygonizer.process(
                 {
@@ -93,6 +92,7 @@ class AbstractInferenceProcessor(ABC):
                 },
                 profile,
             )
+        inference["seg"] = (inference["seg"] > threshold).astype(np.uint8)
         if save_inference_raster:
             profile["input_name"] = Path(image_path).stem
             return self.export_strategy.save_inference(inference, profile)
