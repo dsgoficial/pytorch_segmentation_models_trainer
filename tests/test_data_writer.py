@@ -96,7 +96,7 @@ class Test_TestDataWriter(unittest.TestCase):
         for i in range(4):
             data_writer.write_data(input_data=input_data, profile={"crs": "EPSG:4326"})
             current_output_file_path = os.path.join(
-                self.output_dir, f"output_{i}.geojson"
+                self.output_dir, f"output_{i:08}.geojson"
             )
             assert os.path.isfile(current_output_file_path)
             output_data = geopandas.read_file(filename=current_output_file_path)
