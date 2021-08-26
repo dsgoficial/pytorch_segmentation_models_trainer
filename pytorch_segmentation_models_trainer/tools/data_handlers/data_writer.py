@@ -98,7 +98,7 @@ class BatchVectorFileDataWriter(VectorFileDataWriter):
     def _get_current_file_path(self) -> str:
         suffix = pathlib.Path(self.output_file_path).suffix
         return self.output_file_path.replace(
-            suffix, f"_{self.current_index:10}{suffix}"
+            suffix, f"_{self.current_index:08}{suffix}"
         )
 
     def write_data(
