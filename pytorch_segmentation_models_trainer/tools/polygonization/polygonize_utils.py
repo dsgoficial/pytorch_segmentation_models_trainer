@@ -55,7 +55,7 @@ def compute_init_contours_batch(np_indicator_batch, level, pool=None):
 def split_polylines_corner(polylines, corner_masks):
     new_polylines = []
     for polyline, corner_mask in zip(polylines, corner_masks):
-        splits, = np.where(corner_mask)
+        (splits,) = np.where(corner_mask)
         if len(splits) == 0:
             new_polylines.append(polyline)
             continue

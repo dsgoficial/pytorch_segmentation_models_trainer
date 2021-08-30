@@ -54,7 +54,9 @@ class PLTrainerConfig:
     max_epochs: str = "${hyperparameters.epochs}"
     gpus: int = -1
     precision: int = 32
-    default_root_dir: str = "/experiment_data/${backbone.name}_${hyperparameters.model_name}"
+    default_root_dir: str = (
+        "/experiment_data/${backbone.name}_${hyperparameters.model_name}"
+    )
 
 
 @dataclass

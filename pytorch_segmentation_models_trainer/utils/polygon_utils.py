@@ -340,8 +340,8 @@ def _draw_polygons(
     # Channels
     fill_channel_index = 0  # Always first channel
     edges_channel_index = (
-        fill
-    )  # If fill == True, take second channel. If not then take first
+        fill  # If fill == True, take second channel. If not then take first
+    )
     vertices_channel_index = fill + edges  # Same principle as above
     channel_count = fill + edges + vertices
     im_draw_list = []
