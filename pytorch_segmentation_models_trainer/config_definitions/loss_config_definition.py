@@ -38,7 +38,9 @@ class SegParamsConfig:
 
 @dataclass
 class SegLossConfig:
-    _target_: str = "pytorch_segmentation_models_trainer.custom_losses.base_loss.SegLoss"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_losses.base_loss.SegLoss"
+    )
     name: str = "seg"
     gt_channel_selector: SegParamsConfig = field(default_factory=SegParamsConfig)
     bce_coef: float = 0.5

@@ -45,9 +45,9 @@ def conv3x3(in_planes, out_planes, stride=1):
 
 class SpatialGather_Module(nn.Module):
     """
-        Aggregate the context features according to the initial
-        predicted probability distribution.
-        Employ the soft-weighted method to aggregate the context.
+    Aggregate the context features according to the initial
+    predicted probability distribution.
+    Employ the soft-weighted method to aggregate the context.
     """
 
     def __init__(self, cls_num=0, scale=1):
