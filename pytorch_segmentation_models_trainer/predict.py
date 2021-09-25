@@ -50,6 +50,7 @@ def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
         cfg.checkpoint_path, cfg=cfg
     )
     model = pl_model.model
+    model.to(cfg.device)
     model.eval()
     return model
 

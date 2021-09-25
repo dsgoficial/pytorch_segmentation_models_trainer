@@ -67,7 +67,7 @@ class TemplatePolygonizerProcessor(ABC):
         out_contours_batch, out_probs_batch = self.polygonize_method(
             inference["seg"], inference["crossfield"], self.config, pool=pool
         )
-        self.post_process(out_contours_batch[0], profile)
+        return self.post_process(out_contours_batch[0], profile)
 
     def post_process(self, polygons: List[Polygon], profile: dict):
         """Post-processes generated polygons from process method.
@@ -84,7 +84,9 @@ class TemplatePolygonizerProcessor(ABC):
             if profile["crs"] is not None
             else None,
         )
-        self.data_writer.write_data(projected_polygons, profile)
+        if self.data_writer is not None:
+            self.data_writer.write_data(projected_polygons, profile)
+        return projected_polygons
 
 
 @dataclass
@@ -201,4 +203,4 @@ class SimplePolygonizerProcessor(TemplatePolygonizerProcessor):
         out_contours_batch, out_probs_batch = self.polygonize_method(
             inference["seg"], self.config, pool=pool
         )
-        self.post_process(out_contours_batch[0], profile)
+        return self.post_process(out_contours_batch[0], profile)

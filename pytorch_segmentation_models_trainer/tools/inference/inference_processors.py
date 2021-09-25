@@ -18,12 +18,16 @@
  *                                                                         *
  ****
 """
+from collections import defaultdict
 from concurrent.futures.thread import ThreadPoolExecutor
 import os
 import math
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, List, Union
+from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import (
+    TemplatePolygonizerProcessor,
+)
+from typing import Dict, List, Optional, Union
 
 import albumentations as A
 import cv2
@@ -80,22 +84,28 @@ class AbstractInferenceProcessor(ABC):
         image_path: str,
         threshold: float = 0.5,
         save_inference_raster: bool = True,
-    ) -> str:
+        polygonizer: Optional[TemplatePolygonizerProcessor] = None,
+    ) -> dict:
         image = cv2.imread(image_path)
         profile = self.get_profile(image_path)
         inference = self.make_inference(image)
-        if self.polygonizer is not None:
-            self.polygonizer.process(
+        output_dict = defaultdict(list)
+        polygonizer = self.polygonizer if polygonizer is None else polygonizer
+        if polygonizer is not None:
+            output_dict["polygons"] += polygonizer.process(
                 {
                     key: image_to_tensor(value).unsqueeze(0)
                     for key, value in inference.items()
                 },
                 profile,
             )
-        inference["seg"] = (inference["seg"] > threshold).astype(np.uint8)
         if save_inference_raster:
+            inference["seg"] = (inference["seg"] > threshold).astype(np.uint8)
             profile["input_name"] = Path(image_path).stem
-            return self.export_strategy.save_inference(inference, profile)
+            output_dict["inference"].append(
+                self.export_strategy.save_inference(inference, profile)
+            )
+        return output_dict
 
     @abstractmethod
     def make_inference(self, image: np.array) -> Union[np.array, dict]:
