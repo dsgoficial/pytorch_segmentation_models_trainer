@@ -1,3 +1,9 @@
+# Version 0.12.0
+
+- Minor improvements on polygonization methods;
+- Inference server added;
+
+
 # Version 0.11.0
 
 - Gradient Centralization added;
