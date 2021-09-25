@@ -20,6 +20,8 @@
 """
 
 import io
+
+from fastapi.params import Depends
 from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import (
     TemplatePolygonizerProcessor,
 )
@@ -32,7 +34,6 @@ from fastapi.responses import JSONResponse
 from hydra import compose, initialize
 from hydra.utils import instantiate
 from PIL import Image
-from pydantic import BaseSettings
 from starlette.responses import Response
 from torchvision import transforms
 from shapely.geometry import mapping
@@ -42,12 +43,8 @@ from pytorch_segmentation_models_trainer.predict import (
     instantiate_model_from_checkpoint,
     instantiate_polygonizer,
 )
-
-
-class Settings(BaseSettings):
-    app_name: str = "Awesome API"
-    config_path: str
-    config_name: str
+from functools import lru_cache
+from .config import Settings
 
 
 def get_hydra_config(config_path, config_name):
@@ -56,11 +53,14 @@ def get_hydra_config(config_path, config_name):
     return cfg
 
 
-settings = Settings()
-cfg = get_hydra_config(settings.config_path, settings.config_name)
-# cfg = get_hydra_config(config_path='../../mestrado_experimentos_dissertacao/pytorch/', config_name='predict_polygons_hrnet_ocr_w48_frame_field_local')
-inference_processor = instantiate_inference_processor(cfg)
-inference_processor.polygonizer.data_writer = None
+@lru_cache()
+def get_inference_processor():
+    settings = Settings()
+    cfg = get_hydra_config(settings.config_path, settings.config_name)
+    inference_processor = instantiate_inference_processor(cfg)
+    inference_processor.polygonizer.data_writer = None
+    return inference_processor
+
 
 app = FastAPI(
     title="pytorch-smt polygon inference service",
@@ -71,16 +71,15 @@ app = FastAPI(
 
 @app.get("/polygonize")
 async def get_polygons_from_image_path(
-    file_path: str, polygonizer: Optional[dict] = None
+    file_path: str,
+    inference_processor: Settings = Depends(get_inference_processor),
+    polygonizer: Optional[dict] = None,
 ):
     polygonizer = instantiate(polygonizer) if polygonizer is not None else None
     if polygonizer is not None:
         polygonizer.data_writer = None
     output_dict = inference_processor.process(
-        file_path,
-        threshold=cfg.inference_threshold,
-        save_inference_raster=False,
-        polygonizer=polygonizer,
+        file_path, save_inference_raster=False, polygonizer=polygonizer
     )
     return JSONResponse(
         content={
