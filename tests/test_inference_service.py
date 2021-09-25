@@ -32,7 +32,6 @@ import rasterio
 import segmentation_models_pytorch as smp
 import torch
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
 from hydra import compose, initialize
 from hydra.utils import instantiate
 from parameterized import parameterized
