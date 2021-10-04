@@ -46,11 +46,11 @@ def load_augmentation_object(input_list, bbox_params=None):
         aug_list = [instantiate(i, _recursive_=False) for i in input_list]
     except:
         aug_list = input_list
-    return (
-        A.Compose(aug_list)
-        if bbox_params is None
-        else A.Compose(aug_list, bbox_params=OmegaConf.to_container(bbox_params))
-    )
+    if bbox_params is None:
+        return A.Compose(aug_list)
+    if isinstance(bbox_params, A.BboxParams):
+        return A.Compose(aug_list, bbox_params=bbox_params)
+    return A.Compose(aug_list, bbox_params=OmegaConf.to_container(bbox_params))
 
 
 class AbstractDataset(Dataset):
@@ -558,7 +558,7 @@ class ObjectDetectionDataset(AbstractDataset):
         ds_item_dict["labels"] = torch.as_tensor(
             ds_item_dict["labels"], dtype=torch.int64
         )
-        return image, ds_item_dict, index
+        return image, ds_item_dict
 
 
 class InstanceSegmentationDataset(ObjectDetectionDataset):
@@ -617,7 +617,7 @@ class InstanceSegmentationDataset(ObjectDetectionDataset):
             ds_item_dict["masks"] = torch.as_tensor(
                 ds_item_dict["masks"], dtype=torch.uint8
             )
-        return image, ds_item_dict, index
+        return image, ds_item_dict
 
 
 if __name__ == "__main__":

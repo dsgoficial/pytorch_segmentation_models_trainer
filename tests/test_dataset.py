@@ -565,7 +565,7 @@ class Test_TestDataset(CustomTestCase):
             augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
         )
         self.assertEqual(len(obj_det_ds), 12)
-        image, target, id = obj_det_ds[0]
+        image, target = obj_det_ds[0]
         self.assertEqual(image.shape, (3, 571, 571))
         self.assertEqual(target["boxes"].shape, (2, 4))
         self.assertEqual(target["labels"].shape, (2,))
@@ -578,7 +578,7 @@ class Test_TestDataset(CustomTestCase):
             augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
         )
         self.assertEqual(len(obj_det_ds), 12)
-        image, target, id = obj_det_ds[0]
+        image, target = obj_det_ds[0]
         self.assertEqual(image.shape, (3, 571, 571))
         self.assertEqual(target["boxes"].shape, (2, 4))
         self.assertEqual(target["labels"].shape, (2,))

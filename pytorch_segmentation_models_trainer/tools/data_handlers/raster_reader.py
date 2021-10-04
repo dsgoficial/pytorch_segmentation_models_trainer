@@ -60,9 +60,9 @@ MaskOutputTypeEnum = MaskOutputType
 @dataclass(frozen=True)
 class DatasetEntry:
     image: str
-    polygon_mask: str
     width: int
     height: int
+    polygon_mask: str = None
     bands_means: list = field(default_factory=list)
     bands_stds: list = field(default_factory=list)
     class_freq: list = field(default_factory=list)

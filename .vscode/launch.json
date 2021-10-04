@@ -5,6 +5,27 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name":"Python: FastAPI",
+            "type":"python",
+            "request":"launch",
+            "module":"uvicorn",
+            "args": [
+                "pytorch_segmentation_models_trainer.server:app",
+                "--reload",
+                "--workers",
+                "1",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "5000"
+            ],
+            "jinja":true,
+            "env" : {
+                "CONFIG_PATH": "../../mestrado_experimentos_dissertacao/pytorch/",
+                "CONFIG_NAME": "predict_polygons_hrnet_ocr_w48_frame_field_local"
+            }
+        },
+        {
             "name": "Python: Remote Attach",
             "type": "python",
             "request": "attach",
