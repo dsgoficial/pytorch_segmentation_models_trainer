@@ -2,6 +2,7 @@
 
 - Bug fixes on mask building;
 - Bug fixes on detection model training.
+- New mode on build masks;
 
 # Version 0.12.0
 

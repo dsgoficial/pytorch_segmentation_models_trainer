@@ -34,6 +34,7 @@ import rasterio
 from bidict import bidict
 from geopandas.geoseries import GeoSeries
 from omegaconf.omegaconf import MISSING
+import shapely
 from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import (
     GeoDF,
     GeomType,
@@ -73,6 +74,7 @@ class DatasetEntry:
     size_mask: str = None
     mask_is_single_band: bool = False
     bounding_boxes: str = None
+    polygon_lists: str = None
 
 
 @dataclass
@@ -114,6 +116,7 @@ class RasterFile:
         compute_distances: bool = False,
         compute_sizes: bool = False,
         compute_bbox: bool = False,
+        compute_polygons: bool = False,
     ) -> List[str]:
         """Build segmentation mask according to parameters.
 
@@ -154,13 +157,7 @@ class RasterFile:
             compute_sizes=compute_sizes,
             compute_crossfield=compute_crossfield,
             compute_bbox=compute_bbox,
-        )
-        bbox_list = (
-            self.build_image_bb_annotations_from_vector_layer(
-                mask_feats, profile["transform"]
-            )
-            if compute_bbox
-            else None
+            compute_polygons=compute_polygons,
         )
         raster_ds.close()
         return self.write_masks_to_disk(
@@ -169,7 +166,6 @@ class RasterFile:
             output_dir_dict=output_dir_dict,
             output_filename=output_filename,
             output_extension=output_extension,
-            bbox_list=bbox_list,
         )
 
     def _prepare_profile(self, raster_ds, output_extension: str):
@@ -203,7 +199,6 @@ class RasterFile:
         output_extension,
         folder_basename=None,
         replicate_input_structure=True,
-        bbox_list=None,
     ) -> List[str]:
         path_dict = OrderedDict()
         input_name, _ = os.path.basename(self.file_name).split(".")
@@ -223,6 +218,13 @@ class RasterFile:
                 output = os.path.join(path, subfolders, f"{output_filename}.json")
                 self.save_bounding_boxes_to_disk(
                     raster_dict["bounding_boxes"], output=output
+                )
+                path_dict[key] = output
+                continue
+            if key == "polygon_lists":
+                output = os.path.join(path, subfolders, f"{output_filename}.json")
+                self.save_polygon_list_to_disk(
+                    raster_dict["polygon_lists"], output=output
                 )
                 path_dict[key] = output
                 continue
@@ -247,6 +249,10 @@ class RasterFile:
         with open(output, "w") as out:
             json.dump(bounding_boxes, out)
 
+    def save_polygon_list_to_disk(self, polygon_lists, output: str):
+        with open(output, "w") as out:
+            json.dump(polygon_lists, out, indent=4)
+
     def build_numpy_mask_from_vector_layer(
         self,
         mask_feats: GeoSeries,
@@ -257,6 +263,7 @@ class RasterFile:
         compute_sizes=True,
         compute_crossfield=False,
         compute_bbox=False,
+        compute_polygons=False,
     ) -> np.ndarray:
         """Builds numpy mask from vector layer using rasterio.
 
@@ -291,6 +298,10 @@ class RasterFile:
                 "bounding_boxes"
             ] = self.build_image_bb_annotations_from_vector_layer(
                 polygons, transform=transform
+            )
+        if compute_polygons:
+            return_dict["polygon_lists"] = self.build_polygon_list_from_vector_layer(
+                polygons
             )
         return return_dict
 
@@ -332,6 +343,42 @@ class RasterFile:
                 }
             )
         return return_list
+
+    def build_polygon_list_from_vector_layer(
+        self, polygon_list: List, class_idx: int = 1
+    ) -> Dict[str, Any]:
+        """[summary]
+
+        Args:
+            vector_feats (GeoSeries): [description]
+            transform (Affine, optional): [description]. Defaults to None.
+            class_idx (int, optional): [description]. Defaults to 1.
+
+        Returns:
+            Dict[str, Any]: Dict of {
+                'imgWidth': width,
+                'imgHeight': height,
+                'objects': [{'class': class_idx, 'polygon': [x, y, x, y, ...]}]}]
+            }
+        """
+        with rasterio.open(self.file_name) as raster_ds:
+            transform = raster_ds.transform
+            width = raster_ds.width
+            height = raster_ds.height
+        return {
+            "imgWidth": width,
+            "imgHeight": height,
+            "objects": [
+                {
+                    "class": class_idx,
+                    "polygon": [
+                        ~transform * point
+                        for point in np.array(polygon.exterior.coords[0:-1])
+                    ],
+                }
+                for polygon in polygon_list
+            ],
+        }
 
     def get_coco_bbox_on_image_coords(self, minx, miny, maxx, maxy, transform):
         """Converts vector coordinates to image coordinates.
