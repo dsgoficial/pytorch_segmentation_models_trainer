@@ -88,6 +88,7 @@ train_dataset:
     pin_memory: True
     drop_last: True
     prefetch_factor: 2
+  n_first_rows_to_read: 2
   augmentation_list:
     - _target_: albumentations.HueSaturationValue
       always_apply: false

@@ -36,6 +36,7 @@ train_dataset:
   _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.ObjectDetectionDataset
   input_csv_path: teste
   root_dir: teste
+  n_first_rows_to_read: 2
   data_loader:
     shuffle: True
     num_workers: 2
@@ -65,6 +66,7 @@ val_dataset:
   _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.ObjectDetectionDataset
   input_csv_path: teste
   root_dir: teste
+  n_first_rows_to_read: 2
   bbox_params:
     format: coco
     min_visibility: 0.2
