@@ -562,7 +562,10 @@ class Test_TestDataset(CustomTestCase):
         obj_det_ds = ObjectDetectionDataset(
             input_csv_path=csv_path,
             root_dir=os.path.dirname(csv_path),
-            augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
+            augmentation_list=A.Compose(
+                [A.Normalize(), A.pytorch.ToTensorV2()],
+                bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
+            ),
         )
         self.assertEqual(len(obj_det_ds), 12)
         image, target = obj_det_ds[0]
@@ -575,7 +578,10 @@ class Test_TestDataset(CustomTestCase):
         obj_det_ds = InstanceSegmentationDataset(
             input_csv_path=csv_path,
             root_dir=os.path.dirname(csv_path),
-            augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
+            augmentation_list=A.Compose(
+                [A.Normalize(), A.pytorch.ToTensorV2()],
+                bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
+            ),
         )
         self.assertEqual(len(obj_det_ds), 12)
         image, target = obj_det_ds[0]
