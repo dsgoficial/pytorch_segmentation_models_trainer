@@ -21,6 +21,7 @@
 """
 import os
 import unittest
+import warnings
 
 import numpy as np
 import skan
@@ -43,6 +44,10 @@ root_dir = os.path.join(current_dir, "testing_data")
 
 class Test_TestTensorUtils(unittest.TestCase):
     def setUp(self):
+        warnings.simplefilter("ignore", category=ImportWarning)
+        warnings.simplefilter("ignore", category=DeprecationWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+        warnings.simplefilter("ignore", category=UserWarning)
         self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
         return super().setUp()
 

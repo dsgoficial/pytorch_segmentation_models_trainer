@@ -22,6 +22,7 @@
 import os
 import shutil
 import unittest
+import warnings
 
 
 def get_file_list(dir_path, extension):
@@ -44,6 +45,10 @@ def create_csv_file(file_path, image_list, label_list, root_to_be_removed=None):
 
 class CustomTestCase(unittest.TestCase):
     def setUp(self):
+        warnings.simplefilter("ignore", category=ImportWarning)
+        warnings.simplefilter("ignore", category=DeprecationWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+        warnings.simplefilter("ignore", category=UserWarning)
         current_dir = os.path.dirname(__file__)
         self.root_dir = os.path.join(current_dir, "testing_data", "data")
         image_list = get_file_list(os.path.join(self.root_dir, "images"), ".png")

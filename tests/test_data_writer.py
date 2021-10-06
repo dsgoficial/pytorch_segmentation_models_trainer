@@ -22,6 +22,7 @@
 import os
 import unittest
 from pathlib import Path
+import warnings
 
 import geopandas
 import numpy as np
@@ -51,6 +52,10 @@ root_dir = os.path.join(current_dir, "testing_data")
 
 class Test_TestDataWriter(unittest.TestCase):
     def setUp(self):
+        warnings.simplefilter("ignore", category=ImportWarning)
+        warnings.simplefilter("ignore", category=DeprecationWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+        warnings.simplefilter("ignore", category=UserWarning)
         self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
 
     def tearDown(self):

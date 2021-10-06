@@ -61,6 +61,12 @@ jobs:
       with:
         path: ~/.cache
         key: ${{ runner.os }}-cache
+    - name: Cache downloaded models2
+      uses: actions/cache@v2
+      id: cache
+      with:
+        path: ~/work/pytorch_segmentation_models_trainer/pytorch_segmentation_models_trainer/pytorch_segmentation_models_trainer/custom_models/pretrained/
+        key: ${{ runner.os }}-cache
     - name: Test with unittest
       run: |
         coverage run --source pytorch_segmentation_models_trainer --omit pytorch_segmentation_models_trainer/custom_models/sync_bn/* -m unittest discover -p 'test_*.py'

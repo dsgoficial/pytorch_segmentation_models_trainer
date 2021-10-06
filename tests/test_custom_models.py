@@ -21,6 +21,7 @@
 """
 
 import unittest
+import warnings
 
 import hydra
 import numpy as np
@@ -45,6 +46,12 @@ input_model_list = [
 
 
 class Test_TestCustomModels(unittest.TestCase):
+    def setUp(self) -> None:
+        warnings.simplefilter("ignore", category=ImportWarning)
+        warnings.simplefilter("ignore", category=DeprecationWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+        warnings.simplefilter("ignore", category=UserWarning)
+
     @parameterized.expand(input_model_list)
     def test_create_inference_from_model(
         self, input_model, model_args, expected_output_shape

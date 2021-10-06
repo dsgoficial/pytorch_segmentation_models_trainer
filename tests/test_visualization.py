@@ -21,6 +21,7 @@
 """
 import os
 import unittest
+import warnings
 
 import hydra
 import matplotlib.pyplot as plt
@@ -57,6 +58,10 @@ from matplotlib.testing.compare import compare_images
 
 class Test_TestVisualization(unittest.TestCase):
     def setUp(self):
+        warnings.simplefilter("ignore", category=ImportWarning)
+        warnings.simplefilter("ignore", category=DeprecationWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+        warnings.simplefilter("ignore", category=UserWarning)
         self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
 
     def tearDown(self):
