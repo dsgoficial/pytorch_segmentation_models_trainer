@@ -89,7 +89,7 @@ train_dataset:
   root_dir: teste
   data_loader:
     shuffle: True
-    num_workers: 4
+    num_workers: 2
     pin_memory: True
     drop_last: True
     prefetch_factor: 2
@@ -120,7 +120,7 @@ val_dataset:
   root_dir: teste
   data_loader:
     shuffle: False
-    num_workers: 4
+    num_workers: 2
     pin_memory: True
     drop_last: True
     prefetch_factor: 2
