@@ -57,6 +57,7 @@ val_dataset:
   input_csv_path: teste
   root_dir: teste
   sequence_length: 60
+  n_first_rows_to_read: 2
   data_loader:
     shuffle: False
     num_workers: 2

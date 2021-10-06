@@ -22,6 +22,7 @@
 import os
 import unittest
 from pathlib import Path
+import warnings
 
 # from unittest import IsolatedAsyncioTestCase
 
@@ -131,6 +132,10 @@ app.dependency_overrides[get_inference_processor] = get_settings_override
 
 class Test_TestInferenceService(unittest.TestCase):
     def setUp(self):
+        warnings.simplefilter("ignore", category=ImportWarning)
+        warnings.simplefilter("ignore", category=DeprecationWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+        warnings.simplefilter("ignore", category=UserWarning)
         self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
         self.frame_field_ds = self.get_frame_field_ds()
 
