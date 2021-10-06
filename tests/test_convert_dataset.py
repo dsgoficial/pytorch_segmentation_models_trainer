@@ -23,6 +23,8 @@
 import os
 import unittest
 import warnings
+from hydra import compose, initialize
+import hydra
 
 import pandas as pd
 from parameterized import parameterized
@@ -37,12 +39,13 @@ from pytorch_segmentation_models_trainer.utils.os_utils import (
     create_folder,
     remove_folder,
 )
+from pytorch_segmentation_models_trainer.convert_ds import convert_dataset
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, "testing_data")
 detection_root_dir = os.path.join(root_dir, "data", "detection_data")
 convert_dataset_dir = os.path.join(
-    current_dir, "testing_data", "expected_outputs", "dataset", "convert_dataset"
+    current_dir, "testing_data", "expected_outputs", "convert_dataset"
 )
 
 
@@ -64,19 +67,17 @@ class Test_TestConvertDataset(unittest.TestCase):
         csv_path = os.path.join(
             detection_root_dir, "geo", "dsg_dataset_with_polygons.csv"
         )
-        conversion_processor = ConversionProcessor(
-            input_dataset=InstanceSegmentationDataset(
-                input_csv_path=csv_path,
-                root_dir=os.path.dirname(csv_path),
-                keypoint_key="polygon_lists",
-            ),
-            conversion_strategy=PolygonRNNDatasetConversionStrategy(
-                output_dir=self.output_dir,
-                output_file_name="polygonrnn_dataset",
-                simultaneous_tasks=1,
-            ),
-        )
-        conversion_processor.process()
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="convert_dataset.yaml",
+                overrides=[
+                    f"input_dataset.input_csv_path={csv_path}",
+                    f"input_dataset.root_dir={os.path.dirname(csv_path)}",
+                    f"conversion_strategy.output_dir={self.output_dir}",
+                    f"conversion_strategy.simultaneous_tasks={os.cpu_count()}",
+                ],
+            )
+            convert_dataset(cfg)
         expected_df = pd.read_csv(
             os.path.join(convert_dataset_dir, "polygonrnn_dataset.csv")
         ).sort_values("image")

@@ -24,6 +24,7 @@ import json
 import os
 from typing import Dict, List
 import numpy as np
+from copy import deepcopy
 from pathlib import Path
 from PIL import Image
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     InstanceSegmentationDataset,
 )
 from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import (
+    Executor,
     ProcessPoolExecutor,
 )
 from pytorch_segmentation_models_trainer.utils.os_utils import create_folder
@@ -65,41 +67,52 @@ class PolygonRNNDatasetConversionStrategy(AbstractConversionStrategy):
         self.output_polygons_folder = create_folder(
             os.path.join(self.output_dir, self.output_polygons_folder)
         )
+        self.output_file_name = os.path.join(
+            self.output_dir, f"{self.output_file_name}.csv"
+        )
 
     def convert(self, input_dataset: AbstractDataset):
         if not isinstance(input_dataset, InstanceSegmentationDataset):
             raise TypeError(
                 "input_dataset must be an instance of InstanceSegmentationDataset"
             )
-        lambda_func = lambda x: self._convert_single(x, input_dataset)
-        executor = ProcessPoolExecutor(
+
+        lambda_func = lambda x: self._convert_single(x[0], x[1])
+        executor = Executor(
             compute_func=lambda_func, simultaneous_tasks=self.simultaneous_tasks
         )
         ds_len = len(input_dataset)
         output = (
-            executor.execute_tasks(range(ds_len), ds_len)
+            executor.execute_tasks(self._build_generator(input_dataset), ds_len)
             if self.simultaneous_tasks > 1
-            else [lambda_func(i) for i in range(ds_len)]
+            else [self._convert_single(i) for i in self._build_generator(input_dataset)]
         )
         # output is a list of lists, so we have to flatten it using itertools.chain
         self._write_output_ds(itertools.chain(*output))
 
-    def _convert_single(self, idx: int, input_dataset: AbstractDataset) -> List[Dict]:
+    def _build_generator(self, input_dataset: AbstractDataset):
+        return (
+            (
+                input_dataset.get_path(idx),
+                input_dataset.get_path(idx, key=input_dataset.keypoint_key),
+            )
+            for idx in range(len(input_dataset))
+        )
+
+    def _convert_single(self, image_path: str, json_path: str) -> List[Dict]:
         """[summary]
 
         Args:
-            idx (int): index of the dataset entry
-            input_dataset (AbstractDataset): input dataset to convert
+            idx (int): [description]
+            image_path (str): [description]
+            json_path (str): [description]
 
         Returns:
-            List[Dict]: List of dictionaries with the converted dataset entry, in the format
-            {"image": image_path, "mask": mask_path}
+            List[Dict]: [description]
         """
-        image = Image.open(input_dataset.get_path(idx))
-        json_object = json.load(
-            open(input_dataset.get_path(idx, key=input_dataset.keypoint_key))
-        )
-        image_name = Path(input_dataset.get_path(idx)).stem
+        image = Image.open(image_path)
+        json_object = json.load(open(json_path))
+        image_name = Path(image_path).stem
         output_image_folder = create_folder(
             os.path.join(self.output_images_folder, image_name)
         )
@@ -209,8 +222,7 @@ class PolygonRNNDatasetConversionStrategy(AbstractConversionStrategy):
     def _write_output_ds(self, output_list: list):
         with open(self.output_file_name, "w") as data_file:
             csv_writer = csv.writer(data_file)
-            for i, result in enumerate(output_list):
-                data = dataclasses.asdict(result)
+            for i, data in enumerate(output_list):
                 if i == 0:
                     # writes header
                     csv_writer.writerow(data.keys())

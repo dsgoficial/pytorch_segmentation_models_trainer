@@ -1,3 +1,7 @@
+# Version 0.13.0
+
+- Dataset conversion added. It is possible to convert between some formats of dataset;
+
 # Version 0.12.1
 
 - Bug fixes on mask building;

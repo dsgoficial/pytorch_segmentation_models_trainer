@@ -25,6 +25,7 @@ from pytorch_segmentation_models_trainer.predict import predict
 from pytorch_segmentation_models_trainer.train import train
 from pytorch_segmentation_models_trainer.build_mask import build_masks
 from pytorch_segmentation_models_trainer.config_utils import validate_config
+from pytorch_segmentation_models_trainer.convert_ds import convert_dataset
 
 
 @hydra.main(config_path="conf")
@@ -37,6 +38,8 @@ def main(cfg: DictConfig):
         return validate_config(cfg)
     elif cfg.mode == "build-mask":
         return build_masks(cfg)
+    elif cfg.mode == "convert-dataset":
+        return convert_dataset(cfg)
     else:
         raise NotImplementedError
 
