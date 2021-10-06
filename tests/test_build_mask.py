@@ -223,7 +223,9 @@ class Test_TestBuildMask(unittest.TestCase):
         output_csv = os.path.join(self.output_dir, "dsg_dataset_merged.csv")
         merge_csv_datasets(ds_csv1, ds_csv2, "image", output_csv)
         expected_df = pd.read_csv(
-            os.path.join(root_dir, "expected_outputs", "build_masks", "dsg_dataset.csv")
+            os.path.join(
+                root_dir, "expected_outputs", "build_masks", "dsg_dataset_merged.csv"
+            )
         ).sort_values("image")
         output_df = pd.read_csv(output_csv).sort_values("image")
         pd.testing.assert_frame_equal(
