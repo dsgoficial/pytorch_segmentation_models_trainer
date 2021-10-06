@@ -24,6 +24,7 @@ import os
 import subprocess
 from pathlib import Path
 import unittest
+import warnings
 
 import hydra
 import pytorch_lightning as pl
@@ -70,6 +71,10 @@ pretrained_checkpoints_download_links = {
 
 class Test_TestPredict(unittest.TestCase):
     def setUp(self):
+        warnings.simplefilter("ignore", category=ImportWarning)
+        warnings.simplefilter("ignore", category=DeprecationWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+        warnings.simplefilter("ignore", category=UserWarning)
         self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
         self.output_vector_file = os.path.join(self.output_dir, "output.geojson")
         self.csv_ds_file = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
