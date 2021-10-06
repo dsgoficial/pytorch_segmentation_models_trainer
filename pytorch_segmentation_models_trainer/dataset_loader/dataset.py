@@ -42,6 +42,8 @@ from omegaconf import DictConfig, OmegaConf
 
 
 def load_augmentation_object(input_list, bbox_params=None):
+    if isinstance(input_list, A.Compose):
+        return input_list
     try:
         aug_list = [instantiate(i, _recursive_=False) for i in input_list]
     except:
@@ -571,10 +573,12 @@ class InstanceSegmentationDataset(ObjectDetectionDataset):
         image_key=None,
         mask_key=None,
         bounding_box_key=None,
+        keypoint_key=None,
         n_first_rows_to_read=None,
         bbox_format="xywh",
         bbox_output_format="xyxy",
         return_mask=True,
+        return_keypoints=False,
         bbox_params=None,
     ) -> None:
         mask_key = "polygon_mask" if mask_key is None else mask_key
@@ -592,6 +596,14 @@ class InstanceSegmentationDataset(ObjectDetectionDataset):
             bbox_params=bbox_params,
         )
         self.return_mask = return_mask
+        self.return_keypoints = return_keypoints
+        self.keypoint_key = "keypoints" if keypoint_key is None else keypoint_key
+
+    def load_keypoints(self, idx):
+        keypoints_path = self.get_path(idx, key=self.keypoint_key)
+        with open(keypoints_path, "r") as f:
+            json_file = json.load(f)
+        return torch.as_tensor(json_file[self.keypoint_key], dtype=torch.float32)
 
     def __getitem__(self, index) -> Dict[str, torch.Tensor]:
         image = self.load_image(
@@ -603,6 +615,8 @@ class InstanceSegmentationDataset(ObjectDetectionDataset):
             ds_item_dict["masks"] = [
                 self.load_image(index, key=self.mask_key, is_mask=True)
             ]
+        if self.return_keypoints:
+            ds_item_dict["keypoints"] = self.load_keypoints(index)
         if self.transform is not None:
             ds_item_dict = self.transform(**ds_item_dict)
         image = ds_item_dict.pop("image")
