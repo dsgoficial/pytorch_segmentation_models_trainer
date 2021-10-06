@@ -36,9 +36,10 @@ pl_trainer:
 train_dataset:
   _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
   input_csv_path: teste
+  n_first_rows_to_read: 2
   data_loader:
     shuffle: True
-    num_workers: 4
+    num_workers: 2
     pin_memory: True
     drop_last: True
     prefetch_factor: 2
@@ -66,9 +67,10 @@ train_dataset:
 val_dataset:
   _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
   input_csv_path: teste
+  n_first_rows_to_read: 2
   data_loader:
     shuffle: False
-    num_workers: 4
+    num_workers: 2
     pin_memory: True
     drop_last: True
     prefetch_factor: 2

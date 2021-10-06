@@ -31,9 +31,10 @@ train_dataset:
   input_csv_path: teste
   root_dir: teste
   sequence_length: 60
+  n_first_rows_to_read: 2
   data_loader:
     shuffle: True
-    num_workers: 4
+    num_workers: 2
     pin_memory: True
     drop_last: True
     prefetch_factor: 2
@@ -58,7 +59,7 @@ val_dataset:
   sequence_length: 60
   data_loader:
     shuffle: False
-    num_workers: 4
+    num_workers: 2
     pin_memory: True
     drop_last: True
     prefetch_factor: 2

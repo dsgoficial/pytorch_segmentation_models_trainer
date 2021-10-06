@@ -87,7 +87,7 @@ class ObjectDetectionPLModel(Model):
         # tensorboard_logs = {'acc': {'train': acc}}
         # self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         # return {'loss': loss, 'log': tensorboard_logs}
-        images, targets, image_ids = batch
+        images, targets = batch
         targets = [{k: v for k, v in t.items()} for t in targets]
         # separate losses
         loss_dict = self.model(images, targets)
@@ -101,7 +101,7 @@ class ObjectDetectionPLModel(Model):
         # tensorboard_logs = {'acc': {'val': acc}}
         # self.log('validation_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         # return {'val_loss': loss, 'log': tensorboard_logs}
-        images, targets, image_ids = batch
+        images, targets = batch
         outs = self.model(images)
         iou = torch.stack([_evaluate_iou(t, o) for t, o in zip(targets, outs)]).mean()
         return {"val_iou": iou}

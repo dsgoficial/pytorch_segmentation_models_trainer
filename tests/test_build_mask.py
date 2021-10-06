@@ -223,7 +223,9 @@ class Test_TestBuildMask(unittest.TestCase):
         output_csv = os.path.join(self.output_dir, "dsg_dataset_merged.csv")
         merge_csv_datasets(ds_csv1, ds_csv2, "image", output_csv)
         expected_df = pd.read_csv(
-            os.path.join(root_dir, "expected_outputs", "build_masks", "dsg_dataset.csv")
+            os.path.join(
+                root_dir, "expected_outputs", "build_masks", "dsg_dataset_merged.csv"
+            )
         ).sort_values("image")
         output_df = pd.read_csv(output_csv).sort_values("image")
         pd.testing.assert_frame_equal(
@@ -304,6 +306,36 @@ class Test_TestBuildMask(unittest.TestCase):
             csv_output = build_masks(cfg)
         expected_df = pd.read_csv(
             os.path.join(expected_output_path, "dsg_dataset_with_bboxes.csv")
+        ).sort_values("image")
+        output_df = pd.read_csv(csv_output).sort_values("image")
+        pd.testing.assert_frame_equal(
+            expected_df.reset_index(drop=True), output_df.reset_index(drop=True)
+        )
+
+    def test_build_masks_with_polygons(self):
+        with initialize(config_path="./test_configs"):
+            image_dir = os.path.join(root_dir, "data", "build_masks_data", "images")
+            expected_output_path = os.path.join(
+                root_dir, "expected_outputs", "build_masks"
+            )
+            cfg = compose(
+                config_name="build_mask.yaml",
+                overrides=[
+                    "mask_builder.root_dir=" + self.output_dir,
+                    "mask_builder.output_csv_path=" + self.output_dir,
+                    "mask_builder.image_root_dir=" + image_dir,
+                    "mask_builder.build_crossfield_mask=False",
+                    "mask_builder.geo_df.file_name="
+                    + os.path.join(
+                        root_dir, "data", "build_masks_data", "buildings.geojson"
+                    ),
+                    "+mask_builder.build_polygon_list=True",
+                ],
+            )
+            print(cfg)
+            csv_output = build_masks(cfg)
+        expected_df = pd.read_csv(
+            os.path.join(expected_output_path, "dsg_dataset_with_polygons.csv")
         ).sort_values("image")
         output_df = pd.read_csv(csv_output).sort_values("image")
         pd.testing.assert_frame_equal(

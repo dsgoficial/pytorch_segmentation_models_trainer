@@ -1,3 +1,9 @@
+# Version 0.12.1
+
+- Bug fixes on mask building;
+- Bug fixes on detection model training.
+- New mode on build masks;
+
 # Version 0.12.0
 
 - Minor improvements on polygonization methods;

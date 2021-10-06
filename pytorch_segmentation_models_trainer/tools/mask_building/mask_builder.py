@@ -108,6 +108,20 @@ def build_output_raster_list(input_raster_path: str, cfg: DictConfig) -> List[st
                 )
             )
         )
+    if getattr(cfg, "build_polygon_list"):
+        output_list.append(
+            str(
+                os.path.join(
+                    getattr(cfg, "polygon_list_folder_name"),
+                    os.path.dirname(
+                        os.path.normpath(
+                            str(input_raster_path).split(f"{image_dir_name}/")[-1]
+                        )
+                    ),
+                )
+            )
+        )
+
     return output_list
 
 
@@ -211,6 +225,8 @@ class TemplateMaskBuilder(ABC):
     size_mask_folder_name: str = "size_masks"
     build_bounding_box_list: bool = False
     bounding_box_list_folder_name: str = "bounding_boxes"
+    build_polygon_list: bool = False
+    polygon_list_folder_name: str = "polygon_lists"
     min_polygon_area: float = 50.0
     mask_output_extension: str = "png"
 
@@ -245,6 +261,11 @@ class TemplateMaskBuilder(ABC):
             if mask_key == "bounding_boxes":
                 args_dict["bounding_boxes"] = lambda_func(
                     [file_path, getattr(self, "bounding_box_list_folder_name")]
+                )
+                continue
+            if mask_key == "polygon_lists":
+                args_dict["polygon_lists"] = lambda_func(
+                    [file_path, getattr(self, "polygon_list_folder_name")]
                 )
                 continue
             arg_name = mask_key.split("_")[0] + "_mask"
@@ -311,6 +332,15 @@ class TemplateMaskBuilder(ABC):
                 build_destination_dirs(
                     input_base_path=input_base_path, output_base_path=output_base_path
                 )
+        if self.build_polygon_list:
+            output_base_path = str(
+                os.path.join(self.root_dir, self.polygon_list_folder_name)
+            )
+            dir_dict[self.polygon_list_folder_name] = output_base_path
+            if self.replicate_image_folder_structure:
+                build_destination_dirs(
+                    input_base_path=input_base_path, output_base_path=output_base_path
+                )
         return dir_dict
 
     def build_generator(self):
@@ -355,6 +385,7 @@ class TemplateMaskBuilder(ABC):
             compute_distances=self.build_distance_mask,
             compute_sizes=self.build_size_mask,
             compute_bbox=self.build_bounding_box_list,
+            compute_polygons=self.build_polygon_list,
         )
         ds_entry = self.build_dataset_entry(
             input_raster_path=input_raster_path,
