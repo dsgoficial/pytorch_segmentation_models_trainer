@@ -174,6 +174,6 @@ class Test_TestInferenceService(unittest.TestCase):
     )
     def test_inference_from_service(self, polygonizer) -> None:
         file_path = self.frame_field_ds[0]["path"]
-        response = client.get(f"/polygonize/?file_path={file_path}", json=polygonizer)
+        response = client.post(f"/polygonize/?file_path={file_path}", json=polygonizer)
         self.assertEqual(response.status_code, 200)
         self.assertGreater(len(response.json()["features"]), 0)
