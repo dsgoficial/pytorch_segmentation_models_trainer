@@ -59,9 +59,8 @@ loss_params:
     sigma: 10.0
 
 optimizer:
-  _target_: torch.optim.AdamW
+  _target_: torch.optim.Adam
   lr: 0.0001
-  weight_decay: 1e-4
 
 metrics:
   - _target_: torchmetrics.Accuracy
