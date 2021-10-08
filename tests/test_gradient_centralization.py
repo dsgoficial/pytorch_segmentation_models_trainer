@@ -42,27 +42,32 @@ from tests.utils import CustomTestCase
 gradient_centralization_list = [
     (
         [
-            "optimizer._target_=pytorch_segmentation_models_trainer.optimizers.gradient_centralization.Adam"
+            "optimizer._target_=pytorch_segmentation_models_trainer.optimizers.gradient_centralization.Adam",
+            "+optimizer.use_gc=True",
         ],
     ),
     (
         [
-            "optimizer._target_=pytorch_segmentation_models_trainer.optimizers.gradient_centralization.AdamW"
+            "optimizer._target_=pytorch_segmentation_models_trainer.optimizers.gradient_centralization.AdamW",
+            "+optimizer.use_gc=True",
         ],
     ),
     (
         [
-            "optimizer._target_=pytorch_segmentation_models_trainer.optimizers.gradient_centralization.RAdam"
+            "optimizer._target_=pytorch_segmentation_models_trainer.optimizers.gradient_centralization.RAdam",
+            "+optimizer.use_gc=True",
         ],
     ),
     (
         [
-            "optimizer._target_=pytorch_segmentation_models_trainer.optimizers.gradient_centralization.PlainRAdam"
+            "optimizer._target_=pytorch_segmentation_models_trainer.optimizers.gradient_centralization.PlainRAdam",
+            "+optimizer.use_gc=True",
         ],
     ),
     (
         [
-            "optimizer._target_=pytorch_segmentation_models_trainer.optimizers.gradient_centralization.SGD"
+            "optimizer._target_=pytorch_segmentation_models_trainer.optimizers.gradient_centralization.SGD",
+            "+optimizer.use_gc=True",
         ],
     ),
 ]
