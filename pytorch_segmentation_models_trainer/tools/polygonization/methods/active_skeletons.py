@@ -53,12 +53,13 @@ from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor
     tensorskeleton_to_skeletons,
 )
 from pytorch_segmentation_models_trainer.tools.polygonization import polygonize_utils
+from omegaconf.listconfig import ListConfig
 
 logger = logging.getLogger(__name__)
 
 
 def shapely_postprocess(polylines, np_indicator, tolerance, config):
-    if isinstance(tolerance, list):
+    if isinstance(tolerance, (list, ListConfig)):
         # Use several tolerance values for simplification. return a dict with all results
         out_polygons_dict, out_probs_dict = {}, {}
         for tol in tolerance:
