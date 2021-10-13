@@ -1,6 +1,7 @@
 # Version 0.13.0
 
 - Dataset conversion added. It is possible to convert between some formats of dataset;
+- Tversky Loss and Focal Tversky Loss added;
 
 # Version 0.12.1
 
