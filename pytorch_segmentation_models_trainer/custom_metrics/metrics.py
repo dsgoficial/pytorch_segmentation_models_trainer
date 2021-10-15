@@ -55,7 +55,7 @@ def tversky_loss(y_pred, y_true, alpha, beta, smooth=0, eps=1e-6):
     true_pos = torch.sum(y_pred * y_true, dim=(-1, -2))
     false_neg = torch.sum(y_true * (1 - y_pred), dim=(-1, -2))
     false_pos = torch.sum((1 - y_true) * y_pred, dim=(-1, -2))
-    return (true_pos + smooth) / (
+    return (true_pos + smooth + eps) / (
         smooth + true_pos + alpha * false_pos + beta * false_neg + eps
     )
 
