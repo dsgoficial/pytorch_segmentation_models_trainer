@@ -36,7 +36,7 @@ import logging
 from hydra.utils import instantiate
 
 from pytorch_segmentation_models_trainer.utils import math_utils
-from pytorch_segmentation_models_trainer.custom_metrics import metrics
+from pytorch_segmentation_models_trainer.custom_losses import loss
 from pytorch_segmentation_models_trainer.utils import frame_field_utils
 from pytorch_segmentation_models_trainer.utils.tensor_utils import SpatialGradient
 
@@ -240,13 +240,13 @@ class SegLoss(Loss):
             pred_seg, gt_seg, weight=weights, reduction="mean"
         )
 
-        dice = metrics.dice_loss(pred_seg, gt_seg)
+        dice = loss.dice_loss(pred_seg, gt_seg)
         mean_dice = torch.mean(dice)
 
         focal_tversky = (
             0
             if self.tversky_focal_coef == 0
-            else metrics.focal_tversky_loss(
+            else loss.focal_tversky_loss(
                 pred_seg, gt_seg, gamma=0.25, alpha=0.01, beta=0.99
             )
         )

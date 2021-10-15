@@ -2,6 +2,9 @@
 
 - Dataset conversion added. It is possible to convert between some formats of dataset;
 - Tversky Loss and Focal Tversky Loss added;
+- LabelSmoothingLoss added;
+- MixUpAugmentationLoss added;
+- KnowledgeDistillationLoss added;
 
 # Version 0.12.1
 

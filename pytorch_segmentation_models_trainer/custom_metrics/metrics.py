@@ -35,38 +35,3 @@ def iou(y_pred, y_true, threshold):
     r = intersection.float() / union.float()
     r[union == 0] = 1
     return r
-
-
-def dice_loss(y_pred, y_true, smooth=1, eps=1e-7):
-    """
-
-    @param y_pred: (N, C, H, W)
-    @param y_true: (N, C, H, W)
-    @param smooth:
-    @param eps:
-    @return: (N, C)
-    """
-    numerator = 2 * torch.sum(y_true * y_pred, dim=(-1, -2))
-    denominator = torch.sum(y_true, dim=(-1, -2)) + torch.sum(y_pred, dim=(-1, -2))
-    return 1 - (numerator + smooth) / (denominator + smooth + eps)
-
-
-def tversky_loss(y_pred, y_true, alpha, beta, smooth=0, eps=1e-6):
-    true_pos = torch.sum(y_pred * y_true, dim=(-1, -2))
-    false_neg = torch.sum(y_true * (1 - y_pred), dim=(-1, -2))
-    false_pos = torch.sum((1 - y_true) * y_pred, dim=(-1, -2))
-    return (true_pos + smooth + eps) / (
-        smooth + true_pos + alpha * false_pos + beta * false_neg + eps
-    )
-
-
-def focal_tversky_loss(y_pred, y_true, gamma=0.25, alpha=0.01, beta=0.99):
-    """
-    @param y_pred: (N, C, H, W)
-    @param y_true: (N, C, H, W)
-    @param gamma:
-    @param alpha:
-    @return: (N, C)
-    """
-    t_loss = tversky_loss(y_pred, y_true, alpha, beta)
-    return torch.pow(1 - t_loss, gamma)
