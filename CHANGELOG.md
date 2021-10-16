@@ -5,6 +5,7 @@
 - LabelSmoothingLoss added;
 - MixUpAugmentationLoss added;
 - KnowledgeDistillationLoss added;
+- Mixup augmentation added to Frame Field Model;
 
 # Version 0.12.1
 

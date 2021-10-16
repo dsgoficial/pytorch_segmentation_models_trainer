@@ -202,6 +202,10 @@ class SegLoss(Loss):
         dice_coef: float = 0.5,
         tversky_focal_coef: float = 0,
         use_mixed_precision: bool = False,
+        use_mixup: bool = False,
+        mixup_alpha: float = 0.5,
+        use_label_smooth: bool = False,
+        smooth_factor: float = 0.1,
     ):
         """
         :param name:
@@ -214,6 +218,20 @@ class SegLoss(Loss):
         self.dice_coef = dice_coef
         self.tversky_focal_coef = tversky_focal_coef
         self.use_mixed_precision = use_mixed_precision
+        self.use_mixup = use_mixup
+        self.use_label_smooth = use_label_smooth
+        self.smooth_factor = smooth_factor
+        self.cross_entropy_func = (
+            F.binary_cross_entropy
+            if not self.use_mixed_precision
+            else F.binary_cross_entropy_with_logits
+        )
+        if use_label_smooth:
+            self.cross_entropy_func = loss.smooth_cross_entropy_loss
+        if use_mixup:
+            self.mixup_func = loss.MixUpAugmentationLoss(
+                self.cross_entropy_func, mixup_alpha
+            )
 
     def compute(self, pred_batch: torch.Tensor, gt_batch: torch.Tensor):
         """
@@ -229,15 +247,19 @@ class SegLoss(Loss):
         pred_seg = pred_batch["seg"]
         gt_seg = gt_batch["gt_polygons_image"][:, self.gt_channel_selector, ...]
         weights = gt_batch["seg_loss_weights"][:, self.gt_channel_selector, ...]
-        # if mixed precision is used, the right function is binary_cross_entropy_with_logits
-        # because it can handle operations with fp16 and fp32
-        cross_entropy_func = (
-            F.binary_cross_entropy
-            if not self.use_mixed_precision
-            else F.binary_cross_entropy_with_logits
-        )
-        mean_cross_entropy = cross_entropy_func(
-            pred_seg, gt_seg, weight=weights, reduction="mean"
+        mean_cross_entropy = (
+            self.cross_entropy_func(pred_seg, gt_seg, weight=weights, reduction="mean")
+            if not self.use_mixup
+            else self.mixup_func(
+                input=gt_batch["mixup_pred"],
+                target=(
+                    gt_batch["mixup_y_a"],
+                    gt_batch["mixup_y_b"],
+                    gt_batch["mixup_lam"],
+                ),
+                weight=weights,
+                reduction="mean",
+            )
         )
 
         dice = loss.dice_loss(pred_seg, gt_seg)

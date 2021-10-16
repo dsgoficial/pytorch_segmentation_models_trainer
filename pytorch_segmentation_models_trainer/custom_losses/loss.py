@@ -25,7 +25,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-
+from torch.nn.modules.loss import _WeightedLoss
 
 # Based on https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py
 class KnowledgeDistillationLoss(nn.Module):
@@ -80,6 +80,53 @@ class LabelSmoothingLoss(nn.Module):
             # Fill correct class for each sample in the batch with 1 - epsilon
             true_dist.scatter_(1, target.data.unsqueeze(1), self.confidence)
         return torch.mean(torch.sum(-true_dist * output, dim=self.dim))
+
+
+# source: https://stackoverflow.com/questions/55681502/label-smoothing-in-pytorch
+class SmoothCrossEntropyLoss(_WeightedLoss):
+    def __init__(self, weight=None, reduction="mean", smoothing=0.0):
+        super().__init__(weight=weight, reduction=reduction)
+        self.smoothing = smoothing
+        self.weight = weight
+        self.reduction = reduction
+
+    def k_one_hot(self, targets: torch.Tensor, n_classes: int, smoothing=0.0):
+        with torch.no_grad():
+            targets = (
+                torch.empty(size=(targets.size(0), n_classes), device=targets.device)
+                .fill_(smoothing / (n_classes - 1))
+                .scatter_(1, targets.data.unsqueeze(1), 1.0 - smoothing)
+            )
+        return targets
+
+    def reduce_loss(self, loss):
+        return (
+            loss.mean()
+            if self.reduction == "mean"
+            else loss.sum()
+            if self.reduction == "sum"
+            else loss
+        )
+
+    def forward(self, inputs, targets):
+        assert 0 <= self.smoothing < 1
+
+        targets = self.k_one_hot(targets, inputs.size(-1), self.smoothing)
+        log_preds = F.log_softmax(inputs, -1)
+
+        if self.weight is not None:
+            log_preds = log_preds * self.weight.unsqueeze(0)
+
+        return self.reduce_loss(-(targets * log_preds).sum(dim=-1))
+
+
+def smooth_cross_entropy_loss(
+    pred, target, weight=None, reduction="mean", smoothing=0.0
+):
+    assert 0 <= smoothing < 1
+    return SmoothCrossEntropyLoss(
+        weight=weight, reduction=reduction, smoothing=smoothing
+    )(pred, target)
 
 
 def mixup_data(x, y, alpha=1.0, use_cuda=True):
