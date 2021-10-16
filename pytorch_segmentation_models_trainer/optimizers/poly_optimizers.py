@@ -31,6 +31,7 @@ from pytorch_segmentation_models_trainer.utils.math_utils import bilinear_interp
 from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor_tools import (
     TensorSkeleton,
 )
+from pytorch_segmentation_models_trainer.optimizers import gradient_centralization
 
 
 class TensorPolyOptimizer:
@@ -70,7 +71,10 @@ class TensorPolyOptimizer:
             dist=dist,
             dist_coef=dist_coef,
         )
-        self.optimizer = torch.optim.SGD([tensorpoly.pos], lr=config.poly_lr)
+        # self.optimizer = torch.optim.SGD([tensorpoly.pos], lr=config.poly_lr)
+        self.optimizer = gradient_centralization.SGD(
+            [tensorpoly.pos], lr=config.poly_lr, use_gc=True
+        )
 
         def lr_warmup_func(iter):
             return (
@@ -236,8 +240,8 @@ class TensorSkeletonOptimizer:
         self.criterion = AlignLoss(
             self.tensorskeleton, indicator, level, c0c2, config.loss_params
         )
-        self.optimizer = torch.optim.RMSprop(
-            [tensorskeleton.pos], lr=config.lr, alpha=0.9
+        self.optimizer = gradient_centralization.Adam(
+            [tensorskeleton.pos], lr=config.lr, use_gc=True
         )
         self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
             self.optimizer, config.gamma

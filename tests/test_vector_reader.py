@@ -22,6 +22,7 @@
 import os
 import unittest
 from pathlib import Path
+import warnings
 
 import geopandas
 from geopandas.testing import geom_equals, geom_almost_equals
@@ -53,6 +54,12 @@ test_list = [
 
 
 class Test_TestVectorReader(unittest.TestCase):
+    def setUp(self):
+        warnings.simplefilter("ignore", category=ImportWarning)
+        warnings.simplefilter("ignore", category=DeprecationWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+        warnings.simplefilter("ignore", category=UserWarning)
+
     @parameterized.expand(test_list)
     def test_instantiate_object(self, obj_class, params) -> None:
         obj = obj_class(**params)

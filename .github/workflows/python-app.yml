@@ -22,6 +22,9 @@ jobs:
       uses: actions/setup-python@v2
       with:
         python-version: 3.8
+    - uses: satackey/action-docker-layer-caching@v0.0.11
+      # Ignore the failure of a step and avoid terminating the job.
+      continue-on-error: true
     - uses: huaxk/postgis-action@v1
       with:
         postgresql version: 'latest'
@@ -52,6 +55,24 @@ jobs:
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    - name: Cache downloaded models
+      uses: actions/cache@v2
+      id: cache
+      with:
+        path: ~/.cache
+        key: ${{ runner.os }}-cache
+    - name: Cache downloaded models2
+      uses: actions/cache@v2
+      id: cache2
+      with:
+        path: ~/work/pytorch_segmentation_models_trainer/pytorch_segmentation_models_trainer/pytorch_segmentation_models_trainer/custom_models/pretrained/
+        key: ${{ runner.os }}-cache2
+    - name: Cache test checkpoints
+      uses: actions/cache@v2
+      id: test-cache
+      with:
+        path: ~/work/pytorch_segmentation_models_trainer/pytorch_segmentation_models_trainer/tests/testing_data/data/checkpoints/
+        key: ${{ runner.os }}-test-cache
     - name: Test with unittest
       run: |
         coverage run --source pytorch_segmentation_models_trainer --omit pytorch_segmentation_models_trainer/custom_models/sync_bn/* -m unittest discover -p 'test_*.py'

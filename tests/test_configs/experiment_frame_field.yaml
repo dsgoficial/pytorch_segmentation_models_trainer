@@ -59,9 +59,8 @@ loss_params:
     sigma: 10.0
 
 optimizer:
-  _target_: torch.optim.AdamW
+  _target_: torch.optim.Adam
   lr: 0.0001
-  weight_decay: 1e-4
 
 metrics:
   - _target_: torchmetrics.Accuracy
@@ -114,6 +113,7 @@ val_dataset:
   _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.FrameFieldSegmentationDataset
   input_csv_path: teste
   root_dir: teste
+  n_first_rows_to_read: 2
   data_loader:
     shuffle: False
     num_workers: 2

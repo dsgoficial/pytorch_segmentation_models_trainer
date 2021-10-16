@@ -22,6 +22,7 @@
 import os
 from pathlib import Path
 import unittest
+import warnings
 
 import albumentations as A
 import hydra
@@ -77,6 +78,10 @@ pretrained_checkpoints_download_links = {
 
 class Test_TestInference(unittest.TestCase):
     def setUp(self):
+        warnings.simplefilter("ignore", category=ImportWarning)
+        warnings.simplefilter("ignore", category=DeprecationWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+        warnings.simplefilter("ignore", category=UserWarning)
         self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
         self.frame_field_ds = self.get_frame_field_ds()
         with rasterio.open(self.frame_field_ds[0]["path"], "r") as raster_ds:

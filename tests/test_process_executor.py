@@ -26,6 +26,7 @@ import unittest
 
 from collections.abc import Iterable
 from pathlib import Path
+import warnings
 from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import (
     Executor,
 )
@@ -46,6 +47,10 @@ def copy_file(filepath, destination_folder):
 
 class Test_TestProcessExecutor(unittest.TestCase):
     def setUp(self):
+        warnings.simplefilter("ignore", category=ImportWarning)
+        warnings.simplefilter("ignore", category=DeprecationWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+        warnings.simplefilter("ignore", category=UserWarning)
         self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
         create_folder(self.output_dir)
 

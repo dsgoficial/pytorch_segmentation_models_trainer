@@ -22,6 +22,7 @@
 import os
 import unittest
 from pathlib import Path
+import warnings
 
 # from unittest import IsolatedAsyncioTestCase
 
@@ -131,6 +132,10 @@ app.dependency_overrides[get_inference_processor] = get_settings_override
 
 class Test_TestInferenceService(unittest.TestCase):
     def setUp(self):
+        warnings.simplefilter("ignore", category=ImportWarning)
+        warnings.simplefilter("ignore", category=DeprecationWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+        warnings.simplefilter("ignore", category=UserWarning)
         self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
         self.frame_field_ds = self.get_frame_field_ds()
 
@@ -169,6 +174,6 @@ class Test_TestInferenceService(unittest.TestCase):
     )
     def test_inference_from_service(self, polygonizer) -> None:
         file_path = self.frame_field_ds[0]["path"]
-        response = client.get(f"/polygonize/?file_path={file_path}", json=polygonizer)
+        response = client.post(f"/polygonize/?file_path={file_path}", json=polygonizer)
         self.assertEqual(response.status_code, 200)
         self.assertGreater(len(response.json()["features"]), 0)

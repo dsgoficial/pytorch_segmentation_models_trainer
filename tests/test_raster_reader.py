@@ -21,6 +21,7 @@
 """
 import os
 import unittest
+import warnings
 
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader import (
@@ -87,6 +88,10 @@ expected_image_list = [
 
 class Test_TestRasterReader(unittest.TestCase):
     def setUp(self):
+        warnings.simplefilter("ignore", category=ImportWarning)
+        warnings.simplefilter("ignore", category=DeprecationWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+        warnings.simplefilter("ignore", category=UserWarning)
         self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
         create_folder(os.path.join(root_dir, "test_output", "mask"))
         create_folder(os.path.join(root_dir, "test_output", "boundary_mask"))

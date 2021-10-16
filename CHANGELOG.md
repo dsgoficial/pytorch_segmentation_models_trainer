@@ -1,3 +1,12 @@
+# Version 0.13.0
+
+- Dataset conversion added. It is possible to convert between some formats of dataset;
+- Tversky Loss and Focal Tversky Loss added;
+- LabelSmoothingLoss added;
+- MixUpAugmentationLoss added;
+- KnowledgeDistillationLoss added;
+- Mixup augmentation added to Frame Field Model;
+
 # Version 0.12.1
 
 - Bug fixes on mask building;

@@ -27,6 +27,7 @@ import torch.nn as nn
 import segmentation_models_pytorch as smp
 from hydra.utils import instantiate
 from omegaconf.dictconfig import DictConfig
+from pytorch_segmentation_models_trainer.custom_losses.loss import mixup_data
 from pytorch_segmentation_models_trainer.custom_losses.base_loss import (
     MultiLoss,
     build_combined_loss,
@@ -233,6 +234,12 @@ class FrameFieldSegmentationPLModel(Model):
     def __init__(self, cfg):
         super(FrameFieldSegmentationPLModel, self).__init__(cfg)
         self.loss_norm_is_initializated = False
+        self.use_mixup = (
+            False if "use_mixup" not in cfg.pl_model else cfg.pl_model.use_mixup
+        )
+        self.mixup_alpha = (
+            self.cfg.pl_trainer.mixup_alpha if "mixup_alpha" in cfg.pl_trainer else -1
+        )
 
     def get_loss_function(self) -> MultiLoss:
         """Multi-loss model defined in frame field article
@@ -325,6 +332,11 @@ class FrameFieldSegmentationPLModel(Model):
             else self.gpu_train_transform(batch["image"])
         )
         pred = self.model(batch["image"])
+        if self.use_mixup:
+            batch["mixup_image"], batch["mixup_y_a"], batch["mixup_y_b"], batch[
+                "mixup_lam"
+            ] = mixup_data(batch["image"], batch["seg"], self.mixup_alpha)
+            batch["mixup_pred"] = self.model(batch["mixed_image"])
         loss, individual_metrics_dict, extra_dict = self.loss_function(
             pred, batch, epoch=self.current_epoch
         )

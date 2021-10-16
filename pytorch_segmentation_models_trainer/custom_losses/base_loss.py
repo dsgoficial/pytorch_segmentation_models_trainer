@@ -23,6 +23,7 @@
 
 import math
 from functools import partial
+from typing import List, Union
 
 import scipy.interpolate
 import numpy as np
@@ -32,8 +33,10 @@ import torch.distributed
 from torch.nn import functional as F
 import logging
 
+from hydra.utils import instantiate
+
 from pytorch_segmentation_models_trainer.utils import math_utils
-from pytorch_segmentation_models_trainer.custom_metrics import metrics
+from pytorch_segmentation_models_trainer.custom_losses import loss
 from pytorch_segmentation_models_trainer.utils import frame_field_utils
 from pytorch_segmentation_models_trainer.utils.tensor_utils import SpatialGradient
 
@@ -193,11 +196,16 @@ class MultiLoss(torch.nn.Module):
 class SegLoss(Loss):
     def __init__(
         self,
-        name,
-        gt_channel_selector,
-        bce_coef=0.5,
-        dice_coef=0.5,
-        use_mixed_precision=False,
+        name: str,
+        gt_channel_selector: int,
+        bce_coef: float = 0.5,
+        dice_coef: float = 0.5,
+        tversky_focal_coef: float = 0,
+        use_mixed_precision: bool = False,
+        use_mixup: bool = False,
+        mixup_alpha: float = 0.5,
+        use_label_smooth: bool = False,
+        smooth_factor: float = 0.1,
     ):
         """
         :param name:
@@ -208,9 +216,24 @@ class SegLoss(Loss):
         self.gt_channel_selector = gt_channel_selector
         self.bce_coef = bce_coef
         self.dice_coef = dice_coef
+        self.tversky_focal_coef = tversky_focal_coef
         self.use_mixed_precision = use_mixed_precision
+        self.use_mixup = use_mixup
+        self.use_label_smooth = use_label_smooth
+        self.smooth_factor = smooth_factor
+        self.cross_entropy_func = (
+            F.binary_cross_entropy
+            if not self.use_mixed_precision
+            else F.binary_cross_entropy_with_logits
+        )
+        if use_label_smooth:
+            self.cross_entropy_func = loss.smooth_cross_entropy_loss
+        if use_mixup:
+            self.mixup_func = loss.MixUpAugmentationLoss(
+                self.cross_entropy_func, mixup_alpha
+            )
 
-    def compute(self, pred_batch, gt_batch):
+    def compute(self, pred_batch: torch.Tensor, gt_batch: torch.Tensor):
         """
         seg and gt_polygons_image do not necessarily have the same channel count.
         gt_selector is used to select which channels of gt_polygons_image to use.
@@ -224,19 +247,37 @@ class SegLoss(Loss):
         pred_seg = pred_batch["seg"]
         gt_seg = gt_batch["gt_polygons_image"][:, self.gt_channel_selector, ...]
         weights = gt_batch["seg_loss_weights"][:, self.gt_channel_selector, ...]
-        dice = metrics.dice_loss(pred_seg, gt_seg)
+        mean_cross_entropy = (
+            self.cross_entropy_func(pred_seg, gt_seg, weight=weights, reduction="mean")
+            if not self.use_mixup
+            else self.mixup_func(
+                input=gt_batch["mixup_pred"],
+                target=(
+                    gt_batch["mixup_y_a"],
+                    gt_batch["mixup_y_b"],
+                    gt_batch["mixup_lam"],
+                ),
+                weight=weights,
+                reduction="mean",
+            )
+        )
+
+        dice = loss.dice_loss(pred_seg, gt_seg)
         mean_dice = torch.mean(dice)
-        # if mixed precision is used, the right function is binary_cross_entropy_with_logits
-        # because it can handle operations with fp16 and fp32
-        cross_entropy_func = (
-            F.binary_cross_entropy
-            if not self.use_mixed_precision
-            else F.binary_cross_entropy_with_logits
+
+        focal_tversky = (
+            0
+            if self.tversky_focal_coef == 0
+            else loss.focal_tversky_loss(
+                pred_seg, gt_seg, gamma=0.25, alpha=0.01, beta=0.99
+            )
         )
-        mean_cross_entropy = cross_entropy_func(
-            pred_seg, gt_seg, weight=weights, reduction="mean"
+        mean_focal = torch.mean(focal_tversky) if focal_tversky != 0 else 0
+        return (
+            self.bce_coef * mean_cross_entropy
+            + self.dice_coef * mean_dice
+            + self.tversky_focal_coef * mean_focal
         )
-        return self.bce_coef * mean_cross_entropy + self.dice_coef * mean_dice
 
 
 class CrossfieldAlignLoss(Loss):
@@ -450,6 +491,9 @@ def build_combined_loss(cfg):
                 gt_channel_selector=gt_channel_selector,
                 bce_coef=cfg.loss_params.seg_loss_params.bce_coef,
                 dice_coef=cfg.loss_params.seg_loss_params.dice_coef,
+                tversky_focal_coef=0
+                if "tversky_focal_coef" not in cfg.loss_params.seg_loss_params
+                else cfg.loss_params.seg_loss_params.tversky_focal_coef,
                 use_mixed_precision=True
                 if "precision" in cfg.pl_trainer and cfg.pl_trainer.precision == 16
                 else False,

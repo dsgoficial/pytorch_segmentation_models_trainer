@@ -31,11 +31,12 @@ class Executor:
         self.simultaneous_tasks = (
             os.cpu_count() if simultaneous_tasks is None else simultaneous_tasks
         )
+        self.executor_class = concurrent.futures.ThreadPoolExecutor
 
     def execute_tasks(self, tasks, n_tasks):
         result_list = []
         with tqdm(total=n_tasks) as pbar:
-            with concurrent.futures.ThreadPoolExecutor() as executor:
+            with self.executor_class() as executor:
                 # Schedule the first N futures.  We don't want to schedule them all
                 # at once, to avoid consuming excessive amounts of memory.
                 futures = {
@@ -57,3 +58,9 @@ class Executor:
                         fut = executor.submit(self.compute_func, task)
                         futures[fut] = task
         return result_list
+
+
+class ProcessPoolExecutor(Executor):
+    def __init__(self, compute_func, simultaneous_tasks=None) -> None:
+        super().__init__(compute_func, simultaneous_tasks)
+        self.executor_class = concurrent.futures.ProcessPoolExecutor

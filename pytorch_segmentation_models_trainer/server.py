@@ -69,7 +69,7 @@ app = FastAPI(
 )
 
 
-@app.get("/polygonize")
+@app.post("/polygonize/")
 async def get_polygons_from_image_path(
     file_path: str,
     inference_processor: Settings = Depends(get_inference_processor),

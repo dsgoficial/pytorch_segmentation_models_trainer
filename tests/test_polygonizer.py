@@ -22,6 +22,7 @@
 
 import os
 import unittest
+import warnings
 
 import geopandas
 import hydra
@@ -58,6 +59,10 @@ device = "cpu"
 
 class Test_TestPolygonize(unittest.TestCase):
     def setUp(self):
+        warnings.simplefilter("ignore", category=ImportWarning)
+        warnings.simplefilter("ignore", category=DeprecationWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+        warnings.simplefilter("ignore", category=UserWarning)
         self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
         self.frame_field_ds = self.get_frame_field_ds()
         with rasterio.open(self.frame_field_ds[0]["path"], "r") as raster_ds:
