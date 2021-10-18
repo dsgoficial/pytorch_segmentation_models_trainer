@@ -218,3 +218,56 @@ class Test_TestFrameFieldModel(CustomTestCase):
                 ],
             )
             trainer = train(cfg)
+
+    def test_train_frame_field_model_with_mixup(self) -> None:
+        csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
+        config_path = os.path.join(os.path.abspath(current_dir), "test_configs")
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_frame_field.yaml",
+                overrides=[
+                    "train_dataset.input_csv_path=" + csv_path,
+                    "train_dataset.root_dir=" + frame_field_root_dir,
+                    "val_dataset.input_csv_path=" + csv_path,
+                    "val_dataset.root_dir=" + frame_field_root_dir,
+                    "+pl_model.use_mixup=true",
+                    "+pl_model.mixup_alpha=0.5",
+                ],
+            )
+            trainer = train(cfg)
+
+    def test_train_frame_field_model_with_label_smoothing(self) -> None:
+        csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
+        config_path = os.path.join(os.path.abspath(current_dir), "test_configs")
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_frame_field.yaml",
+                overrides=[
+                    "train_dataset.input_csv_path=" + csv_path,
+                    "train_dataset.root_dir=" + frame_field_root_dir,
+                    "val_dataset.input_csv_path=" + csv_path,
+                    "val_dataset.root_dir=" + frame_field_root_dir,
+                    "+pl_model.use_label_smoothing=true",
+                    "+pl_model.smooth_factor=0.1",
+                ],
+            )
+            trainer = train(cfg)
+
+    def test_train_frame_field_model_with_mixup_and_label_smoothing(self) -> None:
+        csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
+        config_path = os.path.join(os.path.abspath(current_dir), "test_configs")
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_frame_field.yaml",
+                overrides=[
+                    "train_dataset.input_csv_path=" + csv_path,
+                    "train_dataset.root_dir=" + frame_field_root_dir,
+                    "val_dataset.input_csv_path=" + csv_path,
+                    "val_dataset.root_dir=" + frame_field_root_dir,
+                    "+pl_model.use_mixup=true",
+                    "+pl_model.mixup_alpha=0.5",
+                    "+pl_model.use_label_smoothing=true",
+                    "+pl_model.smooth_factor=0.1",
+                ],
+            )
+            trainer = train(cfg)
