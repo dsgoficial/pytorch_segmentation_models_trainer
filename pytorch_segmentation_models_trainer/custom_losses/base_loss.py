@@ -498,16 +498,16 @@ def build_combined_loss(cfg):
                 if "precision" in cfg.pl_trainer and cfg.pl_trainer.precision == 16
                 else False,
                 use_mixup=False
-                if "use_mixup" not in cfg.pl_trainer.use_mixup
+                if "use_mixup" not in cfg.pl_trainer
                 else cfg.pl_trainer.use_mixup,
                 mixup_alpha=0.5
-                if "mixup_alpha" not in cfg.pl_trainer.mixup_alpha
+                if "mixup_alpha" not in cfg.pl_trainer
                 else cfg.pl_trainer.mixup_alpha,
                 use_label_smooth=False
-                if "use_label_smoothing" not in cfg.pl_trainer.use_label_smoothing
+                if "use_label_smoothing" not in cfg.pl_trainer
                 else cfg.pl_trainer.use_label_smoothing,
                 smooth_factor=0.1
-                if "smooth_factor" not in cfg.pl_trainer.smooth_factor
+                if "smooth_factor" not in cfg.pl_trainer
                 else cfg.pl_trainer.smooth_factor,
             )
         )
