@@ -1,3 +1,7 @@
+# Version 0.13.1
+
+- Bug fixes on SegLoss parameters;
+
 # Version 0.13.0
 
 - Dataset conversion added. It is possible to convert between some formats of dataset;
