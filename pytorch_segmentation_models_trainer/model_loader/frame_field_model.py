@@ -339,7 +339,10 @@ class FrameFieldSegmentationPLModel(Model):
                 batch["mixup_y_b"],
                 batch["mixup_lam"],
             ) = mixup_data(
-                batch["image"], batch["gt_polygons_image"][:, 0, ...], self.mixup_alpha
+                batch["image"],
+                batch["gt_polygons_image"][:, 0, ...],
+                self.mixup_alpha,
+                use_cuda=False if self.cfg.device == "cpu" else True,
             )
             batch["mixup_pred"] = self.model(batch["mixup_image"])
         loss, individual_metrics_dict, extra_dict = self.loss_function(
