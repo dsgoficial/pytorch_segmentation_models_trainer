@@ -218,7 +218,7 @@ class Test_TestFrameFieldModel(CustomTestCase):
                 ],
             )
             trainer = train(cfg)
-    
+
     def test_train_frame_field_model_with_mixup(self) -> None:
         csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
         config_path = os.path.join(os.path.abspath(current_dir), "test_configs")
@@ -252,7 +252,7 @@ class Test_TestFrameFieldModel(CustomTestCase):
                 ],
             )
             trainer = train(cfg)
-    
+
     def test_train_frame_field_model_with_mixup_and_label_smoothing(self) -> None:
         csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
         config_path = os.path.join(os.path.abspath(current_dir), "test_configs")
