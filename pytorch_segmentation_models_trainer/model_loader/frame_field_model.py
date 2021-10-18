@@ -238,7 +238,7 @@ class FrameFieldSegmentationPLModel(Model):
             False if "use_mixup" not in cfg.pl_model else cfg.pl_model.use_mixup
         )
         self.mixup_alpha = (
-            self.cfg.pl_trainer.mixup_alpha if "mixup_alpha" in cfg.pl_trainer else -1
+            self.cfg.pl_model.mixup_alpha if "mixup_alpha" in cfg.pl_model else -1
         )
 
     def get_loss_function(self) -> MultiLoss:
@@ -333,10 +333,17 @@ class FrameFieldSegmentationPLModel(Model):
         )
         pred = self.model(batch["image"])
         if self.use_mixup:
-            batch["mixup_image"], batch["mixup_y_a"], batch["mixup_y_b"], batch[
-                "mixup_lam"
-            ] = mixup_data(batch["image"], batch["seg"], self.mixup_alpha)
-            batch["mixup_pred"] = self.model(batch["mixed_image"])
+            (
+                batch["mixup_image"],
+                batch["mixup_y_a"],
+                batch["mixup_y_b"],
+                batch["mixup_lam"]
+            ) = mixup_data(
+                batch["image"],
+                batch["gt_polygons_image"][:, 0, ...],
+                self.mixup_alpha
+            )
+            batch["mixup_pred"] = self.model(batch["mixup_image"])
         loss, individual_metrics_dict, extra_dict = self.loss_function(
             pred, batch, epoch=self.current_epoch
         )

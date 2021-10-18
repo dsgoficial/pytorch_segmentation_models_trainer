@@ -272,7 +272,11 @@ class SegLoss(Loss):
                 pred_seg, gt_seg, gamma=0.25, alpha=0.01, beta=0.99
             )
         )
-        mean_focal = torch.mean(focal_tversky) if focal_tversky != 0 else 0
+        mean_focal = (
+            0
+            if not isinstance(focal_tversky, torch.Tensor) and focal_tversky == 0
+            else torch.mean(focal_tversky)
+        )
         return (
             self.bce_coef * mean_cross_entropy
             + self.dice_coef * mean_dice
