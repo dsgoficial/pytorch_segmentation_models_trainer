@@ -435,6 +435,7 @@ class PolygonRNNDataset(AbstractDataset):
             "x2": self.to_tensor(label_array[:-2]).float(),
             "x3": self.to_tensor(label_array[1:-1]).float(),
             "ta": self.to_tensor(label_index_array[2:]).long(),
+            "polygon": self.to_tensor(polygon).float(),
         }
 
     def build_arrays(self, polygon, num_vertexes):

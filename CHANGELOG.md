@@ -1,3 +1,9 @@
+# Version 0.14.0
+
+- Vector IOU;
+- IoU added to PolygonRNN training loop;
+- PolygonRNN visualization callback added;
+
 # Version 0.13.1
 
 - Bug fixes on SegLoss parameters;
