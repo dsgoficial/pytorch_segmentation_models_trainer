@@ -21,6 +21,9 @@
  ****
 """
 
+from typing import List
+import numpy as np
+from shapely.geometry import Polygon
 import torch
 
 
@@ -35,3 +38,19 @@ def iou(y_pred, y_true, threshold):
     r = intersection.float() / union.float()
     r[union == 0] = 1
     return r
+
+
+def polygon_iou(vertices1: List, vertices2: List) -> float:
+    """
+    calculate iou of two polygons
+    :param vertices1: vertices of the first polygon
+    :param vertices2: vertices of the second polygon
+    :return: the iou, the intersection area, the union area
+    """
+    poly1 = Polygon(np.array(vertices1).reshape(-1, 2)).convex_hull
+    poly2 = Polygon(np.array(vertices2).reshape(-1, 2)).convex_hull
+    if not poly1.intersects(poly2):
+        return 0.0
+    intersection = poly1.intersection(poly2).area
+    union = poly1.area + poly2.area - intersection
+    return float(intersection / union)
