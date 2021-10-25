@@ -544,15 +544,6 @@ class PolygonRNNPLModel(Model):
         acc = correct * 1.0 / target.shape[0]
         return loss, acc
 
-    def _get_vertex_list(self, input_list):
-        vertex_list = []
-        for label in input_list:
-            if label == 784:
-                break
-            vertex = (((label % 28) * 8.0 + 4), ((int(label / 28)) * 8.0 + 4))
-            vertex_list.append(vertex)
-        return vertex_list
-
     def validation_step(self, batch, batch_idx):
         loss, acc = self.compute(batch)
         tensorboard_logs = {"acc": {"val": acc}}

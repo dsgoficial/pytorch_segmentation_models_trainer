@@ -21,32 +21,10 @@
  ****
 """
 
+from typing import List
 from PIL import Image, ImageDraw
 import numpy as np
 import torch
-
-
-def iou(vertices1, vertices2, h, w):
-    """
-    calculate iou of two polygons
-    :param vertices1: vertices of the first polygon
-    :param vertices2: vertices of the second polygon
-    :return: the iou, the intersection area, the union area
-    """
-    img1 = Image.new("L", (w, h), 0)
-    ImageDraw.Draw(img1).polygon(vertices1, outline=1, fill=1)
-    mask1 = np.array(img1)
-    img2 = Image.new("L", (w, h), 0)
-    ImageDraw.Draw(img2).polygon(vertices2, outline=1, fill=1)
-    mask2 = np.array(img2)
-    intersection = np.logical_and(mask1, mask2)
-    union = np.logical_or(mask1, mask2)
-    nu = np.sum(intersection)
-    de = np.sum(union)
-    if de != 0:
-        return nu * 1.0 / de, nu, de
-    else:
-        return 0, nu, de
 
 
 def label2vertex(labels):
@@ -62,6 +40,16 @@ def label2vertex(labels):
         vertex = ((label % 28) * 8, (label / 28) * 8)
         vertices.append(vertex)
     return vertices
+
+
+def get_vertex_list(input_list: List[float]) -> List[float]:
+    vertex_list = []
+    for label in input_list:
+        if label == 784:
+            break
+        vertex = ((label % 28) * 8.0 + 4, (int(label / 28)) * 8.0 + 4)
+        vertex_list.append(vertex)
+    return vertex_list
 
 
 def getbboxfromkps(kps, h, w):
@@ -102,3 +90,64 @@ def tensor2img(tensor):
     img = (tensor.numpy() * 255).astype("uint8")
     img = np.rollaxis(img, 0, 3)
     return img
+
+
+def build_arrays(polygon, num_vertexes, sequence_length):
+    point_count = 2
+    label_array = np.zeros([sequence_length, 28 * 28 + 3])
+    label_index_array = np.zeros([sequence_length])
+    if num_vertexes < sequence_length - 3:
+        for points in polygon:
+            _initialize_label_index_array(
+                point_count, label_array, label_index_array, points
+            )
+            point_count += 1
+        _populate_label_index_array(
+            polygon,
+            num_vertexes,
+            sequence_length,
+            point_count,
+            label_array,
+            label_index_array,
+        )
+    else:
+        scale = num_vertexes * 1.0 / (sequence_length - 3)
+        index_list = (np.arange(0, sequence_length - 3) * scale).astype(int)
+        for points in polygon[index_list]:
+            _initialize_label_index_array(
+                point_count, label_array, label_index_array, points
+            )
+            point_count += 1
+        for kkk in range(point_count, sequence_length):
+            index = 28 * 28
+            label_array[kkk, index] = 1
+            label_index_array[kkk] = index
+    return label_array, label_index_array
+
+
+def _populate_label_index_array(
+    polygon, num_vertexes, sequence_length, point_count, label_array, label_index_array
+):
+    label_array[point_count, 28 * 28] = 1
+    label_index_array[point_count] = 28 * 28
+    for kkk in range(point_count + 1, sequence_length):
+        if kkk % (num_vertexes + 3) == num_vertexes + 2:
+            index = 28 * 28
+        elif kkk % (num_vertexes + 3) == 0:
+            index = 28 * 28 + 1
+        elif kkk % (num_vertexes + 3) == 1:
+            index = 28 * 28 + 2
+        else:
+            index_a = int(polygon[kkk % (num_vertexes + 3) - 2][0] / 8)
+            index_b = int(polygon[kkk % (num_vertexes + 3) - 2][1] / 8)
+            index = index_b * 28 + index_a
+        label_array[kkk, index] = 1
+        label_index_array[kkk] = index
+
+
+def _initialize_label_index_array(point_count, label_array, label_index_array, points):
+    index_a = int(points[0] / 8)
+    index_b = int(points[1] / 8)
+    index = index_b * 28 + index_a
+    label_array[point_count, index] = 1
+    label_index_array[point_count] = index

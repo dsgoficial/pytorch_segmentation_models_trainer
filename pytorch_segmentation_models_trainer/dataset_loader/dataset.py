@@ -24,6 +24,7 @@ from pytorch_segmentation_models_trainer.utils.object_detection_utils import (
     bbox_xywh_to_xyxy,
     bbox_xyxy_to_xywh,
 )
+from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 from albumentations.pytorch import ToTensorV2
 from albumentations.augmentations.transforms import Normalize
 import torch
@@ -424,7 +425,9 @@ class PolygonRNNDataset(AbstractDataset):
             index, key=self.image_key, is_mask=False, force_rgb=True
         )
         polygon, num_vertexes = self.load_polygon(index)
-        label_array, label_index_array = self.build_arrays(polygon, num_vertexes)
+        label_array, label_index_array = polygonrnn_utils.build_arrays(
+            polygon, num_vertexes, self.sequence_length
+        )
 
         if self.transform is not None:
             augmented = self.transform(image=image)
@@ -436,54 +439,6 @@ class PolygonRNNDataset(AbstractDataset):
             "x3": self.to_tensor(label_array[1:-1]).float(),
             "ta": self.to_tensor(label_index_array[2:]).long(),
         }
-
-    def build_arrays(self, polygon, num_vertexes):
-        point_count = 2
-        label_array = np.zeros([self.sequence_length, 28 * 28 + 3])
-        label_index_array = np.zeros([self.sequence_length])
-        if num_vertexes < self.sequence_length - 3:
-            for points in polygon:
-                self.populate_label_index_array(
-                    point_count, label_array, label_index_array, points
-                )
-                point_count += 1
-            label_array[point_count, 28 * 28] = 1
-            label_index_array[point_count] = 28 * 28
-            for kkk in range(point_count + 1, self.sequence_length):
-                if kkk % (num_vertexes + 3) == num_vertexes + 2:
-                    index = 28 * 28
-                elif kkk % (num_vertexes + 3) == 0:
-                    index = 28 * 28 + 1
-                elif kkk % (num_vertexes + 3) == 1:
-                    index = 28 * 28 + 2
-                else:
-                    index_a = int(polygon[kkk % (num_vertexes + 3) - 2][0] / 8)
-                    index_b = int(polygon[kkk % (num_vertexes + 3) - 2][1] / 8)
-                    index = index_b * 28 + index_a
-                label_array[kkk, index] = 1
-                label_index_array[kkk] = index
-        else:
-            scale = num_vertexes * 1.0 / (self.sequence_length - 3)
-            index_list = (np.arange(0, self.sequence_length - 3) * scale).astype(int)
-            for points in polygon[index_list]:
-                self.populate_label_index_array(
-                    point_count, label_array, label_index_array, points
-                )
-                point_count += 1
-            for kkk in range(point_count, self.sequence_length):
-                index = 28 * 28
-                label_array[kkk, index] = 1
-                label_index_array[kkk] = index
-        return label_array, label_index_array
-
-    def populate_label_index_array(
-        self, point_count, label_array, label_index_array, points
-    ):
-        index_a = int(points[0] / 8)
-        index_b = int(points[1] / 8)
-        index = index_b * 28 + index_a
-        label_array[point_count, index] = 1
-        label_index_array[point_count] = index
 
 
 class ObjectDetectionDataset(AbstractDataset):

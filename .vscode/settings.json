@@ -21,4 +21,7 @@
     "editor.defaultFormatter": "ms-python.python",
     "python.autoComplete.extraPaths": [
     ],
+    "[json]": {
+        "editor.defaultFormatter": "vscode.json-language-features"
+    },
 }
