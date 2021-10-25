@@ -16,7 +16,7 @@ pytorch_toolbelt
 descartes
 fiona
 psycopg2
-geopandas
+geopandas==0.9.0
 geoalchemy2
 rasterio
 numba
