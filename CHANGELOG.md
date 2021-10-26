@@ -1,6 +1,7 @@
 # Version 0.14.0
 
 - Vector IOU;
+- Polis metric added;
 - IoU added to PolygonRNN training loop;
 - PolygonRNN visualization callback added;
 

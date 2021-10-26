@@ -23,7 +23,7 @@
 
 from typing import List
 import numpy as np
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, LineString, Point
 import torch
 
 
@@ -54,3 +54,35 @@ def polygon_iou(vertices1: List, vertices2: List) -> float:
     intersection = poly1.intersection(poly2).area
     union = poly1.area + poly2.area - intersection
     return float(intersection / union)
+
+
+def polis(polygon_a: Polygon, polygon_b: Polygon) -> float:
+    """Compute the polis metric between two polygons.
+
+    Args:
+        polygon_a (Polygon): Shapely polygon
+        polygon_b (Polygon): Shapely polygon
+
+    Returns:
+        float: polis metric
+    """
+    bounds_a, bounds_b = polygon_a.exterior, polygon_b.exterior
+    return _one_side_polis(bounds_a.coords, bounds_b) + _one_side_polis(
+        bounds_b.coords, bounds_a
+    )
+
+
+def _one_side_polis(coords: List, bounds: LineString) -> float:
+    """Compute the polis metric for one side of a polygon.
+
+    Args:
+        coords (List): Coordinates of the polygon
+        bounds (LineString): Shapely line string
+
+    Returns:
+        float: polis metric
+    """
+    distance_sum = sum(
+        bounds.distance(point) for point in (Point(p) for p in coords[:-1])
+    )
+    return distance_sum / float(2 * len(coords))

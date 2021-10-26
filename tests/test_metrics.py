@@ -23,6 +23,7 @@
 import unittest
 import torch
 import numpy as np
+from shapely.geometry import Polygon
 
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
 
@@ -42,3 +43,12 @@ class Test_TestMetrics(unittest.TestCase):
         polygon1 = [2, 0, 2, 2, 0, 0, 0, 2]
         polygon2 = [1, 1, 4, 1, 4, 4, 1, 4]
         self.assertAlmostEqual(metrics.polygon_iou(polygon1, polygon2), 0.083333333333)
+
+    def test_polis(self) -> None:
+        polygon1 = Polygon([(0, 0), (0, 2), (2, 2), (2, 0), (0, 0)])
+        polygon2 = Polygon([(0, 0), (0, 2), (3, 3), (2, 0), (0, 0)])
+        self.assertAlmostEqual(metrics.polis(polygon1, polygon1), 0.0)
+        self.assertAlmostEqual(metrics.polis(polygon1, polygon2), 0.20466690944067711)
+        self.assertAlmostEqual(
+            metrics.polis(polygon1, polygon2), metrics.polis(polygon2, polygon1)
+        )
