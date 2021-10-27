@@ -4,6 +4,7 @@
 - Polis metric added;
 - IoU added to PolygonRNN training loop;
 - PolygonRNN visualization callback added;
+- Bug fix on polygon building on build mask geometry handling;
 
 # Version 0.13.1
 
