@@ -72,3 +72,18 @@ class Test_TestPolygonRNNUtils(CustomTestCase):
         np.testing.assert_array_almost_equal(
             output_batch, np.stack([polygon1, polygon2])
         )
+
+    def test_encode_polygons_on_tensor_batch(self) -> None:
+        polygon1 = np.array([[100, 100], [100, 204], [204, 204], [204, 100]])
+        polygon2 = np.array([[204, 204], [220, 204], [220, 220], [220, 204]])
+        _, label_index_array1 = polygonrnn_utils.build_arrays(polygon1, 4, 60)
+        _, label_index_array2 = polygonrnn_utils.build_arrays(polygon2, 4, 60)
+        batch = np.stack([label_index_array1[2::], label_index_array2[2::]], axis=0)
+        batch_tensor = torch.from_numpy(batch).float()
+        output_tensor_batch = polygonrnn_utils.get_vertex_list_from_batch_tensors(
+            batch_tensor
+        )
+        self.assertEqual(output_tensor_batch.shape, torch.Size([2, 4, 2]))
+        torch.testing.assert_close(
+            output_tensor_batch, torch.tensor([polygon1, polygon2], dtype=torch.float)
+        )

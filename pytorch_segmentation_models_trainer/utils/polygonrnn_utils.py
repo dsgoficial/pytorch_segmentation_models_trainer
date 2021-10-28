@@ -21,7 +21,7 @@
  ****
 """
 
-from typing import List, Optional
+from typing import Callable, List, Optional
 from PIL import Image, ImageDraw
 import numpy as np
 import torch
@@ -49,6 +49,7 @@ def get_vertex_list(
     scale_w: Optional[float] = 1.0,
     min_col: Optional[int] = 0,
     min_row: Optional[int] = 0,
+    return_cast_func: Optional[Callable] = None,
 ) -> List[float]:
     """Gets vertex list from input.
 
@@ -62,13 +63,16 @@ def get_vertex_list(
     Returns:
         List[float]: List of the vertexes
     """
-    return [
-        (
-            ((label % 28) * 8.0 + 4) / scale_w + min_col,
-            ((int(label / 28)) * 8.0 + 4) / scale_h + min_row,
-        )
-        for label in itertools.takewhile(lambda x: x != 784, input_list)
-    ]
+    return_cast_func = return_cast_func if return_cast_func is not None else lambda x: x
+    return return_cast_func(
+        [
+            (
+                ((label % 28) * 8.0 + 4) / scale_w + min_col,
+                ((float(label // 28)) * 8.0 + 4) / scale_h + min_row,
+            )
+            for label in itertools.takewhile(lambda x: x != 784, input_list)
+        ]
+    )
 
 
 def get_vertex_list_from_batch(
@@ -89,6 +93,36 @@ def get_vertex_list_from_batch(
     """
     func = lambda x: get_vertex_list(x, scale_h, scale_w, min_col, min_row)
     return np.apply_along_axis(func, 1, input_batch)
+
+
+def get_vertex_list_from_batch_tensors(
+    input_batch: torch.Tensor,
+    scale_h: Optional[float] = 1.0,
+    scale_w: Optional[float] = 1.0,
+    min_col: Optional[int] = 0,
+    min_row: Optional[int] = 0,
+) -> torch.Tensor:
+    """Gets vertex list from input batch.
+
+    Args:
+        input_batch (torch.Tensor): [description]
+        scale_h (Optional[float], optional): Height scale. Defaults to 1.0.
+        scale_w (Optional[float], optional): Width scale. Defaults to 1.0.
+        min_col (Optional[int], optional): Minimum column. Defaults to 0.
+        min_row (Optional[int], optional): Minimun row. Defaults to 0.
+    """
+    cast_func = lambda x: torch.tensor(
+        x, dtype=torch.float32, device=input_batch.device
+    )
+    return torch.stack(
+        [
+            get_vertex_list(
+                x, scale_h, scale_w, min_col, min_row, return_cast_func=cast_func
+            )
+            for x in torch.unbind(input_batch, dim=0)
+        ],
+        dim=0,
+    )
 
 
 def getbboxfromkps(kps, h, w):
