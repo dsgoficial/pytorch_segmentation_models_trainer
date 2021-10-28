@@ -56,6 +56,8 @@ class PolygonRNNDatasetConversionStrategy(AbstractConversionStrategy):
     output_file_name: str = MISSING
     output_images_folder: str = "images_croped"
     output_polygons_folder: str = "polygons_croped"
+    write_output_files: bool = True
+    original_images_folder_name: str = "images"
     simultaneous_tasks: int = 1
     image_size: int = 224
 
@@ -103,7 +105,6 @@ class PolygonRNNDatasetConversionStrategy(AbstractConversionStrategy):
         """[summary]
 
         Args:
-            idx (int): [description]
             image_path (str): [description]
             json_path (str): [description]
 
@@ -123,6 +124,26 @@ class PolygonRNNDatasetConversionStrategy(AbstractConversionStrategy):
         for i, item in enumerate(json_object["objects"]):
             min_row, min_col, max_row, max_col = self._get_bounds(json_object, item)
             scale_h, scale_w = self._get_scales(min_row, min_col, max_row, max_col)
+            csv_entries_list.append(
+                {
+                    "image": os.path.join(
+                        Path(self.output_images_folder).stem, image_name, f"{i}.png"
+                    ),
+                    "mask": os.path.join(
+                        Path(self.output_polygons_folder).stem, image_name, f"{i}.json"
+                    ),
+                    "scale_h": scale_h,
+                    "scale_w": scale_w,
+                    "min_col": min_col,
+                    "min_row": min_row,
+                    "original_image_path": os.path.join(
+                        self.original_images_folder_name,
+                        image_path.split(self.original_images_folder_name)[1::][0][1::],
+                    ),
+                }
+            )
+            if not self.write_output_files:
+                continue
             self._crop_image(
                 image,
                 os.path.join(output_image_folder, f"{i}.png"),
@@ -138,16 +159,6 @@ class PolygonRNNDatasetConversionStrategy(AbstractConversionStrategy):
                 min_col,
                 scale_h,
                 scale_w,
-            )
-            csv_entries_list.append(
-                {
-                    "image": os.path.join(
-                        Path(self.output_images_folder).stem, image_name, f"{i}.png"
-                    ),
-                    "mask": os.path.join(
-                        Path(self.output_polygons_folder).stem, image_name, f"{i}.json"
-                    ),
-                }
             )
         return csv_entries_list
 

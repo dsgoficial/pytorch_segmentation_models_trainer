@@ -60,10 +60,14 @@ class Test_TestConvertDataset(unittest.TestCase):
     def tearDown(self):
         remove_folder(self.output_dir)
 
-    def test_convert_dataset(self):
+    @parameterized.expand(
+        [(None,), ([f"+conversion_strategy.write_output_files=False"],)]
+    )
+    def test_convert_dataset(self, extra_overrides):
         """
         Tests the convert_dataset function
         """
+        extra_overrides = extra_overrides if extra_overrides is not None else []
         csv_path = os.path.join(
             detection_root_dir, "geo", "dsg_dataset_with_polygons.csv"
         )
@@ -75,7 +79,8 @@ class Test_TestConvertDataset(unittest.TestCase):
                     f"input_dataset.root_dir={os.path.dirname(csv_path)}",
                     f"conversion_strategy.output_dir={self.output_dir}",
                     f"conversion_strategy.simultaneous_tasks={os.cpu_count()}",
-                ],
+                ]
+                + extra_overrides,
             )
             convert_dataset(cfg)
         expected_df = pd.read_csv(
