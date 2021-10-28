@@ -60,3 +60,15 @@ class Test_TestPolygonRNNUtils(CustomTestCase):
         label_array, label_index_array = polygonrnn_utils.build_arrays(polygon, 4, 60)
         output_vertex_list = polygonrnn_utils.get_vertex_list(label_index_array[2::])
         np.testing.assert_array_almost_equal(polygon, output_vertex_list)
+
+    def test_encode_polygons_on_batch(self) -> None:
+        polygon1 = np.array([[100, 100], [100, 204], [204, 204], [204, 100]])
+        polygon2 = np.array([[204, 204], [220, 204], [220, 220], [220, 204]])
+        _, label_index_array1 = polygonrnn_utils.build_arrays(polygon1, 4, 60)
+        _, label_index_array2 = polygonrnn_utils.build_arrays(polygon2, 4, 60)
+        batch = np.stack([label_index_array1[2::], label_index_array2[2::]], axis=0)
+        output_batch = polygonrnn_utils.get_vertex_list_from_batch(batch)
+        self.assertEqual(output_batch.shape, (2, 4, 2))
+        np.testing.assert_array_almost_equal(
+            output_batch, np.stack([polygon1, polygon2])
+        )
