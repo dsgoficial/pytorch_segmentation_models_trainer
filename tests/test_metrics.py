@@ -39,10 +39,11 @@ class Test_TestMetrics(unittest.TestCase):
             metrics.iou(y_pred, y_true, threshold=0.9).mean(), torch.tensor(0.5000)
         )
 
-    def test_vector_iou(self) -> None:
+    def test_polygon_iou(self) -> None:
         polygon1 = [2, 0, 2, 2, 0, 0, 0, 2]
         polygon2 = [1, 1, 4, 1, 4, 4, 1, 4]
-        self.assertAlmostEqual(metrics.polygon_iou(polygon1, polygon2), 0.083333333333)
+        iou, _, __ = metrics.polygon_iou(polygon1, polygon2)
+        self.assertAlmostEqual(iou, 0.083333333333)
 
     def test_polis(self) -> None:
         polygon1 = Polygon([(0, 0), (0, 2), (2, 2), (2, 0), (0, 0)])

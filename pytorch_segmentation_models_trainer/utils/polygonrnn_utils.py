@@ -122,7 +122,9 @@ def get_vertex_list_from_batch_tensors(
             min_col[idx],
             min_row[idx],
             return_cast_func=cast_func,
-        ).numpy()
+        )
+        .cpu()
+        .numpy()
         for idx, x in enumerate(torch.unbind(input_batch, dim=0))
     ]
 

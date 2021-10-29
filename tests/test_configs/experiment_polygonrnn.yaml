@@ -18,7 +18,7 @@ metrics:
   - _target_: torchmetrics.Recall
 
 hyperparameters:
-  batch_size: 1
+  batch_size: 2
   epochs: 1
   max_lr: 0.1
 
@@ -31,7 +31,7 @@ train_dataset:
   input_csv_path: teste
   root_dir: teste
   sequence_length: 20
-  n_first_rows_to_read: 1
+  n_first_rows_to_read: 2
   data_loader:
     shuffle: True
     num_workers: 2
@@ -57,7 +57,7 @@ val_dataset:
   input_csv_path: teste
   root_dir: teste
   sequence_length: 20
-  n_first_rows_to_read: 1
+  n_first_rows_to_read: 2
   data_loader:
     shuffle: False
     num_workers: 2

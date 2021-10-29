@@ -39,6 +39,8 @@ from PIL import Image
 from torch.utils.data import Dataset
 import json
 
+from shapely.geometry import Polygon
+
 from omegaconf import DictConfig, OmegaConf
 
 
@@ -399,6 +401,13 @@ class PolygonRNNDataset(AbstractDataset):
         data_loader=None,
         image_key=None,
         mask_key=None,
+        image_width_key=None,
+        image_height_key=None,
+        scale_h_key=None,
+        scale_w_key=None,
+        min_col_key=None,
+        min_row_key=None,
+        original_image_path_key=None,
         n_first_rows_to_read=None,
     ) -> None:
         super(PolygonRNNDataset, self).__init__(
@@ -411,6 +420,15 @@ class PolygonRNNDataset(AbstractDataset):
             n_first_rows_to_read=n_first_rows_to_read,
         )
         self.sequence_length = sequence_length
+        self.scale_h_key = scale_h_key if scale_h_key is not None else "scale_h"
+        self.scale_w_key = scale_w_key if scale_w_key is not None else "scale_w"
+        self.min_col_key = min_col_key if min_col_key is not None else "min_col"
+        self.min_row_key = min_row_key if min_row_key is not None else "min_row"
+        self.original_image_path_key = (
+            original_image_path_key
+            if original_image_path_key is not None
+            else "original_image_path"
+        )
 
     def load_polygon(self, idx):
         mask_name = os.path.join(self.root_dir, self.df.iloc[idx][self.mask_key])
@@ -432,13 +450,22 @@ class PolygonRNNDataset(AbstractDataset):
         if self.transform is not None:
             augmented = self.transform(image=image)
             image = augmented["image"]
-        return {
+        output_dict = {
             "image": self.to_tensor(image).float(),
             "x1": self.to_tensor(label_array[2]).float(),
             "x2": self.to_tensor(label_array[:-2]).float(),
             "x3": self.to_tensor(label_array[1:-1]).float(),
             "ta": self.to_tensor(label_index_array[2:]).long(),
+            "polygon_wkt": Polygon(polygon).wkt,
+            "scale_h": self.df.iloc[index][self.scale_h_key],
+            "scale_w": self.df.iloc[index][self.scale_w_key],
+            "min_col": self.df.iloc[index][self.min_col_key],
+            "min_row": self.df.iloc[index][self.min_row_key],
+            "original_image_path": self.get_path(
+                index, key=self.original_image_path_key
+            ),
         }
+        return output_dict
 
 
 class ObjectDetectionDataset(AbstractDataset):

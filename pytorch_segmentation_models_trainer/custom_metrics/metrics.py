@@ -21,7 +21,7 @@
  ****
 """
 
-from typing import List
+from typing import List, Tuple
 import numpy as np
 from shapely.geometry import Polygon, LineString, Point
 import torch
@@ -40,20 +40,30 @@ def iou(y_pred, y_true, threshold):
     return r
 
 
-def polygon_iou(vertices1: List, vertices2: List) -> float:
+def _handle_vertices(vertices):
+    vertices_array = np.array(vertices)
+    if vertices_array.shape[0] == 0:
+        return Point(0, 0)
+    if vertices_array.shape[0] == 1:
+        return Point(vertices_array.squeeze(0))
+    if vertices_array.shape[0] == 2:
+        return LineString(vertices_array)
+    return Polygon(vertices_array.reshape(-1, 2)).convex_hull
+
+
+def polygon_iou(vertices1: List, vertices2: List) -> Tuple[float, float, float]:
     """
     calculate iou of two polygons
     :param vertices1: vertices of the first polygon
     :param vertices2: vertices of the second polygon
     :return: the iou, the intersection area, the union area
     """
-    poly1 = Polygon(np.array(vertices1).reshape(-1, 2)).convex_hull
-    poly2 = Polygon(np.array(vertices2).reshape(-1, 2)).convex_hull
-    if not poly1.intersects(poly2):
-        return 0.0
-    intersection = poly1.intersection(poly2).area
-    union = poly1.area + poly2.area - intersection
-    return float(intersection / union)
+    geom1 = _handle_vertices(vertices1)
+    geom2 = _handle_vertices(vertices2)
+    intersection = geom1.intersection(geom2).area
+    union = geom1.area + geom2.area - intersection
+    iou = 0 if union == 0 else intersection / union
+    return iou, intersection, union
 
 
 def polis(polygon_a: Polygon, polygon_b: Polygon) -> float:
@@ -67,8 +77,9 @@ def polis(polygon_a: Polygon, polygon_b: Polygon) -> float:
         float: polis metric
     """
     bounds_a, bounds_b = polygon_a.exterior, polygon_b.exterior
-    return _one_side_polis(bounds_a.coords, bounds_b) + _one_side_polis(
-        bounds_b.coords, bounds_a
+    return float(
+        _one_side_polis(bounds_a.coords, bounds_b)
+        + _one_side_polis(bounds_b.coords, bounds_a)
     )
 
 
@@ -85,13 +96,19 @@ def _one_side_polis(coords: List, bounds: LineString) -> float:
     distance_sum = sum(
         bounds.distance(point) for point in (Point(p) for p in coords[:-1])
     )
-    return distance_sum / float(2 * len(coords))
+    return float(distance_sum / float(2 * len(coords)))
 
 
-def batch_polis(batch_polygon_a: np.array, batch_polygon_b: np.array) -> np.array:
+def batch_polis(batch_polygon_a: np.ndarray, batch_polygon_b: np.ndarray) -> np.ndarray:
     """Compute the polis metric between two polygon batches.
 
     Args:
     """
-    func = lambda x: polis(Polygon(x[0]), Polygon(x[1]))
+
+    def _polis(numpy_polygon_a, numpy_polygon_b):
+        if numpy_polygon_a.shape[0] < 3 or numpy_polygon_b.shape[0] < 3:
+            return 0
+        return polis(Polygon(numpy_polygon_a), Polygon(numpy_polygon_b))
+
+    func = lambda x: _polis(x[0], x[1])
     return np.array(list(map(func, zip(batch_polygon_a, batch_polygon_b))))
