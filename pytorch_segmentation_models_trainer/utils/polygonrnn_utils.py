@@ -21,7 +21,7 @@
  ****
 """
 
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Union
 from PIL import Image, ImageDraw
 import numpy as np
 import torch
@@ -97,32 +97,34 @@ def get_vertex_list_from_batch(
 
 def get_vertex_list_from_batch_tensors(
     input_batch: torch.Tensor,
-    scale_h: Optional[float] = 1.0,
-    scale_w: Optional[float] = 1.0,
-    min_col: Optional[int] = 0,
-    min_row: Optional[int] = 0,
-) -> torch.Tensor:
+    scale_h: torch.Tensor,
+    scale_w: torch.Tensor,
+    min_col: torch.Tensor,
+    min_row: torch.Tensor,
+) -> List[np.array]:
     """Gets vertex list from input batch.
 
     Args:
         input_batch (torch.Tensor): [description]
-        scale_h (Optional[float], optional): Height scale. Defaults to 1.0.
-        scale_w (Optional[float], optional): Width scale. Defaults to 1.0.
-        min_col (Optional[int], optional): Minimum column. Defaults to 0.
-        min_row (Optional[int], optional): Minimun row. Defaults to 0.
+        scale_h (Optional[Union(float, torch.Tensor)]: Height scale. Defaults to 1.0.
+        scale_w (Optional[Union(float, torch.Tensor)]: Width scale. Defaults to 1.0.
+        min_col (Optional[Union(int, torch.Tensor)], optional): Minimum column. Defaults to 0.
+        min_row (Optional[Union(int, torch.Tensor)], optional): Minimun row. Defaults to 0.
     """
     cast_func = lambda x: torch.tensor(
         x, dtype=torch.float32, device=input_batch.device
     )
-    return torch.stack(
-        [
-            get_vertex_list(
-                x, scale_h, scale_w, min_col, min_row, return_cast_func=cast_func
-            )
-            for x in torch.unbind(input_batch, dim=0)
-        ],
-        dim=0,
-    )
+    return [
+        get_vertex_list(
+            x,
+            scale_h[idx],
+            scale_w[idx],
+            min_col[idx],
+            min_row[idx],
+            return_cast_func=cast_func,
+        ).numpy()
+        for idx, x in enumerate(torch.unbind(input_batch, dim=0))
+    ]
 
 
 def getbboxfromkps(kps, h, w):

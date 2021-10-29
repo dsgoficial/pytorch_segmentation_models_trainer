@@ -86,3 +86,12 @@ def _one_side_polis(coords: List, bounds: LineString) -> float:
         bounds.distance(point) for point in (Point(p) for p in coords[:-1])
     )
     return distance_sum / float(2 * len(coords))
+
+
+def batch_polis(batch_polygon_a: np.array, batch_polygon_b: np.array) -> np.array:
+    """Compute the polis metric between two polygon batches.
+
+    Args:
+    """
+    func = lambda x: polis(Polygon(x[0]), Polygon(x[1]))
+    return np.array(list(map(func, zip(batch_polygon_a, batch_polygon_b))))

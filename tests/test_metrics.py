@@ -52,3 +52,20 @@ class Test_TestMetrics(unittest.TestCase):
         self.assertAlmostEqual(
             metrics.polis(polygon1, polygon2), metrics.polis(polygon2, polygon1)
         )
+
+    def test_polis_batch(self) -> None:
+        batch1 = np.array(
+            [
+                [(0, 0), (0, 2), (2, 2), (2, 0), (0, 0)],
+                [(0, 0), (0, 2.5), (2.5, 2.5), (2.5, 0), (0, 0)],
+            ]
+        )
+        batch2 = np.array(
+            [
+                [(0, 0), (0, 2), (3, 3), (2, 0), (0, 0)],
+                [(0, 0), (0, 2.5), (3.5, 3.5), (2.5, 0), (0, 0)],
+            ]
+        )
+        np.testing.assert_array_almost_equal(
+            metrics.batch_polis(batch1, batch2), np.array([0.20466691, 0.21010164])
+        )
