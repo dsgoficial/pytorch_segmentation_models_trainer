@@ -539,23 +539,21 @@ class Test_TestDataset(CustomTestCase):
         self.assertDictEqual(dataclasses.asdict(coco_ds), expected_output)
 
     def test_polygon_rnn_dataset(self):
-        csv_path = os.path.join(
-            polygon_rnn_root_dir, "training_dataset_from_cityscapes.csv"
-        )
+        csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
         polygon_rnn_ds = PolygonRNNDataset(
             input_csv_path=csv_path,
             sequence_length=60,
             root_dir=polygon_rnn_root_dir,
             augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
         )
-        self.assertEqual(len(polygon_rnn_ds), 21)
-        for idx in range(len(polygon_rnn_ds)):
-            ds_item = polygon_rnn_ds[idx]
-            self.assertEqual(ds_item["image"].shape, (3, 224, 224))
-            self.assertEqual(ds_item["x1"].shape, (787,))
-            self.assertEqual(ds_item["x2"].shape, (58, 787))
-            self.assertEqual(ds_item["x3"].shape, (58, 787))
-            self.assertEqual(ds_item["ta"].shape, (58,))
+        self.assertEqual(len(polygon_rnn_ds), 587)
+
+        ds_item = polygon_rnn_ds[0]
+        self.assertEqual(ds_item["image"].shape, (3, 224, 224))
+        self.assertEqual(ds_item["x1"].shape, (787,))
+        self.assertEqual(ds_item["x2"].shape, (58, 787))
+        self.assertEqual(ds_item["x3"].shape, (58, 787))
+        self.assertEqual(ds_item["ta"].shape, (58,))
 
     def test_object_detection_dataset(self):
         csv_path = os.path.join(detection_root_dir, "geo", "dsg_dataset.csv")
