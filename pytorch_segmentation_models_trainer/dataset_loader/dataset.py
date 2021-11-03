@@ -544,6 +544,17 @@ class ObjectDetectionDataset(AbstractDataset):
         )
         return image, ds_item_dict
 
+    @staticmethod
+    def collate_fn(batch: List) -> Dict[torch.Tensor, List[Dict]]:
+        """
+        :param batch: an iterable of N sets from __getitem__()
+        :return: a tensor of images, lists of varying-size tensors of bounding boxes, labels, and difficulties
+        """
+
+        images, targets = tuple(zip(*batch))
+        images = torch.stack(images, dim=0)
+        return images, list(targets)
+
 
 class InstanceSegmentationDataset(ObjectDetectionDataset):
     def __init__(
