@@ -31,6 +31,7 @@ import numpy as np
 import pytorch_lightning as pl
 from pytorch_segmentation_models_trainer.tools.visualization.base_plot_tools import (
     batch_denormalize_tensor,
+    denormalize_np_array,
     generate_visualization,
     visualize_image_with_bboxes,
 )
