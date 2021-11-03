@@ -3,6 +3,7 @@
 - Vector IOU;
 - Polis metric added;
 - IoU added to PolygonRNN training loop;
+- Object detection visualization callback added;
 - PolygonRNN visualization callback added;
 - Bug fix on polygon building on build mask geometry handling;
 
