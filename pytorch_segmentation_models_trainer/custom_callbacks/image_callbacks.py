@@ -29,7 +29,7 @@ from typing import Any, List
 import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl
-from tools.visualization.base_plot_tools import (
+from pytorch_segmentation_models_trainer.tools.visualization.base_plot_tools import (
     batch_denormalize_tensor,
     generate_visualization,
     visualize_image_with_bboxes,
@@ -195,13 +195,32 @@ class FrameFieldOverlayedResultCallback(pl.callbacks.base.Callback):
             )
 
 
-class ObjectDetectionResultCallback(pl.callbacks.base.Callback):
+class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
     @rank_zero_only
     def on_validation_end(self, trainer, pl_module):
+        if not self.save_outputs:
+            return
         val_ds = pl_module.val_dataloader()
-        batch = next(iter(val_ds))
-        image_display = batch_denormalize_tensor(batch["image"]).to("cpu")
-        output = pl_module(batch["image"].to(pl_module.device))
-        visualization_list = visualize_image_with_bboxes(
-            image_display, output["boxes"][output["scores"] > 0.5]
+        n_samples = (
+            pl_module.val_dataloader().batch_size
+            if self.n_samples is None
+            else self.n_samples
         )
+        current_item = 0
+        for images, targets in val_ds:
+            if current_item >= n_samples:
+                break
+            image_display = batch_denormalize_tensor(
+                images, clip_range=[0, 255], output_type=torch.uint8
+            ).to("cpu")
+            outputs = pl_module(images.to(pl_module.device))
+            boxes = [out["boxes"][out["scores"] > 0.5].to("cpu") for out in outputs]
+            visualization_list = visualize_image_with_bboxes(
+                image_display.to("cpu"), boxes
+            )
+            for vis in visualization_list:
+                trainer.logger.experiment.add_image(
+                    val_ds.dataset.get_path(current_item), vis, trainer.current_epoch
+                )
+                current_item += 1
+        return

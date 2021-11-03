@@ -51,11 +51,17 @@ detection_root_dir = os.path.join(
 
 
 class Test_TestDetectionModel(CustomTestCase):
-    def test_train_object_detection_model(self) -> None:
+    @parameterized.expand(
+        [
+            ("experiment_object_detection.yaml",),
+            ("experiment_object_detection_with_callback.yaml",),
+        ]
+    )
+    def test_train_object_detection_model(self, config_name) -> None:
         csv_path = os.path.join(detection_root_dir, "dsg_dataset.csv")
         with initialize(config_path="./test_configs"):
             cfg = compose(
-                config_name="experiment_object_detection.yaml",
+                config_name=config_name,
                 overrides=[
                     "train_dataset.input_csv_path=" + csv_path,
                     "train_dataset.root_dir=" + detection_root_dir,

@@ -60,7 +60,9 @@ def denormalize_np_array(image: np.ndarray, mean=None, std=None) -> np.ndarray:
     return image * np.array(std)[..., None, None] + np.array(mean)[..., None, None]
 
 
-def batch_denormalize_tensor(tensor, mean=None, std=None, inplace=False):
+def batch_denormalize_tensor(
+    tensor, mean=None, std=None, inplace=False, clip_range=None, output_type=None
+):
     """Denormalize a batched tensor image with batched mean and batched standard deviation.
     .. note::
         This transform acts out of place by default, i.e., it does not mutates the input tensor.
@@ -86,6 +88,7 @@ def batch_denormalize_tensor(tensor, mean=None, std=None, inplace=False):
             tensor.shape[0], tensor.shape[1]
         )
     )
+    output_type = tensor.dtype if output_type is None else output_type
     assert (
         len(tensor.shape) == 4
     ), "tensor should have 4 dims (B, H, W, C) , not {}".format(len(tensor.shape))
@@ -106,7 +109,12 @@ def batch_denormalize_tensor(tensor, mean=None, std=None, inplace=False):
     mean = mean.to(tensor.dtype)
     std = std.to(tensor.dtype)
     tensor.mul_(std[..., None, None]).add_(mean[..., None, None])
-    return tensor
+    if clip_range is None:
+        return tensor.to(output_type)
+    min_pixel_value, max_pixel_value = clip_range
+    return torch.clamp(
+        max_pixel_value * tensor, min=min_pixel_value, max=max_pixel_value
+    ).to(output_type)
 
 
 def generate_visualization(fig_title=None, **images):
@@ -127,6 +135,6 @@ def visualize_image_with_bboxes(
     image_batch: torch.Tensor, batch_boxes: torch.Tensor, width: int = 4
 ):
     return [
-        draw_bounding_boxes(img, boxes=boxes, width=4)
+        draw_bounding_boxes(img, boxes=boxes, width=width)
         for img, boxes in zip(image_batch, batch_boxes)
     ]

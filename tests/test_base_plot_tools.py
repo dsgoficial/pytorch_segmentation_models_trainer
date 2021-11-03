@@ -26,14 +26,22 @@ from pathlib import Path
 
 import albumentations as A
 import numpy as np
-from dataset_loader.dataset import ObjectDetectionDataset
+import torch
+import matplotlib.pyplot as plt
+
+import torchvision.transforms.functional as F
+from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
+    ObjectDetectionDataset,
+)
 from numpy.testing import assert_array_equal
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.utils.os_utils import (
     create_folder,
     remove_folder,
 )
-from tools.visualization.base_plot_tools import visualize_image_with_bboxes
+from pytorch_segmentation_models_trainer.tools.visualization.base_plot_tools import (
+    visualize_image_with_bboxes,
+)
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, "testing_data")
@@ -57,12 +65,15 @@ class Test_TestBasePlotTools(unittest.TestCase):
             input_csv_path=csv_path,
             root_dir=os.path.dirname(csv_path),
             augmentation_list=A.Compose(
-                [A.pytorch.ToTensorV2()],
+                [A.RandomCrop(512, 512), A.pytorch.ToTensorV2()],
                 bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
             ),
         )
-        image, target = obj_det_ds[0]
-        output = visualize_image_with_bboxes(
-            image.unsqueeeze(0), target["boxes"].unsqueeze(0)
+        dataloader = torch.utils.data.DataLoader(
+            obj_det_ds, batch_size=4, shuffle=False, collate_fn=obj_det_ds.collate_fn
         )
-        assert True
+        images, targets = next(iter(dataloader))
+        output = visualize_image_with_bboxes(
+            images, [target["boxes"] for target in targets]
+        )
+        self.assertEqual(len(output), 4)
