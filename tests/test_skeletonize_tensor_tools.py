@@ -156,18 +156,3 @@ class Test_TestSkeletonize(unittest.TestCase):
         )
         self.assertEqual(tensorskeleton.batch_delim.shape, torch.Size([3]))
         assert torch.equal(tensorskeleton.batch_delim, torch.tensor([0, 12, 16]))
-        skeletons_batch = tensorskeleton_to_skeletons(tensorskeleton)
-        for i, skeleton in enumerate(skeletons_batch):
-            plot_skeleton(skeleton)
-            plt.savefig(os.path.join(self.output_dir, f"test_output{i}.png"))
-            plt.close()
-            self.assertEqual(
-                compare_images(
-                    os.path.join(
-                        root_dir, "expected_outputs", "tensor_tools", f"output{i}.png"
-                    ),
-                    os.path.join(self.output_dir, f"test_output{i}.png"),
-                    0.001,
-                ),
-                None,
-            )
