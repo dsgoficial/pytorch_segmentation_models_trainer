@@ -117,17 +117,19 @@ def batch_denormalize_tensor(
     ).to(output_type)
 
 
-def generate_visualization(fig_title=None, **images):
+def generate_visualization(fig_title=None, fig_size=None, font_size=16, **images):
     n = len(images)
-    fig = plt.figure(figsize=(16, 5))
+    fig_size = (16, 5) if fig_size is None else fig_size
+    fig = plt.figure(figsize=fig_size)
     if fig_title is not None:
-        fig.suptitle(fig_title, fontsize=16)
+        fig.suptitle(fig_title, fontsize=font_size)
     for i, (name, image) in enumerate(images.items()):
         plt.subplot(1, n, i + 1)
         plt.xticks([])
         plt.yticks([])
         plt.title(" ".join(name.split("_")).title())
         plt.imshow(image)
+    fig.subplots_adjust(top=0.8)
     return plt, fig
 
 

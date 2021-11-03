@@ -40,7 +40,9 @@ from torch.utils.tensorboard import SummaryWriter
 from pytorch_lightning.utilities import rank_zero_only
 from pytorch_segmentation_models_trainer.tools.visualization.crossfield_plot import (
     get_tensorboard_image_seg_display,
+    plot_polygons,
 )
+from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 
 
 class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
@@ -91,7 +93,7 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
                 epoch=current_epoch,
             ),
         )
-        plot.savefig(report_path, format="png")
+        plot.savefig(report_path, format="png", bbox_inches="tight")
         return report_path
 
     def on_sanity_check_end(self, trainer, pl_module):
@@ -223,4 +225,52 @@ class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
                     val_ds.dataset.get_path(current_item), vis, trainer.current_epoch
                 )
                 current_item += 1
+        return
+
+
+class PolygonRNNResultCallback(ImageSegmentationResultCallback):
+    @rank_zero_only
+    def on_validation_end(self, trainer, pl_module):
+        if not self.save_outputs:
+            return
+        val_ds = pl_module.val_dataloader()
+        prepared_input = val_ds.dataset.get_n_image_path_dict_list(self.n_samples)
+        for image_path, prepared_item in prepared_input.items():
+            output_batch_polygons = pl_module.model.test(
+                prepared_item["croped_images"], pl_module.val_seq_len
+            )
+            gt_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
+                prepared_item["ta"],
+                prepared_item["scale_h"],
+                prepared_item["scale_w"],
+                prepared_item["min_col"],
+                prepared_item["min_row"],
+            )
+            predicted_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
+                output_batch_polygons,
+                prepared_item["scale_h"],
+                prepared_item["scale_w"],
+                prepared_item["min_col"],
+                prepared_item["min_row"],
+            )
+            plot_title = image_path
+            plt_result, fig = generate_visualization(
+                fig_title=plot_title,
+                fig_size=(10, 6),
+                expected_output=prepared_item["original_image"],
+                predicted_output=prepared_item["original_image"],
+            )
+            gt_axes, predicted_axes = plt.gcf().get_axes()
+            fig.tight_layout()
+            fig.subplots_adjust(top=0.95)
+            plot_polygons(gt_axes, gt_polygon_list, markersize=5)
+            plot_polygons(predicted_axes, predicted_polygon_list, markersize=5)
+            if self.save_outputs:
+                saved_image = self.save_plot_to_disk(
+                    plt_result, plot_title, trainer.current_epoch
+                )
+                self.log_data_to_tensorboard(
+                    saved_image, plot_title, trainer.logger, trainer.current_epoch
+                )
+            plt.close(fig)
         return

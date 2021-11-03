@@ -91,3 +91,22 @@ class Test_TestPolygonRNNModel(CustomTestCase):
                 ],
             )
             trainer = train(cfg)
+
+    def test_train_polygon_rnn_model_with_callback(self) -> None:
+        csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_polygonrnn_with_callback.yaml",
+                overrides=[
+                    "train_dataset.input_csv_path=" + csv_path,
+                    "train_dataset.root_dir=" + polygon_rnn_root_dir,
+                    "val_dataset.input_csv_path=" + csv_path,
+                    "val_dataset.root_dir=" + polygon_rnn_root_dir,
+                    # 'pl_trainer.gpus=1',
+                    # 'device=cuda',
+                    # 'optimizer.lr=0.00001',
+                    # 'hyperparameters.batch_size=4',
+                    # 'hyperparameters.epochs=10'
+                ],
+            )
+            trainer = train(cfg)

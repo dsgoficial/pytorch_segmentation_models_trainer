@@ -19,6 +19,8 @@
  ****
 """
 from abc import abstractmethod
+from collections import defaultdict
+import itertools
 import os
 from pytorch_segmentation_models_trainer.utils.object_detection_utils import (
     bbox_xywh_to_xyxy,
@@ -29,7 +31,7 @@ from albumentations.pytorch import ToTensorV2
 from albumentations.augmentations.transforms import Normalize
 import torch
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import albumentations as A
 import numpy as np
@@ -105,17 +107,23 @@ class AbstractDataset(Dataset):
         key = self.image_key if key is None else key
         image_path = str(self.df.iloc[idx][key])
         if self.root_dir is not None:
-            return os.path.join(
-                self.root_dir,
-                image_path
-                if not image_path.startswith(os.path.sep)
-                else image_path[1::],
-            )
+            return self._add_root_dir_to_path(image_path)
         return image_path
+
+    def _add_root_dir_to_path(self, image_path):
+        return os.path.join(
+            self.root_dir,
+            image_path if not image_path.startswith(os.path.sep) else image_path[1::],
+        )
 
     def load_image(self, idx, key=None, is_mask=False, force_rgb=False):
         key = self.image_key if key is None else key
         image_path = self.get_path(idx, key=key)
+        return self.load_image_from_path(
+            image_path, is_mask=is_mask, force_rgb=force_rgb
+        )
+
+    def load_image_from_path(self, image_path, is_mask=False, force_rgb=False):
         image = (
             Image.open(image_path)
             if not is_mask
@@ -429,9 +437,13 @@ class PolygonRNNDataset(AbstractDataset):
             if original_image_path_key is not None
             else "original_image_path"
         )
+        self.unique_image_path_list = self.df[self.original_image_path_key].unique()
 
     def load_polygon(self, idx):
         mask_name = os.path.join(self.root_dir, self.df.iloc[idx][self.mask_key])
+        return self._load_polygon_from_path(mask_name)
+
+    def _load_polygon_from_path(self, mask_name):
         with open(mask_name, "r") as f:
             json_file = json.load(f)
         polygon = np.array(json_file["polygon"])
@@ -464,6 +476,37 @@ class PolygonRNNDataset(AbstractDataset):
             "original_image_path": self.get_path(
                 index, key=self.original_image_path_key
             ),
+        }
+        return output_dict
+
+    def get_images_from_image_path(self, image_path: str) -> List:
+        entries = self.df.loc[self.df[self.original_image_path_key] == image_path]
+        items = [self.__getitem__(idx) for idx in entries.index.tolist()]
+        return {
+            "original_image": self.load_image(
+                entries.index.tolist()[0], key=self.original_image_path_key
+            ),
+            "polygon_wkt_list": [item["polygon_wkt"] for item in items],
+            "croped_images": torch.stack([item["image"] for item in items]),
+            "scale_h": torch.tensor([item["scale_h"] for item in items]),
+            "scale_w": torch.tensor([item["scale_w"] for item in items]),
+            "min_col": torch.tensor([item["min_col"] for item in items]),
+            "min_row": torch.tensor([item["min_row"] for item in items]),
+            "ta": torch.stack([item["ta"] for item in items]),
+        }
+
+    def get_n_image_path_lists(self, n: int) -> List:
+        return list(
+            itertools.chain.from_iterable(
+                self.get_images_from_image_path(image_path)
+                for image_path in self.unique_image_path_list[:n]
+            )
+        )
+
+    def get_n_image_path_dict_list(self, n: int) -> Dict[str, List]:
+        output_dict = {
+            image_path: self.get_images_from_image_path(image_path)
+            for image_path in self.unique_image_path_list[:n]
         }
         return output_dict
 
