@@ -123,6 +123,8 @@ class PolygonRNNDatasetConversionStrategy(AbstractConversionStrategy):
         csv_entries_list = []
         for i, item in enumerate(json_object["objects"]):
             min_row, min_col, max_row, max_col = self._get_bounds(json_object, item)
+            if max_row - min_row == 0 or max_col - min_col == 0:
+                continue
             scale_h, scale_w = self._get_scales(min_row, min_col, max_row, max_col)
             csv_entries_list.append(
                 {
