@@ -22,6 +22,7 @@
 """
 from collections import OrderedDict
 from logging import log
+import os
 from pathlib import Path
 
 import segmentation_models_pytorch as smp
@@ -38,6 +39,8 @@ from pytorch_segmentation_models_trainer.utils import polygonrnn_utils, tensor_u
 from torch import nn
 from torch.autograd import Variable
 from tqdm import tqdm
+
+current_dir = os.path.dirname(__file__)
 
 
 class ConvLSTMCell(nn.Module):
@@ -365,11 +368,12 @@ class PolygonRNN(nn.Module):
             self.load_vgg()
 
     def load_vgg(self):
-        vgg_file = Path("vgg16_bn-6c64b313.pth")
+        download_folder = Path(current_dir) / Path("pretrained")
+        vgg_file = download_folder / Path("vgg16_bn-6c64b313.pth")
         vgg16_dict = (
-            torch.load("vgg16_bn-6c64b313.pth")
+            torch.load(vgg_file)
             if vgg_file.is_file()
-            else self.download_vgg16()
+            else self.download_vgg16(download_folder)
         )
         vgg_name = [
             name for name in vgg16_dict if "feature" in name and "running" not in name
@@ -378,12 +382,14 @@ class PolygonRNN(nn.Module):
             if "model" in name:
                 param.data.copy_(vgg16_dict[vgg_name[idx]])
 
-    def download_vgg16(self):
+    def download_vgg16(self, download_folder):
         try:
+            model_path = download_folder / Path("vgg16_bn-6c64b313.pth")
             wget.download(
-                "https://download.pytorch.org/models/vgg16_bn" "-6c64b313.pth"
+                "https://download.pytorch.org/models/vgg16_bn" "-6c64b313.pth",
+                out=str(model_path),
             )
-            vgg16_dict = torch.load("vgg16_bn-6c64b313.pth")
+            vgg16_dict = torch.load(model_path)
         except:
             vgg16_dict = torch.load(
                 model_zoo.load_url(
@@ -510,7 +516,7 @@ class PolygonRNNPLModel(Model):
 
     def get_model(self):
         return PolygonRNN(
-            load_vgg=self.cfg.model.load_vgg if "load_vgg" in self.cfg.model else True
+            load_vgg=self.cfg.model.load_vgg if "load_vgg" in self.cfg.model else False
         )
 
     def get_loss_function(self):

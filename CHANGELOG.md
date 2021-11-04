@@ -1,6 +1,8 @@
 # Veresion 0.14.1
 
 - Bug fix on convert dataset;
+- Bug fix on PolygonRNNDataset;
+- Bug fix on PolygonRNNResultCallback when using gpu;
 
 # Version 0.14.0
 

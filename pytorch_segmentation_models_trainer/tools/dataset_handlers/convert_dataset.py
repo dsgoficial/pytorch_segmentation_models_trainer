@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import dataclasses
 from omegaconf import MISSING, DictConfig, OmegaConf
+from shapely.geometry.polygon import Polygon
 
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     AbstractDataset,
@@ -142,6 +143,7 @@ class PolygonRNNDatasetConversionStrategy(AbstractConversionStrategy):
                         self.original_images_folder_name,
                         image_path.split(self.original_images_folder_name)[1::][0][1::],
                     ),
+                    "original_polygon_wkt": Polygon(item["polygon"]).wkt,
                 }
             )
             if not self.write_output_files:

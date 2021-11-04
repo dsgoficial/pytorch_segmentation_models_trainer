@@ -12,7 +12,7 @@ import torch
 import torchvision
 import shapely.geometry
 
-from pytorch_segmentation_models_trainer.utils import math_utils
+from pytorch_segmentation_models_trainer.utils import math_utils, polygonrnn_utils
 
 
 def get_seg_display(seg):
@@ -184,10 +184,10 @@ def plot_polygons(
     if len(polygons) == 0:
         return
     patches = []
-    for i, geometry in enumerate(polygons):
-        polygon = shapely.geometry.Polygon(geometry)
-        if not polygon.is_empty:
-            patch = PolygonPatch(polygon)
+    shapely_geom_list = list(map(polygonrnn_utils.handle_vertices, polygons))
+    for shapely_geom in shapely_geom_list:
+        if not shapely_geom.is_empty and "Polygon" in shapely_geom.geom_type:
+            patch = PolygonPatch(shapely_geom)
             patches.append(patch)
     random.seed(1)
     if color_choices is None:
@@ -205,28 +205,29 @@ def plot_polygons(
             [0, 0.5, 1, 1],
             [0, 1, 0.5, 1],
         ]
-    colors = random.choices(color_choices, k=len(patches))
-    edgecolors = np.array(colors, dtype=np.float)
+    colors = random.choices(color_choices, k=len(shapely_geom_list))
+    edgecolors = np.array(colors, dtype=np.float64)
     facecolors = edgecolors.copy()
     if polygon_probs is not None:
         facecolors[:, -1] = alpha * np.array(polygon_probs) + 0.1
-    else:
+    elif len(facecolors) > 0:
         facecolors[:, -1] = alpha
     p = PatchCollection(
         patches, facecolors=facecolors, edgecolors=edgecolors, linewidths=linewidths
     )
     axis.add_collection(p)
 
-    if draw_vertices:
-        for i, geom in enumerate(polygons):
-            polygon = shapely.geometry.Polygon(geom)
-            axis.plot(
-                *polygon.exterior.xy,
-                marker="o",
-                color=edgecolors[i],
-                markersize=markersize,
-            )
-            for interior in polygon.interiors:
+    if not draw_vertices:
+        return
+    for i, shapely_geom in enumerate(shapely_geom_list):
+        xy_list = (
+            shapely_geom.exterior.xy
+            if "Polygon" in shapely_geom.geom_type
+            else shapely_geom.xy
+        )
+        axis.plot(*xy_list, marker="o", color=edgecolors[i], markersize=markersize)
+        if "Polygon" in shapely_geom.geom_type:
+            for interior in shapely_geom.interiors:
                 axis.plot(
                     *interior.xy, marker="o", color=edgecolors[i], markersize=markersize
                 )

@@ -238,15 +238,10 @@ class PolygonRNNResultCallback(ImageSegmentationResultCallback):
         prepared_input = val_ds.dataset.get_n_image_path_dict_list(self.n_samples)
         for image_path, prepared_item in prepared_input.items():
             output_batch_polygons = pl_module.model.test(
-                prepared_item["croped_images"], pl_module.val_seq_len
+                prepared_item["croped_images"].to(pl_module.device),
+                pl_module.val_seq_len,
             )
-            gt_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
-                prepared_item["ta"],
-                prepared_item["scale_h"],
-                prepared_item["scale_w"],
-                prepared_item["min_col"],
-                prepared_item["min_row"],
-            )
+            gt_polygon_list = prepared_item["shapely_polygon_list"]
             predicted_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
                 output_batch_polygons,
                 prepared_item["scale_h"],
