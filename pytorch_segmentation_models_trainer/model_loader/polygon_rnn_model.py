@@ -34,7 +34,7 @@ from hydra.utils import instantiate
 from omegaconf.dictconfig import DictConfig
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
 from pytorch_segmentation_models_trainer.model_loader.model import Model
-from pytorch_segmentation_models_trainer.utils import tensor_utils
+from pytorch_segmentation_models_trainer.utils import polygonrnn_utils, tensor_utils
 from torch import nn
 from torch.autograd import Variable
 from tqdm import tqdm
@@ -506,6 +506,7 @@ class PolygonRNN(nn.Module):
 class PolygonRNNPLModel(Model):
     def __init__(self, cfg):
         super(PolygonRNNPLModel, self).__init__(cfg)
+        self.val_seq_len = self.cfg.val_dataset.sequence_length
 
     def get_model(self):
         return PolygonRNN(
@@ -516,7 +517,8 @@ class PolygonRNNPLModel(Model):
         return nn.CrossEntropyLoss()
 
     def training_step(self, batch, batch_idx):
-        loss, acc = self.compute(batch)
+        result = self.compute(batch)
+        loss, acc = self.compute_loss_acc(batch, result)
         tensorboard_logs = {"acc": {"train": acc}}
         self.log(
             "train_loss",
@@ -527,17 +529,17 @@ class PolygonRNNPLModel(Model):
             logger=True,
             sync_dist=True,
         )
+        self.log(
+            "train_acc", acc, on_step=True, prog_bar=True, logger=True, sync_dist=True
+        )
         return {"loss": loss, "log": tensorboard_logs}
 
     def compute(self, batch):
-        x = Variable(batch["image"])
-        x1 = Variable(batch["x1"])
-        x2 = Variable(batch["x2"])
-        x3 = Variable(batch["x3"])
-        ta = Variable(batch["ta"])
-        output = self.model(x, x1, x2, x3)
-        result = output.contiguous().view(-1, 28 * 28 + 3)
-        target = ta.contiguous().view(-1)
+        output = self.model(batch["image"], batch["x1"], batch["x2"], batch["x3"])
+        return output.contiguous().view(-1, 28 * 28 + 3)
+
+    def compute_loss_acc(self, batch, result):
+        target = batch["ta"].contiguous().view(-1)
         loss = self.loss_function(result, target)
         result_index = torch.argmax(result, 1)
         correct = (target == result_index).float().sum().item()
@@ -545,7 +547,10 @@ class PolygonRNNPLModel(Model):
         return loss, acc
 
     def validation_step(self, batch, batch_idx):
-        loss, acc = self.compute(batch)
+        result = self.compute(batch)
+        loss, acc = self.compute_loss_acc(batch, result)
+        test_output = self.model.test(batch["image"], self.val_seq_len)
+        batch_polis, intersection, union = self.evaluate_batch(batch, test_output)
         tensorboard_logs = {"acc": {"val": acc}}
         self.log(
             "validation_loss",
@@ -556,23 +561,67 @@ class PolygonRNNPLModel(Model):
             logger=True,
             sync_dist=True,
         )
-        return {"val_loss": loss, "log": tensorboard_logs}
+        self.log(
+            "val_acc", acc, on_step=True, prog_bar=True, logger=True, sync_dist=True
+        )
+        return {
+            "val_loss": loss,
+            "log": tensorboard_logs,
+            "polis": batch_polis,
+            "intersection": intersection,
+            "union": union,
+        }
+
+    def evaluate_batch(self, batch, result):
+        gt_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
+            batch["ta"],
+            batch["scale_h"],
+            batch["scale_w"],
+            batch["min_col"],
+            batch["min_row"],
+        )
+        predicted_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
+            result,
+            batch["scale_h"],
+            batch["scale_w"],
+            batch["min_col"],
+            batch["min_row"],
+        )
+        batch_polis = torch.from_numpy(
+            metrics.batch_polis(predicted_polygon_list, gt_polygon_list)
+        )
+        iou = lambda x: metrics.polygon_iou(x[0], x[1])
+        output_tensor_iou = torch.tensor(
+            list(map(iou, zip(predicted_polygon_list, gt_polygon_list)))
+        )
+        intersection = output_tensor_iou[:, 1]
+        union = output_tensor_iou[:, 2]
+        return batch_polis, intersection, union
 
     def training_epoch_end(self, outputs):
-        avg_loss = torch.stack([x["loss"] for x in outputs]).mean()
-        avg_acc = torch.stack(
-            [torch.tensor(x["log"]["acc"]["train"]) for x in outputs]
-        ).mean()
-        tensorboard_logs = {
-            "avg_loss": {"train": avg_loss},
-            "avg_acc": {"train": avg_acc},
-        }
+        tensorboard_logs = self._get_tensorboard_logs(outputs, "loss", "train")
         self.log_dict(tensorboard_logs, logger=True)
 
-    def validation_epoch_end(self, outputs):
-        avg_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
+    def _get_tensorboard_logs(self, outputs, loss_name, step):
+        avg_loss = torch.stack([x[loss_name] for x in outputs]).mean()
         avg_acc = torch.stack(
-            [torch.tensor(x["log"]["acc"]["val"]) for x in outputs]
+            [torch.tensor(x["log"]["acc"][step]) for x in outputs]
         ).mean()
-        tensorboard_logs = {"avg_loss": {"val": avg_loss}, "avg_acc": {"val": avg_acc}}
+        if step == "train":
+            return {"avg_loss": {step: avg_loss}, "avg_acc": {step: avg_acc}}
+        intersection = torch.stack([x["intersection"] for x in outputs]).sum()
+        union = torch.stack([x["union"] for x in outputs]).sum()
+        iou = intersection / union
+        polis = torch.stack([x["polis"].float() for x in outputs]).mean()
+        tensorboard_logs = {
+            "avg_loss": {step: avg_loss},
+            "avg_acc": {step: avg_acc},
+            "iou": {step: iou},
+            "polis": {step: polis},
+        }
+
+        return tensorboard_logs
+
+    def validation_epoch_end(self, outputs):
+        tensorboard_logs = self._get_tensorboard_logs(outputs, "val_loss", "val")
         self.log_dict(tensorboard_logs, logger=True)

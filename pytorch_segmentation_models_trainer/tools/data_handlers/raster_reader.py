@@ -18,6 +18,8 @@
  *                                                                         *
  ****
 """
+import itertools
+import json
 import os
 from abc import ABC, abstractmethod
 from collections import OrderedDict
@@ -25,16 +27,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List
-from affine import Affine
-import json
 
 import numpy as np
 import pandas as pd
 import rasterio
+import shapely
+from affine import Affine
 from bidict import bidict
 from geopandas.geoseries import GeoSeries
 from omegaconf.omegaconf import MISSING
-import shapely
 from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import (
     GeoDF,
     GeomType,
@@ -376,7 +377,12 @@ class RasterFile:
                         for point in np.array(polygon.exterior.coords[0:-1])
                     ],
                 }
-                for polygon in polygon_list
+                for polygon in itertools.chain(
+                    *[
+                        list(geom) if geom.geom_type == "MultiPolygon" else [geom]
+                        for geom in polygon_list
+                    ]
+                )
             ],
         }
 

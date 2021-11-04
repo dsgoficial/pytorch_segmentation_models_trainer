@@ -218,7 +218,8 @@ def plot_polygons(
     axis.add_collection(p)
 
     if draw_vertices:
-        for i, polygon in enumerate(polygons):
+        for i, geom in enumerate(polygons):
+            polygon = shapely.geometry.Polygon(geom)
             axis.plot(
                 *polygon.exterior.xy,
                 marker="o",

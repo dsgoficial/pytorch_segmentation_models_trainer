@@ -28,6 +28,7 @@ import albumentations as A
 import hydra
 import numpy as np
 from hydra import compose, initialize
+import torch
 from pytorch_segmentation_models_trainer.config_definitions.coco_dataset_config import (
     AnnotationConfig,
     CategoryConfig,
@@ -539,23 +540,23 @@ class Test_TestDataset(CustomTestCase):
         self.assertDictEqual(dataclasses.asdict(coco_ds), expected_output)
 
     def test_polygon_rnn_dataset(self):
-        csv_path = os.path.join(
-            polygon_rnn_root_dir, "training_dataset_from_cityscapes.csv"
-        )
+        csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
         polygon_rnn_ds = PolygonRNNDataset(
             input_csv_path=csv_path,
             sequence_length=60,
             root_dir=polygon_rnn_root_dir,
             augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
         )
-        self.assertEqual(len(polygon_rnn_ds), 21)
-        for idx in range(len(polygon_rnn_ds)):
-            ds_item = polygon_rnn_ds[idx]
-            self.assertEqual(ds_item["image"].shape, (3, 224, 224))
-            self.assertEqual(ds_item["x1"].shape, (787,))
-            self.assertEqual(ds_item["x2"].shape, (58, 787))
-            self.assertEqual(ds_item["x3"].shape, (58, 787))
-            self.assertEqual(ds_item["ta"].shape, (58,))
+        self.assertEqual(len(polygon_rnn_ds), 587)
+
+        ds_item = polygon_rnn_ds[0]
+        self.assertEqual(ds_item["image"].shape, (3, 224, 224))
+        self.assertEqual(ds_item["x1"].shape, (787,))
+        self.assertEqual(ds_item["x2"].shape, (58, 787))
+        self.assertEqual(ds_item["x3"].shape, (58, 787))
+        self.assertEqual(
+            ds_item["ta"].shape, (58,)
+        )  # tensor (N, 3, 300, 300), 3 lists of N tensors each
 
     def test_object_detection_dataset(self):
         csv_path = os.path.join(detection_root_dir, "geo", "dsg_dataset.csv")
@@ -563,15 +564,22 @@ class Test_TestDataset(CustomTestCase):
             input_csv_path=csv_path,
             root_dir=os.path.dirname(csv_path),
             augmentation_list=A.Compose(
-                [A.Normalize(), A.pytorch.ToTensorV2()],
+                [A.CenterCrop(512, 512), A.Normalize(), A.pytorch.ToTensorV2()],
                 bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
             ),
         )
+        batch = torch.utils.data.DataLoader(
+            obj_det_ds, batch_size=4, shuffle=False, collate_fn=obj_det_ds.collate_fn
+        )
+        for _, batch_item in enumerate(batch):
+            batch_images, batch_targets = batch_item
+            self.assertEqual(batch_images.shape, (4, 3, 512, 512))
+            self.assertEqual(len(batch_targets), 4)
         self.assertEqual(len(obj_det_ds), 12)
         image, target = obj_det_ds[0]
-        self.assertEqual(image.shape, (3, 571, 571))
-        self.assertEqual(target["boxes"].shape, (2, 4))
-        self.assertEqual(target["labels"].shape, (2,))
+        self.assertEqual(image.shape, (3, 512, 512))
+        self.assertEqual(target["boxes"].shape, (1, 4))
+        self.assertEqual(target["labels"].shape, (1,))
 
     def test_instance_segmentation_dataset(self):
         csv_path = os.path.join(detection_root_dir, "geo", "dsg_dataset.csv")

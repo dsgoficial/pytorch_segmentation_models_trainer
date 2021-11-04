@@ -57,12 +57,10 @@ class Test_TestPolygonRNNModel(CustomTestCase):
         return True
 
     def test_create_inference_from_model(self) -> None:
-        csv_path = os.path.join(
-            polygon_rnn_root_dir, "training_dataset_from_cityscapes.csv"
-        )
+        csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
         polygon_rnn_ds = PolygonRNNDataset(
             input_csv_path=csv_path,
-            sequence_length=60,
+            sequence_length=20,
             root_dir=polygon_rnn_root_dir,
             augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
         )
@@ -73,15 +71,32 @@ class Test_TestPolygonRNNModel(CustomTestCase):
         with torch.no_grad():
             batch = next(iter(data_loader))
             output = polygonrnn(batch["image"], batch["x1"], batch["x2"], batch["x3"])
-        self.assertEqual(output.shape, (2, 58, 787))
+        self.assertEqual(output.shape, (2, 18, 787))
 
     def test_train_polygon_rnn_model(self) -> None:
-        csv_path = os.path.join(
-            polygon_rnn_root_dir, "training_dataset_from_cityscapes.csv"
-        )
+        csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
         with initialize(config_path="./test_configs"):
             cfg = compose(
                 config_name="experiment_polygonrnn.yaml",
+                overrides=[
+                    "train_dataset.input_csv_path=" + csv_path,
+                    "train_dataset.root_dir=" + polygon_rnn_root_dir,
+                    "val_dataset.input_csv_path=" + csv_path,
+                    "val_dataset.root_dir=" + polygon_rnn_root_dir,
+                    # 'pl_trainer.gpus=1',
+                    # 'device=cuda',
+                    # 'optimizer.lr=0.00001',
+                    # 'hyperparameters.batch_size=4',
+                    # 'hyperparameters.epochs=10'
+                ],
+            )
+            trainer = train(cfg)
+
+    def test_train_polygon_rnn_model_with_callback(self) -> None:
+        csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_polygonrnn_with_callback.yaml",
                 overrides=[
                     "train_dataset.input_csv_path=" + csv_path,
                     "train_dataset.root_dir=" + polygon_rnn_root_dir,

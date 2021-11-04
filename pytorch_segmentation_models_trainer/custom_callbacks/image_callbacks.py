@@ -29,94 +29,21 @@ from typing import Any, List
 import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl
+from pytorch_segmentation_models_trainer.tools.visualization.base_plot_tools import (
+    batch_denormalize_tensor,
+    denormalize_np_array,
+    generate_visualization,
+    visualize_image_with_bboxes,
+)
 import torch
 from PIL import Image
 from torch.utils.tensorboard import SummaryWriter
 from pytorch_lightning.utilities import rank_zero_only
 from pytorch_segmentation_models_trainer.tools.visualization.crossfield_plot import (
     get_tensorboard_image_seg_display,
+    plot_polygons,
 )
-
-logging.getLogger("matplotlib").setLevel(level=logging.CRITICAL)
-
-
-def denormalize_np_array(image: np.ndarray, mean=None, std=None) -> np.ndarray:
-    """Denormalizes normalized image. Used in visualization of augmented images.
-
-    Args:
-        image (np.ndarray): input image
-        mean (list, optional): Mean used in normalization.
-            Defaults to [0.485, 0.456, 0.406].
-        std (list, optional): Standard deviation used in normalization.
-            Defaults to [0.229, 0.224, 0.225].
-    """
-    mean = [0.485, 0.456, 0.406] if mean is None else mean
-    std = [0.229, 0.224, 0.225] if std is None else std
-
-    return image * np.array(std)[..., None, None] + np.array(mean)[..., None, None]
-
-
-def batch_denormalize_tensor(tensor, mean=None, std=None, inplace=False):
-    """Denormalize a batched tensor image with batched mean and batched standard deviation.
-    .. note::
-        This transform acts out of place by default, i.e., it does not mutates the input tensor.
-    Args:
-        tensor (Tensor): Tensor image of size (B, C, H, W) to be normalized.
-        mean (sequence): Tensor means of size (B, C).
-        std (sequence): Tensor standard deviations of size (B, C).
-        inplace(bool,optional): Bool to make this operation inplace.
-    Returns:
-        Tensor: Normalized Tensor image.
-    """
-    mean = (
-        mean
-        if mean is not None
-        else torch.tensor([0.485, 0.456, 0.406]).expand(
-            tensor.shape[0], tensor.shape[1]
-        )
-    )
-    std = (
-        std
-        if std is not None
-        else torch.tensor([0.229, 0.224, 0.225]).expand(
-            tensor.shape[0], tensor.shape[1]
-        )
-    )
-    assert (
-        len(tensor.shape) == 4
-    ), "tensor should have 4 dims (B, H, W, C) , not {}".format(len(tensor.shape))
-    assert (
-        len(mean.shape) == len(std.shape) == 2
-    ), "mean and std should have 2 dims (B, C) , not {} and {}".format(
-        len(mean.shape), len(std.shape)
-    )
-    assert (
-        tensor.shape[1] == mean.shape[1] == std.shape[1]
-    ), "tensor, mean and std should have the same number of channels, not {}, {} and {}".format(
-        tensor.shape[-1], mean.shape[-1], std.shape[-1]
-    )
-
-    if not inplace:
-        tensor = tensor.clone()
-
-    mean = mean.to(tensor.dtype)
-    std = std.to(tensor.dtype)
-    tensor.mul_(std[..., None, None]).add_(mean[..., None, None])
-    return tensor
-
-
-def generate_visualization(fig_title=None, **images):
-    n = len(images)
-    fig = plt.figure(figsize=(16, 5))
-    if fig_title is not None:
-        fig.suptitle(fig_title, fontsize=16)
-    for i, (name, image) in enumerate(images.items()):
-        plt.subplot(1, n, i + 1)
-        plt.xticks([])
-        plt.yticks([])
-        plt.title(" ".join(name.split("_")).title())
-        plt.imshow(image)
-    return plt, fig
+from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 
 
 class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
@@ -167,7 +94,7 @@ class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
                 epoch=current_epoch,
             ),
         )
-        plot.savefig(report_path, format="png")
+        plot.savefig(report_path, format="png", bbox_inches="tight")
         return report_path
 
     def on_sanity_check_end(self, trainer, pl_module):
@@ -269,3 +196,82 @@ class FrameFieldOverlayedResultCallback(pl.callbacks.base.Callback):
             trainer.logger.experiment.add_images(
                 "seg", image_seg_display, trainer.current_epoch
             )
+
+
+class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
+    @rank_zero_only
+    def on_validation_end(self, trainer, pl_module):
+        if not self.save_outputs:
+            return
+        val_ds = pl_module.val_dataloader()
+        n_samples = (
+            pl_module.val_dataloader().batch_size
+            if self.n_samples is None
+            else self.n_samples
+        )
+        current_item = 0
+        for images, targets in val_ds:
+            if current_item >= n_samples:
+                break
+            image_display = batch_denormalize_tensor(
+                images, clip_range=[0, 255], output_type=torch.uint8
+            ).to("cpu")
+            outputs = pl_module(images.to(pl_module.device))
+            boxes = [out["boxes"][out["scores"] > 0.5].to("cpu") for out in outputs]
+            visualization_list = visualize_image_with_bboxes(
+                image_display.to("cpu"), boxes
+            )
+            for vis in visualization_list:
+                trainer.logger.experiment.add_image(
+                    val_ds.dataset.get_path(current_item), vis, trainer.current_epoch
+                )
+                current_item += 1
+        return
+
+
+class PolygonRNNResultCallback(ImageSegmentationResultCallback):
+    @rank_zero_only
+    def on_validation_end(self, trainer, pl_module):
+        if not self.save_outputs:
+            return
+        val_ds = pl_module.val_dataloader()
+        prepared_input = val_ds.dataset.get_n_image_path_dict_list(self.n_samples)
+        for image_path, prepared_item in prepared_input.items():
+            output_batch_polygons = pl_module.model.test(
+                prepared_item["croped_images"], pl_module.val_seq_len
+            )
+            gt_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
+                prepared_item["ta"],
+                prepared_item["scale_h"],
+                prepared_item["scale_w"],
+                prepared_item["min_col"],
+                prepared_item["min_row"],
+            )
+            predicted_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
+                output_batch_polygons,
+                prepared_item["scale_h"],
+                prepared_item["scale_w"],
+                prepared_item["min_col"],
+                prepared_item["min_row"],
+            )
+            plot_title = image_path
+            plt_result, fig = generate_visualization(
+                fig_title=plot_title,
+                fig_size=(10, 6),
+                expected_output=prepared_item["original_image"],
+                predicted_output=prepared_item["original_image"],
+            )
+            gt_axes, predicted_axes = plt.gcf().get_axes()
+            fig.tight_layout()
+            fig.subplots_adjust(top=0.95)
+            plot_polygons(gt_axes, gt_polygon_list, markersize=5)
+            plot_polygons(predicted_axes, predicted_polygon_list, markersize=5)
+            if self.save_outputs:
+                saved_image = self.save_plot_to_disk(
+                    plt_result, plot_title, trainer.current_epoch
+                )
+                self.log_data_to_tensorboard(
+                    saved_image, plot_title, trainer.logger, trainer.current_epoch
+                )
+            plt.close(fig)
+        return

@@ -25,10 +25,6 @@ import torch
 from torchvision.ops import box_iou
 
 
-def collate_fn(batch):
-    return tuple(zip(*batch))
-
-
 def _evaluate_iou(target, pred):
     """Evaluate intersection over union (IOU) for target from dataset and output prediction from model."""
     if pred["boxes"].shape[0] == 0:
@@ -59,7 +55,7 @@ class ObjectDetectionPLModel(Model):
             prefetch_factor=self.cfg.train_dataset.data_loader.prefetch_factor
             if "prefetch_factor" in self.cfg.train_dataset.data_loader
             else 4 * self.hyperparameters.batch_size,
-            collate_fn=collate_fn,
+            collate_fn=self.train_ds.collate_fn,
         )
 
     def val_dataloader(self):
@@ -79,7 +75,7 @@ class ObjectDetectionPLModel(Model):
             prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor
             if "prefetch_factor" in self.cfg.val_dataset.data_loader
             else 4 * self.hyperparameters.batch_size,
-            collate_fn=collate_fn,
+            collate_fn=self.val_ds.collate_fn,
         )
 
     def training_step(self, batch, batch_idx):
@@ -88,7 +84,7 @@ class ObjectDetectionPLModel(Model):
         # self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         # return {'loss': loss, 'log': tensorboard_logs}
         images, targets = batch
-        targets = [{k: v for k, v in t.items()} for t in targets]
+        # targets = [{k: v for k, v in t.items()} for t in targets]
         # separate losses
         loss_dict = self.model(images, targets)
         # total loss

@@ -1,3 +1,12 @@
+# Version 0.14.0
+
+- Vector IOU;
+- Polis metric added;
+- IoU added to PolygonRNN training loop;
+- Object detection visualization callback added;
+- PolygonRNN visualization callback added;
+- Bug fix on polygon building on build mask geometry handling;
+
 # Version 0.13.1
 
 - Bug fixes on SegLoss parameters;

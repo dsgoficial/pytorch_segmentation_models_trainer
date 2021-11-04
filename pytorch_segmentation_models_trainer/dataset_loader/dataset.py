@@ -19,16 +19,19 @@
  ****
 """
 from abc import abstractmethod
+from collections import defaultdict
+import itertools
 import os
 from pytorch_segmentation_models_trainer.utils.object_detection_utils import (
     bbox_xywh_to_xyxy,
     bbox_xyxy_to_xywh,
 )
+from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 from albumentations.pytorch import ToTensorV2
 from albumentations.augmentations.transforms import Normalize
 import torch
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import albumentations as A
 import numpy as np
@@ -37,6 +40,8 @@ from hydra.utils import instantiate
 from PIL import Image
 from torch.utils.data import Dataset
 import json
+
+from shapely.geometry import Polygon
 
 from omegaconf import DictConfig, OmegaConf
 
@@ -102,17 +107,23 @@ class AbstractDataset(Dataset):
         key = self.image_key if key is None else key
         image_path = str(self.df.iloc[idx][key])
         if self.root_dir is not None:
-            return os.path.join(
-                self.root_dir,
-                image_path
-                if not image_path.startswith(os.path.sep)
-                else image_path[1::],
-            )
+            return self._add_root_dir_to_path(image_path)
         return image_path
+
+    def _add_root_dir_to_path(self, image_path):
+        return os.path.join(
+            self.root_dir,
+            image_path if not image_path.startswith(os.path.sep) else image_path[1::],
+        )
 
     def load_image(self, idx, key=None, is_mask=False, force_rgb=False):
         key = self.image_key if key is None else key
         image_path = self.get_path(idx, key=key)
+        return self.load_image_from_path(
+            image_path, is_mask=is_mask, force_rgb=force_rgb
+        )
+
+    def load_image_from_path(self, image_path, is_mask=False, force_rgb=False):
         image = (
             Image.open(image_path)
             if not is_mask
@@ -398,6 +409,13 @@ class PolygonRNNDataset(AbstractDataset):
         data_loader=None,
         image_key=None,
         mask_key=None,
+        image_width_key=None,
+        image_height_key=None,
+        scale_h_key=None,
+        scale_w_key=None,
+        min_col_key=None,
+        min_row_key=None,
+        original_image_path_key=None,
         n_first_rows_to_read=None,
     ) -> None:
         super(PolygonRNNDataset, self).__init__(
@@ -410,9 +428,22 @@ class PolygonRNNDataset(AbstractDataset):
             n_first_rows_to_read=n_first_rows_to_read,
         )
         self.sequence_length = sequence_length
+        self.scale_h_key = scale_h_key if scale_h_key is not None else "scale_h"
+        self.scale_w_key = scale_w_key if scale_w_key is not None else "scale_w"
+        self.min_col_key = min_col_key if min_col_key is not None else "min_col"
+        self.min_row_key = min_row_key if min_row_key is not None else "min_row"
+        self.original_image_path_key = (
+            original_image_path_key
+            if original_image_path_key is not None
+            else "original_image_path"
+        )
+        self.unique_image_path_list = self.df[self.original_image_path_key].unique()
 
     def load_polygon(self, idx):
         mask_name = os.path.join(self.root_dir, self.df.iloc[idx][self.mask_key])
+        return self._load_polygon_from_path(mask_name)
+
+    def _load_polygon_from_path(self, mask_name):
         with open(mask_name, "r") as f:
             json_file = json.load(f)
         polygon = np.array(json_file["polygon"])
@@ -424,66 +455,60 @@ class PolygonRNNDataset(AbstractDataset):
             index, key=self.image_key, is_mask=False, force_rgb=True
         )
         polygon, num_vertexes = self.load_polygon(index)
-        label_array, label_index_array = self.build_arrays(polygon, num_vertexes)
+        label_array, label_index_array = polygonrnn_utils.build_arrays(
+            polygon, num_vertexes, self.sequence_length
+        )
 
         if self.transform is not None:
             augmented = self.transform(image=image)
             image = augmented["image"]
-        return {
+        output_dict = {
             "image": self.to_tensor(image).float(),
             "x1": self.to_tensor(label_array[2]).float(),
             "x2": self.to_tensor(label_array[:-2]).float(),
             "x3": self.to_tensor(label_array[1:-1]).float(),
             "ta": self.to_tensor(label_index_array[2:]).long(),
+            "polygon_wkt": Polygon(polygon).wkt,
+            "scale_h": self.df.iloc[index][self.scale_h_key],
+            "scale_w": self.df.iloc[index][self.scale_w_key],
+            "min_col": self.df.iloc[index][self.min_col_key],
+            "min_row": self.df.iloc[index][self.min_row_key],
+            "original_image_path": self.get_path(
+                index, key=self.original_image_path_key
+            ),
+        }
+        return output_dict
+
+    def get_images_from_image_path(self, image_path: str) -> List:
+        entries = self.df.loc[self.df[self.original_image_path_key] == image_path]
+        items = [self.__getitem__(idx) for idx in entries.index.tolist()]
+        return {
+            "original_image": self.load_image(
+                entries.index.tolist()[0], key=self.original_image_path_key
+            ),
+            "polygon_wkt_list": [item["polygon_wkt"] for item in items],
+            "croped_images": torch.stack([item["image"] for item in items]),
+            "scale_h": torch.tensor([item["scale_h"] for item in items]),
+            "scale_w": torch.tensor([item["scale_w"] for item in items]),
+            "min_col": torch.tensor([item["min_col"] for item in items]),
+            "min_row": torch.tensor([item["min_row"] for item in items]),
+            "ta": torch.stack([item["ta"] for item in items]),
         }
 
-    def build_arrays(self, polygon, num_vertexes):
-        point_count = 2
-        label_array = np.zeros([self.sequence_length, 28 * 28 + 3])
-        label_index_array = np.zeros([self.sequence_length])
-        if num_vertexes < self.sequence_length - 3:
-            for points in polygon:
-                self.populate_label_index_array(
-                    point_count, label_array, label_index_array, points
-                )
-                point_count += 1
-            label_array[point_count, 28 * 28] = 1
-            label_index_array[point_count] = 28 * 28
-            for kkk in range(point_count + 1, self.sequence_length):
-                if kkk % (num_vertexes + 3) == num_vertexes + 2:
-                    index = 28 * 28
-                elif kkk % (num_vertexes + 3) == 0:
-                    index = 28 * 28 + 1
-                elif kkk % (num_vertexes + 3) == 1:
-                    index = 28 * 28 + 2
-                else:
-                    index_a = int(polygon[kkk % (num_vertexes + 3) - 2][0] / 8)
-                    index_b = int(polygon[kkk % (num_vertexes + 3) - 2][1] / 8)
-                    index = index_b * 28 + index_a
-                label_array[kkk, index] = 1
-                label_index_array[kkk] = index
-        else:
-            scale = num_vertexes * 1.0 / (self.sequence_length - 3)
-            index_list = (np.arange(0, self.sequence_length - 3) * scale).astype(int)
-            for points in polygon[index_list]:
-                self.populate_label_index_array(
-                    point_count, label_array, label_index_array, points
-                )
-                point_count += 1
-            for kkk in range(point_count, self.sequence_length):
-                index = 28 * 28
-                label_array[kkk, index] = 1
-                label_index_array[kkk] = index
-        return label_array, label_index_array
+    def get_n_image_path_lists(self, n: int) -> List:
+        return list(
+            itertools.chain.from_iterable(
+                self.get_images_from_image_path(image_path)
+                for image_path in self.unique_image_path_list[:n]
+            )
+        )
 
-    def populate_label_index_array(
-        self, point_count, label_array, label_index_array, points
-    ):
-        index_a = int(points[0] / 8)
-        index_b = int(points[1] / 8)
-        index = index_b * 28 + index_a
-        label_array[point_count, index] = 1
-        label_index_array[point_count] = index
+    def get_n_image_path_dict_list(self, n: int) -> Dict[str, List]:
+        output_dict = {
+            image_path: self.get_images_from_image_path(image_path)
+            for image_path in self.unique_image_path_list[:n]
+        }
+        return output_dict
 
 
 class ObjectDetectionDataset(AbstractDataset):
@@ -561,6 +586,17 @@ class ObjectDetectionDataset(AbstractDataset):
             ds_item_dict["labels"], dtype=torch.int64
         )
         return image, ds_item_dict
+
+    @staticmethod
+    def collate_fn(batch: List) -> Dict[torch.Tensor, List[Dict]]:
+        """
+        :param batch: an iterable of N sets from __getitem__()
+        :return: a tensor of images, lists of varying-size tensors of bounding boxes, labels, and difficulties
+        """
+
+        images, targets = tuple(zip(*batch))
+        images = torch.stack(images, dim=0)
+        return images, list(targets)
 
 
 class InstanceSegmentationDataset(ObjectDetectionDataset):
