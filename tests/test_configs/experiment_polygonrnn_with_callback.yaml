@@ -34,6 +34,7 @@ train_dataset:
   input_csv_path: teste
   root_dir: teste
   sequence_length: 20
+  dataset_type: train
   n_first_rows_to_read: 2
   data_loader:
     shuffle: True
@@ -60,6 +61,7 @@ val_dataset:
   input_csv_path: teste
   root_dir: teste
   sequence_length: 20
+  dataset_type: val
   n_first_rows_to_read: 2
   data_loader:
     shuffle: False

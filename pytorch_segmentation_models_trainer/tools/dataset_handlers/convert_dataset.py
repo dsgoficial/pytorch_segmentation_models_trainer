@@ -113,7 +113,8 @@ class PolygonRNNDatasetConversionStrategy(AbstractConversionStrategy):
             List[Dict]: [description]
         """
         image = Image.open(image_path)
-        json_object = json.load(open(json_path))
+        with open(json_path) as f:
+            json_object = json.load(f)
         image_name = Path(image_path).stem
         output_image_folder = create_folder(
             os.path.join(self.output_images_folder, image_name)

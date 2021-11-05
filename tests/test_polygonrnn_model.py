@@ -79,15 +79,15 @@ class Test_TestPolygonRNNModel(CustomTestCase):
             cfg = compose(
                 config_name="experiment_polygonrnn.yaml",
                 overrides=[
-                    "train_dataset.input_csv_path=" + csv_path,
-                    "train_dataset.root_dir=" + polygon_rnn_root_dir,
-                    "val_dataset.input_csv_path=" + csv_path,
-                    "val_dataset.root_dir=" + polygon_rnn_root_dir,
-                    # 'pl_trainer.gpus=1',
-                    # 'device=cuda',
-                    # 'optimizer.lr=0.00001',
-                    # 'hyperparameters.batch_size=4',
-                    # 'hyperparameters.epochs=10'
+                    f"train_dataset.input_csv_path={csv_path}",
+                    f"train_dataset.root_dir={polygon_rnn_root_dir}",
+                    f"val_dataset.input_csv_path={csv_path}",
+                    f"val_dataset.root_dir={polygon_rnn_root_dir}",
+                    # "pl_trainer.gpus=1",
+                    # "device=cuda",
+                    # "optimizer.lr=0.00001",
+                    # "hyperparameters.batch_size=4",
+                    # "hyperparameters.epochs=10"
                 ],
             )
             trainer = train(cfg)
@@ -98,15 +98,20 @@ class Test_TestPolygonRNNModel(CustomTestCase):
             cfg = compose(
                 config_name="experiment_polygonrnn_with_callback.yaml",
                 overrides=[
-                    "train_dataset.input_csv_path=" + csv_path,
-                    "train_dataset.root_dir=" + polygon_rnn_root_dir,
-                    "val_dataset.input_csv_path=" + csv_path,
-                    "val_dataset.root_dir=" + polygon_rnn_root_dir,
-                    # 'pl_trainer.gpus=1',
-                    # 'device=cuda',
-                    # 'optimizer.lr=0.00001',
-                    # 'hyperparameters.batch_size=4',
-                    # 'hyperparameters.epochs=10'
+                    f"train_dataset.input_csv_path={csv_path}",
+                    f"train_dataset.root_dir={polygon_rnn_root_dir}",
+                    f"val_dataset.input_csv_path={csv_path}",
+                    f"val_dataset.root_dir={polygon_rnn_root_dir}",
+                    # f"train_dataset.n_first_rows_to_read=500",
+                    # f"train_dataset.sequence_length=120",
+                    # f"val_dataset.sequence_length=120",
+                    # f"val_dataset.n_first_rows_to_read=16",
+                    # "pl_trainer.gpus=1",
+                    # "device=cuda",
+                    # "optimizer.lr=0.00001",
+                    # "hyperparameters.batch_size=8",
+                    # "hyperparameters.epochs=100"
                 ],
             )
             trainer = train(cfg)
+        return

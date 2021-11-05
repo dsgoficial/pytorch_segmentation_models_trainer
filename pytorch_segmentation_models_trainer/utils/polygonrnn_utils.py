@@ -52,6 +52,7 @@ def get_vertex_list(
     min_col: Optional[int] = 0,
     min_row: Optional[int] = 0,
     return_cast_func: Optional[Callable] = None,
+    grid_size: Optional[int] = 28,
 ) -> List[float]:
     """Gets vertex list from input.
 
@@ -69,8 +70,8 @@ def get_vertex_list(
     return return_cast_func(
         [
             (
-                ((label % 28) * 8.0 + 4) / scale_w + min_col,
-                ((float(label // 28)) * 8.0 + 4) / scale_h + min_row,
+                ((label % grid_size) * 8.0 + 4) / scale_w + min_col,
+                ((float(label // grid_size)) * 8.0 + 4) / scale_h + min_row,
             )
             for label in itertools.takewhile(lambda x: x != 784, input_list)
         ]
@@ -115,6 +116,7 @@ def get_vertex_list_from_batch(
     scale_w: Optional[float] = 1.0,
     min_col: Optional[int] = 0,
     min_row: Optional[int] = 0,
+    grid_size: Optional[int] = 28,
 ) -> np.array:
     """Gets vertex list from input batch.
 
@@ -125,7 +127,9 @@ def get_vertex_list_from_batch(
         min_col (Optional[int], optional): Minimum column. Defaults to 0.
         min_row (Optional[int], optional): Minimun row. Defaults to 0.
     """
-    func = lambda x: get_vertex_list(x, scale_h, scale_w, min_col, min_row)
+    func = lambda x: get_vertex_list(
+        x, scale_h, scale_w, min_col, min_row, grid_size=grid_size
+    )
     return np.apply_along_axis(func, 1, input_batch)
 
 
@@ -135,6 +139,7 @@ def get_vertex_list_from_batch_tensors(
     scale_w: torch.Tensor,
     min_col: torch.Tensor,
     min_row: torch.Tensor,
+    grid_size: Optional[int] = 28,
 ) -> List[np.array]:
     """Gets vertex list from input batch.
 
@@ -156,6 +161,7 @@ def get_vertex_list_from_batch_tensors(
             min_col[idx],
             min_row[idx],
             return_cast_func=cast_func,
+            grid_size=grid_size,
         )
         .cpu()
         .numpy()

@@ -52,12 +52,29 @@ polygon_rnn_root_dir = os.path.join(
 
 
 class Test_TestPolygonRNNUtils(CustomTestCase):
-    def test_encode_polygon(self) -> None:
+    @parameterized.expand(
+        [
+            ([[100, 100], [100, 204], [204, 204], [204, 100]],),
+            (
+                [
+                    (196.0, 92.0),
+                    (204.0, 220.0),
+                    (36.0, 220.0),
+                    (28.0, 140.0),
+                    (20.0, 44.0),
+                    (84.0, 20.0),
+                ],
+            ),
+        ]
+    )
+    def test_encode_polygon(self, coordinates) -> None:
         """
         Tests the function that encodes a polygon into a tensor
         """
-        polygon = np.array([[100, 100], [100, 204], [204, 204], [204, 100]])
-        label_array, label_index_array = polygonrnn_utils.build_arrays(polygon, 4, 60)
+        polygon = np.array(coordinates)
+        label_array, label_index_array = polygonrnn_utils.build_arrays(
+            polygon, len(coordinates), 60
+        )
         output_vertex_list = polygonrnn_utils.get_vertex_list(label_index_array[2::])
         np.testing.assert_array_almost_equal(polygon, output_vertex_list)
 
