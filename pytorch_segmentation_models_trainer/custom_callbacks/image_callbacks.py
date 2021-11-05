@@ -235,6 +235,11 @@ class PolygonRNNResultCallback(ImageSegmentationResultCallback):
         if not self.save_outputs:
             return
         val_ds = pl_module.val_dataloader()
+        self.n_samples = (
+            pl_module.val_dataloader().batch_size
+            if self.n_samples is None
+            else self.n_samples
+        )
         prepared_input = val_ds.dataset.get_n_image_path_dict_list(self.n_samples)
         for image_path, prepared_item in prepared_input.items():
             output_batch_polygons = pl_module.model.test(
