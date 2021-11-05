@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import dataclasses
 from omegaconf import MISSING, DictConfig, OmegaConf
+from shapely.geometry.polygon import Polygon
 
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     AbstractDataset,
@@ -112,7 +113,8 @@ class PolygonRNNDatasetConversionStrategy(AbstractConversionStrategy):
             List[Dict]: [description]
         """
         image = Image.open(image_path)
-        json_object = json.load(open(json_path))
+        with open(json_path) as f:
+            json_object = json.load(f)
         image_name = Path(image_path).stem
         output_image_folder = create_folder(
             os.path.join(self.output_images_folder, image_name)
@@ -123,6 +125,8 @@ class PolygonRNNDatasetConversionStrategy(AbstractConversionStrategy):
         csv_entries_list = []
         for i, item in enumerate(json_object["objects"]):
             min_row, min_col, max_row, max_col = self._get_bounds(json_object, item)
+            if max_row - min_row == 0 or max_col - min_col == 0:
+                continue
             scale_h, scale_w = self._get_scales(min_row, min_col, max_row, max_col)
             csv_entries_list.append(
                 {
@@ -140,6 +144,7 @@ class PolygonRNNDatasetConversionStrategy(AbstractConversionStrategy):
                         self.original_images_folder_name,
                         image_path.split(self.original_images_folder_name)[1::][0][1::],
                     ),
+                    "original_polygon_wkt": Polygon(item["polygon"]).wkt,
                 }
             )
             if not self.write_output_files:

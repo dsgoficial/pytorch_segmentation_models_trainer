@@ -32,7 +32,7 @@ from albumentations.augmentations.transforms import Normalize
 import torch
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-
+import shapely.wkt
 import albumentations as A
 import numpy as np
 import pandas as pd
@@ -416,7 +416,9 @@ class PolygonRNNDataset(AbstractDataset):
         min_col_key=None,
         min_row_key=None,
         original_image_path_key=None,
+        original_polygon_key=None,
         n_first_rows_to_read=None,
+        dataset_type="train",
     ) -> None:
         super(PolygonRNNDataset, self).__init__(
             input_csv_path=input_csv_path,
@@ -437,7 +439,16 @@ class PolygonRNNDataset(AbstractDataset):
             if original_image_path_key is not None
             else "original_image_path"
         )
-        self.unique_image_path_list = self.df[self.original_image_path_key].unique()
+        self.original_polygon_key = (
+            original_polygon_key
+            if original_polygon_key is not None
+            else "original_polygon_wkt"
+        )
+        if dataset_type not in ["train", "val"]:
+            raise NotImplemented
+        self.dataset_type = dataset_type
+        if dataset_type == "val":
+            self.unique_image_path_list = self.df[self.original_image_path_key].unique()
 
     def load_polygon(self, idx):
         mask_name = os.path.join(self.root_dir, self.df.iloc[idx][self.mask_key])
@@ -468,15 +479,20 @@ class PolygonRNNDataset(AbstractDataset):
             "x2": self.to_tensor(label_array[:-2]).float(),
             "x3": self.to_tensor(label_array[1:-1]).float(),
             "ta": self.to_tensor(label_index_array[2:]).long(),
-            "polygon_wkt": Polygon(polygon).wkt,
-            "scale_h": self.df.iloc[index][self.scale_h_key],
-            "scale_w": self.df.iloc[index][self.scale_w_key],
-            "min_col": self.df.iloc[index][self.min_col_key],
-            "min_row": self.df.iloc[index][self.min_row_key],
-            "original_image_path": self.get_path(
-                index, key=self.original_image_path_key
-            ),
         }
+        if self.dataset_type == "val":
+            output_dict.update(
+                {
+                    "polygon_wkt": self.df.iloc[index][self.original_polygon_key],
+                    "scale_h": self.df.iloc[index][self.scale_h_key],
+                    "scale_w": self.df.iloc[index][self.scale_w_key],
+                    "min_col": self.df.iloc[index][self.min_col_key],
+                    "min_row": self.df.iloc[index][self.min_row_key],
+                    "original_image_path": self.get_path(
+                        index, key=self.original_image_path_key
+                    ),
+                }
+            )
         return output_dict
 
     def get_images_from_image_path(self, image_path: str) -> List:
@@ -486,7 +502,9 @@ class PolygonRNNDataset(AbstractDataset):
             "original_image": self.load_image(
                 entries.index.tolist()[0], key=self.original_image_path_key
             ),
-            "polygon_wkt_list": [item["polygon_wkt"] for item in items],
+            "shapely_polygon_list": [
+                shapely.wkt.loads(item["polygon_wkt"]) for item in items
+            ],
             "croped_images": torch.stack([item["image"] for item in items]),
             "scale_h": torch.tensor([item["scale_h"] for item in items]),
             "scale_w": torch.tensor([item["scale_w"] for item in items]),

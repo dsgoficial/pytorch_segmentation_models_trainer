@@ -45,13 +45,12 @@ class Model(pl.LightningModule):
         self.train_ds = instantiate(self.cfg.train_dataset, _recursive_=False)
         self.val_ds = instantiate(self.cfg.val_dataset, _recursive_=False)
         self.loss_function = self.get_loss_function()
-        metrics = torchmetrics.MetricCollection(
-            [instantiate(i, _recursive_=False) for i in self.cfg.metrics]
-        )
-        self.train_metrics = metrics.clone(prefix="train_")
-        self.val_metrics = metrics.clone(prefix="val_")
-        # self.train_metrics = self.get_metrics()
-        # self.val_metrics = self.get_metrics()
+        if "metrics" in self.cfg:
+            metrics = torchmetrics.MetricCollection(
+                [instantiate(i, _recursive_=False) for i in self.cfg.metrics]
+            )
+            self.train_metrics = metrics.clone(prefix="train_")
+            self.val_metrics = metrics.clone(prefix="val_")
         self.gpu_train_transform = (
             None
             if "gpu_augmentation_list" not in self.cfg.train_dataset
@@ -78,6 +77,8 @@ class Model(pl.LightningModule):
         return model
 
     def get_metrics(self):
+        if "metrics" not in self.cfg:
+            return None
         return nn.ModuleDict(
             [
                 [self.get_metric_name(i), instantiate(i, _recursive_=False)]

@@ -51,11 +51,16 @@ def train(cfg: DictConfig):
         "Starting the training of a model with the following configuration: \n%s",
         OmegaConf.to_yaml(cfg),
     )
-    model = (
-        Model(cfg)
-        if "pl_model" not in cfg
-        else import_module_from_cfg(cfg.pl_model)(cfg)
-    )
+    if "resume_from_checkpoint" in cfg.hyperparameters:
+        model = import_module_from_cfg(cfg.pl_model).load_from_checkpoint(
+            cfg.hyperparameters.resume_from_checkpoint, cfg=cfg
+        )
+    else:
+        model = (
+            Model(cfg)
+            if "pl_model" not in cfg
+            else import_module_from_cfg(cfg.pl_model)(cfg)
+        )
     trainer_logger = (
         instantiate(cfg.logger, _recursive_=False) if "logger" in cfg else True
     )

@@ -26,6 +26,8 @@ from PIL import Image, ImageDraw
 import numpy as np
 import torch
 import itertools
+from shapely.geometry import Polygon, LineString, Point
+from shapely.geometry.base import BaseGeometry
 
 
 def label2vertex(labels):
@@ -50,6 +52,7 @@ def get_vertex_list(
     min_col: Optional[int] = 0,
     min_row: Optional[int] = 0,
     return_cast_func: Optional[Callable] = None,
+    grid_size: Optional[int] = 28,
 ) -> List[float]:
     """Gets vertex list from input.
 
@@ -67,12 +70,44 @@ def get_vertex_list(
     return return_cast_func(
         [
             (
-                ((label % 28) * 8.0 + 4) / scale_w + min_col,
-                ((float(label // 28)) * 8.0 + 4) / scale_h + min_row,
+                ((label % grid_size) * 8.0 + 4) / scale_w + min_col,
+                ((float(label // grid_size)) * 8.0 + 4) / scale_h + min_row,
             )
             for label in itertools.takewhile(lambda x: x != 784, input_list)
         ]
     )
+
+
+def scale_shapely_polygon(
+    polygon: Polygon, scale_h, scale_w, min_col, min_row
+) -> Polygon:
+    polygon_np_array = np.array(polygon.exterior.coords)
+    rescaled_array = np.apply_along_axis(
+        lambda x: x * scale_w + min_col, 0, polygon_np_array
+    )
+    rescaled_array = np.apply_along_axis(
+        lambda y: y * scale_h + min_row, 1, rescaled_array
+    )
+    return Polygon(rescaled_array)
+
+
+def scale_polygon_list(
+    polygon_list: List[Polygon],
+    list_scale_h: Union[List[float], np.array],
+    list_scale_w: Union[List[float], np.array],
+    list_min_col: Union[List[int], np.array],
+    list_min_row: Union[List[int], np.array],
+) -> List[Polygon]:
+    return [
+        scale_shapely_polygon(
+            polygon,
+            list_scale_h[idx],
+            list_scale_w[idx],
+            list_min_col[idx],
+            list_min_row[idx],
+        )
+        for idx, polygon in enumerate(polygon_list)
+    ]
 
 
 def get_vertex_list_from_batch(
@@ -81,6 +116,7 @@ def get_vertex_list_from_batch(
     scale_w: Optional[float] = 1.0,
     min_col: Optional[int] = 0,
     min_row: Optional[int] = 0,
+    grid_size: Optional[int] = 28,
 ) -> np.array:
     """Gets vertex list from input batch.
 
@@ -91,7 +127,9 @@ def get_vertex_list_from_batch(
         min_col (Optional[int], optional): Minimum column. Defaults to 0.
         min_row (Optional[int], optional): Minimun row. Defaults to 0.
     """
-    func = lambda x: get_vertex_list(x, scale_h, scale_w, min_col, min_row)
+    func = lambda x: get_vertex_list(
+        x, scale_h, scale_w, min_col, min_row, grid_size=grid_size
+    )
     return np.apply_along_axis(func, 1, input_batch)
 
 
@@ -101,6 +139,7 @@ def get_vertex_list_from_batch_tensors(
     scale_w: torch.Tensor,
     min_col: torch.Tensor,
     min_row: torch.Tensor,
+    grid_size: Optional[int] = 28,
 ) -> List[np.array]:
     """Gets vertex list from input batch.
 
@@ -122,6 +161,7 @@ def get_vertex_list_from_batch_tensors(
             min_col[idx],
             min_row[idx],
             return_cast_func=cast_func,
+            grid_size=grid_size,
         )
         .cpu()
         .numpy()
@@ -228,3 +268,16 @@ def _initialize_label_index_array(point_count, label_array, label_index_array, p
     index = index_b * 28 + index_a
     label_array[point_count, index] = 1
     label_index_array[point_count] = index
+
+
+def handle_vertices(vertices):
+    if isinstance(vertices, BaseGeometry):
+        return vertices
+    vertices_array = np.array(vertices)
+    if vertices_array.shape[0] == 0:
+        return Point(0, 0)
+    if vertices_array.shape[0] == 1:
+        return Point(vertices_array.squeeze(0))
+    if vertices_array.shape[0] == 2:
+        return LineString(vertices_array)
+    return Polygon(vertices_array.reshape(-1, 2)).convex_hull

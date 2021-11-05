@@ -22,6 +22,7 @@
 """
 from collections import OrderedDict
 from logging import log
+import os
 from pathlib import Path
 
 import segmentation_models_pytorch as smp
@@ -38,6 +39,8 @@ from pytorch_segmentation_models_trainer.utils import polygonrnn_utils, tensor_u
 from torch import nn
 from torch.autograd import Variable
 from tqdm import tqdm
+
+current_dir = os.path.dirname(__file__)
 
 
 class ConvLSTMCell(nn.Module):
@@ -345,32 +348,45 @@ class PolygonRNN(nn.Module):
                     load pretrained vgg model or not
         """
 
-        for name, param in self.convlstm.named_parameters():
-            if "bias" in name:
+        self._init_convlstm()
+        self._init_convlstmlayer()
+        self._init_convlayer()
+        if load_vgg:
+            self.load_vgg()
+
+    def _init_convlayer(self):
+        for name, param in self.named_parameters():
+            if "bias" in name and "convlayer" in name:
                 nn.init.constant_(param, 0.0)
-            elif "weight" in name:
+            elif "weight" in name and "convlayer" in name and "0" in name:
                 nn.init.xavier_normal_(param)
+
+    def _init_convlstmlayer(self):
         for name, param in self.lstmlayer.named_parameters():
             if "bias" in name:
                 nn.init.constant_(param, 1.0)
             elif "weight" in name:
                 # nn.init.xavier_normal_(param)
                 nn.init.orthogonal_(param)
-        for name, param in self.named_parameters():
-            if "bias" in name and "convlayer" in name:
+
+    def _init_convlstm(self):
+        for name, param in self.convlstm.named_parameters():
+            if "bias" in name:
                 nn.init.constant_(param, 0.0)
-            elif "weight" in name and "convlayer" in name and "0" in name:
+            elif "weight" in name:
                 nn.init.xavier_normal_(param)
-        if load_vgg:
-            self.load_vgg()
 
     def load_vgg(self):
-        vgg_file = Path("vgg16_bn-6c64b313.pth")
+        download_folder = Path(current_dir) / Path("pretrained")
+        vgg_file = download_folder / Path("vgg16_bn-6c64b313.pth")
         vgg16_dict = (
-            torch.load("vgg16_bn-6c64b313.pth")
+            torch.load(vgg_file)
             if vgg_file.is_file()
-            else self.download_vgg16()
+            else self._download_vgg16(download_folder)
         )
+        self._populate_network(vgg16_dict)
+
+    def _populate_network(self, vgg16_dict):
         vgg_name = [
             name for name in vgg16_dict if "feature" in name and "running" not in name
         ]
@@ -378,12 +394,14 @@ class PolygonRNN(nn.Module):
             if "model" in name:
                 param.data.copy_(vgg16_dict[vgg_name[idx]])
 
-    def download_vgg16(self):
+    def _download_vgg16(self, download_folder):
         try:
+            model_path = download_folder / Path("vgg16_bn-6c64b313.pth")
             wget.download(
-                "https://download.pytorch.org/models/vgg16_bn" "-6c64b313.pth"
+                "https://download.pytorch.org/models/vgg16_bn" "-6c64b313.pth",
+                out=str(model_path),
             )
-            vgg16_dict = torch.load("vgg16_bn-6c64b313.pth")
+            vgg16_dict = torch.load(model_path)
         except:
             vgg16_dict = torch.load(
                 model_zoo.load_url(
@@ -393,7 +411,7 @@ class PolygonRNN(nn.Module):
 
         return vgg16_dict
 
-    def compute_output(self, model, x, convlayer=None, apply_pooling=True):
+    def _compute_output(self, model, x, convlayer=None, apply_pooling=True):
         output_k = model(x)
         output_kk = self.poollayer(output_k) if apply_pooling else output_k
         output_kk = convlayer(output_kk) if convlayer is not None else output_kk
@@ -401,23 +419,27 @@ class PolygonRNN(nn.Module):
 
     def forward(self, input_data1, first, second, third):
         bs, length_s = second.shape[0], second.shape[1]
-        output1, output11 = self.compute_output(self.model1, input_data1)
-        output2, output22 = self.compute_output(
-            self.model2, output1, convlayer=self.convlayer2, apply_pooling=False
+        output1, output11 = self._compute_output(
+            model=self.model1,
+            x=input_data1,
+            convlayer=self.convlayer1,
+            apply_pooling=True,
         )
-        output3, output33 = self.compute_output(
-            self.model3, output2, convlayer=self.convlayer3, apply_pooling=False
+        output2, output22 = self._compute_output(
+            model=self.model2, x=output1, convlayer=self.convlayer2, apply_pooling=False
         )
-        output4, output44 = self.compute_output(
-            self.model4, output3, convlayer=self.convlayer4, apply_pooling=False
+        output3, output33 = self._compute_output(
+            model=self.model3, x=output2, convlayer=self.convlayer3, apply_pooling=False
+        )
+        output4, output44 = self._compute_output(
+            model=self.model4, x=output3, convlayer=self.convlayer4, apply_pooling=False
         )
         output44 = self.upsample(output44)
         output = torch.cat([output11, output22, output33, output44], dim=1)
         output = self.convlayer5(output)
         output = output.unsqueeze(1)
         output = output.repeat(1, length_s, 1, 1, 1)
-        device = output.device
-        padding_f = torch.zeros([bs, 1, 1, 28, 28]).to(device)
+        padding_f = torch.zeros([bs, 1, 1, 28, 28]).to(output.device)
 
         input_f = (
             first[:, :-3]
@@ -432,7 +454,6 @@ class PolygonRNN(nn.Module):
 
         output = self.convlstm(output)[0][-1]
 
-        shape_o = output.shape
         output = output.contiguous().view(bs, length_s, -1)
         output = torch.cat([output, second, third], dim=2)
         output = self.lstmlayer(output)[0]
@@ -445,15 +466,20 @@ class PolygonRNN(nn.Module):
     def test(self, input_data1, len_s):
         bs = input_data1.shape[0]
         result = torch.zeros([bs, len_s]).to(input_data1.device)
-        output1, output11 = self.compute_output(self.model1, input_data1)
-        output2, output22 = self.compute_output(
-            self.model2, output1, convlayer=self.convlayer2, apply_pooling=False
+        output1, output11 = self._compute_output(
+            model=self.model1,
+            x=input_data1,
+            convlayer=self.convlayer1,
+            apply_pooling=True,
         )
-        output3, output33 = self.compute_output(
-            self.model3, output2, convlayer=self.convlayer3, apply_pooling=False
+        output2, output22 = self._compute_output(
+            model=self.model2, x=output1, convlayer=self.convlayer2, apply_pooling=False
         )
-        output4, output44 = self.compute_output(
-            self.model4, output3, convlayer=self.convlayer4, apply_pooling=False
+        output3, output33 = self._compute_output(
+            model=self.model3, x=output2, convlayer=self.convlayer3, apply_pooling=False
+        )
+        output4, output44 = self._compute_output(
+            model=self.model4, x=output3, convlayer=self.convlayer4, apply_pooling=False
         )
         output44 = self.upsample(output44)
         output = torch.cat([output11, output22, output33, output44], dim=1)
@@ -510,7 +536,7 @@ class PolygonRNNPLModel(Model):
 
     def get_model(self):
         return PolygonRNN(
-            load_vgg=self.cfg.model.load_vgg if "load_vgg" in self.cfg.model else True
+            load_vgg=self.cfg.model.load_vgg if "load_vgg" in self.cfg.model else False
         )
 
     def get_loss_function(self):
@@ -557,12 +583,12 @@ class PolygonRNNPLModel(Model):
             loss,
             on_step=True,
             on_epoch=True,
-            prog_bar=True,
+            prog_bar=False,
             logger=True,
             sync_dist=True,
         )
         self.log(
-            "val_acc", acc, on_step=True, prog_bar=True, logger=True, sync_dist=True
+            "val_acc", acc, on_step=True, prog_bar=False, logger=True, sync_dist=True
         )
         return {
             "val_loss": loss,

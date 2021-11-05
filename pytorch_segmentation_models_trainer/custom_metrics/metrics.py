@@ -25,6 +25,7 @@ from typing import List, Tuple
 import numpy as np
 from shapely.geometry import Polygon, LineString, Point
 import torch
+from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 
 
 def iou(y_pred, y_true, threshold):
@@ -40,17 +41,6 @@ def iou(y_pred, y_true, threshold):
     return r
 
 
-def _handle_vertices(vertices):
-    vertices_array = np.array(vertices)
-    if vertices_array.shape[0] == 0:
-        return Point(0, 0)
-    if vertices_array.shape[0] == 1:
-        return Point(vertices_array.squeeze(0))
-    if vertices_array.shape[0] == 2:
-        return LineString(vertices_array)
-    return Polygon(vertices_array.reshape(-1, 2)).convex_hull
-
-
 def polygon_iou(vertices1: List, vertices2: List) -> Tuple[float, float, float]:
     """
     calculate iou of two polygons
@@ -58,8 +48,8 @@ def polygon_iou(vertices1: List, vertices2: List) -> Tuple[float, float, float]:
     :param vertices2: vertices of the second polygon
     :return: the iou, the intersection area, the union area
     """
-    geom1 = _handle_vertices(vertices1)
-    geom2 = _handle_vertices(vertices2)
+    geom1 = polygonrnn_utils.handle_vertices(vertices1)
+    geom2 = polygonrnn_utils.handle_vertices(vertices2)
     intersection = geom1.intersection(geom2).area
     union = geom1.area + geom2.area - intersection
     iou = 0 if union == 0 else intersection / union
