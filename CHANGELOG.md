@@ -3,6 +3,7 @@
 - Bug fix on convert dataset;
 - Bug fix on PolygonRNNDataset;
 - Bug fix on PolygonRNNResultCallback when using gpu;
+- Bug fix on PolygonRNNPLModel;
 
 # Version 0.14.0
 
