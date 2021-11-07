@@ -73,7 +73,9 @@ def get_vertex_list(
                 ((label % grid_size) * 8.0 + 4) / scale_w + min_col,
                 ((float(label // grid_size)) * 8.0 + 4) / scale_h + min_row,
             )
-            for label in itertools.takewhile(lambda x: x != 784, input_list)
+            for label in itertools.takewhile(
+                lambda x: x != grid_size * grid_size, input_list
+            )
         ]
     )
 
@@ -209,14 +211,14 @@ def tensor2img(tensor):
     return img
 
 
-def build_arrays(polygon, num_vertexes, sequence_length):
+def build_arrays(polygon, num_vertexes, sequence_length, grid_size=28):
     point_count = 2
-    label_array = np.zeros([sequence_length, 28 * 28 + 3])
+    label_array = np.zeros([sequence_length, grid_size * grid_size + 3])
     label_index_array = np.zeros([sequence_length])
     if num_vertexes < sequence_length - 3:
         for points in polygon:
             _initialize_label_index_array(
-                point_count, label_array, label_index_array, points
+                point_count, label_array, label_index_array, points, grid_size=grid_size
             )
             point_count += 1
         _populate_label_index_array(
@@ -232,40 +234,48 @@ def build_arrays(polygon, num_vertexes, sequence_length):
         index_list = (np.arange(0, sequence_length - 3) * scale).astype(int)
         for points in polygon[index_list]:
             _initialize_label_index_array(
-                point_count, label_array, label_index_array, points
+                point_count, label_array, label_index_array, points, grid_size=grid_size
             )
             point_count += 1
         for kkk in range(point_count, sequence_length):
-            index = 28 * 28
+            index = grid_size * grid_size
             label_array[kkk, index] = 1
             label_index_array[kkk] = index
     return label_array, label_index_array
 
 
 def _populate_label_index_array(
-    polygon, num_vertexes, sequence_length, point_count, label_array, label_index_array
+    polygon,
+    num_vertexes,
+    sequence_length,
+    point_count,
+    label_array,
+    label_index_array,
+    grid_size=28,
 ):
-    label_array[point_count, 28 * 28] = 1
-    label_index_array[point_count] = 28 * 28
+    label_array[point_count, grid_size * grid_size] = 1
+    label_index_array[point_count] = grid_size * grid_size
     for kkk in range(point_count + 1, sequence_length):
         if kkk % (num_vertexes + 3) == num_vertexes + 2:
-            index = 28 * 28
+            index = grid_size * grid_size
         elif kkk % (num_vertexes + 3) == 0:
-            index = 28 * 28 + 1
+            index = grid_size * grid_size + 1
         elif kkk % (num_vertexes + 3) == 1:
-            index = 28 * 28 + 2
+            index = grid_size * grid_size + 2
         else:
             index_a = int(polygon[kkk % (num_vertexes + 3) - 2][0] / 8)
             index_b = int(polygon[kkk % (num_vertexes + 3) - 2][1] / 8)
-            index = index_b * 28 + index_a
+            index = index_b * grid_size + index_a
         label_array[kkk, index] = 1
         label_index_array[kkk] = index
 
 
-def _initialize_label_index_array(point_count, label_array, label_index_array, points):
+def _initialize_label_index_array(
+    point_count, label_array, label_index_array, points, grid_size=28
+):
     index_a = int(points[0] / 8)
     index_b = int(points[1] / 8)
-    index = index_b * 28 + index_a
+    index = index_b * grid_size + index_a
     label_array[point_count, index] = 1
     label_index_array[point_count] = index
 
