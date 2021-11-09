@@ -357,4 +357,4 @@ def handle_vertices(vertices):
         return Point(vertices_array.squeeze(0))
     if vertices_array.shape[0] == 2:
         return LineString(vertices_array)
-    return Polygon(vertices_array.reshape(-1, 2)).boundary
+    return Polygon(vertices_array.reshape(-1, 2))
