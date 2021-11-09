@@ -120,7 +120,7 @@ def batch_denormalize_tensor(
 def generate_visualization(fig_title=None, fig_size=None, font_size=16, **images):
     n = len(images)
     fig_size = (16, 5) if fig_size is None else fig_size
-    fig = plt.figure(figsize=fig_size)
+    fig, axarr = plt.subplots(1, n, figsize=fig_size)
     if fig_title is not None:
         fig.suptitle(fig_title, fontsize=font_size)
     for i, (name, image) in enumerate(images.items()):
@@ -130,7 +130,7 @@ def generate_visualization(fig_title=None, fig_size=None, font_size=16, **images
         plt.title(" ".join(name.split("_")).title())
         plt.imshow(image)
     fig.subplots_adjust(top=0.8)
-    return plt, fig
+    return axarr, fig
 
 
 def visualize_image_with_bboxes(

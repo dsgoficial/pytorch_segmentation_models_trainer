@@ -1,3 +1,8 @@
+# Veresion 0.15.0
+
+- New Modified PolyMapper model (Object Detection + PolygonRNN);
+- Minor code refactor;
+
 # Veresion 0.14.2
 
 - Bug fix on PolygonRNN polygon tokenizer.
