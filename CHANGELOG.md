@@ -1,6 +1,7 @@
 # Veresion 0.15.0
 
 - New Modified PolyMapper model (Object Detection + PolygonRNN);
+- New callback: Frame Field Only Crossfield Warmup Callback;
 - Minor code refactor;
 
 # Veresion 0.14.2

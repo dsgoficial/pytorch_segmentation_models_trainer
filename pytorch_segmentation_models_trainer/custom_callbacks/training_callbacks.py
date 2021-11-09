@@ -49,7 +49,7 @@ class WarmupCallback(pl.callbacks.base.Callback):
                 f"\nModel will warm up for {self.warmup_epochs} "
                 "epochs. Freezing encoder weights.\n"
             )
-            pl_module.set_encoder_trainable(trainable=False)
+            self._set_component_trainable(pl_module, False)
 
     def on_train_epoch_end(self, trainer, pl_module):
         if self.warmed_up:
@@ -59,8 +59,19 @@ class WarmupCallback(pl.callbacks.base.Callback):
                 f"\nModel warm up completed in the end of epoch {trainer.current_epoch}. "
                 "Unfreezing encoder weights.\n"
             )
-            pl_module.set_encoder_trainable(trainable=True)
+            self._set_component_trainable(pl_module, True)
             self.warmed_up = True
+
+    def _set_component_trainable(self, pl_module, trainable=True):
+        pl_module.set_encoder_trainable(trainable=trainable)
+
+
+class FrameFieldOnlyCrossfieldWarmupCallback(WarmupCallback):
+    def __init__(self, warmup_epochs=2) -> None:
+        super().__init__(warmup_epochs)
+
+    def _set_component_trainable(self, pl_module, trainable=True):
+        pl_module.set_all_but_crossfield_trainable(trainable=trainable)
 
 
 class FrameFieldComputeWeightNormLossesCallback(pl.callbacks.base.Callback):
