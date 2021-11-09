@@ -253,7 +253,7 @@ class PolygonRNN(nn.Module):
     Code extracted from https://github.com/AlexMa011/pytorch-polygon-rnn
     """
 
-    def __init__(self, load_vgg=True):
+    def __init__(self, load_vgg=True, encoder_trainable=True):
         super(PolygonRNN, self).__init__()
 
         def _make_basic(input_size, output_size, kernel_size, stride, padding):
@@ -340,6 +340,22 @@ class PolygonRNN(nn.Module):
         )
         self.linear = nn.Linear(28 * 28 * 2, 28 * 28 + 3)
         self.init_weights(load_vgg=load_vgg)
+        if not encoder_trainable:
+            self.set_encoder_trainable(trainable=False)
+
+    def set_encoder_trainable(self, trainable=False):
+        for component in [
+            self.convlayer1,
+            self.convlayer2,
+            self.convlayer3,
+            self.convlayer4,
+            self.convlayer5,
+        ]:
+            for child in component.children():
+                for param in child.parameters():
+                    param.requires_grad = trainable
+        print(f"Convolutional backbone set to trainable={trainable}")
+        return
 
     def init_weights(self, load_vgg=True):
         """
