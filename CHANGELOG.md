@@ -1,3 +1,7 @@
+# Veresion 0.14.2
+
+- Bug fix on PolygonRNN polygon tokenizer.
+
 # Veresion 0.14.1
 
 - Bug fix on convert dataset;

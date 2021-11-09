@@ -253,7 +253,7 @@ class PolygonRNN(nn.Module):
     Code extracted from https://github.com/AlexMa011/pytorch-polygon-rnn
     """
 
-    def __init__(self, load_vgg=True, encoder_trainable=True):
+    def __init__(self, load_vgg=True, encoder_trainable=True, grid_size=28):
         super(PolygonRNN, self).__init__()
 
         def _make_basic(input_size, output_size, kernel_size, stride, padding):
@@ -267,6 +267,7 @@ class PolygonRNN(nn.Module):
                 nn.BatchNorm2d(output_size),
             )
 
+        self.grid_size = grid_size
         self.model1 = nn.Sequential(
             nn.Conv2d(3, 64, 3, 1, 1),
             nn.BatchNorm2d(64),
@@ -326,7 +327,7 @@ class PolygonRNN(nn.Module):
         self.poollayer = nn.MaxPool2d(2, 2)
         self.upsample = nn.Upsample(scale_factor=2, mode="bilinear")
         self.convlstm = ConvLSTM(
-            input_size=(28, 28),
+            input_size=(grid_size, grid_size),
             input_dim=131,
             hidden_dim=[32, 8],
             kernel_size=(3, 3),
@@ -336,9 +337,11 @@ class PolygonRNN(nn.Module):
             return_all_layers=True,
         )
         self.lstmlayer = nn.LSTM(
-            28 * 28 * 8 + (28 * 28 + 3) * 2, 28 * 28 * 2, batch_first=True
+            grid_size * grid_size * 8 + (grid_size * grid_size + 3) * 2,
+            grid_size * grid_size * 2,
+            batch_first=True,
         )
-        self.linear = nn.Linear(28 * 28 * 2, 28 * 28 + 3)
+        self.linear = nn.Linear(grid_size * grid_size * 2, grid_size * grid_size + 3)
         self.init_weights(load_vgg=load_vgg)
         if not encoder_trainable:
             self.set_encoder_trainable(trainable=False)
@@ -455,17 +458,21 @@ class PolygonRNN(nn.Module):
         output = self.convlayer5(output)
         output = output.unsqueeze(1)
         output = output.repeat(1, length_s, 1, 1, 1)
-        padding_f = torch.zeros([bs, 1, 1, 28, 28]).to(output.device)
+        padding_f = torch.zeros([bs, 1, 1, self.grid_size, self.grid_size]).to(
+            output.device
+        )
 
         input_f = (
             first[:, :-3]
-            .view(-1, 1, 28, 28)
+            .view(-1, 1, self.grid_size, self.grid_size)
             .unsqueeze(1)
             .repeat(1, length_s - 1, 1, 1, 1)
         )
         input_f = torch.cat([padding_f, input_f], dim=1)
-        input_s = second[:, :, :-3].view(-1, length_s, 1, 28, 28)
-        input_t = third[:, :, :-3].view(-1, length_s, 1, 28, 28)
+        input_s = second[:, :, :-3].view(
+            -1, length_s, 1, self.grid_size, self.grid_size
+        )
+        input_t = third[:, :, :-3].view(-1, length_s, 1, self.grid_size, self.grid_size)
         output = torch.cat([output, input_f, input_s, input_t], dim=2)
 
         output = self.convlstm(output)[0][-1]
@@ -501,19 +508,35 @@ class PolygonRNN(nn.Module):
         output = torch.cat([output11, output22, output33, output44], dim=1)
         feature = self.convlayer5(output)
 
-        padding_f = torch.zeros([bs, 1, 1, 28, 28]).float().to(input_data1.device)
-        input_s = torch.zeros([bs, 1, 1, 28, 28]).float().to(input_data1.device)
-        input_t = torch.zeros([bs, 1, 1, 28, 28]).float().to(input_data1.device)
+        padding_f = (
+            torch.zeros([bs, 1, 1, self.grid_size, self.grid_size])
+            .float()
+            .to(input_data1.device)
+        )
+        input_s = (
+            torch.zeros([bs, 1, 1, self.grid_size, self.grid_size])
+            .float()
+            .to(input_data1.device)
+        )
+        input_t = (
+            torch.zeros([bs, 1, 1, self.grid_size, self.grid_size])
+            .float()
+            .to(input_data1.device)
+        )
 
         output = torch.cat([feature.unsqueeze(1), padding_f, input_s, input_t], dim=2)
 
         output, hidden1 = self.convlstm(output)
         output = output[-1]
         output = output.contiguous().view(bs, 1, -1)
-        second = torch.zeros([bs, 1, 28 * 28 + 3]).to(input_data1.device)
-        second[:, 0, 28 * 28 + 1] = 1
-        third = torch.zeros([bs, 1, 28 * 28 + 3]).to(input_data1.device)
-        third[:, 0, 28 * 28 + 2] = 1
+        second = torch.zeros([bs, 1, self.grid_size * self.grid_size + 3]).to(
+            input_data1.device
+        )
+        second[:, 0, self.grid_size * self.grid_size + 1] = 1
+        third = torch.zeros([bs, 1, self.grid_size * self.grid_size + 3]).to(
+            input_data1.device
+        )
+        third[:, 0, self.grid_size * self.grid_size + 2] = 1
         output = torch.cat([output, second, third], dim=2)
 
         output, hidden2 = self.lstmlayer(output)
@@ -527,9 +550,9 @@ class PolygonRNN(nn.Module):
         for i in range(len_s - 1):
             second = third
             third = output
-            input_f = first[:, :, :-3].view(-1, 1, 1, 28, 28)
-            input_s = second[:, :, :-3].view(-1, 1, 1, 28, 28)
-            input_t = third[:, :, :-3].view(-1, 1, 1, 28, 28)
+            input_f = first[:, :, :-3].view(-1, 1, 1, self.grid_size, self.grid_size)
+            input_s = second[:, :, :-3].view(-1, 1, 1, self.grid_size, self.grid_size)
+            input_t = third[:, :, :-3].view(-1, 1, 1, self.grid_size, self.grid_size)
             input1 = torch.cat([feature.unsqueeze(1), input_f, input_s, input_t], dim=2)
             output, hidden1 = self.convlstm(input1, hidden1)
             output = output[-1]
@@ -546,9 +569,10 @@ class PolygonRNN(nn.Module):
 
 
 class PolygonRNNPLModel(Model):
-    def __init__(self, cfg):
+    def __init__(self, cfg, grid_size=28):
         super(PolygonRNNPLModel, self).__init__(cfg)
         self.val_seq_len = self.cfg.val_dataset.sequence_length
+        self.grid_size = grid_size
 
     def get_model(self):
         return PolygonRNN(
@@ -578,7 +602,7 @@ class PolygonRNNPLModel(Model):
 
     def compute(self, batch):
         output = self.model(batch["image"], batch["x1"], batch["x2"], batch["x3"])
-        return output.contiguous().view(-1, 28 * 28 + 3)
+        return output.contiguous().view(-1, self.grid_size * self.grid_size + 3)
 
     def compute_loss_acc(self, batch, result):
         target = batch["ta"].contiguous().view(-1)

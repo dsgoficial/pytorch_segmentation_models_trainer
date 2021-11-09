@@ -419,6 +419,7 @@ class PolygonRNNDataset(AbstractDataset):
         original_polygon_key=None,
         n_first_rows_to_read=None,
         dataset_type="train",
+        grid_size=28,
     ) -> None:
         super(PolygonRNNDataset, self).__init__(
             input_csv_path=input_csv_path,
@@ -449,6 +450,7 @@ class PolygonRNNDataset(AbstractDataset):
         self.dataset_type = dataset_type
         if dataset_type == "val":
             self.unique_image_path_list = self.df[self.original_image_path_key].unique()
+        self.grid_size = grid_size
 
     def load_polygon(self, idx):
         mask_name = os.path.join(self.root_dir, self.df.iloc[idx][self.mask_key])
@@ -467,7 +469,7 @@ class PolygonRNNDataset(AbstractDataset):
         )
         polygon, num_vertexes = self.load_polygon(index)
         label_array, label_index_array = polygonrnn_utils.build_arrays(
-            polygon, num_vertexes, self.sequence_length
+            polygon, num_vertexes, self.sequence_length, grid_size=self.grid_size
         )
 
         if self.transform is not None:

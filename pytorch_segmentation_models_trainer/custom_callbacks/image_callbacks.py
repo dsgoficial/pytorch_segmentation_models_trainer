@@ -253,6 +253,7 @@ class PolygonRNNResultCallback(ImageSegmentationResultCallback):
                 prepared_item["scale_w"],
                 prepared_item["min_col"],
                 prepared_item["min_row"],
+                grid_size=val_ds.dataset.grid_size,
             )
             plot_title = image_path
             plt_result, fig = generate_visualization(
