@@ -40,7 +40,7 @@ class Test_TestMetrics(unittest.TestCase):
         )
 
     def test_polygon_iou(self) -> None:
-        polygon1 = [2, 0, 2, 2, 0, 0, 0, 2]
+        polygon1 = [2, 0, 2, 2, 0, 2, 0, 0]
         polygon2 = [1, 1, 4, 1, 4, 4, 1, 4]
         iou, _, __ = metrics.polygon_iou(polygon1, polygon2)
         self.assertAlmostEqual(iou, 0.083333333333)

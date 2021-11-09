@@ -108,3 +108,28 @@ class Test_TestPolygonRNNUtils(CustomTestCase):
             np.testing.assert_array_almost_equal(
                 output_tensor_batch[idx], polygon.astype(np.float32)
             )
+
+    @parameterized.expand(
+        [
+            ([[100, 100], [100, 204], [204, 204], [204, 100]],),
+            (
+                [
+                    (196.0, 92.0),
+                    (204.0, 220.0),
+                    (36.0, 220.0),
+                    (28.0, 140.0),
+                    (20.0, 44.0),
+                    (84.0, 20.0),
+                ],
+            ),
+        ]
+    )
+    def test_get_vertex_list_from_numpy(self, coordinates) -> None:
+        polygon = np.array(coordinates)
+        label_array, label_index_array = polygonrnn_utils.build_arrays(
+            polygon, len(coordinates), 60
+        )
+        output_vertex_list = polygonrnn_utils.get_vertex_list_from_numpy(
+            label_index_array[2::]
+        )
+        np.testing.assert_array_almost_equal(polygon, output_vertex_list)
