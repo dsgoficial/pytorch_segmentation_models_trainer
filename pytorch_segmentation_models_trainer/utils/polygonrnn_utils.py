@@ -26,9 +26,10 @@ from PIL import Image, ImageDraw
 import numpy as np
 import torch
 import itertools
-from shapely.geometry import Polygon, LineString, Point
+from shapely.geometry import Polygon, LineString, Point, MultiPolygon
 from shapely.geometry.base import BaseGeometry
 import cv2
+from shapely.validation import make_valid
 
 
 def label2vertex(labels):
@@ -358,3 +359,15 @@ def handle_vertices(vertices):
     if vertices_array.shape[0] == 2:
         return LineString(vertices_array)
     return Polygon(vertices_array.reshape(-1, 2))
+
+
+def validate_polygon(geom: Polygon) -> List[Union[Polygon, MultiPolygon]]:
+    if geom.is_valid:
+        return [geom]
+    valid_output = make_valid(geom)
+    if isinstance(valid_output, (Polygon, MultiPolygon)):
+        return [valid_output]
+    if isinstance(valid_output, list):
+        return [p for p in valid_output if isinstance(p, (Polygon, MultiPolygon))]
+    else:
+        return []
