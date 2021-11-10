@@ -270,7 +270,7 @@ class FrameFieldSegmentationPLModel(Model):
         print(f"{component_name} weights set to trainable={trainable}")
         return
 
-    def set_only_crossfield_trainable(self, trainable=False):
+    def set_all_but_crossfield_trainable(self, trainable=False):
         self.set_encoder_trainable(trainable=trainable)
         self.set_decoder_trainable(trainable=trainable)
         self.set_seg_module_trainable(trainable=trainable)
