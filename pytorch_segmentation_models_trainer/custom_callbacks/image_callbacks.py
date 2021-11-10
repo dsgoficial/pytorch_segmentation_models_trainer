@@ -304,7 +304,7 @@ class PolygonRNNResultCallback(ImageSegmentationResultCallback):
             plot_polygons(predicted_axes, predicted_polygon_list, markersize=5)
             if self.save_outputs:
                 saved_image = self.save_plot_to_disk(
-                    plt_result, plot_title, trainer.current_epoch
+                    plt, plot_title, trainer.current_epoch
                 )
                 self.log_data_to_tensorboard(
                     saved_image, plot_title, trainer.logger, trainer.current_epoch
