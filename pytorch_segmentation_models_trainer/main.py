@@ -27,6 +27,10 @@ from pytorch_segmentation_models_trainer.build_mask import build_masks
 from pytorch_segmentation_models_trainer.config_utils import validate_config
 from pytorch_segmentation_models_trainer.convert_ds import convert_dataset
 
+import logging
+
+logging.getLogger("shapely.geos").setLevel(logging.CRITICAL)
+
 
 @hydra.main(config_path="conf")
 def main(cfg: DictConfig):
