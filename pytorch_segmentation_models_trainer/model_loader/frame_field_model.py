@@ -240,6 +240,22 @@ class FrameFieldSegmentationPLModel(Model):
         self.mixup_alpha = (
             self.cfg.pl_model.mixup_alpha if "mixup_alpha" in cfg.pl_model else -1
         )
+        if "set_encoder_trainable" in self.cfg.pl_model:
+            self.set_encoder_trainable(
+                trainable=self.cfg.pl_model.set_encoder_trainable
+            )
+        if "set_decoder_trainable" in self.cfg.pl_model:
+            self.set_decoder_trainable(
+                trainable=self.cfg.pl_model.set_decoder_trainable
+            )
+        if "set_seg_module_trainable" in self.cfg.pl_model:
+            self.set_seg_module_trainable(
+                trainable=self.cfg.pl_model.set_seg_module_trainable
+            )
+        if "set_crossfield_trainable" in self.cfg.pl_model:
+            self.set_crossfield_trainable(
+                trainable=self.cfg.pl_model.set_crossfield_trainable
+            )
 
     def get_loss_function(self) -> MultiLoss:
         """Multi-loss model defined in frame field article
@@ -249,18 +265,31 @@ class FrameFieldSegmentationPLModel(Model):
         return build_combined_loss(self.cfg)
 
     def set_encoder_trainable(self, trainable=False):
-        return self.set_model_component_trainable(
-            self.model.segmentation_model.encoder, "Encoder", trainable=trainable
-        )
+        if hasattr(self.model.segmentation_model, "encoder"):
+            return self.set_model_component_trainable(
+                self.model.segmentation_model.encoder, "Encoder", trainable=trainable
+            )
+        elif hasattr(self.model.segmentation_model, "set_model_trainable"):
+            return self.model.segmentation_model.set_model_trainable(
+                trainable=trainable
+            )
+        else:
+            raise NotImplementedError("Set model trainable not implemented.")
 
     def set_decoder_trainable(self, trainable=False):
-        return self.set_model_component_trainable(
-            self.model.segmentation_model.decoder, "Decoder", trainable=trainable
-        )
+        if hasattr(self.model.segmentation_model, "decoder"):
+            return self.set_model_component_trainable(
+                self.model.segmentation_model.decoder, "Decoder", trainable=trainable
+            )
 
     def set_seg_module_trainable(self, trainable=False):
         return self.set_model_component_trainable(
-            self.seg_module, "Seg Module", trainable=trainable
+            self.model.seg_module, "Seg Module", trainable=trainable
+        )
+
+    def set_crossfield_trainable(self, trainable=False):
+        return self.set_model_component_trainable(
+            self.crossfield_module, "Crossfield", trainable=trainable
         )
 
     def set_model_component_trainable(self, component, component_name, trainable=False):

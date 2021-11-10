@@ -224,6 +224,15 @@ class HRNetOCRW48(torch.nn.Module):
             else self.segmentation_head(self.backbone(x)["out"])
         )
 
+    def set_model_trainable(self, trainable=True):
+        self.set_component_trainable(self.backbone, trainable=trainable)
+        self.set_component_trainable(self.segmentation_head, trainable=trainable)
+
+    def set_component_trainable(self, component, trainable=True):
+        for child in component.children():
+            for param in child.parameters():
+                param.requires_grad = trainable
+
 
 class ObjectDetectionModel(torch.nn.Module):
     def __init__(self, base_model, head):
