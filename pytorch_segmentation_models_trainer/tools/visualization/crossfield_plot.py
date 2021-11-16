@@ -29,7 +29,9 @@ def get_seg_display(seg):
     return seg_display
 
 
-def get_tensorboard_image_seg_display(image, seg, crossfield=None):
+def get_tensorboard_image_seg_display(
+    image, seg, crossfield=None, crossfield_stride=10, width=1
+):
     assert (
         len(image.shape) == 4 and image.shape[1] == 3
     ), f"image should be (N, 3, H, W), not {image.shape}."
@@ -71,7 +73,9 @@ def get_tensorboard_image_seg_display(image, seg, crossfield=None):
     if crossfield is not None:
         np_crossfield = crossfield.cpu().detach().numpy().transpose(0, 2, 3, 1)
         image_plot_crossfield_list = [
-            get_image_plot_crossfield(_crossfield, crossfield_stride=10)
+            get_image_plot_crossfield(
+                _crossfield, crossfield_stride=crossfield_stride, width=width
+            )
             for _crossfield in np_crossfield
         ]
         image_plot_crossfield_list = [
