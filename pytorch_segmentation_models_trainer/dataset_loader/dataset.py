@@ -498,8 +498,7 @@ class PolygonRNNDataset(AbstractDataset):
         return output_dict
 
     def get_images_from_image_path(self, image_path: str) -> List:
-        entries = self.df.loc[self.df[self.original_image_path_key] == image_path]
-        items = [self.__getitem__(idx) for idx in entries.index.tolist()]
+        entries, items = self.get_training_images_from_image_path(image_path)
         return {
             "original_image": self.load_image(
                 entries.index.tolist()[0], key=self.original_image_path_key
@@ -514,6 +513,11 @@ class PolygonRNNDataset(AbstractDataset):
             "min_row": torch.tensor([item["min_row"] for item in items]),
             "ta": torch.stack([item["ta"] for item in items]),
         }
+
+    def get_training_images_from_image_path(self, image_path):
+        entries = self.df.loc[self.df[self.original_image_path_key] == image_path]
+        items = [self.__getitem__(idx) for idx in entries.index.tolist()]
+        return entries, items
 
     def get_n_image_path_lists(self, n: int) -> List:
         return list(
@@ -687,6 +691,30 @@ class InstanceSegmentationDataset(ObjectDetectionDataset):
             ds_item_dict["masks"] = torch.as_tensor(
                 ds_item_dict["masks"], dtype=torch.uint8
             )
+        return image, ds_item_dict
+
+
+class ModPolyMapperDataset(Dataset):
+    def __init__(
+        self,
+        object_detection_dataset: ObjectDetectionDataset,
+        polygon_rnn_dataset: PolygonRNNDataset,
+    ) -> None:
+        super(ModPolyMapperDataset, self).__init__()
+        self.object_detection_dataset = object_detection_dataset
+        self.polygon_rnn_dataset = polygon_rnn_dataset
+
+    def __len__(self) -> int:
+        return len(self.object_detection_dataset)
+
+    def __getitem__(self, index) -> Dict[str, torch.Tensor]:
+        image, ds_item_dict = self.object_detection_dataset[index]
+        _, polygon_rnn_data = self.polygon_rnn_dataset.get_training_images_from_image_path(
+            self.object_detection_dataset.get_path(
+                index, key=self.object_detection_dataset.image_key
+            )
+        )
+        ds_item_dict["polygon_rnn_data"] = polygon_rnn_data
         return image, ds_item_dict
 
 

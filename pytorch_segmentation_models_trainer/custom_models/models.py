@@ -19,21 +19,24 @@
  ****
 """
 
+from ctypes import Union
 import os
 import dataclasses
 import logging
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import hydra
 import torch
 import torchvision
+import kornia
 from hydra.core.config_store import ConfigStore
 from hydra.utils import instantiate
 from omegaconf import MISSING, DictConfig, OmegaConf
 from segmentation_models_pytorch.base import SegmentationHead
 from segmentation_models_pytorch.base import initialization as init
+from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import PolygonRNN
 from pytorch_segmentation_models_trainer.custom_models.utils import (
     _SimpleSegmentationModel,
 )
@@ -263,6 +266,49 @@ class InstanceSegmentationModel(torch.nn.Module):
 
     def forward(self, x, targets=None):
         return self.model(x, targets=targets)
+
+
+class NaiveModPolyMapper(torch.nn.Module):
+    """
+    This class implements a naive mod poly mapper.
+    """
+
+    def __init__(
+        self,
+        obj_det_model: ObjectDetectionModel,
+        polygonrnn_model: PolygonRNN,
+        val_seq_len: Optional[int] = None,
+    ):
+        super().__init__()
+        self.obj_det_model = obj_det_model
+        self.polygonrnn_model = polygonrnn_model
+        self.val_seq_len = val_seq_len if val_seq_len is not None else 60
+
+    def forward(
+        self, x: torch.Tensor, targets: Optional[torch.Tensor] = None
+    ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
+        if self.training:
+            losses = self.get_obj_det_losses(x, targets)
+            losses.update(self.get_polygonrnn_losses(x, targets))
+            return losses
+        detections = self.obj_det_model(x)
+        resized_inputs = kornia.geometry.transform.crop_and_resize(
+            x, detections, (224, 224), mode="bilinear", align_corners=True
+        )
+        polygon_rnn_prediction = self.polygonrnn_model.test(
+            resized_inputs, self.val_seq_len
+        )
+        return {"bboxes": detections, "polygon_rnn_prediction": polygon_rnn_prediction}
+
+    def get_obj_det_losses(
+        self, x: torch.Tensor, targets: torch.Tensor
+    ) -> Dict[str, torch.Tensor]:
+        return self.obj_det_model(x, targets)
+
+    def get_polygonrnn_losses(
+        self, x: torch.Tensor, targets: torch.Tensor
+    ) -> Dict[str, torch.Tensor]:
+        return {"polygonrnn_loss": self.polygonrnn_model.compute_loss(x, targets)}
 
 
 if __name__ == "__main__":
