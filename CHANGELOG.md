@@ -2,6 +2,8 @@
 
 - New Modified PolyMapper model (Object Detection + PolygonRNN);
 - New callback: Frame Field Only Crossfield Warmup Callback;
+- Bug fix on object detection model;
+- Bug fix on bounding box mask building;
 - Bug fix on polygon iou with invalid geometries;
 - Minor code refactor;
 
