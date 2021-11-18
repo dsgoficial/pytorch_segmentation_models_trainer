@@ -78,7 +78,7 @@ def polygons_to_world_coords(polygons, transform, epsg_number):
     for polygon in polygons:
         item_list += polygon.geoms if polygon.geom_type == "MultiPolygon" else [polygon]
     return [
-        shapely.geometry.asPolygon(
+        shapely.geometry.Polygon(
             np.array([transform * point for point in np.array(polygon.exterior.coords)])
         )
         for polygon in item_list
