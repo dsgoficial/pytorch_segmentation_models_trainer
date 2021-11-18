@@ -19,13 +19,13 @@
  ****
 """
 
-from ctypes import Union
 import os
 import dataclasses
 import logging
-from collections import OrderedDict
+import itertools
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import hydra
 import torch
@@ -280,8 +280,8 @@ class NaiveModPolyMapper(torch.nn.Module):
         val_seq_len: Optional[int] = None,
     ):
         super().__init__()
-        self.obj_det_model = obj_det_model
-        self.polygonrnn_model = polygonrnn_model
+        self.obj_det_model = instantiate(obj_det_model, _recursive_=False)
+        self.polygonrnn_model = instantiate(polygonrnn_model, _recursive_=False)
         self.val_seq_len = val_seq_len if val_seq_len is not None else 60
 
     def forward(
@@ -292,23 +292,48 @@ class NaiveModPolyMapper(torch.nn.Module):
             losses.update(self.get_polygonrnn_losses(x, targets))
             return losses
         detections = self.obj_det_model(x)
-        resized_inputs = kornia.geometry.transform.crop_and_resize(
-            x, detections, (224, 224), mode="bilinear", align_corners=True
-        )
-        polygon_rnn_prediction = self.polygonrnn_model.test(
-            resized_inputs, self.val_seq_len
-        )
-        return {"bboxes": detections, "polygon_rnn_prediction": polygon_rnn_prediction}
+        if detections == []:
+            for idx, det in enumerate(detections):
+                det.update({"polygonrnn_output": None})
+                detections[idx] = det
+            return detections
+        for idx, det in enumerate(detections):
+            resized_inputs = torchvision.ops.roi_align(
+                x, [det["boxes"]], output_size=(224, 224)
+            )
+            polygonrnn_output = self.polygonrnn_model.test(
+                resized_inputs, self.val_seq_len
+            )
+            det.update({"polygonrnn_output": polygonrnn_output})
+            detections[idx] = det
+        return detections
 
     def get_obj_det_losses(
         self, x: torch.Tensor, targets: torch.Tensor
     ) -> Dict[str, torch.Tensor]:
         return self.obj_det_model(x, targets)
 
+    def build_polygon_rnn_batch(self, targets):
+        aux_list = list(
+            itertools.chain.from_iterable(
+                target["polygon_rnn_data"] for target in targets
+            )
+        )
+        return {
+            "cropped_image": torch.stack([item["image"] for item in aux_list]),
+            "x1": torch.stack([item["x1"] for item in aux_list]),
+            "x2": torch.stack([item["x2"] for item in aux_list]),
+            "x3": torch.stack([item["x3"] for item in aux_list]),
+            "ta": torch.stack([item["ta"] for item in aux_list]),
+        }
+
     def get_polygonrnn_losses(
         self, x: torch.Tensor, targets: torch.Tensor
     ) -> Dict[str, torch.Tensor]:
-        return {"polygonrnn_loss": self.polygonrnn_model.compute_loss(x, targets)}
+        batch = self.build_polygon_rnn_batch(targets)
+        result = self.polygonrnn_model.compute(batch, image_key="cropped_image")
+        loss, acc = self.polygonrnn_model.compute_loss_and_accuracy(batch, result)
+        return {"polygonrnn_loss": loss, "polygonrnn_accuracy": acc}
 
 
 if __name__ == "__main__":

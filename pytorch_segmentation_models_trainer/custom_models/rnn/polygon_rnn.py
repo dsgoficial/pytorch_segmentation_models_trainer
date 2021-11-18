@@ -568,7 +568,17 @@ class PolygonRNN(nn.Module):
 
         return result
 
-    def compute_loss(self, batch: torch.Tensor, result: torch.Tensor) -> _Loss:
+    def compute(self, batch: torch.Tensor, image_key=None) -> torch.Tensor:
+        image_key = "image" if image_key is None else image_key
+        output = self.forward(batch[image_key], batch["x1"], batch["x2"], batch["x3"])
+        return output.contiguous().view(-1, self.grid_size * self.grid_size + 3)
+
+    def compute_loss_and_accuracy(
+        self, batch: torch.Tensor, result: torch.Tensor
+    ) -> _Loss:
         target = batch["ta"].contiguous().view(-1)
-        loss = nn.CrossEntropyLoss(result, target)
-        return loss
+        loss = nn.functional.cross_entropy(result, target)
+        result_index = torch.argmax(result, 1)
+        correct = (target == result_index).float().sum().item()
+        acc = correct * 1.0 / target.shape[0]
+        return loss, acc

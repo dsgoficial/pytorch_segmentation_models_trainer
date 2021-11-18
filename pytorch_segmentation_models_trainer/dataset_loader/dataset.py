@@ -103,10 +103,10 @@ class AbstractDataset(Dataset):
         """
         pass
 
-    def get_path(self, idx, key=None):
+    def get_path(self, idx, key=None, add_root_dir=True):
         key = self.image_key if key is None else key
         image_path = str(self.df.iloc[idx][key])
-        if self.root_dir is not None:
+        if self.root_dir is not None and add_root_dir:
             return self._add_root_dir_to_path(image_path)
         return image_path
 
@@ -694,13 +694,13 @@ class InstanceSegmentationDataset(ObjectDetectionDataset):
         return image, ds_item_dict
 
 
-class ModPolyMapperDataset(Dataset):
+class NaiveModPolyMapperDataset(Dataset):
     def __init__(
         self,
         object_detection_dataset: ObjectDetectionDataset,
         polygon_rnn_dataset: PolygonRNNDataset,
     ) -> None:
-        super(ModPolyMapperDataset, self).__init__()
+        super(NaiveModPolyMapperDataset, self).__init__()
         self.object_detection_dataset = object_detection_dataset
         self.polygon_rnn_dataset = polygon_rnn_dataset
 
@@ -711,11 +711,22 @@ class ModPolyMapperDataset(Dataset):
         image, ds_item_dict = self.object_detection_dataset[index]
         _, polygon_rnn_data = self.polygon_rnn_dataset.get_training_images_from_image_path(
             self.object_detection_dataset.get_path(
-                index, key=self.object_detection_dataset.image_key
+                index, key=self.object_detection_dataset.image_key, add_root_dir=False
             )
         )
         ds_item_dict["polygon_rnn_data"] = polygon_rnn_data
         return image, ds_item_dict
+
+    @staticmethod
+    def collate_fn(batch: List) -> Dict[torch.Tensor, List[Dict]]:
+        """
+        :param batch: an iterable of N sets from __getitem__()
+        :return: a tensor of images, lists of varying-size tensors of bounding boxes, labels, and difficulties
+        """
+
+        images, targets = tuple(zip(*batch))
+        images = torch.stack(images, dim=0)
+        return images, list(targets)
 
 
 if __name__ == "__main__":

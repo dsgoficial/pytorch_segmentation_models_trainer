@@ -39,6 +39,7 @@ from pytorch_segmentation_models_trainer.config_definitions.coco_dataset_config 
 )
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     InstanceSegmentationDataset,
+    NaiveModPolyMapperDataset,
     ObjectDetectionDataset,
     PolygonRNNDataset,
     SegmentationDataset,
@@ -597,3 +598,35 @@ class Test_TestDataset(CustomTestCase):
         self.assertEqual(target["boxes"].shape, (2, 4))
         self.assertEqual(target["labels"].shape, (2,))
         self.assertEqual(target["masks"].shape, (1, 571, 571))
+
+    def test_naive_mod_polymapper_dataset(self):
+        csv_path = os.path.join(detection_root_dir, "geo", "dsg_dataset.csv")
+        poly_csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
+        ds = NaiveModPolyMapperDataset(
+            object_detection_dataset=ObjectDetectionDataset(
+                input_csv_path=csv_path,
+                root_dir=os.path.dirname(csv_path),
+                augmentation_list=A.Compose(
+                    [A.CenterCrop(512, 512), A.Normalize(), A.pytorch.ToTensorV2()],
+                    bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
+                ),
+            ),
+            polygon_rnn_dataset=PolygonRNNDataset(
+                input_csv_path=poly_csv_path,
+                sequence_length=60,
+                root_dir=polygon_rnn_root_dir,
+                augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
+            ),
+        )
+        self.assertEqual(len(ds), 12)
+        image, target = ds[0]
+        self.assertEqual(image.shape, (3, 512, 512))
+        self.assertEqual(target["boxes"].shape, (1, 4))
+        self.assertEqual(target["labels"].shape, (1,))
+        self.assertEqual(len(target["polygon_rnn_data"]), 2)
+        for data in target["polygon_rnn_data"]:
+            self.assertEqual(data["image"].shape, (3, 224, 224))
+            self.assertEqual(data["x1"].shape, (787,))
+            self.assertEqual(data["x2"].shape, (58, 787))
+            self.assertEqual(data["x3"].shape, (58, 787))
+            self.assertEqual(data["ta"].shape, (58,))
