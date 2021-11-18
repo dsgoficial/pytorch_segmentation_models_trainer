@@ -234,6 +234,24 @@ class FrameFieldOverlayedResultCallback(ImageSegmentationResultCallback):
 
 
 class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
+    def __init__(
+        self,
+        n_samples: int = None,
+        output_path: str = None,
+        normalized_input=True,
+        norm_params=None,
+        log_every_k_epochs=1,
+        threshold=0.5,
+    ) -> None:
+        super().__init__(
+            n_samples=n_samples,
+            output_path=output_path,
+            normalized_input=normalized_input,
+            norm_params=norm_params,
+            log_every_k_epochs=log_every_k_epochs,
+        )
+        self.threshold = threshold
+
     @rank_zero_only
     def on_validation_end(self, trainer, pl_module):
         if not self.save_outputs:
@@ -252,7 +270,10 @@ class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
                 images, clip_range=[0, 255], output_type=torch.uint8
             ).to("cpu")
             outputs = pl_module(images.to(pl_module.device))
-            boxes = [out["boxes"][out["scores"] > 0.5].to("cpu") for out in outputs]
+            boxes = [
+                out["boxes"][out["scores"] > self.threshold].to("cpu")
+                for out in outputs
+            ]
             visualization_list = visualize_image_with_bboxes(
                 image_display.to("cpu"), boxes
             )
