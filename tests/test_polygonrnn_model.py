@@ -83,11 +83,7 @@ class Test_TestPolygonRNNModel(CustomTestCase):
                     f"train_dataset.root_dir={polygon_rnn_root_dir}",
                     f"val_dataset.input_csv_path={csv_path}",
                     f"val_dataset.root_dir={polygon_rnn_root_dir}",
-                    # "pl_trainer.gpus=1",
-                    # "device=cuda",
-                    # "optimizer.lr=0.00001",
-                    # "hyperparameters.batch_size=4",
-                    # "hyperparameters.epochs=10"
+                    "+pl_trainer.fast_dev_run=true",
                 ],
             )
             trainer = train(cfg)
@@ -102,15 +98,7 @@ class Test_TestPolygonRNNModel(CustomTestCase):
                     f"train_dataset.root_dir={polygon_rnn_root_dir}",
                     f"val_dataset.input_csv_path={csv_path}",
                     f"val_dataset.root_dir={polygon_rnn_root_dir}",
-                    # f"train_dataset.n_first_rows_to_read=500",
-                    # f"train_dataset.sequence_length=120",
-                    # f"val_dataset.sequence_length=120",
-                    # f"val_dataset.n_first_rows_to_read=16",
-                    # "pl_trainer.gpus=1",
-                    # "device=cuda",
-                    # "optimizer.lr=0.00001",
-                    # "hyperparameters.batch_size=8",
-                    # "hyperparameters.epochs=100"
+                    "+pl_trainer.fast_dev_run=true",
                 ],
             )
             trainer = train(cfg)

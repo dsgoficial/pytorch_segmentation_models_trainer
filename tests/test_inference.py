@@ -32,6 +32,7 @@ import numpy as np
 import rasterio
 import segmentation_models_pytorch as smp
 import torch
+from collections import OrderedDict
 from hydra import compose, initialize
 from hydra.utils import instantiate
 from parameterized import parameterized
@@ -115,11 +116,16 @@ class Test_TestInference(unittest.TestCase):
     def tearDown(self):
         remove_folder(self.output_dir)
 
-    def get_frame_field_ds(self):
+    def get_frame_field_ds(self, with_center_crop=False):
+        config_name = (
+            "frame_field_dataset.yaml"
+            if not with_center_crop
+            else "frame_field_dataset_with_center_crop.yaml"
+        )
         csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
         with initialize(config_path="./test_configs"):
             cfg = compose(
-                config_name="frame_field_dataset.yaml",
+                config_name=config_name,
                 overrides=[
                     "input_csv_path=" + csv_path,
                     "root_dir=" + frame_field_root_dir,
@@ -165,26 +171,19 @@ class Test_TestInference(unittest.TestCase):
         return PolygonRNNPolygonizerProcessor(data_writer=data_writer, config=config)
 
     def get_model_for_eval(self):
-        csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
-        with initialize(config_path="./test_configs"):
-            cfg = compose(
-                config_name="frame_field_for_inference.yaml",
-                overrides=[
-                    "train_dataset.input_csv_path=" + csv_path,
-                    "train_dataset.root_dir=" + frame_field_root_dir,
-                    "val_dataset.input_csv_path=" + csv_path,
-                    "val_dataset.root_dir=" + frame_field_root_dir,
-                ],
-            )
-        checkpoint_file_path = self.get_checkpoint_file(
-            "frame_field_resnet152_unet_200_epochs.ckpt"
+        ds_with_center_crop = self.get_frame_field_ds(with_center_crop=True)
+        b1, b2, _ = ds_with_center_crop[0]["gt_polygons_image"]
+        mock_model = Mock(spec=FrameFieldSegmentationPLModel)
+        mock_model.return_value = OrderedDict(
+            {
+                "seg": torch.stack([b1, b2]).unsqueeze(0),
+                "crossfield": ds_with_center_crop[0]["gt_crossfield_angle"].unsqueeze(
+                    0
+                ),
+            }
         )
-        pl_model = FrameFieldSegmentationPLModel.load_from_checkpoint(
-            checkpoint_file_path, cfg=cfg
-        )
-        model = pl_model.model
-        model.eval()
-        return model
+        mock_model.eval()
+        return mock_model
 
     def get_checkpoint_file(self, file_name):
         checkpoint_folder = create_folder(os.path.join(root_dir, "data", "checkpoints"))
@@ -203,7 +202,7 @@ class Test_TestInference(unittest.TestCase):
         inference_processor = SingleImageInfereceProcessor(
             model=smp.Unet(),
             device=device,
-            batch_size=8,
+            batch_size=1,
             export_strategy=RasterExportInferenceStrategy(
                 output_file_path=output_file_path
             ),
@@ -225,7 +224,7 @@ class Test_TestInference(unittest.TestCase):
                 },
             ),
             device=device,
-            batch_size=8,
+            batch_size=1,
             export_strategy=MultipleRasterExportInferenceStrategy(
                 output_folder=self.output_dir, output_basename="output.tif"
             ),
@@ -246,7 +245,7 @@ class Test_TestInference(unittest.TestCase):
         inference_processor = SingleImageFromFrameFieldProcessor(
             model=self.get_model_for_eval(),
             device=device,
-            batch_size=8,
+            batch_size=1,
             export_strategy=MultipleRasterExportInferenceStrategy(
                 output_folder=self.output_dir,
                 output_basename=f"{polygonizer_key}_output.tif",

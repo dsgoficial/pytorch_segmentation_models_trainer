@@ -92,6 +92,7 @@ class Test_TestGradientCentralization(CustomTestCase):
                     "train_dataset.root_dir=" + frame_field_root_dir,
                     "val_dataset.input_csv_path=" + csv_path,
                     "val_dataset.root_dir=" + frame_field_root_dir,
+                    "+pl_trainer.fast_dev_run=true",
                 ],
             )
             trainer = train(cfg)
