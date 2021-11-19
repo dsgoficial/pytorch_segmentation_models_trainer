@@ -26,9 +26,10 @@ from PIL import Image, ImageDraw
 import numpy as np
 import torch
 import itertools
-from shapely.geometry import Polygon, LineString, Point
+from shapely.geometry import Polygon, LineString, Point, MultiPolygon
 from shapely.geometry.base import BaseGeometry
 import cv2
+from shapely.validation import make_valid
 
 
 def label2vertex(labels):
@@ -82,18 +83,18 @@ def get_vertex_list(
 
 
 def get_vertex_list_from_numpy(
-    input_array: np.array,
+    input_array: np.ndarray,
     scale_h: Optional[float] = 1.0,
     scale_w: Optional[float] = 1.0,
     min_col: Optional[int] = 0,
     min_row: Optional[int] = 0,
     grid_size: Optional[int] = 28,
     return_cast_func: Optional[Callable] = None,
-) -> np.array:
+) -> np.ndarray:
     """Gets vertex list from input batch.
 
     Args:
-        input_batch (np.array): [description]
+        input_batch (np.ndarray): [description]
         scale_h (Optional[float], optional): Height scale. Defaults to 1.0.
         scale_w (Optional[float], optional): Width scale. Defaults to 1.0.
         min_col (Optional[int], optional): Minimum column. Defaults to 0.
@@ -140,10 +141,10 @@ def scale_shapely_polygon(
 
 def scale_polygon_list(
     polygon_list: List[Polygon],
-    list_scale_h: Union[List[float], np.array],
-    list_scale_w: Union[List[float], np.array],
-    list_min_col: Union[List[int], np.array],
-    list_min_row: Union[List[int], np.array],
+    list_scale_h: Union[List[float], np.ndarray],
+    list_scale_w: Union[List[float], np.ndarray],
+    list_min_col: Union[List[int], np.ndarray],
+    list_min_row: Union[List[int], np.ndarray],
 ) -> List[Polygon]:
     return [
         scale_shapely_polygon(
@@ -158,17 +159,17 @@ def scale_polygon_list(
 
 
 def get_vertex_list_from_batch(
-    input_batch: np.array,
+    input_batch: np.ndarray,
     scale_h: Optional[float] = 1.0,
     scale_w: Optional[float] = 1.0,
     min_col: Optional[int] = 0,
     min_row: Optional[int] = 0,
     grid_size: Optional[int] = 28,
-) -> np.array:
+) -> np.ndarray:
     """Gets vertex list from input batch.
 
     Args:
-        input_batch (np.array): [description]
+        input_batch (np.ndarray): [description]
         scale_h (Optional[float], optional): Height scale. Defaults to 1.0.
         scale_w (Optional[float], optional): Width scale. Defaults to 1.0.
         min_col (Optional[int], optional): Minimum column. Defaults to 0.
@@ -187,7 +188,7 @@ def get_vertex_list_from_batch_tensors(
     min_col: torch.Tensor,
     min_row: torch.Tensor,
     grid_size: Optional[int] = 28,
-) -> List[np.array]:
+) -> List[np.ndarray]:
     """Gets vertex list from input batch.
 
     Args:
@@ -358,3 +359,15 @@ def handle_vertices(vertices):
     if vertices_array.shape[0] == 2:
         return LineString(vertices_array)
     return Polygon(vertices_array.reshape(-1, 2))
+
+
+def validate_polygon(geom: Polygon) -> List[Union[Polygon, MultiPolygon]]:
+    if geom.is_valid:
+        return [geom]
+    valid_output = make_valid(geom)
+    if isinstance(valid_output, (Polygon, MultiPolygon)):
+        return [valid_output]
+    if isinstance(valid_output, list):
+        return [p for p in valid_output if isinstance(p, (Polygon, MultiPolygon))]
+    else:
+        return []

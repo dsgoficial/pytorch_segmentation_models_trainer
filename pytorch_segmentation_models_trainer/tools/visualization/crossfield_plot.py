@@ -30,7 +30,7 @@ def get_seg_display(seg):
 
 
 def get_tensorboard_image_seg_display(
-    image, seg, crossfield=None, crossfield_stride=10, alpha=None, width=0.2
+    image, seg, crossfield=None, crossfield_stride=10, width=1
 ):
     assert (
         len(image.shape) == 4 and image.shape[1] == 3
@@ -61,11 +61,7 @@ def get_tensorboard_image_seg_display(
             image.shape[3] == crossfield.shape[3]
         ), "image and crossfield should have the same image width."
 
-    alpha = (
-        torch.clamp(torch.sum(seg, dim=1, keepdim=True), 0, 1)
-        if alpha is None
-        else alpha
-    )
+    alpha = torch.clamp(torch.sum(seg, dim=1, keepdim=True), 0, 1)
 
     # Add missing seg channels
     seg_display = torch.zeros_like(image)
@@ -88,15 +84,13 @@ def get_tensorboard_image_seg_display(
             for image_plot_crossfield in image_plot_crossfield_list
         ]
         image_plot_crossfield = torch.stack(image_plot_crossfield_list, dim=0)
-        alpha_band = 255 * image_plot_crossfield[:, 3:4, :, :]
-        crossfield_image_plot = 255 * image_plot_crossfield[:, :3, :, :]
+        alpha = image_plot_crossfield[:, 3:4, :, :]
         image_seg_display = (
-            1 - alpha_band
-        ) * image_seg_display + alpha_band * crossfield_image_plot
-        # image_seg_display = image_seg_display * crossfield_image_plot.int()
-        # image_seg_display = (1-alpha)*image_seg_display + alpha * image_seg_display * crossfield_image_plot.int()
+            1 - alpha
+        ) * image_seg_display + alpha * image_plot_crossfield[:, :3, :, :]
+        # image_seg_display = image_plot_crossfield[:, :3, :, :]
 
-    return image_seg_display.int()
+    return image_seg_display
 
 
 def plot_crossfield(

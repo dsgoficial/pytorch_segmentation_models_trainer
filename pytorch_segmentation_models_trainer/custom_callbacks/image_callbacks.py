@@ -40,7 +40,9 @@ from PIL import Image
 from torch.utils.tensorboard import SummaryWriter
 from pytorch_lightning.utilities import rank_zero_only
 from pytorch_segmentation_models_trainer.tools.visualization.crossfield_plot import (
+    get_image_plot_crossfield,
     get_tensorboard_image_seg_display,
+    plot_crossfield,
     plot_polygons,
 )
 from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
@@ -162,17 +164,29 @@ class FrameFieldResultCallback(ImageSegmentationResultCallback):
             predicted_mask = pred["seg"][i]
             predicted_mask = predicted_mask.to("cpu")
             plot_title = val_ds.dataset.get_path(i)
-            plt_result, fig = generate_visualization(
+            crossfield = pred["crossfield"]
+            np_crossfield = crossfield.cpu().detach().numpy().transpose(0, 2, 3, 1)
+            image_to_plot = np.transpose(image, (1, 2, 0))
+            # image_plot_crossfield_list = [
+            #     get_image_plot_crossfield(
+            #         _crossfield, crossfield_stride=10, width=0.2
+            #     )
+            #     for _crossfield in np_crossfield
+            # ]
+            axarr, fig = generate_visualization(
                 fig_title=plot_title,
-                image=np.transpose(image, (1, 2, 0)),
+                image=image_to_plot,
                 ground_truth_mask=self.prepare_mask_to_plot(mask.numpy()[0]),
                 predicted_mask=self.prepare_mask_to_plot(predicted_mask.numpy()[0]),
                 ground_truth_boundary=self.prepare_mask_to_plot(mask.numpy()[1]),
                 predicted_boundary=self.prepare_mask_to_plot(predicted_mask.numpy()[1]),
+                # crossfield=image_plot_crossfield_list[i],
             )
+            fig.tight_layout()
+            fig.subplots_adjust(top=0.95)
             if self.save_outputs:
                 saved_image = self.save_plot_to_disk(
-                    plt_result, plot_title, trainer.current_epoch
+                    plt, plot_title, trainer.current_epoch
                 )
                 self.log_data_to_tensorboard(
                     saved_image, plot_title, logger, trainer.current_epoch
@@ -181,24 +195,63 @@ class FrameFieldResultCallback(ImageSegmentationResultCallback):
         return
 
 
-class FrameFieldOverlayedResultCallback(pl.callbacks.base.Callback):
+class FrameFieldOverlayedResultCallback(ImageSegmentationResultCallback):
     @rank_zero_only
     def on_validation_end(self, trainer, pl_module):
+        if not self.save_outputs:
+            return
         val_ds = pl_module.val_dataloader()
-        batch = next(iter(val_ds))
-        image_display = batch_denormalize_tensor(batch["image"]).to(pl_module.device)
-        pred = pl_module(batch["image"].to(pl_module.device))
-        if "seg" in pred:
-            crossfield = pred["crossfield"] if "crossfield" in pred else None
-            image_seg_display = get_tensorboard_image_seg_display(
-                255 * image_display, 255 * pred["seg"], crossfield=crossfield
-            )
-            trainer.logger.experiment.add_images(
-                "seg", image_seg_display, trainer.current_epoch
-            )
+        n_samples = (
+            pl_module.val_dataloader().batch_size
+            if self.n_samples is None
+            else self.n_samples
+        )
+        current_item = 0
+        for batch in val_ds:
+            if current_item >= n_samples:
+                break
+            images = batch["image"]
+            image_display = batch_denormalize_tensor(images).to("cpu")
+            pred = pl_module(images.to(pl_module.device))
+            crossfield = pred["crossfield"].to("cpu") if "crossfield" in pred else None
+            seg = pred["seg"].to("cpu")
+            if "seg" not in pred:
+                return
+            for idx in range(images.shape[0]):
+                if current_item >= n_samples:
+                    break
+                image_seg_display = get_tensorboard_image_seg_display(
+                    image_display[idx].unsqueeze(0),
+                    seg[idx].unsqueeze(0),
+                    crossfield=crossfield[idx].unsqueeze(0),
+                )
+                trainer.logger.experiment.add_images(
+                    f"overlay-{batch['path'][idx]}",
+                    image_seg_display,
+                    trainer.current_epoch,
+                )
+                current_item += 1
 
 
 class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
+    def __init__(
+        self,
+        n_samples: int = None,
+        output_path: str = None,
+        normalized_input=True,
+        norm_params=None,
+        log_every_k_epochs=1,
+        threshold=0.5,
+    ) -> None:
+        super().__init__(
+            n_samples=n_samples,
+            output_path=output_path,
+            normalized_input=normalized_input,
+            norm_params=norm_params,
+            log_every_k_epochs=log_every_k_epochs,
+        )
+        self.threshold = threshold
+
     @rank_zero_only
     def on_validation_end(self, trainer, pl_module):
         if not self.save_outputs:
@@ -217,7 +270,10 @@ class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
                 images, clip_range=[0, 255], output_type=torch.uint8
             ).to("cpu")
             outputs = pl_module(images.to(pl_module.device))
-            boxes = [out["boxes"][out["scores"] > 0.5].to("cpu") for out in outputs]
+            boxes = [
+                out["boxes"][out["scores"] > self.threshold].to("cpu")
+                for out in outputs
+            ]
             visualization_list = visualize_image_with_bboxes(
                 image_display.to("cpu"), boxes
             )
@@ -269,7 +325,7 @@ class PolygonRNNResultCallback(ImageSegmentationResultCallback):
             plot_polygons(predicted_axes, predicted_polygon_list, markersize=5)
             if self.save_outputs:
                 saved_image = self.save_plot_to_disk(
-                    plt_result, plot_title, trainer.current_epoch
+                    plt, plot_title, trainer.current_epoch
                 )
                 self.log_data_to_tensorboard(
                     saved_image, plot_title, trainer.logger, trainer.current_epoch

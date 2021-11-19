@@ -78,6 +78,7 @@ callbacks:
   - _target_: pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks.WarmupCallback
     warmup_epochs: 1
   - _target_: pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.FrameFieldResultCallback
+  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.FrameFieldOverlayedResultCallback
 
 pl_trainer:
   max_epochs: ${hyperparameters.epochs}

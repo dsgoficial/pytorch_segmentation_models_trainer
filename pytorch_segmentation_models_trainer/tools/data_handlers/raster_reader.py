@@ -337,12 +337,10 @@ class RasterFile:
             with rasterio.open(self.file_name) as raster_ds:
                 transform = raster_ds.transform
         for geom in vector_feats:
-            return_list.append(
-                {
-                    "class": class_idx,
-                    "bbox": self.get_coco_bbox_on_image_coords(*geom.bounds, transform),
-                }
-            )
+            bbox = self.get_coco_bbox_on_image_coords(*geom.bounds, transform)
+            if bbox[-1] <= 0 or bbox[-2] <= 0:
+                continue
+            return_list.append({"class": class_idx, "bbox": bbox})
         return return_list
 
     def build_polygon_list_from_vector_layer(

@@ -27,6 +27,15 @@ from pytorch_segmentation_models_trainer.build_mask import build_masks
 from pytorch_segmentation_models_trainer.config_utils import validate_config
 from pytorch_segmentation_models_trainer.convert_ds import convert_dataset
 
+import logging
+import warnings
+from rasterio.errors import NotGeoreferencedWarning
+
+logging.getLogger("shapely.geos").setLevel(logging.CRITICAL)
+logging.getLogger("rasterio.errors").setLevel(logging.CRITICAL)
+warnings.filterwarnings("ignore", category=NotGeoreferencedWarning)
+warnings.simplefilter(action="ignore", category=Warning)
+
 
 @hydra.main(config_path="conf")
 def main(cfg: DictConfig):

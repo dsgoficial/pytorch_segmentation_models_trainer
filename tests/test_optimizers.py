@@ -43,6 +43,7 @@ class Test_TestOptimizers(CustomTestCase):
                     "train_dataset.input_csv_path=" + self.csv_ds_file,
                     "val_dataset.input_csv_path=" + self.csv_ds_file,
                     f"optimizer._target_=pytorch_segmentation_models_trainer.optimizers.gradient_centralization.{optimizer_class_name}",
+                    "+pl_trainer.fast_dev_run=true",
                 ],
             )
             train_obj = train(cfg)

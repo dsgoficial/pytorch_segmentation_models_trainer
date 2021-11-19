@@ -21,9 +21,11 @@
  ****
 """
 
-from typing import List, Tuple
+import itertools
+from typing import List, Tuple, Union
 import numpy as np
 from shapely.geometry import Polygon, LineString, Point
+from shapely.geometry.multipolygon import MultiPolygon
 import torch
 from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 
@@ -50,6 +52,38 @@ def polygon_iou(vertices1: List, vertices2: List) -> Tuple[float, float, float]:
     """
     geom1 = polygonrnn_utils.handle_vertices(vertices1)
     geom2 = polygonrnn_utils.handle_vertices(vertices2)
+    if geom1.is_valid and geom2.is_valid:
+        return _poly_iou(geom1, geom2)
+    return _iou_with_invalid_geom(geom1, geom2)
+
+
+def _iou_with_invalid_geom(
+    geom1: Union[Polygon, MultiPolygon], geom2: Union[Polygon, MultiPolygon]
+) -> Tuple[float, float, float]:
+    geom1_list = polygonrnn_utils.validate_polygon(geom1)
+    geom2_list = polygonrnn_utils.validate_polygon(geom2)
+    if geom1_list == []:
+        return 0, 0, sum(geom.area for geom in geom2_list)
+    if geom2_list == []:
+        return 0, 0, sum(geom.area for geom in geom1_list)
+
+    iou_intersection_union_array = sum(
+        [
+            np.array(_poly_iou(geom_a, geom_b))
+            for geom_a in geom1_list
+            for geom_b in geom2_list
+        ]
+    )
+    return (
+        iou_intersection_union_array[0],
+        iou_intersection_union_array[1],
+        iou_intersection_union_array[2],
+    )
+
+
+def _poly_iou(
+    geom1: Union[Polygon, MultiPolygon], geom2: Union[Polygon, MultiPolygon]
+) -> Tuple[float, float, float]:
     intersection = geom1.intersection(geom2).area
     union = geom1.area + geom2.area - intersection
     iou = 0 if union == 0 else intersection / union

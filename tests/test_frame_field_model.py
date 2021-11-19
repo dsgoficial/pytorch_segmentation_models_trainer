@@ -123,7 +123,6 @@ class Test_TestFrameFieldModel(CustomTestCase):
     def test_create_instance(self) -> None:
         model = smp.Unet()
         frame_field_model = FrameFieldModel(model)
-        print(frame_field_model)
         return True
 
     @parameterized.expand(input_model_list)
@@ -168,11 +167,7 @@ class Test_TestFrameFieldModel(CustomTestCase):
                     "train_dataset.root_dir=" + frame_field_root_dir,
                     "val_dataset.input_csv_path=" + csv_path,
                     "val_dataset.root_dir=" + frame_field_root_dir,
-                    # 'pl_trainer.gpus=1',
-                    # 'device=cuda',
-                    # 'optimizer.lr=0.00001',
-                    # 'hyperparameters.batch_size=4',
-                    # 'hyperparameters.epochs=100'
+                    "+pl_trainer.fast_dev_run=true",
                 ],
             )
             trainer = train(cfg)
@@ -188,11 +183,6 @@ class Test_TestFrameFieldModel(CustomTestCase):
                     "train_dataset.root_dir=" + frame_field_root_dir,
                     "val_dataset.input_csv_path=" + csv_path,
                     "val_dataset.root_dir=" + frame_field_root_dir,
-                    # 'pl_trainer.gpus=1',
-                    # 'device=cuda',
-                    # 'optimizer.lr=0.00001',
-                    # 'hyperparameters.batch_size=4',
-                    # 'hyperparameters.epochs=10'
                 ],
             )
             trainer = train(cfg)
@@ -210,11 +200,7 @@ class Test_TestFrameFieldModel(CustomTestCase):
                     "train_dataset.root_dir=" + frame_field_root_dir,
                     "val_dataset.input_csv_path=" + csv_path,
                     "val_dataset.root_dir=" + frame_field_root_dir,
-                    # 'pl_trainer.gpus=1',
-                    # 'device=cuda',
-                    # 'optimizer.lr=0.00001',
-                    # 'hyperparameters.batch_size=4',
-                    # 'hyperparameters.epochs=10'
+                    "+pl_trainer.fast_dev_run=true",
                 ],
             )
             trainer = train(cfg)
@@ -232,6 +218,7 @@ class Test_TestFrameFieldModel(CustomTestCase):
                     "val_dataset.root_dir=" + frame_field_root_dir,
                     "+pl_model.use_mixup=true",
                     "+pl_model.mixup_alpha=0.5",
+                    "+pl_trainer.fast_dev_run=true",
                 ],
             )
             trainer = train(cfg)
@@ -249,6 +236,7 @@ class Test_TestFrameFieldModel(CustomTestCase):
                     "val_dataset.root_dir=" + frame_field_root_dir,
                     "+pl_model.use_label_smoothing=true",
                     "+pl_model.smooth_factor=0.1",
+                    "+pl_trainer.fast_dev_run=true",
                 ],
             )
             trainer = train(cfg)
@@ -268,6 +256,7 @@ class Test_TestFrameFieldModel(CustomTestCase):
                     "+pl_model.mixup_alpha=0.5",
                     "+pl_model.use_label_smoothing=true",
                     "+pl_model.smooth_factor=0.1",
+                    "+pl_trainer.fast_dev_run=true",
                 ],
             )
             trainer = train(cfg)

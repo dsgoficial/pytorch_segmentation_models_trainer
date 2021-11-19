@@ -45,6 +45,12 @@ class Test_TestMetrics(unittest.TestCase):
         iou, _, __ = metrics.polygon_iou(polygon1, polygon2)
         self.assertAlmostEqual(iou, 0.083333333333)
 
+    def test_polygon_iou_with_invalid_geom(self) -> None:
+        polygon1 = [2, 0, 2, 2, 0, 2, 0, 0]
+        polygon2 = [0, 0, 2, 2, 2, 0, 0, 2]  # invalid, bow-tie
+        iou, _, __ = metrics.polygon_iou(polygon1, polygon2)
+        self.assertAlmostEqual(iou, 0.5)
+
     def test_polis(self) -> None:
         polygon1 = Polygon([(0, 0), (0, 2), (2, 2), (2, 0), (0, 0)])
         polygon2 = Polygon([(0, 0), (0, 2), (3, 3), (2, 0), (0, 0)])
