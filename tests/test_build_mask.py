@@ -123,7 +123,6 @@ class Test_TestBuildMask(unittest.TestCase):
                     ),
                 ],
             )
-            print(cfg)
             csv_output = build_masks(cfg)
             expected_df = pd.read_csv(
                 os.path.join(expected_output_path, "dsg_dataset.csv")
@@ -147,7 +146,6 @@ class Test_TestBuildMask(unittest.TestCase):
                     "mask_builder.image_root_dir=" + image_dir,
                 ],
             )
-            print(cfg)
             csv_output = build_masks(cfg)
             expected_df = pd.read_csv(
                 os.path.join(expected_output_path, "dsg_dataset.csv")
@@ -177,7 +175,6 @@ class Test_TestBuildMask(unittest.TestCase):
                     ),
                 ],
             )
-            print(cfg)
             csv_output = build_masks(cfg)
             expected_df = pd.read_csv(
                 os.path.join(expected_output_path, "coco_dataset.csv")
@@ -208,7 +205,6 @@ class Test_TestBuildMask(unittest.TestCase):
                     "+mask_builder.geo_df.pre_build_vector_dict=False",
                 ],
             )
-            print(cfg)
             csv_output = build_masks(cfg)
             expected_df = pd.read_csv(
                 os.path.join(expected_output_path, "coco_dataset.csv")
@@ -256,7 +252,6 @@ class Test_TestBuildMask(unittest.TestCase):
                     ),
                 ],
             )
-            print(cfg)
             csv_output = build_masks(cfg)
         with initialize(config_path="./test_configs"):
             image_dir = os.path.join(root_dir, "data", "build_masks_data", "images")
@@ -277,7 +272,6 @@ class Test_TestBuildMask(unittest.TestCase):
                     ),
                 ],
             )
-            print(cfg)
             csv_output = build_masks(cfg)
         expected_df = pd.read_csv(
             os.path.join(expected_output_path, "dsg_dataset.csv")
@@ -307,7 +301,6 @@ class Test_TestBuildMask(unittest.TestCase):
                     "+mask_builder.build_bounding_box_list=True",
                 ],
             )
-            print(cfg)
             csv_output = build_masks(cfg)
         expected_df = pd.read_csv(
             os.path.join(expected_output_path, "dsg_dataset_with_bboxes.csv")
@@ -337,7 +330,6 @@ class Test_TestBuildMask(unittest.TestCase):
                     "+mask_builder.build_polygon_list=True",
                 ],
             )
-            print(cfg)
             csv_output = build_masks(cfg)
         expected_df = pd.read_csv(
             os.path.join(expected_output_path, "dsg_dataset_with_polygons.csv")

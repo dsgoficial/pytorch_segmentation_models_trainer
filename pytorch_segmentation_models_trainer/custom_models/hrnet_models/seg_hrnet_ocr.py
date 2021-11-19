@@ -808,8 +808,8 @@ class HRNetOCR(nn.Module):
                 k.replace("last_layer", "aux_head").replace("model.", ""): v
                 for k, v in pretrained_dict.items()
             }
-            print(set(model_dict) - set(pretrained_dict))
-            print(set(pretrained_dict) - set(model_dict))
+            # print(set(model_dict) - set(pretrained_dict))
+            # print(set(pretrained_dict) - set(model_dict))
             pretrained_dict = {
                 k: v for k, v in pretrained_dict.items() if k in model_dict.keys()
             }

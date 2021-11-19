@@ -125,9 +125,10 @@ class AbstractInferenceProcessor(ABC):
     def save_inference(self, image_path, threshold, profile, inference, output_dict):
         inference["seg"] = (inference["seg"] > threshold).astype(np.uint8)
         profile["input_name"] = Path(image_path).stem
-        output_dict["inference"].append(
-            self.export_strategy.save_inference(inference, profile)
-        )
+        if self.export_strategy is not None:
+            output_dict["inference"].append(
+                self.export_strategy.save_inference(inference, profile)
+            )
 
     @abstractmethod
     def make_inference(

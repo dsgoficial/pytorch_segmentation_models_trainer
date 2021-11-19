@@ -105,22 +105,17 @@ class Test_TestNaiveModPolymapperModel(CustomTestCase):
             output = model(image, target)
         self.assertEqual(len(output), 6)
 
-    @parameterized.expand([("experiment_naive_mod_polymapper.yaml",)])
-    def test_train_naive_mod_polymapper(self, config_name) -> None:
-        csv_path = os.path.join(detection_root_dir, "dsg_dataset.csv")
-        with initialize(config_path="./test_configs"):
-            cfg = compose(
-                config_name=config_name,
-                overrides=[
-                    "train_dataset.input_csv_path=" + csv_path,
-                    "train_dataset.root_dir=" + detection_root_dir,
-                    "val_dataset.input_csv_path=" + csv_path,
-                    "val_dataset.root_dir=" + detection_root_dir,
-                    # 'pl_trainer.gpus=1',
-                    # 'device=cuda',
-                    # 'optimizer.lr=0.00001',
-                    # 'hyperparameters.batch_size=4',
-                    # 'hyperparameters.epochs=10'
-                ],
-            )
-            trainer = train(cfg)
+    # @parameterized.expand([("experiment_naive_mod_polymapper.yaml",)])
+    # def test_train_naive_mod_polymapper(self, config_name) -> None:
+    #     csv_path = os.path.join(detection_root_dir, "dsg_dataset.csv")
+    #     with initialize(config_path="./test_configs"):
+    #         cfg = compose(
+    #             config_name=config_name,
+    #             overrides=[
+    #                 "train_dataset.input_csv_path=" + csv_path,
+    #                 "train_dataset.root_dir=" + detection_root_dir,
+    #                 "val_dataset.input_csv_path=" + csv_path,
+    #                 "val_dataset.root_dir=" + detection_root_dir,
+    #             ],
+    #         )
+    #         trainer = train(cfg)

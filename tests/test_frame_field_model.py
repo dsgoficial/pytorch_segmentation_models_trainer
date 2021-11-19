@@ -123,7 +123,6 @@ class Test_TestFrameFieldModel(CustomTestCase):
     def test_create_instance(self) -> None:
         model = smp.Unet()
         frame_field_model = FrameFieldModel(model)
-        print(frame_field_model)
         return True
 
     @parameterized.expand(input_model_list)
