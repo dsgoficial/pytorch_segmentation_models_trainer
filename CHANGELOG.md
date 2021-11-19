@@ -1,7 +1,9 @@
 # Veresion 0.15.0
 
-- New Modified PolyMapper model (Object Detection + PolygonRNN);
+- New Naive Mod PolyMapper model (Object Detection + PolygonRNN);
+- New Naive Mod Polymapper dataset;
 - New callback: Frame Field Only Crossfield Warmup Callback;
+- New inference processors for Object Detection and PolygonRNN;
 - Bug fix on object detection model;
 - Bug fix on bounding box mask building;
 - Bug fix on polygon iou with invalid geometries;
