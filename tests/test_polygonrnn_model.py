@@ -97,7 +97,6 @@ class Test_TestPolygonRNNModel(CustomTestCase):
                     f"train_dataset.root_dir={polygon_rnn_root_dir}",
                     f"val_dataset.input_csv_path={csv_path}",
                     f"val_dataset.root_dir={polygon_rnn_root_dir}",
-                    "+pl_trainer.fast_dev_run=true",
                 ],
             )
             trainer = train(cfg)
