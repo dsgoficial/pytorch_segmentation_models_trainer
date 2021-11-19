@@ -19,6 +19,7 @@
  ****
 """
 from copy import deepcopy
+import json
 import pathlib
 from typing import List, Union
 import numpy as np
@@ -145,3 +146,12 @@ class VectorDatabaseDataWriter(AbstractDataWriter):
             f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
         )
         gdf.to_postgis(self.table_name, engine, if_exists=self.if_exists)
+
+
+@dataclass
+class ObjectDetectionDataWriter(AbstractDataWriter):
+    output_file_path: str = MISSING
+
+    def write_data(self, input_data: np.array, profile=None) -> None:
+        with open(self.output_file_path, "w") as f:
+            f.write(json.dumps(input_data))

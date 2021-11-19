@@ -26,6 +26,9 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from PIL import Image
+from pytorch_segmentation_models_trainer.tools.detection.bbox_handler import (
+    BboxTileMerger,
+)
 from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import (
     PolygonRNNPolygonizerProcessor,
     TemplatePolygonizerProcessor,
@@ -106,6 +109,8 @@ class AbstractInferenceProcessor(ABC):
             )
         if save_inference_output:
             self.save_inference(image_path, threshold, profile, inference, output_dict)
+        if "output_inferences" in kwargs and kwargs["output_inferences"]:
+            output_dict["inference_output"].append(inference)
         return output_dict
 
     def process_polygonizer(self, polygonizer, inference, profile):
@@ -285,6 +290,8 @@ class ObjectDetectionInferenceProcessor(AbstractInferenceProcessor):
         model_input_shape=None,
         step_shape=None,
         mask_bands=1,
+        post_process_method=None,
+        min_visibility=0.3,
         config=None,
     ):
         super(ObjectDetectionInferenceProcessor, self).__init__(
@@ -298,10 +305,33 @@ class ObjectDetectionInferenceProcessor(AbstractInferenceProcessor):
             mask_bands=mask_bands,
             config=config,
         )
+        self.post_process_method = (
+            post_process_method if post_process_method is not None else "union"
+        )
+        self.min_visibility = min_visibility
+
+    def process(
+        self,
+        image_path: str,
+        threshold: float = 0.5,
+        save_inference_output: bool = True,
+        polygonizer: Optional[TemplatePolygonizerProcessor] = None,
+        restore_geo_transform: bool = True,
+        **kwargs: Optional[Any],
+    ) -> Dict[str, Any]:
+        kwargs.update({"output_inferences": True})
+        return super(ObjectDetectionInferenceProcessor, self).process(
+            image_path,
+            threshold,
+            save_inference_output,
+            polygonizer,
+            restore_geo_transform,
+            **kwargs,
+        )
 
     def make_inference(
         self, image: np.ndarray, **kwargs: Optional[Any]
-    ) -> Union[np.ndarray, dict]:
+    ) -> List[Dict[str, torch.Tensor]]:
         normalized_image = self.normalize(image=image)["image"]
         pad_func = A.PadIfNeeded(
             math.ceil(image.shape[0] / self.model_input_shape[0])
@@ -309,7 +339,6 @@ class ObjectDetectionInferenceProcessor(AbstractInferenceProcessor):
             math.ceil(image.shape[1] / self.model_input_shape[1])
             * self.model_input_shape[1],
         )
-        center_crop_func = A.CenterCrop(*image.shape[0:2])
         normalized_image = pad_func(image=normalized_image)["image"]
         tiler = ImageSlicer(
             normalized_image.shape,
@@ -317,28 +346,35 @@ class ObjectDetectionInferenceProcessor(AbstractInferenceProcessor):
             tile_step=self.step_shape,
         )
         tiles = [image_to_tensor(tile) for tile in tiler.split(normalized_image)]
+        merger = BboxTileMerger(
+            image_shape=image.shape,
+            post_process_method=self.post_process_method,
+            device=self.device,
+        )
+        self.predict_and_integrate_batches(tiles, tiler, merger)
+        bboxes = merger.merge()
+        return bboxes
 
-    def predict_and_merge(
-        self,
-        tiles: List[np.array],
-        tiler: ImageSlicer,
-        merger_dict: Dict[str, TileMerger],
+    def predict_and_integrate_batches(
+        self, tiles: List[np.array], tiler: ImageSlicer, merger: BboxTileMerger
     ):
         with torch.no_grad():
-            for tiles_batch, coords_batch in DataLoader(
+            for tiles_batch, crop_coords_batch in DataLoader(
                 list(zip(tiles, tiler.crops)),
                 batch_size=self.batch_size,
                 pin_memory=True,
             ):
                 tiles_batch = tiles_batch.float().to(self.device)
                 pred_batch = self.model(tiles_batch)
-                self.integrate_batch(pred_batch, coords_batch, merger_dict)
-
-    def get_merger_dict(self, tiler: ImageSlicer):
-        pass
+                merger.integrate_boxes(pred_batch, crop_coords_batch)
 
     def save_inference(self, image_path, threshold, profile, inference, output_dict):
-        pass
+        inference = [
+            {k: v.cpu().tolist() for k, v in item.items()} for item in inference
+        ]
+        output_dict["inference"].append(
+            self.export_strategy.save_inference(inference, profile)
+        )
 
 
 class PolygonRNNInferenceProcessor(AbstractInferenceProcessor):

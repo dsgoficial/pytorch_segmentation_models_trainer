@@ -19,6 +19,7 @@
  *                                                                         *
  ****
 """
+import json
 import os
 from pathlib import Path
 import unittest
@@ -34,6 +35,9 @@ import torch
 from hydra import compose, initialize
 from hydra.utils import instantiate
 from parameterized import parameterized
+from build.lib.pytorch_segmentation_models_trainer.custom_models.models import (
+    ObjectDetectionModel,
+)
 from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import PolygonRNN
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import PolygonRNNDataset
 from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
@@ -45,9 +49,11 @@ from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import 
 )
 from pytorch_segmentation_models_trainer.tools.inference.export_inference import (
     MultipleRasterExportInferenceStrategy,
+    ObjectDetectionExportInferenceStrategy,
     RasterExportInferenceStrategy,
 )
 from pytorch_segmentation_models_trainer.tools.inference.inference_processors import (
+    ObjectDetectionInferenceProcessor,
     PolygonRNNInferenceProcessor,
     SingleImageFromFrameFieldProcessor,
     SingleImageInfereceProcessor,
@@ -290,3 +296,38 @@ class Test_TestInference(unittest.TestCase):
             os.path.join(self.output_dir, f"polygonrnn_polygonizer.geojson")
         )
         self.assertEqual(len(gdf), 1)
+
+    def test_create_object_detection_inference_from_model(self) -> None:
+        csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
+        polygon_rnn_ds = PolygonRNNDataset(
+            input_csv_path=csv_path,
+            sequence_length=60,
+            root_dir=polygon_rnn_root_dir,
+            augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
+            dataset_type="val",
+        )
+        mock_model = Mock(spec=ObjectDetectionModel)
+        mock_model.return_value = [
+            {
+                "bboxes": torch.tensor([[10, 10, 50, 50], [110, 110, 150, 150]]),
+                "scores": torch.tensor([0.9, 0.5]),
+                "labels": torch.tensor([1, 1]),
+            }
+        ]
+        inference_processor = ObjectDetectionInferenceProcessor(
+            model=mock_model,
+            device=device,
+            batch_size=1,
+            model_input_shape=(400, 400),
+            step_shape=(200, 200),
+            export_strategy=ObjectDetectionExportInferenceStrategy(
+                os.path.join(self.output_dir, f"obj_det_result.json")
+            ),
+        )
+        result = inference_processor.process(
+            image_path=polygon_rnn_ds[0]["original_image_path"], output_inferences=True
+        )
+        assert os.path.isfile(os.path.join(self.output_dir, f"obj_det_result.json"))
+        with open(os.path.join(self.output_dir, f"obj_det_result.json")) as f:
+            result_list = json.load(f)
+        self.assertEqual(len(result_list), 18)

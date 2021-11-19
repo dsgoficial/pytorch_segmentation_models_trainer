@@ -179,7 +179,7 @@ class BboxTileMerger(TileMerger):
             union_merge_postprocess(bboxes, scores, labels)
             if self.post_process_method == "union"
             else nms_postprocess(
-                boxes, scores, labels, self.threshold, self.match_metric
+                bboxes, scores, labels, self.threshold, self.match_metric
             )
         )
 
@@ -199,10 +199,12 @@ class BboxTileMerger(TileMerger):
             crop_coords (np.ndarray): crop coordinates
         """
         integrate_list = []
-        for output in model_output:
+        for idx, output in enumerate(model_output):
             out = output.copy()
             out["bboxes"] = shift_bbox(
-                out["bboxes"], row_shift=crop_coords[0], column_shift=crop_coords[1]
+                out["bboxes"],
+                row_shift=crop_coords[idx][0],
+                column_shift=crop_coords[idx][1],
             )
             integrate_list.append(out)
         self.model_output_list.extend(integrate_list)

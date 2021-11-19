@@ -27,6 +27,7 @@ import albumentations as A
 import numpy as np
 import rasterio
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
+    ObjectDetectionDataWriter,
     RasterDataWriter,
     VectorDatabaseDataWriter,
     VectorFileDataWriter,
@@ -113,3 +114,10 @@ class VectorDatabaseExportInferenceStrategy(ExportInferenceTemplate):
             table_name=table_name,
             geometry_column=geometry_column,
         )
+
+
+class ObjectDetectionExportInferenceStrategy(ExportInferenceTemplate):
+    def __init__(self, output_file_path):
+        super(ObjectDetectionExportInferenceStrategy, self).__init__()
+        self.output_file_path = output_file_path
+        self.writer = ObjectDetectionDataWriter(output_file_path=output_file_path)
