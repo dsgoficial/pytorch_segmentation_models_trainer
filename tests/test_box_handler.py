@@ -165,7 +165,7 @@ class Test_TestBoxHandler(unittest.TestCase):
         )
         tile_merger = BboxTileMerger(image_shape=(300, 300))
         for idx, input_dict in enumerate(input_dict_list):
-            tile_merger.integrate_boxes([input_dict], crop_coords[idx])
+            tile_merger.integrate_boxes([input_dict], [crop_coords[idx]])
         merged_dict_list = tile_merger.merge()
         expected_output = [
             {
