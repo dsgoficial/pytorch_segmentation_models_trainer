@@ -24,6 +24,7 @@ from typing import Dict, List, Union
 
 import numpy as np
 from affine import Affine
+import torch
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
     AbstractDataWriter,
     VectorDatabaseDataWriter,
@@ -33,6 +34,7 @@ from pytorch_segmentation_models_trainer.tools.polygonization.methods import (
     active_contours,
     active_skeletons,
     simple,
+    polygon_rnn_polygonization,
 )
 from pytorch_segmentation_models_trainer.utils.polygon_utils import (
     polygons_to_world_coords,
@@ -204,3 +206,35 @@ class SimplePolygonizerProcessor(TemplatePolygonizerProcessor):
             inference["seg"], self.config, pool=pool
         )
         return self.post_process(out_contours_batch[0], profile)
+
+
+@dataclass
+class PolygonRNNConfig:
+    tolerance: float = 0.0
+    grid_size: int = 28
+    min_area: float = 10
+
+
+@dataclass
+class PolygonRNNPolygonizerProcessor(TemplatePolygonizerProcessor):
+    config: PolygonRNNConfig = field(default_factory=PolygonRNNConfig)
+
+    def __post_init__(self):
+        self.polygonize_method = polygon_rnn_polygonization.polygonize
+
+    def process(
+        self,
+        inference: Dict[str, Union[torch.Tensor, np.array]],
+        profile: dict,
+        pool: ThreadPoolExecutor = None,
+    ):
+        """Processes the polygonization. Reimplemented from template due to signature
+        differences on polygonize method.
+
+        Args:
+            inference (Dict[str, np.array]): numpy inference from the neural network.
+            pool (concurrent.futures.ThreadPool, optional): Thread object in case of
+            parallel execution. Defaults to None.
+        """
+        out_contours_batch = self.polygonize_method(inference, self.config, pool=pool)
+        return self.post_process(out_contours_batch, profile)

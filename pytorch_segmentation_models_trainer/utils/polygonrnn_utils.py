@@ -83,18 +83,18 @@ def get_vertex_list(
 
 
 def get_vertex_list_from_numpy(
-    input_array: np.array,
+    input_array: np.ndarray,
     scale_h: Optional[float] = 1.0,
     scale_w: Optional[float] = 1.0,
     min_col: Optional[int] = 0,
     min_row: Optional[int] = 0,
     grid_size: Optional[int] = 28,
     return_cast_func: Optional[Callable] = None,
-) -> np.array:
+) -> np.ndarray:
     """Gets vertex list from input batch.
 
     Args:
-        input_batch (np.array): [description]
+        input_batch (np.ndarray): [description]
         scale_h (Optional[float], optional): Height scale. Defaults to 1.0.
         scale_w (Optional[float], optional): Width scale. Defaults to 1.0.
         min_col (Optional[int], optional): Minimum column. Defaults to 0.
@@ -141,10 +141,10 @@ def scale_shapely_polygon(
 
 def scale_polygon_list(
     polygon_list: List[Polygon],
-    list_scale_h: Union[List[float], np.array],
-    list_scale_w: Union[List[float], np.array],
-    list_min_col: Union[List[int], np.array],
-    list_min_row: Union[List[int], np.array],
+    list_scale_h: Union[List[float], np.ndarray],
+    list_scale_w: Union[List[float], np.ndarray],
+    list_min_col: Union[List[int], np.ndarray],
+    list_min_row: Union[List[int], np.ndarray],
 ) -> List[Polygon]:
     return [
         scale_shapely_polygon(
@@ -159,17 +159,17 @@ def scale_polygon_list(
 
 
 def get_vertex_list_from_batch(
-    input_batch: np.array,
+    input_batch: np.ndarray,
     scale_h: Optional[float] = 1.0,
     scale_w: Optional[float] = 1.0,
     min_col: Optional[int] = 0,
     min_row: Optional[int] = 0,
     grid_size: Optional[int] = 28,
-) -> np.array:
+) -> np.ndarray:
     """Gets vertex list from input batch.
 
     Args:
-        input_batch (np.array): [description]
+        input_batch (np.ndarray): [description]
         scale_h (Optional[float], optional): Height scale. Defaults to 1.0.
         scale_w (Optional[float], optional): Width scale. Defaults to 1.0.
         min_col (Optional[int], optional): Minimum column. Defaults to 0.
@@ -188,7 +188,7 @@ def get_vertex_list_from_batch_tensors(
     min_col: torch.Tensor,
     min_row: torch.Tensor,
     grid_size: Optional[int] = 28,
-) -> List[np.array]:
+) -> List[np.ndarray]:
     """Gets vertex list from input batch.
 
     Args:

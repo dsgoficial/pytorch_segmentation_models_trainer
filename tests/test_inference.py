@@ -25,6 +25,7 @@ import unittest
 import warnings
 
 import albumentations as A
+import geopandas
 import hydra
 import numpy as np
 import rasterio
@@ -33,6 +34,8 @@ import torch
 from hydra import compose, initialize
 from hydra.utils import instantiate
 from parameterized import parameterized
+from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import PolygonRNN
+from pytorch_segmentation_models_trainer.dataset_loader.dataset import PolygonRNNDataset
 from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
     FrameFieldModel,
     FrameFieldSegmentationPLModel,
@@ -45,6 +48,7 @@ from pytorch_segmentation_models_trainer.tools.inference.export_inference import
     RasterExportInferenceStrategy,
 )
 from pytorch_segmentation_models_trainer.tools.inference.inference_processors import (
+    PolygonRNNInferenceProcessor,
     SingleImageFromFrameFieldProcessor,
     SingleImageInfereceProcessor,
 )
@@ -53,6 +57,8 @@ from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import
     ACMPolygonizerProcessor,
     ASMConfig,
     ASMPolygonizerProcessor,
+    PolygonRNNConfig,
+    PolygonRNNPolygonizerProcessor,
     SimplePolConfig,
     SimplePolygonizerProcessor,
 )
@@ -61,9 +67,13 @@ from pytorch_segmentation_models_trainer.utils.os_utils import (
     remove_folder,
 )
 from torchvision.datasets.utils import download_url
+from unittest.mock import Mock
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, "testing_data")
+polygon_rnn_root_dir = os.path.join(
+    current_dir, "testing_data", "data", "polygon_rnn_data"
+)
 
 frame_field_root_dir = os.path.join(
     current_dir, "testing_data", "data", "frame_field_data"
@@ -92,6 +102,7 @@ class Test_TestInference(unittest.TestCase):
             "simple": self.get_simple_polygonizer(),
             "acm": self.get_acm_polygonizer(),
             "asm": self.get_asm_polygonizer(),
+            "polygonrnn": self.get_polygonrnn_polygonizer(),
         }
         self.center_crop = A.CenterCrop(512, 512)
 
@@ -136,6 +147,16 @@ class Test_TestInference(unittest.TestCase):
         )
         data_writer = VectorFileDataWriter(output_file_path=self.asm_output_file_path)
         return ASMPolygonizerProcessor(data_writer=data_writer, config=config)
+
+    def get_polygonrnn_polygonizer(self):
+        config = PolygonRNNConfig()
+        self.polygonrnn_output_file_path = os.path.join(
+            self.output_dir, "polygonrnn_polygonizer.geojson"
+        )
+        data_writer = VectorFileDataWriter(
+            output_file_path=self.polygonrnn_output_file_path
+        )
+        return PolygonRNNPolygonizerProcessor(data_writer=data_writer, config=config)
 
     def get_model_for_eval(self):
         csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
@@ -240,3 +261,32 @@ class Test_TestInference(unittest.TestCase):
             )
         )
         assert os.path.isfile(getattr(self, f"{polygonizer_key}_output_file_path"))
+
+    def test_create_polygonrnn_inference_from_model_with_polygonize(self) -> None:
+        csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
+        polygon_rnn_ds = PolygonRNNDataset(
+            input_csv_path=csv_path,
+            sequence_length=60,
+            root_dir=polygon_rnn_root_dir,
+            augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
+            dataset_type="val",
+        )
+        mock_model = Mock(spec=PolygonRNN)
+        mock_model.test.return_value = polygon_rnn_ds[0]["ta"].unsqueeze(0)
+        inference_processor = PolygonRNNInferenceProcessor(
+            model=mock_model,
+            batch_size=2,
+            device=device,
+            polygonizer=self.polygonizers_dict["polygonrnn"],
+        )
+        inference_processor.process(
+            image_path=polygon_rnn_ds[0]["original_image_path"],
+            bboxes=[np.array([0, 0, 224, 224])],
+        )
+        assert os.path.isfile(
+            os.path.join(self.output_dir, f"polygonrnn_polygonizer.geojson")
+        )
+        gdf = geopandas.read_file(
+            os.path.join(self.output_dir, f"polygonrnn_polygonizer.geojson")
+        )
+        self.assertEqual(len(gdf), 1)
