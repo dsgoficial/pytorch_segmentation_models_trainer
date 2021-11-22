@@ -122,7 +122,7 @@ def union_merge_postprocess(
 
 
 def _build_return_tuple_with_selected_object_predictions(
-    selected_object_predictions: List[ObjectPrediction]
+    selected_object_predictions: List[ObjectPrediction],
 ) -> Tuple[torch.Tensor]:
     return (
         torch.tensor(
