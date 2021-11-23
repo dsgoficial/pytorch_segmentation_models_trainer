@@ -21,12 +21,12 @@
  ****
 """
 
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Union, Tuple, Dict
 from PIL import Image, ImageDraw
 import numpy as np
 import torch
 import itertools
-from shapely.geometry import Polygon, LineString, Point, MultiPolygon
+from shapely.geometry import Polygon, LineString, Point, MultiPolygon, box
 from shapely.geometry.base import BaseGeometry
 import cv2
 from shapely.validation import make_valid
@@ -130,12 +130,9 @@ def scale_shapely_polygon(
     polygon: Polygon, scale_h, scale_w, min_col, min_row
 ) -> Polygon:
     polygon_np_array = np.array(polygon.exterior.coords)
-    rescaled_array = np.apply_along_axis(
-        lambda x: x * scale_w + min_col, 0, polygon_np_array
-    )
-    rescaled_array = np.apply_along_axis(
-        lambda y: y * scale_h + min_row, 1, rescaled_array
-    )
+    rescaled_array = np.zeros(polygon_np_array.shape)
+    rescaled_array[:, 0] = polygon_np_array[:, 0] / scale_w + min_col
+    rescaled_array[:, 1] = polygon_np_array[:, 1] / scale_h + min_row
     return Polygon(rescaled_array)
 
 
@@ -376,10 +373,123 @@ def validate_polygon(geom: Polygon) -> List[Union[Polygon, MultiPolygon]]:
 def crop_polygons_to_bounding_boxes(
     polygons: List[Polygon], bounding_boxes: List
 ) -> List[Polygon]:
-    polygons_to_crop = [
-        polygon.intersection(bb)
-        for polygon in polygons
-        for bb in bounding_boxes
-        if polygon.intersects(bb)
+    polygons_to_crop = []
+    for polygon in polygons:
+        for bbox in bounding_boxes:
+            if polygon.intersects(bbox) and polygon not in polygons_to_crop:
+                polygon = polygon.intersection(bbox)
+                polygons_to_crop.append(polygon)
+    return list(itertools.chain.from_iterable(map(validate_polygon, polygons_to_crop)))
+
+
+def get_scales(
+    min_row: int,
+    min_col: int,
+    max_row: int,
+    max_col: int,
+    target_height: float = 224.0,
+    target_width: float = 224.0,
+) -> tuple:
+    """
+        Gets scales for the image.
+
+        Args:
+            min_row (int): min row
+            min_col (int): min col
+            max_row (int): max row
+            max_col (int): max col
+
+        Returns:
+            tuple: scale_h, scale_w
+        """
+    object_h = max_row - min_row
+    object_w = max_col - min_col
+    scale_h = target_height / object_h
+    scale_w = target_width / object_w
+    return scale_h, scale_w
+
+
+def get_extended_bounds(
+    polygon: Polygon, image_bounds: List, extend_factor: float = 0.1
+) -> Tuple:
+    """
+    Gets extended bounds for the image.
+
+    Args:
+        polygon (Polygon): polygon
+        image_bounds (List): image bounds
+        extend_factor (float): extend factor
+
+    Returns:
+        Tuple: extended bounds
+    """
+    np_polygon = np.array(polygon.exterior.coords)
+    image_width, image_height = image_bounds
+    min_c = np.min(np_polygon, axis=0)
+    max_c = np.max(np_polygon, axis=0)
+    h_extend = int(round(0.1 * (max_c[1] - min_c[1])))
+    w_extend = int(round(0.1 * (max_c[0] - min_c[0])))
+    min_row = np.maximum(0, min_c[1] - h_extend)
+    min_col = np.maximum(0, min_c[0] - w_extend)
+    max_row = np.minimum(image_height, max_c[1] + h_extend)
+    max_col = np.minimum(image_width, max_c[0] + w_extend)
+    return min_row, min_col, max_row, max_col
+
+
+def crop_and_rescale_polygons_to_bounding_boxes(
+    polygons: List[Polygon],
+    bounding_boxes: List,
+    image_bounds_list: List,
+    target_height: float = 224.0,
+    target_width: float = 224.0,
+    extend_factor: float = 0.1,
+) -> Dict[str, np.ndarray]:
+    """
+    Crops and rescales polygons to bounding boxes.
+
+    Args:
+        polygons (List[Polygon]): polygons
+        bounding_boxes (List): bounding boxes
+
+    Returns:
+        List[Polygon]: cropped and rescaled polygons
+    """
+    shapely_boxes = [
+        box(minx, miny, maxx, maxy, ccw=True)
+        for minx, miny, maxx, maxy in bounding_boxes
     ]
-    return itertools.chain.from_iterable(map(validate_polygon, polygons_to_crop))
+    croped_polygons = crop_polygons_to_bounding_boxes(polygons, shapely_boxes)
+    extended_bounds_func = lambda x: get_extended_bounds(x[0], x[1], extend_factor)
+    extended_polygons_bounds = list(
+        map(extended_bounds_func, zip(croped_polygons, image_bounds_list))
+    )
+    get_scales_func = lambda x: get_scales(
+        min_row=x[0],
+        min_col=x[1],
+        max_row=x[2],
+        max_col=x[3],
+        target_height=target_height,
+        target_width=target_width,
+    )
+    scales = list(map(get_scales_func, extended_polygons_bounds))
+
+    return [
+        {
+            "polygon": np.array(
+                [
+                    [
+                        np.maximum(0, np.minimum(223, (points[0] - min_col) * scale_w)),
+                        np.maximum(0, np.minimum(223, (points[1] - min_row) * scale_h)),
+                    ]
+                    for points in polygon.exterior.coords
+                ]
+            ),
+            "scale_w": scale_w,
+            "scale_h": scale_h,
+            "min_row": min_row,
+            "min_col": min_col,
+        }
+        for polygon, (scale_h, scale_w), (min_row, min_col, _, __) in zip(
+            croped_polygons, scales, extended_polygons_bounds
+        )
+    ]
