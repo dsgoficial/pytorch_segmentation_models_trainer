@@ -713,7 +713,7 @@ class NaiveModPolyMapperDataset(Dataset):
     def get_polygonrnn_data(self, idx):
         _, polygon_rnn_data = self.polygon_rnn_dataset.get_training_images_from_image_path(
             self.object_detection_dataset.get_path(
-                index, key=self.object_detection_dataset.image_key, add_root_dir=False
+                idx, key=self.object_detection_dataset.image_key, add_root_dir=False
             )
         )
         return {"polygon_rnn_data": polygon_rnn_data}
