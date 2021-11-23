@@ -62,19 +62,16 @@ torch.manual_seed(0)
 
 
 class Test_ModPolyMapperModel(unittest.TestCase):
-    def _get_model(self):
-        return ModPolyMapper(num_classes=2, pretrained=False)
+    def _get_model(
+        self, backbone_trainable_layers=3, pretrained=False
+    ) -> ModPolyMapper:
+        return ModPolyMapper(
+            num_classes=2,
+            backbone_trainable_layers=backbone_trainable_layers,
+            pretrained=pretrained,
+        )
 
-    def test_mod_polymapper_model(self) -> None:
-        model = self._get_model()
-        sample = torch.randn([2, 3, 256, 256])
-        model.eval()
-        with torch.no_grad():
-            out = model(sample)
-        self.assertEqual(len(out), 2)
-        self.assertEqual(len(out[0].keys()), 4)
-
-    def test_create_inference_from_model(self) -> None:
+    def _get_dataloader(self) -> torch.utils.data.DataLoader:
         csv_path = os.path.join(detection_root_dir, "dsg_dataset.csv")
         poly_csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
         ds = ModPolyMapperDataset(
@@ -100,10 +97,24 @@ class Test_ModPolyMapperModel(unittest.TestCase):
             num_workers=1,
             collate_fn=ds.collate_fn,
         )
+        return data_loader
+
+    def test_model_forward(self) -> None:
         model = self._get_model()
+        sample = torch.randn([2, 3, 256, 256])
+        model.eval()
         with torch.no_grad():
-            image, target = next(iter(data_loader))
-            output = model(image, target)
-        self.assertEqual(len(output), 6)
-        for k, v in output.items():
-            self.assertIsInstance(v, torch.Tensor)
+            out = model(sample)
+        self.assertEqual(len(out), 2)
+        self.assertEqual(len(out[0].keys()), 4)
+
+    def test_model_backwards(self) -> None:
+        model = self._get_model(backbone_trainable_layers=5, pretrained=True)
+        data_loader = self._get_dataloader()
+        model.train()
+        image, target = next(iter(data_loader))
+        losses, acc = model(image, target)
+        loss = sum(losses.values())
+        loss.backward()
+        for n, x in model.named_parameters():
+            assert x.grad is not None, f"No gradient for {n}"

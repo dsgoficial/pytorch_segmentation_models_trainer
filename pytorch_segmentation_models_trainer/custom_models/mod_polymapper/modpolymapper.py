@@ -21,9 +21,9 @@
 import torch
 from torch import nn
 from torch.nn.modules.loss import _Loss
-from torchvision.ops import RoIAlign
 from torchvision.models.detection.faster_rcnn import FasterRCNN
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
+from mmcv.ops.roi_align import RoIAlign
 from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import (
     make_basic_conv_block,
     PolygonRNN,
@@ -38,14 +38,16 @@ from typing import List, Tuple, Union, Dict, Optional
 class RoiAlignBlock(torch.nn.Module):
     def __init__(
         self,
-        in_channels,
-        out_channels,
-        spatial_scale,
-        roi_output,
-        kernel_size=(3, 3),
-        apply_pooling=False,
+        in_channels: int,
+        out_channels: int,
+        spatial_scale: float,
+        roi_output: int,
+        kernel_size: Tuple = (3, 3),
+        apply_pooling: bool = False,
+        upsample_factor: int = 1.0,
     ):
         super().__init__()
+        assert upsample_factor >= 1, "upsample_factor must be equal or greater than 1.0"
         self.roi_align = RoIAlign(
             output_size=roi_output,
             spatial_scale=spatial_scale,
@@ -65,7 +67,24 @@ class RoiAlignBlock(torch.nn.Module):
             ),
             torch.nn.ReLU(),
             torch.nn.BatchNorm2d(out_channels),
+            torch.nn.Identity()
+            if upsample_factor == 1.0
+            else torch.nn.Upsample(scale_factor=upsample_factor, mode="bilinear"),
         )
+
+    def init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.biase is not None:
+                    nn.init.constant_(m.bias, 0)
 
     def forward(self, x, rois):
         x = self.roi_align(x, rois)
@@ -101,6 +120,7 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
             roi_output=14,
             kernel_size=(3, 3),
             apply_pooling=False,
+            upsample_factor=2.0,
         )
         self.roi_align_block4 = RoiAlignBlock(
             in_channels=256,
@@ -109,6 +129,7 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
             roi_output=7,
             kernel_size=(3, 3),
             apply_pooling=False,
+            upsample_factor=4.0,
         )
         self.convlayer5 = make_basic_conv_block(512, 128, 3, 1, 1)
         self.convlstm = ConvLSTM(
@@ -127,8 +148,9 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
             batch_first=True,
         )
         self.linear = nn.Linear(grid_size * grid_size * 2, grid_size * grid_size + 3)
+        self.init_weights()
 
-    def init_weights(self, load_vgg=True):
+    def init_weights(self):
         """
         Initialize weights of PolygonNet
         :param load_vgg: bool
@@ -138,6 +160,7 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
         self._init_convlstm()
         self._init_convlstmlayer()
         self._init_convlayer()
+        self._init_roialign()
 
     def _init_convlayer(self):
         for name, param in self.named_parameters():
@@ -161,12 +184,21 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
             elif "weight" in name:
                 nn.init.xavier_normal_(param)
 
+    def _init_roialign(self):
+        for block in [
+            self.roi_align_block1,
+            self.roi_align_block2,
+            self.roi_align_block3,
+            self.roi_align_block4,
+        ]:
+            block.init_weights()
+
     def get_backbone_output_features(self, x, rois):
         backbone_output = self.backbone(x)
         roi_output11 = self.roi_align_block1(backbone_output["0"], rois)
         roi_output22 = self.roi_align_block2(backbone_output["1"], rois)
-        roi_output33 = self.roi_align_block2(backbone_output["2"], rois)
-        roi_output44 = self.roi_align_block2(backbone_output["3"], rois)
+        roi_output33 = self.roi_align_block3(backbone_output["2"], rois)
+        roi_output44 = self.roi_align_block4(backbone_output["3"], rois)
         output = torch.cat(
             [roi_output11, roi_output22, roi_output33, roi_output44], dim=1
         )
@@ -206,8 +238,15 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
         return output
 
     def forward(self, x, targets):
-        rois = [target["boxes"] for target in targets]
-        output = self.get_backbone_output_features(x, rois)
+        bboxes = [target["boxes"] for target in targets]
+        bboxes = torch.stack(
+            [
+                torch.cat([torch.tensor([idx]), roi_row])
+                for idx, roi in enumerate(bboxes)
+                for roi_row in roi
+            ]
+        )  # num_rois, 5
+        output = self.get_backbone_output_features(x, bboxes)
         return self.get_rnn_output(
             output,
             first=torch.cat([item["x1"] for item in targets]),
@@ -215,10 +254,9 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
             third=torch.cat([item["x3"] for item in targets]),
         )
 
-    def test(self, input_data1, rois, len_s):
+    def test(self, input_data1: torch.Tensor, rois: torch.Tensor, len_s: int):
         bs = input_data1.shape[0]
         result = torch.zeros([bs, len_s]).to(input_data1.device)
-        bboxes = [item["boxes"] for item in rois]
         feature = self.get_backbone_output_features(input_data1, bboxes)
         if feature.shape[0] == 0:
             return torch.zeros([bs, 1, self.grid_size * self.grid_size + 3])
@@ -291,19 +329,19 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
     ) -> _Loss:
         target = ta.contiguous().view(-1)
         loss = nn.functional.cross_entropy(result, target)
-        result_index = torch.argmax(result, 1)
-        correct = (target == result_index).float().sum().item()
-        acc = torch.tensor(correct * 1.0 / target.shape[0], device=loss.device)
-        return loss, acc
+        # result_index = torch.argmax(result, 1)
+        # correct = (target == result_index).float().sum().item()
+        # acc = torch.tensor(correct * 1.0 / target.shape[0], device=loss.device)
+        return loss, 0
 
-    def get_polygonrnn_losses(
+    def get_polygonrnn_losses_and_accuracy(
         self, x: torch.Tensor, targets: torch.Tensor
-    ) -> Dict[str, torch.Tensor]:
+    ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
         result = self.compute(x, targets)
         loss, acc = self.compute_loss_and_accuracy(
             ta=torch.cat([i["ta"] for i in targets]), result=result
         )
-        return {"polygonrnn_loss": loss, "polygonrnn_accuracy": acc}
+        return {"polygonrnn_loss": loss}, acc
 
 
 class GenericModPolyMapper(nn.Module):
@@ -324,17 +362,43 @@ class GenericModPolyMapper(nn.Module):
         )
         self.val_seq_len = val_seq_len
 
+    def _get_empty_entries(self, detections):
+        empty_entries = []
+        for idx, det in enumerate(detections):
+            detections[idx].update({"polygonrnn_output": []})
+            if det["boxes"].shape[0] == 0:
+                empty_entries.append(idx)
+        return empty_entries
+
     def forward(
         self, x: torch.Tensor, targets: Optional[torch.Tensor] = None
-    ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
+    ) -> Union[torch.Tensor, Tuple[Dict[str, torch.Tensor], torch.Tensor]]:
         if self.training:
             losses = self.obj_detection_model(x, targets)
-            losses.update(self.polygonrnn_model.get_polygonrnn_losses(x, targets))
-            return losses
+            polygonrnn_loss, acc = self.polygonrnn_model.get_polygonrnn_losses_and_accuracy(
+                x, targets
+            )
+            losses.update(polygonrnn_loss)
+            return losses, acc
         detections = self.obj_detection_model(x)
-        polygonrnn_output = self.polygonrnn_model.test(x, detections, self.val_seq_len)
+        empty_entries = self._get_empty_entries(detections)
+        if len(empty_entries) == len(detections):
+            return detections
+        bboxes = [
+            item["boxes"] for idx, item in enumerate(rois) if idx not in empty_entries
+        ]
+        bboxes = torch.cat(
+            [
+                torch.cat([torch.tensor([idx]), roi_row])
+                for idx, roi in enumerate(bboxes)
+                for roi_row in roi
+            ]
+        )  # num_rois, 5
+        polygonrnn_output = self.polygonrnn_model.test(x, boxes, self.val_seq_len)
         min_bound = 0
         for idx, det in enumerate(detections):
+            if idx in empty_entries:
+                continue
             n_items = len(det["boxes"])
             detections[idx].update(
                 {
@@ -357,12 +421,17 @@ class ModPolyMapper(GenericModPolyMapper):
     def __init__(
         self,
         num_classes,
+        backbone_trainable_layers: int = 3,
         pretrained: bool = True,
         grid_size: int = 28,
         val_seq_len: Optional[int] = 60,
         **kwargs
     ):
-        backbone = resnet_fpn_backbone("resnet101", pretrained=pretrained)
+        backbone = resnet_fpn_backbone(
+            "resnet101",
+            trainable_layers=backbone_trainable_layers,
+            pretrained=pretrained,
+        )
         model = FasterRCNN(backbone, num_classes, **kwargs)
         super(ModPolyMapper, self).__init__(
             obj_detection_model=model, grid_size=grid_size, val_seq_len=val_seq_len

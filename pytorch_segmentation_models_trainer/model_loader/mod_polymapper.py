@@ -40,21 +40,29 @@ from tqdm import tqdm
 current_dir = os.path.dirname(__file__)
 
 
-class NaiveModPolyMapperPLModel(Model):
+class GenericPolyMapperPLModel(Model):
     def __init__(self, cfg, grid_size=28):
-        super(NaiveModPolyMapperPLModel, self).__init__(cfg)
+        super(GenericPolyMapperPLModel, self).__init__(cfg)
 
     def get_loss_function(self):
         return nn.CrossEntropyLoss()
 
+    def get_tensorboard_logs(self, input_dict, step_type="train"):
+        return {k: {step_type: v} for k, v in input_dict.items()}
+
     def training_step(self, batch, batch_idx):
-        pass
-
-    def compute(self, batch):
-        pass
-
-    def compute_loss_acc(self, batch, result):
-        pass
+        losses = self.model(batch)
+        tensorboard_logs = self.get_tensorboard_logs(losses, step_type="train")
+        self.log(
+            "train_losses",
+            losses,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            sync_dist=True,
+        )
+        return {"loss": losses, "log": tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
         pass
