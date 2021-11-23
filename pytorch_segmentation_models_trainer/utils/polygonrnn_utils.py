@@ -371,3 +371,15 @@ def validate_polygon(geom: Polygon) -> List[Union[Polygon, MultiPolygon]]:
         return [p for p in valid_output if isinstance(p, (Polygon, MultiPolygon))]
     else:
         return []
+
+
+def crop_polygons_to_bounding_boxes(
+    polygons: List[Polygon], bounding_boxes: List
+) -> List[Polygon]:
+    polygons_to_crop = [
+        polygon.intersection(bb)
+        for polygon in polygons
+        for bb in bounding_boxes
+        if polygon.intersects(bb)
+    ]
+    return itertools.chain.from_iterable(map(validate_polygon, polygons_to_crop))

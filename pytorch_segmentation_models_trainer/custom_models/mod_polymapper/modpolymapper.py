@@ -175,7 +175,7 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
 
     def get_rnn_output(self, output, first, second, third):
         bs, length_s = second.shape[0], second.shape[1]
-        output = output.unsqueeze(1) if len(output.shape) == 3 else output
+        output = output.unsqueeze(1)
         output = output.repeat(1, length_s, 1, 1, 1)
         padding_f = torch.zeros([bs, 1, 1, self.grid_size, self.grid_size]).to(
             output.device
@@ -295,14 +295,6 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
         correct = (target == result_index).float().sum().item()
         acc = correct * 1.0 / target.shape[0]
         return loss, acc
-
-    def build_polygon_rnn_batch(self, targets):
-        return {
-            "x1": torch.cat([item["x1"] for item in targets]),
-            "x2": torch.cat([item["x2"] for item in targets]),
-            "x3": torch.cat([item["x3"] for item in targets]),
-            "ta": torch.cat([item["ta"] for item in targets]),
-        }
 
     def get_polygonrnn_losses(
         self, x: torch.Tensor, targets: torch.Tensor

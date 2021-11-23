@@ -514,8 +514,11 @@ class PolygonRNNDataset(AbstractDataset):
             "ta": torch.stack([item["ta"] for item in items]),
         }
 
+    def get_entries_from_image_path(self, image_path):
+        return self.df.loc[self.df[self.original_image_path_key] == image_path]
+
     def get_training_images_from_image_path(self, image_path):
-        entries = self.df.loc[self.df[self.original_image_path_key] == image_path]
+        entries = self.get_entries_from_image_path(image_path)
         items = [self.__getitem__(idx) for idx in entries.index.tolist()]
         return entries, items
 
@@ -743,18 +746,69 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
             polygon_rnn_dataset=polygon_rnn_dataset,
         )
 
-    def get_polygonrnn_data(self, idx):
-        _, polygon_rnn_data = self.polygon_rnn_dataset.get_training_images_from_image_path(
-            self.object_detection_dataset.get_path(
-                idx, key=self.object_detection_dataset.image_key, add_root_dir=False
-            )
+    def get_polygonrnn_data_within_bboxes(
+        self, idx: int, bboxes: List
+    ) -> Dict[str, torch.Tensor]:
+        polygon_list: List[Polygon] = self.get_polygonrnn_polygons(idx)
+        croped_polygon_list: List[Polygon] = self.crop_polygons_to_bboxes(
+            polygon_list, bboxes
         )
+        targets = []
+        for polygon in croped_polygon_list:
+            num_vertexes = len(polygon.exterior.coords) - 1
+            label_array, label_index_array = polygonrnn_utils.build_arrays(
+                np.array(
+                    polygon.exterior.coords[:-1]
+                ),  # ajustar bboxes para 224 (como no ds converter)
+                num_vertexes,
+                self.polygon_rnn_dataset.sequence_length,
+                grid_size=self.polygon_rnn_dataset.grid_size,
+            )
+            targets.append(
+                {
+                    "x1": self.to_tensor(label_array[2]).float(),
+                    "x2": self.to_tensor(label_array[:-2]).float(),
+                    "x3": self.to_tensor(label_array[1:-1]).float(),
+                    "ta": self.to_tensor(label_index_array[2:]).long(),
+                }
+            )
+
         return {
-            "x1": torch.stack([item["x1"] for item in polygon_rnn_data]),
-            "x2": torch.stack([item["x2"] for item in polygon_rnn_data]),
-            "x3": torch.stack([item["x3"] for item in polygon_rnn_data]),
-            "ta": torch.stack([item["ta"] for item in polygon_rnn_data]),
+            "polygon_rnn_data": {
+                "x1": torch.cat([item["x1"] for item in targets]),
+                "x2": torch.cat([item["x2"] for item in targets]),
+                "x3": torch.cat([item["x3"] for item in targets]),
+                "ta": torch.cat([item["ta"] for item in targets]),
+            }
         }
+
+    def get_polygonrnn_polygons(self, idx: int) -> List[Polygon]:
+        image_path = self.object_detection_dataset.get_path(
+            idx, key=self.object_detection_dataset.image_key, add_root_dir=False
+        )
+        entries = self.polygon_rnn_dataset.get_entries_from_image_path(image_path)
+        return [
+            shapely.wkt.loads(polygon_wkt)
+            for polygon_wkt in entries["original_polygon_wkt"]
+        ]
+
+    def crop_polygons_to_bboxes(
+        self, polygons: List[Polygon], bboxes: List
+    ) -> List[Polygon]:
+        bounding_boxes = [
+            shapely.geometry.box(minx, miny, maxx, maxy, ccw=True)
+            for minx, miny, maxx, maxy in bboxes
+        ]
+        return polygonrnn_utils.crop_polygons_to_bounding_boxes(
+            polygons, bounding_boxes
+        )
+
+    def __getitem__(self, index) -> Dict[str, torch.Tensor]:
+        image, ds_item_dict = self.object_detection_dataset[index]
+        ds_item_dict.update(
+            self.get_polygonrnn_data_within_bboxes(index, ds_item_dict["boxes"])
+        )
+        return image, ds_item_dict
 
 
 if __name__ == "__main__":
