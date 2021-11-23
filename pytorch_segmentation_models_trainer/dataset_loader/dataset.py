@@ -747,39 +747,41 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
         )
 
     def get_polygonrnn_data_within_bboxes(
-        self, idx: int, bboxes: List
+        self, idx: int, bboxes: List, image_bounds_list: List
     ) -> Dict[str, torch.Tensor]:
         polygon_list: List[Polygon] = self.get_polygonrnn_polygons(idx)
-        croped_polygon_list: List[Polygon] = self.crop_polygons_to_bboxes(
-            polygon_list, bboxes
+        croped_polygon_dict_list: Dict[str, np.ndarray] = self.crop_polygons_to_bboxes(
+            polygon_list, bboxes, image_bounds_list
         )
         targets = []
-        for polygon in croped_polygon_list:
-            num_vertexes = len(polygon.exterior.coords) - 1
+        for list_item in croped_polygon_dict_list:
+            polygon = list_item.pop("polygon")
+            num_vertexes = len(polygon) - 1
             label_array, label_index_array = polygonrnn_utils.build_arrays(
-                np.array(
-                    polygon.exterior.coords[:-1]
-                ),  # ajustar bboxes para 224 (como no ds converter)
+                polygon,
                 num_vertexes,
                 self.polygon_rnn_dataset.sequence_length,
                 grid_size=self.polygon_rnn_dataset.grid_size,
             )
-            targets.append(
-                {
-                    "x1": self.to_tensor(label_array[2]).float(),
-                    "x2": self.to_tensor(label_array[:-2]).float(),
-                    "x3": self.to_tensor(label_array[1:-1]).float(),
-                    "ta": self.to_tensor(label_index_array[2:]).long(),
-                }
-            )
+
+            item = {
+                "x1": self.polygon_rnn_dataset.to_tensor(label_array[2]).float(),
+                "x2": self.polygon_rnn_dataset.to_tensor(label_array[:-2]).float(),
+                "x3": self.polygon_rnn_dataset.to_tensor(label_array[1:-1]).float(),
+                "ta": self.polygon_rnn_dataset.to_tensor(label_index_array[2:]).long(),
+            }
+            item.update({k: torch.tensor(v) for k, v in list_item.items()})
+            targets.append(item)
 
         return {
-            "polygon_rnn_data": {
-                "x1": torch.cat([item["x1"] for item in targets]),
-                "x2": torch.cat([item["x2"] for item in targets]),
-                "x3": torch.cat([item["x3"] for item in targets]),
-                "ta": torch.cat([item["ta"] for item in targets]),
-            }
+            "x1": torch.cat([item["x1"] for item in targets]),
+            "x2": torch.cat([item["x2"] for item in targets]),
+            "x3": torch.cat([item["x3"] for item in targets]),
+            "ta": torch.cat([item["ta"] for item in targets]),
+            "scale_h": torch.stack([item["scale_h"] for item in targets]),
+            "scale_w": torch.stack([item["scale_w"] for item in targets]),
+            "min_row": torch.stack([item["min_row"] for item in targets]),
+            "min_col": torch.stack([item["min_col"] for item in targets]),
         }
 
     def get_polygonrnn_polygons(self, idx: int) -> List[Polygon]:
@@ -793,20 +795,23 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
         ]
 
     def crop_polygons_to_bboxes(
-        self, polygons: List[Polygon], bboxes: List
+        self, polygons: List[Polygon], bboxes: List, image_bounds_list: List
     ) -> List[Polygon]:
-        bounding_boxes = [
-            shapely.geometry.box(minx, miny, maxx, maxy, ccw=True)
-            for minx, miny, maxx, maxy in bboxes
-        ]
-        return polygonrnn_utils.crop_polygons_to_bounding_boxes(
-            polygons, bounding_boxes
+        return polygonrnn_utils.crop_and_rescale_polygons_to_bounding_boxes(
+            polygons, bboxes, image_bounds_list
         )
 
     def __getitem__(self, index) -> Dict[str, torch.Tensor]:
         image, ds_item_dict = self.object_detection_dataset[index]
         ds_item_dict.update(
-            self.get_polygonrnn_data_within_bboxes(index, ds_item_dict["boxes"])
+            self.get_polygonrnn_data_within_bboxes(
+                index,
+                ds_item_dict["boxes"],
+                image_bounds_list=[
+                    (image.shape[1], image.shape[2])
+                    for _ in range(ds_item_dict["boxes"].shape[0])
+                ],
+            )
         )
         return image, ds_item_dict
 

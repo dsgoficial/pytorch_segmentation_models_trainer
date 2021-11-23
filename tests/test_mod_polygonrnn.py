@@ -90,7 +90,6 @@ class Test_ModPolyMapperModel(unittest.TestCase):
                 input_csv_path=poly_csv_path,
                 sequence_length=60,
                 root_dir=polygon_rnn_root_dir,
-                augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
             ),
         )
         data_loader = torch.utils.data.DataLoader(
