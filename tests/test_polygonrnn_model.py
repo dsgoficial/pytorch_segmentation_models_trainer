@@ -50,7 +50,7 @@ polygon_rnn_root_dir = os.path.join(
 )
 
 
-class Test_TestPolygonRNNModel(CustomTestCase):
+class Test_PolygonRNNModel(CustomTestCase):
     def test_create_instance(self) -> None:
         polygonrnn = PolygonRNN()
         return True

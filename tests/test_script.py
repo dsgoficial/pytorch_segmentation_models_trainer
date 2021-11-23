@@ -37,7 +37,7 @@ config_path_list = [
 ]
 
 
-class Test_TestScript(CustomTestCase):
+class Test_Script(CustomTestCase):
     def test_run_train_from_python_script(self) -> None:
         script_path = os.path.join(
             os.path.dirname(__file__),

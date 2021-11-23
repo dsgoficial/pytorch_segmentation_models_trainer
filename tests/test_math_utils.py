@@ -32,6 +32,6 @@ from pytorch_segmentation_models_trainer.utils.math_utils import (
 )
 
 
-class Test_TestMathUtils(unittest.TestCase):
+class Test_MathUtils(unittest.TestCase):
     def test_compute_crossfield_c0c2(self) -> None:
         return True

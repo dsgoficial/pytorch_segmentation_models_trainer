@@ -48,7 +48,7 @@ root_dir = os.path.join(current_dir, "testing_data")
 detection_root_dir = os.path.join(current_dir, "testing_data", "data", "detection_data")
 
 
-class Test_TestBasePlotTools(unittest.TestCase):
+class Test_BasePlotTools(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)

@@ -33,7 +33,7 @@ from hydra.experimental import compose, initialize
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.custom_models import models as pytorch_smt_cm
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
-    NaiveModPolyMapperDataset,
+    ModPolyMapperDataset,
     ObjectDetectionDataset,
     PolygonRNNDataset,
 )
@@ -43,6 +43,9 @@ from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
 )
 from pytorch_segmentation_models_trainer.model_loader.polygon_rnn_model import (
     PolygonRNN,
+)
+from pytorch_segmentation_models_trainer.custom_models.mod_polymapper.modpolymapper import (
+    ModPolyMapper,
 )
 from pytorch_segmentation_models_trainer.train import train
 
@@ -55,27 +58,26 @@ detection_root_dir = os.path.join(
 polygon_rnn_root_dir = os.path.join(
     current_dir, "testing_data", "data", "polygon_rnn_data"
 )
+torch.manual_seed(0)
 
 
-class Test_NaiveModPolymapperModel(CustomTestCase):
+class Test_ModPolyMapperModel(unittest.TestCase):
     def _get_model(self):
-        with initialize(config_path="./test_configs"):
-            cfg = compose(config_name="naive_mod_polymapper_model.yaml")
-            model = hydra.utils.instantiate(cfg, _recursive_=False)
-        return model
+        return ModPolyMapper(num_classes=2, pretrained=False)
 
-    def test_naive_mod_polymapper_model(self) -> None:
+    def test_mod_polymapper_model(self) -> None:
         model = self._get_model()
-        sample = torch.ones([2, 3, 256, 256])
+        sample = torch.randn([2, 3, 256, 256])
         model.eval()
         with torch.no_grad():
             out = model(sample)
         self.assertEqual(len(out), 2)
+        self.assertEqual(len(out[0].keys()), 4)
 
     def test_create_inference_from_model(self) -> None:
         csv_path = os.path.join(detection_root_dir, "dsg_dataset.csv")
         poly_csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
-        ds = NaiveModPolyMapperDataset(
+        ds = ModPolyMapperDataset(
             object_detection_dataset=ObjectDetectionDataset(
                 input_csv_path=csv_path,
                 root_dir=os.path.dirname(csv_path),
@@ -104,18 +106,3 @@ class Test_NaiveModPolymapperModel(CustomTestCase):
             image, target = next(iter(data_loader))
             output = model(image, target)
         self.assertEqual(len(output), 6)
-
-    # @parameterized.expand([("experiment_naive_mod_polymapper.yaml",)])
-    # def test_train_naive_mod_polymapper(self, config_name) -> None:
-    #     csv_path = os.path.join(detection_root_dir, "dsg_dataset.csv")
-    #     with initialize(config_path="./test_configs"):
-    #         cfg = compose(
-    #             config_name=config_name,
-    #             overrides=[
-    #                 "train_dataset.input_csv_path=" + csv_path,
-    #                 "train_dataset.root_dir=" + detection_root_dir,
-    #                 "val_dataset.input_csv_path=" + csv_path,
-    #                 "val_dataset.root_dir=" + detection_root_dir,
-    #             ],
-    #         )
-    #         trainer = train(cfg)

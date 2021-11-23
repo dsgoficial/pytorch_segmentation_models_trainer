@@ -707,14 +707,17 @@ class NaiveModPolyMapperDataset(Dataset):
     def __len__(self) -> int:
         return len(self.object_detection_dataset)
 
-    def __getitem__(self, index) -> Dict[str, torch.Tensor]:
-        image, ds_item_dict = self.object_detection_dataset[index]
+    def get_polygonrnn_data(self, idx):
         _, polygon_rnn_data = self.polygon_rnn_dataset.get_training_images_from_image_path(
             self.object_detection_dataset.get_path(
                 index, key=self.object_detection_dataset.image_key, add_root_dir=False
             )
         )
-        ds_item_dict["polygon_rnn_data"] = polygon_rnn_data
+        return {"polygon_rnn_data": polygon_rnn_data}
+
+    def __getitem__(self, index) -> Dict[str, torch.Tensor]:
+        image, ds_item_dict = self.object_detection_dataset[index]
+        ds_item_dict.update(self.get_polygonrnn_data(index))
         return image, ds_item_dict
 
     @staticmethod
@@ -727,6 +730,31 @@ class NaiveModPolyMapperDataset(Dataset):
         images, targets = tuple(zip(*batch))
         images = torch.stack(images, dim=0)
         return images, list(targets)
+
+
+class ModPolyMapperDataset(NaiveModPolyMapperDataset):
+    def __init__(
+        self,
+        object_detection_dataset: ObjectDetectionDataset,
+        polygon_rnn_dataset: PolygonRNNDataset,
+    ) -> None:
+        super(ModPolyMapperDataset, self).__init__(
+            object_detection_dataset=object_detection_dataset,
+            polygon_rnn_dataset=polygon_rnn_dataset,
+        )
+
+    def get_polygonrnn_data(self, idx):
+        _, polygon_rnn_data = self.polygon_rnn_dataset.get_training_images_from_image_path(
+            self.object_detection_dataset.get_path(
+                idx, key=self.object_detection_dataset.image_key, add_root_dir=False
+            )
+        )
+        return {
+            "x1": torch.stack([item["x1"] for item in polygon_rnn_data]),
+            "x2": torch.stack([item["x2"] for item in polygon_rnn_data]),
+            "x3": torch.stack([item["x3"] for item in polygon_rnn_data]),
+            "ta": torch.stack([item["ta"] for item in polygon_rnn_data]),
+        }
 
 
 if __name__ == "__main__":

@@ -78,7 +78,7 @@ frame_field_root_dir = os.path.join(
 )
 
 
-class Test_TestGradientCentralization(CustomTestCase):
+class Test_GradientCentralization(CustomTestCase):
     @parameterized.expand(gradient_centralization_list)
     def test_train_with_gradient_centralization(self, overrides_list):
         csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")

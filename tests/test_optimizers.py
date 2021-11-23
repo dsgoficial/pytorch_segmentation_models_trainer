@@ -33,7 +33,7 @@ from tests.utils import CustomTestCase
 optimizer_name_list = ["Adam", "AdamW", "RAdam", "PlainRAdam", "SGD"]
 
 
-class Test_TestOptimizers(CustomTestCase):
+class Test_Optimizers(CustomTestCase):
     @parameterized.expand(optimizer_name_list)
     def test_run_train_using_optimizer(self, optimizer_class_name: str) -> None:
         with initialize(config_path="./test_configs"):

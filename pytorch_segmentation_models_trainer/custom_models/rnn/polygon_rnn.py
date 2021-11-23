@@ -249,6 +249,18 @@ class ConvLSTM(nn.Module):
         return param
 
 
+def make_basic_conv_block(input_size, output_size, kernel_size, stride, padding):
+    """
+
+    :rtype: nn.Sequential
+    """
+    return nn.Sequential(
+        nn.Conv2d(input_size, output_size, kernel_size, stride, padding),
+        nn.ReLU(),
+        nn.BatchNorm2d(output_size),
+    )
+
+
 class PolygonRNN(nn.Module):
     """
     Code extracted from https://github.com/AlexMa011/pytorch-polygon-rnn
@@ -256,18 +268,6 @@ class PolygonRNN(nn.Module):
 
     def __init__(self, load_vgg=True, encoder_trainable=True, grid_size=28):
         super(PolygonRNN, self).__init__()
-
-        def _make_basic(input_size, output_size, kernel_size, stride, padding):
-            """
-
-            :rtype: nn.Sequential
-            """
-            return nn.Sequential(
-                nn.Conv2d(input_size, output_size, kernel_size, stride, padding),
-                nn.ReLU(),
-                nn.BatchNorm2d(output_size),
-            )
-
         self.grid_size = grid_size
         self.model1 = nn.Sequential(
             nn.Conv2d(3, 64, 3, 1, 1),
@@ -320,11 +320,11 @@ class PolygonRNN(nn.Module):
             nn.BatchNorm2d(512),
             nn.ReLU(),
         )
-        self.convlayer1 = _make_basic(128, 128, 3, 1, 1)
-        self.convlayer2 = _make_basic(256, 128, 3, 1, 1)
-        self.convlayer3 = _make_basic(512, 128, 3, 1, 1)
-        self.convlayer4 = _make_basic(512, 128, 3, 1, 1)
-        self.convlayer5 = _make_basic(512, 128, 3, 1, 1)
+        self.convlayer1 = make_basic_conv_block(128, 128, 3, 1, 1)
+        self.convlayer2 = make_basic_conv_block(256, 128, 3, 1, 1)
+        self.convlayer3 = make_basic_conv_block(512, 128, 3, 1, 1)
+        self.convlayer4 = make_basic_conv_block(512, 128, 3, 1, 1)
+        self.convlayer5 = make_basic_conv_block(512, 128, 3, 1, 1)
         self.poollayer = nn.MaxPool2d(2, 2)
         self.upsample = nn.Upsample(scale_factor=2, mode="bilinear")
         self.convlstm = ConvLSTM(

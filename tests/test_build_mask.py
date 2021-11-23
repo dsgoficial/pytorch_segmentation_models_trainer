@@ -56,7 +56,7 @@ root_dir = os.path.join(current_dir, "testing_data")
 suffix_dict = {"PNG": ".png", "GTiff": ".tif", "JPEG": ".jpg"}
 
 
-class Test_TestBuildMask(unittest.TestCase):
+class Test_BuildMask(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)

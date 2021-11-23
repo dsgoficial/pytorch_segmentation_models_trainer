@@ -56,7 +56,7 @@ frame_field_root_dir = os.path.join(
 from matplotlib.testing.compare import compare_images
 
 
-class Test_TestVisualization(unittest.TestCase):
+class Test_Visualization(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)

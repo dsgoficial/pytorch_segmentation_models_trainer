@@ -51,7 +51,7 @@ polygon_rnn_root_dir = os.path.join(
 )
 
 
-class Test_TestPolygonRNNUtils(CustomTestCase):
+class Test_PolygonRNNUtils(CustomTestCase):
     @parameterized.expand(
         [
             ([[100, 100], [100, 204], [204, 204], [204, 100]],),

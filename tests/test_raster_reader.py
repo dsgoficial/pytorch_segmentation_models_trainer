@@ -86,7 +86,7 @@ expected_image_list = [
 ]
 
 
-class Test_TestRasterReader(unittest.TestCase):
+class Test_RasterReader(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)

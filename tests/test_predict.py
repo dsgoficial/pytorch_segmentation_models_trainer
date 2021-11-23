@@ -69,7 +69,7 @@ pretrained_checkpoints_download_links = {
 }
 
 
-class Test_TestPredict(unittest.TestCase):
+class Test_Predict(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)

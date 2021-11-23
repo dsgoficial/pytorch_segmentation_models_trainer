@@ -28,7 +28,7 @@ from shapely.geometry import Polygon
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
 
 
-class Test_TestMetrics(unittest.TestCase):
+class Test_Metrics(unittest.TestCase):
     def test_iou(self) -> None:
         y_pred = torch.tensor([[0, 0], [1, 0.5], [0.2, 0.8], [0.5, 0.5], [1, 1]])
         y_true = torch.tensor([[0, 0], [1, 1], [0, 0], [1, 1], [0, 0]])
