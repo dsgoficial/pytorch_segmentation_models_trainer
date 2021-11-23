@@ -105,3 +105,5 @@ class Test_ModPolyMapperModel(unittest.TestCase):
             image, target = next(iter(data_loader))
             output = model(image, target)
         self.assertEqual(len(output), 6)
+        for k, v in output.items():
+            self.assertIsInstance(v, torch.Tensor)

@@ -774,10 +774,10 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
             targets.append(item)
 
         return {
-            "x1": torch.cat([item["x1"] for item in targets]),
-            "x2": torch.cat([item["x2"] for item in targets]),
-            "x3": torch.cat([item["x3"] for item in targets]),
-            "ta": torch.cat([item["ta"] for item in targets]),
+            "x1": torch.stack([item["x1"] for item in targets]),
+            "x2": torch.stack([item["x2"] for item in targets]),
+            "x3": torch.stack([item["x3"] for item in targets]),
+            "ta": torch.stack([item["ta"] for item in targets]),
             "scale_h": torch.stack([item["scale_h"] for item in targets]),
             "scale_w": torch.stack([item["scale_w"] for item in targets]),
             "min_row": torch.stack([item["min_row"] for item in targets]),

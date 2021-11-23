@@ -287,20 +287,22 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
         return output.contiguous().view(-1, self.grid_size * self.grid_size + 3)
 
     def compute_loss_and_accuracy(
-        self, batch: torch.Tensor, result: torch.Tensor
+        self, ta: torch.Tensor, result: torch.Tensor
     ) -> _Loss:
-        target = batch["ta"].contiguous().view(-1)
+        target = ta.contiguous().view(-1)
         loss = nn.functional.cross_entropy(result, target)
         result_index = torch.argmax(result, 1)
         correct = (target == result_index).float().sum().item()
-        acc = correct * 1.0 / target.shape[0]
+        acc = torch.tensor(correct * 1.0 / target.shape[0], device=loss.device)
         return loss, acc
 
     def get_polygonrnn_losses(
         self, x: torch.Tensor, targets: torch.Tensor
     ) -> Dict[str, torch.Tensor]:
         result = self.compute(x, targets)
-        loss, acc = self.polygonrnn_model.compute_loss_and_accuracy(batch, result)
+        loss, acc = self.compute_loss_and_accuracy(
+            ta=torch.cat([i["ta"] for i in targets]), result=result
+        )
         return {"polygonrnn_loss": loss, "polygonrnn_accuracy": acc}
 
 
