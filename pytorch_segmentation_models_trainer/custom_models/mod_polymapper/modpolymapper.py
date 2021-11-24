@@ -23,7 +23,7 @@ from torch import nn
 from torch.nn.modules.loss import _Loss
 from torchvision.models.detection.faster_rcnn import FasterRCNN
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
-from mmcv.ops.roi_align import RoIAlign
+from torchvision.ops import RoIAlign
 from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import (
     make_basic_conv_block,
     PolygonRNN,
@@ -257,7 +257,7 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
     def test(self, input_data1: torch.Tensor, rois: torch.Tensor, len_s: int):
         bs = input_data1.shape[0]
         result = torch.zeros([bs, len_s]).to(input_data1.device)
-        feature = self.get_backbone_output_features(input_data1, rois)
+        feature = self.get_backbone_output_features(input_data1, bboxes)
         if feature.shape[0] == 0:
             return torch.zeros([bs, 1, self.grid_size * self.grid_size + 3])
 
@@ -385,7 +385,7 @@ class GenericModPolyMapper(nn.Module):
         if len(empty_entries) == len(detections):
             return detections
         bboxes = [
-            item["boxes"] for idx, item in enumerate(detections) if idx not in empty_entries
+            item["boxes"] for idx, item in enumerate(rois) if idx not in empty_entries
         ]
         bboxes = torch.cat(
             [
