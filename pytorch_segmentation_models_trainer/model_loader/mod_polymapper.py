@@ -18,11 +18,10 @@
  *                                                                         *
  ****
 """
+import os
 from collections import OrderedDict
 from logging import log
-import os
 from pathlib import Path
-from torch.utils.data import DataLoader
 
 import segmentation_models_pytorch as smp
 import torch
@@ -33,10 +32,13 @@ from omegaconf.dictconfig import DictConfig
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
 from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import PolygonRNN
 from pytorch_segmentation_models_trainer.model_loader.model import Model
-from pytorch_segmentation_models_trainer.utils import polygonrnn_utils, tensor_utils
+from pytorch_segmentation_models_trainer.utils import (
+    object_detection_utils,
+    polygonrnn_utils,
+    tensor_utils,
+)
 from torch import nn
-from torch.autograd import Variable
-from tqdm import tqdm
+from torch.utils.data import DataLoader
 
 current_dir = os.path.dirname(__file__)
 
@@ -46,6 +48,7 @@ class GenericPolyMapperPLModel(Model):
         super(GenericPolyMapperPLModel, self).__init__(cfg)
         self.train_ds = instantiate(self.cfg.train_dataset.dataset, _recursive_=True)
         self.val_ds = instantiate(self.cfg.val_dataset.dataset, _recursive_=True)
+        self.perform_evaluation = False
 
     def train_dataloader(self):
         return DataLoader(
@@ -92,32 +95,116 @@ class GenericPolyMapperPLModel(Model):
     def get_loss_function(self):
         return nn.CrossEntropyLoss()
 
-    def get_tensorboard_logs(self, input_dict, step_type="train"):
-        return {k: {step_type: v} for k, v in input_dict.items()}
+    def _build_tensorboard_logs(self, outputs, step_type="train"):
+        avg_loss = torch.stack([x["loss"] for x in outputs]).mean()
+        tensorboard_logs = {"avg_loss": {step_type: avg_loss}}
+        if len(outputs) == 0:
+            return tensorboard_logs
+        for key in outputs[0]["log"].keys():
+            tensorboard_logs.update(
+                {
+                    f"avg_{key}": {
+                        step_type: torch.stack([x["log"][key] for x in outputs]).mean()
+                    }
+                }
+            )
+        if self.perform_evaluation:
+            for metric_key in outputs[0]["metrics"].keys():
+                tensorboard_logs.update(
+                    {
+                        f"avg_{metric_key}": {
+                            step_type: torch.stack(
+                                [x["metrics"][metric_key] for x in outputs]
+                            ).mean()
+                        }
+                    }
+                )
+        return tensorboard_logs
 
     def training_step(self, batch, batch_idx):
         images, targets = batch
         loss_dict, acc = self.model(images, targets)
-        tensorboard_logs = self.get_tensorboard_logs(loss_dict, step_type="train")
+        detached_loss_dict = {k: v.detach() for k, v in loss_dict.items()}
         return {
             "loss": sum(loss for loss in loss_dict.values()),
-            "log": tensorboard_logs,
+            "log": detached_loss_dict,
+            "progress_bar": detached_loss_dict,
         }
 
     def validation_step(self, batch, batch_idx):
         images, targets = batch
         self.model.train()
         loss_dict, acc = self.model(images, targets)
+        loss = sum(loss for loss in loss_dict.values())
+        self.log(
+            "validation_loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=False,
+            logger=True,
+            sync_dist=True,
+        )
+
         self.model.eval()
         outputs = self.model(images)
-        # batch_polis, intersection, union = self.evaluate_output(batch, outputs)
-        # pass
+        return_dict = {
+            "loss": loss,
+            "log": {k: v.detach() for k, v in loss_dict.items()},
+        }
+        if self.perform_evaluation:
+            metrics_dict_item = self.evaluate_output(batch, outputs)
+            return_dict.update(metrics_dict_item)
+        return return_dict
 
     def evaluate_output(self, batch, outputs):
-        pass
+        images, targets = batch
+        targets_dict = polygonrnn_utils.target_list_to_dict(targets)
+        outputs_dict = polygonrnn_utils.target_list_to_dict(outputs)
+
+        gt_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
+            targets_dict["ta"],
+            targets_dict["scale_h"],
+            targets_dict["scale_w"],
+            targets_dict["min_col"],
+            targets_dict["min_row"],
+        )
+
+        predicted_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
+            outputs_dict["polygonrnn_output"],
+            outputs_dict["scale_h"],
+            outputs_dict["scale_w"],
+            outputs_dict["min_col"],
+            outputs_dict["min_row"],
+        )
+        batch_polis = torch.from_numpy(
+            metrics.batch_polis(predicted_polygon_list, gt_polygon_list)
+        )
+        iou = lambda x: metrics.polygon_iou(x[0], x[1])
+        output_tensor_iou = torch.tensor(
+            list(map(iou, zip(predicted_polygon_list, gt_polygon_list)))
+        )
+        intersection = output_tensor_iou[:, 1]
+        union = output_tensor_iou[:, 2]
+
+        box_iou = torch.stack(
+            [
+                object_detection_utils.evaluate_box_iou(t, o)
+                for t, o in zip(targets, outs)
+            ]
+        ).mean()
+
+        return {
+            "polis": batch_polis,
+            "intersection": intersection,
+            "union": union,
+            "box_iou": box_iou,
+        }
 
     def training_epoch_end(self, outputs):
-        pass
+        tensorboard_logs = self._build_tensorboard_logs(outputs)
+        self.log_dict(tensorboard_logs, logger=True)
 
     def validation_epoch_end(self, outputs):
-        pass
+        tensorboard_logs = self._build_tensorboard_logs(outputs, step_type="val")
+        self.log_dict(tensorboard_logs, logger=True)

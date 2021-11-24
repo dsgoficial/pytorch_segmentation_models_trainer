@@ -407,6 +407,9 @@ class GenericModPolyMapper(nn.Module):
                     ]
                 }
             )
+            detections[idx].update(
+                polygonrnn_utils.build_polygonrnn_extra_info_from_bboxes(det["boxes"])
+            )
             min_bound += n_items
         return detections
 

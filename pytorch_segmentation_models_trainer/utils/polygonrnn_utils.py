@@ -493,3 +493,43 @@ def crop_and_rescale_polygons_to_bounding_boxes(
             croped_polygons, scales, extended_polygons_bounds
         )
     ]
+
+
+def target_list_to_dict(targets):
+    """
+    Converts a list of targets to a dictionary of targets.
+
+    Args:
+        targets (List[Dict]): list of targets
+
+    Returns:
+        Dict[str, Dict]: dictionary of targets
+    """
+    result_dict = {key: [i[key] for i in targets] for key in targets[0].keys()}
+    for key, value in result_dict.items():
+        value = list(itertools.chain.from_iterable(value))
+        if value == []:
+            result_dict[key] = torch.tensor([])
+            continue
+        result_dict[key] = torch.stack(value)
+    return result_dict
+
+
+def build_polygonrnn_extra_info_from_bboxes(
+    bboxes: torch.Tensor, target_height=224.0, target_width=224.0
+):
+    outputs_dict = {}
+    outputs_dict["min_row"] = bboxes[:, 0]
+    outputs_dict["min_col"] = bboxes[:, 1]
+    get_scales_func = lambda x: polygonrnn_utils.get_scales(
+        min_row=x[0],
+        min_col=x[1],
+        max_row=x[2],
+        max_col=x[3],
+        target_height=target_height,
+        target_width=target_width,
+    )
+    scales = torch.tensor(list(map(get_scales_func, list(bboxes))))
+    outputs_dict["scale_h"] = scales[:, 0]
+    outputs_dict["scale_w"] = scales[:, 1]
+    return outputs_dict
