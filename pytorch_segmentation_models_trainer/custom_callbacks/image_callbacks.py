@@ -252,16 +252,7 @@ class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
         )
         self.threshold = threshold
 
-    @rank_zero_only
-    def on_validation_end(self, trainer, pl_module):
-        if not self.save_outputs:
-            return
-        val_ds = pl_module.val_dataloader()
-        n_samples = (
-            pl_module.val_dataloader().batch_size
-            if self.n_samples is None
-            else self.n_samples
-        )
+    def build_vis(self, val_ds, n_samples, pl_module, trainer):
         current_item = 0
         for images, targets in val_ds:
             if current_item >= n_samples:
@@ -282,10 +273,50 @@ class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
                     val_ds.dataset.get_path(current_item), vis, trainer.current_epoch
                 )
                 current_item += 1
+
+    @rank_zero_only
+    def on_validation_end(self, trainer, pl_module):
+        if not self.save_outputs:
+            return
+        val_ds = pl_module.val_dataloader()
+        n_samples = (
+            pl_module.val_dataloader().batch_size
+            if self.n_samples is None
+            else self.n_samples
+        )
+        self.build_vis(val_ds, n_samples, pl_module, trainer)
         return
 
 
 class PolygonRNNResultCallback(ImageSegmentationResultCallback):
+    def build_polygon_vis(
+        self,
+        image_path,
+        original_image,
+        gt_polygon_list,
+        predicted_polygon_list,
+        trainer,
+    ):
+        plot_title = image_path
+        plt_result, fig = generate_visualization(
+            fig_title=plot_title,
+            fig_size=(10, 6),
+            expected_output=original_image,
+            predicted_output=original_image,
+        )
+        gt_axes, predicted_axes = plt.gcf().get_axes()
+        fig.tight_layout()
+        fig.subplots_adjust(top=0.95)
+        plot_polygons(gt_axes, gt_polygon_list, markersize=5)
+        plot_polygons(predicted_axes, predicted_polygon_list, markersize=5)
+        if self.save_outputs:
+            saved_image = self.save_plot_to_disk(plt, plot_title, trainer.current_epoch)
+            self.log_data_to_tensorboard(
+                saved_image, plot_title, trainer.logger, trainer.current_epoch
+            )
+        plt.close(fig)
+        return saved_image
+
     @rank_zero_only
     def on_validation_end(self, trainer, pl_module):
         if not self.save_outputs:
@@ -311,24 +342,89 @@ class PolygonRNNResultCallback(ImageSegmentationResultCallback):
                 prepared_item["min_row"],
                 grid_size=val_ds.dataset.grid_size,
             )
-            plot_title = image_path
-            plt_result, fig = generate_visualization(
-                fig_title=plot_title,
-                fig_size=(10, 6),
-                expected_output=prepared_item["original_image"],
-                predicted_output=prepared_item["original_image"],
+            saved_image = self.build_polygon_vis(
+                image_path,
+                prepared_item["original_image"],
+                gt_polygon_list,
+                predicted_polygon_list,
+                trainer,
             )
-            gt_axes, predicted_axes = plt.gcf().get_axes()
-            fig.tight_layout()
-            fig.subplots_adjust(top=0.95)
-            plot_polygons(gt_axes, gt_polygon_list, markersize=5)
-            plot_polygons(predicted_axes, predicted_polygon_list, markersize=5)
-            if self.save_outputs:
-                saved_image = self.save_plot_to_disk(
-                    plt, plot_title, trainer.current_epoch
-                )
-                self.log_data_to_tensorboard(
-                    saved_image, plot_title, trainer.logger, trainer.current_epoch
-                )
-            plt.close(fig)
         return
+
+
+class ModPolyMapperResultCallback(PolygonRNNResultCallback):
+    def __init__(
+        self,
+        n_samples: int = None,
+        output_path: str = None,
+        normalized_input=True,
+        norm_params=None,
+        log_every_k_epochs=1,
+        threshold=0.5,
+    ) -> None:
+        super().__init__(
+            n_samples=n_samples,
+            output_path=output_path,
+            normalized_input=normalized_input,
+            norm_params=norm_params,
+            log_every_k_epochs=log_every_k_epochs,
+        )
+        self.threshold = threshold
+
+    def build_bbox_vis(self, current_item, image_display, outputs, trainer, val_ds):
+        boxes = [
+            out["boxes"][out["scores"] > self.threshold].to("cpu") for out in outputs
+        ]
+        visualization_list = visualize_image_with_bboxes(image_display.to("cpu"), boxes)
+        for vis in visualization_list:
+            trainer.logger.experiment.add_image(
+                val_ds.dataset.get_path(current_item), vis, trainer.current_epoch
+            )
+            current_item += 1
+        return current_item
+
+    def get_polygon_lists(self, targets, outputs):
+        targets_dict = polygonrnn_utils.target_list_to_dict(targets)
+        outputs_dict = polygonrnn_utils.target_list_to_dict(outputs)
+        gt_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
+            targets_dict["ta"],
+            targets_dict["scale_h"],
+            targets_dict["scale_w"],
+            targets_dict["min_col"],
+            targets_dict["min_row"],
+        )
+
+        predicted_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
+            outputs_dict["polygonrnn_output"],
+            outputs_dict["scale_h"],
+            outputs_dict["scale_w"],
+            outputs_dict["min_col"],
+            outputs_dict["min_row"],
+        )
+        return gt_polygon_list, predicted_polygon_list
+
+    @rank_zero_only
+    def on_validation_end(self, trainer, pl_module):
+        val_ds = pl_module.val_dataloader()
+        self.n_samples = (
+            pl_module.val_dataloader().batch_size
+            if self.n_samples is None
+            else self.n_samples
+        )
+        current_item = 0
+        for images, targets in val_ds:
+            if current_item >= n_samples:
+                break
+            image_display = batch_denormalize_tensor(
+                images, clip_range=[0, 255], output_type=torch.uint8
+            ).to("cpu")
+            outputs = pl_module(images.to(pl_module.device))
+            visualization_list = self.build_bbox_vis(
+                image_display, outputs, trainer, val_ds
+            )
+            polygon_visualization_list = self.build_polygon_vis(
+                image_display, targets, outputs, trainer, val_ds
+            )
+            gt_polygon_list, predicted_polygon_list = self.get_polygon_lists(
+                targets, outputs
+            )
