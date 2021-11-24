@@ -385,7 +385,7 @@ class GenericModPolyMapper(nn.Module):
         if len(empty_entries) == len(detections):
             return detections
         bboxes = [
-            item["boxes"] for idx, item in enumerate(rois) if idx not in empty_entries
+            item["boxes"] for idx, item in enumerate(detections) if idx not in empty_entries
         ]
         bboxes = torch.cat(
             [
