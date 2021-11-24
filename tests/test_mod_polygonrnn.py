@@ -49,7 +49,7 @@ from pytorch_segmentation_models_trainer.custom_models.mod_polymapper.modpolymap
 )
 from pytorch_segmentation_models_trainer.train import train
 
-from tests.utils import CustomTestCase
+from tests.utils import CustomTestCase, get_config_from_hydra
 
 current_dir = os.path.dirname(__file__)
 detection_root_dir = os.path.join(
@@ -58,6 +58,8 @@ detection_root_dir = os.path.join(
 polygon_rnn_root_dir = os.path.join(
     current_dir, "testing_data", "data", "polygon_rnn_data"
 )
+csv_path = os.path.join(detection_root_dir, "dsg_dataset.csv")
+poly_csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
 torch.manual_seed(0)
 
 
@@ -72,8 +74,6 @@ class Test_ModPolyMapperModel(unittest.TestCase):
         )
 
     def _get_dataloader(self) -> torch.utils.data.DataLoader:
-        csv_path = os.path.join(detection_root_dir, "dsg_dataset.csv")
-        poly_csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
         ds = ModPolyMapperDataset(
             object_detection_dataset=ObjectDetectionDataset(
                 input_csv_path=csv_path,
@@ -118,3 +118,20 @@ class Test_ModPolyMapperModel(unittest.TestCase):
         loss.backward()
         for n, x in model.named_parameters():
             assert x.grad is not None, f"No gradient for {n}"
+
+    def test_pl_model_train(self) -> None:
+        cfg = get_config_from_hydra(
+            config_name="experiment_mod_polymapper.yaml",
+            overrides_list=[
+                f"train_dataset.dataset.object_detection_dataset.input_csv_path={csv_path}",
+                f"train_dataset.dataset.object_detection_dataset.root_dir={detection_root_dir}",
+                f"train_dataset.dataset.polygon_rnn_dataset.input_csv_path={poly_csv_path}",
+                f"train_dataset.dataset.polygon_rnn_dataset.root_dir={polygon_rnn_root_dir}",
+                f"val_dataset.dataset.object_detection_dataset.input_csv_path={csv_path}",
+                f"val_dataset.dataset.object_detection_dataset.root_dir={detection_root_dir}",
+                f"val_dataset.dataset.polygon_rnn_dataset.input_csv_path={poly_csv_path}",
+                f"val_dataset.dataset.polygon_rnn_dataset.root_dir={polygon_rnn_root_dir}",
+                "+pl_trainer.fast_dev_run=true",
+            ],
+        )
+        trainer = train(cfg)

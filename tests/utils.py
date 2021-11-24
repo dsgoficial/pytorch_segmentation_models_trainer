@@ -23,6 +23,7 @@ import os
 import shutil
 import unittest
 import warnings
+import hydra
 
 
 def get_file_list(dir_path, extension):
@@ -41,6 +42,13 @@ def create_csv_file(file_path, image_list, label_list, root_to_be_removed=None):
             csv_text = csv_text.replace(root_to_be_removed, "")
         csv_file.write(csv_text)
     return file_path
+
+
+def get_config_from_hydra(config_name, overrides_list, config_path=None):
+    config_path = config_path if config_path is not None else "./test_configs"
+    with hydra.initialize(config_path=config_path):
+        cfg = hydra.compose(config_name=config_name, overrides=overrides_list)
+    return cfg
 
 
 class CustomTestCase(unittest.TestCase):

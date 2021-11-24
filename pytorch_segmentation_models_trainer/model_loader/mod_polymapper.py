@@ -22,6 +22,7 @@ from collections import OrderedDict
 from logging import log
 import os
 from pathlib import Path
+from torch.utils.data import DataLoader
 
 import segmentation_models_pytorch as smp
 import torch
@@ -43,6 +44,50 @@ current_dir = os.path.dirname(__file__)
 class GenericPolyMapperPLModel(Model):
     def __init__(self, cfg, grid_size=28):
         super(GenericPolyMapperPLModel, self).__init__(cfg)
+        self.train_ds = instantiate(self.cfg.train_dataset.dataset, _recursive_=True)
+        self.val_ds = instantiate(self.cfg.val_dataset.dataset, _recursive_=True)
+
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_ds,
+            batch_size=self.cfg.hyperparameters.batch_size,
+            shuffle=self.cfg.train_dataset.data_loader.shuffle,
+            num_workers=self.cfg.train_dataset.data_loader.num_workers,
+            pin_memory=self.cfg.train_dataset.data_loader.pin_memory
+            if "pin_memory" in self.cfg.train_dataset.data_loader
+            else True,
+            drop_last=self.cfg.train_dataset.data_loader.drop_last
+            if "drop_last" in self.cfg.train_dataset.data_loader
+            else True,
+            prefetch_factor=self.cfg.train_dataset.data_loader.prefetch_factor
+            if "prefetch_factor" in self.cfg.train_dataset.data_loader
+            else 4 * self.hyperparameters.batch_size,
+            collate_fn=self.train_ds.collate_fn
+            if hasattr(self.train_ds, "collate_fn")
+            else self.train_ds.train_dataset.collate_fn,
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_ds,
+            batch_size=self.cfg.hyperparameters.batch_size,
+            shuffle=self.cfg.val_dataset.data_loader.shuffle
+            if "shuffle" in self.cfg.val_dataset.data_loader
+            else False,
+            num_workers=self.cfg.val_dataset.data_loader.num_workers,
+            pin_memory=self.cfg.val_dataset.data_loader.pin_memory
+            if "pin_memory" in self.cfg.val_dataset.data_loader
+            else True,
+            drop_last=self.cfg.val_dataset.data_loader.drop_last
+            if "drop_last" in self.cfg.val_dataset.data_loader
+            else True,
+            prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor
+            if "prefetch_factor" in self.cfg.val_dataset.data_loader
+            else 4 * self.hyperparameters.batch_size,
+            collate_fn=self.val_ds.collate_fn
+            if hasattr(self.val_ds, "collate_fn")
+            else self.val_ds.val_dataset.collate_fn,
+        )
 
     def get_loss_function(self):
         return nn.CrossEntropyLoss()
@@ -51,20 +96,24 @@ class GenericPolyMapperPLModel(Model):
         return {k: {step_type: v} for k, v in input_dict.items()}
 
     def training_step(self, batch, batch_idx):
-        losses = self.model(batch)
-        tensorboard_logs = self.get_tensorboard_logs(losses, step_type="train")
-        self.log(
-            "train_losses",
-            losses,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=True,
-        )
-        return {"loss": losses, "log": tensorboard_logs}
+        images, targets = batch
+        loss_dict, acc = self.model(images, targets)
+        tensorboard_logs = self.get_tensorboard_logs(loss_dict, step_type="train")
+        return {
+            "loss": sum(loss for loss in loss_dict.values()),
+            "log": tensorboard_logs,
+        }
 
     def validation_step(self, batch, batch_idx):
+        images, targets = batch
+        self.model.train()
+        loss_dict, acc = self.model(images, targets)
+        self.model.eval()
+        outputs = self.model(images)
+        # batch_polis, intersection, union = self.evaluate_output(batch, outputs)
+        # pass
+
+    def evaluate_output(self, batch, outputs):
         pass
 
     def training_epoch_end(self, outputs):
