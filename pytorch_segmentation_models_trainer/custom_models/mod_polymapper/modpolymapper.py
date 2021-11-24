@@ -394,7 +394,7 @@ class GenericModPolyMapper(nn.Module):
                 for roi_row in roi
             ]
         )  # num_rois, 5
-        polygonrnn_output = self.polygonrnn_model.test(x, boxes, self.val_seq_len)
+        polygonrnn_output = self.polygonrnn_model.test(x, bboxes, self.val_seq_len)
         min_bound = 0
         for idx, det in enumerate(detections):
             if idx in empty_entries:
