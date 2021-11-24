@@ -257,7 +257,7 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
     def test(self, input_data1: torch.Tensor, rois: torch.Tensor, len_s: int):
         bs = input_data1.shape[0]
         result = torch.zeros([bs, len_s]).to(input_data1.device)
-        feature = self.get_backbone_output_features(input_data1, bboxes)
+        feature = self.get_backbone_output_features(input_data1, rois)
         if feature.shape[0] == 0:
             return torch.zeros([bs, 1, self.grid_size * self.grid_size + 3])
 
