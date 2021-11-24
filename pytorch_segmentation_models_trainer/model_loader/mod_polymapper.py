@@ -190,7 +190,7 @@ class GenericPolyMapperPLModel(Model):
         box_iou = torch.stack(
             [
                 object_detection_utils.evaluate_box_iou(t, o)
-                for t, o in zip(targets, outs)
+                for t, o in zip(targets_dict["boxes"], outputs_dict["boxes"])
             ]
         ).mean()
 

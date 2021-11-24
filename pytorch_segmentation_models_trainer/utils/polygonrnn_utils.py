@@ -521,7 +521,7 @@ def build_polygonrnn_extra_info_from_bboxes(
     outputs_dict = {}
     outputs_dict["min_row"] = bboxes[:, 0]
     outputs_dict["min_col"] = bboxes[:, 1]
-    get_scales_func = lambda x: polygonrnn_utils.get_scales(
+    get_scales_func = lambda x: get_scales(
         min_row=x[0],
         min_col=x[1],
         max_row=x[2],
