@@ -387,10 +387,17 @@ def crop_polygons_to_bounding_boxes(
     polygons_to_crop = []
     for polygon in polygons:
         for bbox in bounding_boxes:
-            if polygon.intersects(bbox) and polygon not in polygons_to_crop:
+            if polygon.intersects(bbox):
                 polygon = polygon.intersection(bbox)
                 polygons_to_crop.append(polygon)
-    return list(itertools.chain.from_iterable(map(validate_polygon, polygons_to_crop)))
+    valid_polygons = itertools.chain.from_iterable(
+        map(validate_polygon, polygons_to_crop)
+    )
+    unique_polygons = []
+    for polygon in valid_polygons:
+        if not any(polygon.equals(p) for p in unique_polygons):
+            unique_polygons.append(polygon)
+    return unique_polygons
 
 
 def get_scales(

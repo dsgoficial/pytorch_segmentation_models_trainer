@@ -242,7 +242,7 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
         bboxes = [target["boxes"] for target in targets]
         bboxes = torch.stack(
             [
-                torch.cat([torch.tensor([idx]), roi_row])
+                torch.cat([torch.tensor([idx], device=roi_row.device), roi_row])
                 for idx, roi in enumerate(bboxes)
                 for roi_row in roi
             ]

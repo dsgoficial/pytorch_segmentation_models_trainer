@@ -41,6 +41,7 @@ from pytorch_segmentation_models_trainer.model_loader.polygon_rnn_model import (
     PolygonRNN,
 )
 from pytorch_segmentation_models_trainer.train import train
+from tests.utils import BasicTestCase
 
 current_dir = os.path.dirname(__file__)
 polygon_rnn_root_dir = os.path.join(
@@ -48,7 +49,7 @@ polygon_rnn_root_dir = os.path.join(
 )
 
 
-class Test_PolygonRNNModel(unittest.TestCase):
+class Test_PolygonRNNModel(BasicTestCase):
     def test_create_instance(self) -> None:
         polygonrnn = PolygonRNN()
         return True
