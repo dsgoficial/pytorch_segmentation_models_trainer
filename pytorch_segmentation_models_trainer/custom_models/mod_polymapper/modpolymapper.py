@@ -206,7 +206,13 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
         output = self.convlayer5(output)
         return output
 
-    def get_rnn_output(self, output, first, second, third):
+    def get_rnn_output(
+        self,
+        output: torch.Tensor,
+        first: torch.Tensor,
+        second: torch.Tensor,
+        third: torch.Tensor,
+    ) -> torch.Tensor:
         bs, length_s = second.shape[0], second.shape[1]
         output = output.unsqueeze(1)
         output = output.repeat(1, length_s, 1, 1, 1)
@@ -397,13 +403,15 @@ class GenericModPolyMapper(nn.Module):
         ]
         bboxes = torch.cat(
             [
-                torch.column_stack([idx * torch.ones(bbox.shape[0]), bbox])
+                torch.column_stack(
+                    [idx * torch.ones(bbox.shape[0], device=bbox.device), bbox]
+                )
                 for idx, bbox in enumerate(bboxes)
             ]
         )  # num_rois, 5
         polygonrnn_output = self.polygonrnn_model.test(
-            x, bboxes, self.val_seq_len
-        )  # type: ignore
+            x, bboxes, self.val_seq_len  # type: ignore
+        )
         min_bound = 0
         for idx, det in enumerate(detections):
             if idx in empty_entries:

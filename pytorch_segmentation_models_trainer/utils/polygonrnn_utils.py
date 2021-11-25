@@ -389,13 +389,18 @@ def crop_polygons_to_bounding_boxes(
         for bbox in bounding_boxes:
             if polygon.intersects(bbox):
                 polygon = polygon.intersection(bbox)
-                polygons_to_crop.append(polygon)
+                if isinstance(polygon, Polygon):
+                    polygons_to_crop.append(polygon)
+                elif isinstance(polygon, MultiPolygon):
+                    polygons_to_crop.extend(list(polygon))
     valid_polygons = itertools.chain.from_iterable(
-        map(validate_polygon, polygons_to_crop)
+        list(map(validate_polygon, polygons_to_crop))
     )
     unique_polygons = []
     for polygon in valid_polygons:
-        if not any(polygon.equals(p) for p in unique_polygons):
+        if not any(polygon.equals(p) for p in unique_polygons) and isinstance(
+            polygon, (Polygon, MultiPolygon)
+        ):
             unique_polygons.append(polygon)
     return unique_polygons
 
@@ -454,6 +459,10 @@ def get_extended_bounds(
     return min_row, min_col, max_row, max_col
 
 
+def get_bboxes_from_polygons(polygons: List[Polygon]) -> List[Tuple]:
+    return [p.bounds for p in polygons]
+
+
 def crop_and_rescale_polygons_to_bounding_boxes(
     polygons: List[Union[BaseGeometry, Polygon]],
     bounding_boxes: Union[torch.Tensor, List],
@@ -477,6 +486,13 @@ def crop_and_rescale_polygons_to_bounding_boxes(
         for minx, miny, maxx, maxy in bounding_boxes
     ]
     croped_polygons = crop_polygons_to_bounding_boxes(polygons, shapely_boxes)
+    bboxes = (
+        torch.Tensor(
+            get_bboxes_from_polygons(croped_polygons), device=bounding_boxes.device
+        )
+        if len(croped_polygons) > bounding_boxes.shape[0]
+        else bounding_boxes
+    )
 
     def extended_bounds_func(x):
         return get_extended_bounds(x[0], x[1], extend_factor)
@@ -512,9 +528,10 @@ def crop_and_rescale_polygons_to_bounding_boxes(
             "scale_h": scale_h,
             "min_row": min_row,
             "min_col": min_col,
+            "bbox": bbox,
         }
-        for polygon, (scale_h, scale_w), (min_row, min_col, _, __) in zip(
-            croped_polygons, scales, extended_polygons_bounds
+        for polygon, bbox, (scale_h, scale_w), (min_row, min_col, _, __) in zip(
+            croped_polygons, bboxes, scales, extended_polygons_bounds
         )
     ]
 

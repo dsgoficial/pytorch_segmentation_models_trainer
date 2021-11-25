@@ -763,7 +763,7 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
         self, idx: int, bboxes: Union[torch.Tensor, List], image_bounds_list: List
     ) -> Dict[str, torch.Tensor]:
         polygon_list = self.get_polygonrnn_polygons(idx)
-        croped_polygon_dict_list = self.crop_polygons_to_bboxes(
+        croped_polygon_dict_list = polygonrnn_utils.crop_and_rescale_polygons_to_bounding_boxes(
             polygon_list, bboxes, image_bounds_list
         )
         targets = []
@@ -795,6 +795,8 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
             "scale_w": torch.stack([item["scale_w"] for item in targets]),
             "min_row": torch.stack([item["min_row"] for item in targets]),
             "min_col": torch.stack([item["min_col"] for item in targets]),
+            # this is done to consider cases where cropped boxes lead to multipolygon
+            "boxes": torch.stack([item["bbox"] for item in targets]),
         }
 
     def get_polygonrnn_polygons(self, idx: int) -> List[Union[BaseGeometry, Polygon]]:
@@ -806,16 +808,6 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
             shapely.wkt.loads(polygon_wkt)
             for polygon_wkt in entries["original_polygon_wkt"]
         ]
-
-    def crop_polygons_to_bboxes(
-        self,
-        polygons: List[Union[BaseGeometry, Polygon]],
-        bboxes: Union[torch.Tensor, List],
-        image_bounds_list: List,
-    ) -> List[Dict[str, np.ndarray]]:
-        return polygonrnn_utils.crop_and_rescale_polygons_to_bounding_boxes(
-            polygons, bboxes, image_bounds_list
-        )
 
     def __getitem__(
         self, index: int
