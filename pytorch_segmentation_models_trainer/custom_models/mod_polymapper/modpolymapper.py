@@ -256,7 +256,7 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
         )
 
     def test(self, input_data1: torch.Tensor, rois: torch.Tensor, len_s: int):
-        bs = input_data1.shape[0]
+        bs = rois.shape[0]
         result = torch.zeros([bs, len_s]).to(input_data1.device)
         feature = self.get_backbone_output_features(input_data1, rois)
         if feature.shape[0] == 0:
@@ -327,7 +327,7 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
 
     def compute_loss_and_accuracy(
         self, ta: torch.Tensor, result: torch.Tensor
-    ) -> _Loss:
+    ) -> Tuple[_Loss, torch.Tensor]:
         target = ta.contiguous().view(-1)
         loss = nn.functional.cross_entropy(result, target)
         result_index = torch.argmax(result, 1)
@@ -337,7 +337,7 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
 
     def get_polygonrnn_losses_and_accuracy(
         self, x: torch.Tensor, targets: torch.Tensor
-    ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+    ) -> Tuple[Dict[str, Union[_Loss, torch.Tensor]], torch.Tensor]:
         result = self.compute(x, targets)
         loss, acc = self.compute_loss_and_accuracy(
             ta=torch.cat([i["ta"] for i in targets]), result=result
@@ -348,10 +348,10 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
 class GenericModPolyMapper(nn.Module):
     def __init__(
         self,
-        obj_detection_model: ObjectDetectionModel,
+        obj_detection_model: Union[ObjectDetectionModel, torch.nn.Module],
         polygonrnn_model: Optional[Union[GenericPolyMapperRnnBlock, PolygonRNN]] = None,
-        grid_size=28,
-        val_seq_len: Optional[int] = 60,
+        grid_size: int = 28,
+        val_seq_len: int = 60,
     ):
         super(GenericModPolyMapper, self).__init__()
         self.obj_detection_model = obj_detection_model
@@ -375,8 +375,9 @@ class GenericModPolyMapper(nn.Module):
         self, x: torch.Tensor, targets: Optional[torch.Tensor] = None
     ) -> Union[torch.Tensor, Tuple[Dict[str, torch.Tensor], torch.Tensor]]:
         if self.training:
+            assert targets is not None, "Targets are required for training"
             losses = self.obj_detection_model(x, targets)
-            polygonrnn_loss, acc = self.polygonrnn_model.get_polygonrnn_losses_and_accuracy(
+            polygonrnn_loss, acc = self.polygonrnn_model.get_polygonrnn_losses_and_accuracy(  # type: ignore
                 x, targets
             )
             losses.update(polygonrnn_loss)
@@ -384,21 +385,31 @@ class GenericModPolyMapper(nn.Module):
         detections = self.obj_detection_model(x)
         empty_entries = self._get_empty_entries(detections)
         if len(empty_entries) == len(detections):
+            for idx, _ in enumerate(detections):
+                detections[idx].update(
+                    {key: [] for key in ["min_row", "min_col", "scale_h", "scale_w"]}
+                )
             return detections
         bboxes = [
-            item["boxes"] for idx, item in enumerate(detections) if idx not in empty_entries
+            item["boxes"]
+            for idx, item in enumerate(detections)
+            if idx not in empty_entries
         ]
         bboxes = torch.cat(
             [
-                torch.cat([torch.tensor([idx]), roi_row])
-                for idx, roi in enumerate(bboxes)
-                for roi_row in roi
+                torch.column_stack([idx * torch.ones(bbox.shape[0]), bbox])
+                for idx, bbox in enumerate(bboxes)
             ]
         )  # num_rois, 5
-        polygonrnn_output = self.polygonrnn_model.test(x, bboxes, self.val_seq_len)
+        polygonrnn_output = self.polygonrnn_model.test(
+            x, bboxes, self.val_seq_len
+        )  # type: ignore
         min_bound = 0
         for idx, det in enumerate(detections):
             if idx in empty_entries:
+                detections[idx].update(
+                    {key: [] for key in ["min_row", "min_col", "scale_h", "scale_w"]}
+                )
                 continue
             n_items = len(det["boxes"])
             detections[idx].update(

@@ -101,8 +101,13 @@ def get_vertex_list_from_numpy(
         min_row (Optional[int], optional): Minimun row. Defaults to 0.
     """
     return_cast_func = return_cast_func if return_cast_func is not None else lambda x: x
-    cast_to_int = lambda x: x.astype(np.int32) if isinstance(x, np.ndarray) else x.int()
-    cast_to_np = lambda x: x.cpu().numpy() if isinstance(x, torch.Tensor) else x
+
+    def cast_to_int(x):
+        return x.astype(np.int32) if isinstance(x, np.ndarray) else x.int()
+
+    def cast_to_np(x):
+        return x.cpu().numpy() if isinstance(x, torch.Tensor) else x
+
     input_array = cast_to_np(input_array)
     if np.max(input_array) >= grid_size ** 2:
         length = np.argmax(input_array)
@@ -172,9 +177,12 @@ def get_vertex_list_from_batch(
         min_col (Optional[int], optional): Minimum column. Defaults to 0.
         min_row (Optional[int], optional): Minimun row. Defaults to 0.
     """
-    func = lambda x: get_vertex_list(
-        x, scale_h, scale_w, min_col, min_row, grid_size=grid_size
-    )
+
+    def func(x):
+        return get_vertex_list(
+            x, scale_h, scale_w, min_col, min_row, grid_size=grid_size
+        )
+
     return np.apply_along_axis(func, 1, input_batch)
 
 
@@ -195,7 +203,10 @@ def get_vertex_list_from_batch_tensors(
         min_col (Optional[Union(int, torch.Tensor)], optional): Minimum column. Defaults to 0.
         min_row (Optional[Union(int, torch.Tensor)], optional): Minimun row. Defaults to 0.
     """
-    cast_func = lambda x: np.array(x, dtype=np.float32)
+
+    def cast_func(x):
+        return np.array(x, dtype=np.float32)
+
     return [
         get_vertex_list_from_numpy(
             x,
@@ -437,40 +448,46 @@ def get_extended_bounds(
 
 
 def crop_and_rescale_polygons_to_bounding_boxes(
-    polygons: List[Polygon],
-    bounding_boxes: List,
+    polygons: List[Union[BaseGeometry, Polygon]],
+    bounding_boxes: Union[torch.Tensor, List],
     image_bounds_list: List,
     target_height: float = 224.0,
     target_width: float = 224.0,
     extend_factor: float = 0.1,
-) -> Dict[str, np.ndarray]:
+) -> List[Dict[str, np.ndarray]]:
     """
     Crops and rescales polygons to bounding boxes.
 
     Args:
-        polygons (List[Polygon]): polygons
+        polygons (List[Union[BaseGeometry, Polygon]]): polygons
         bounding_boxes (List): bounding boxes
 
     Returns:
-        List[Polygon]: cropped and rescaled polygons
+        List[Dict[str, np.ndarray]]: cropped and rescaled polygons
     """
     shapely_boxes = [
         box(minx, miny, maxx, maxy, ccw=True)
         for minx, miny, maxx, maxy in bounding_boxes
     ]
     croped_polygons = crop_polygons_to_bounding_boxes(polygons, shapely_boxes)
-    extended_bounds_func = lambda x: get_extended_bounds(x[0], x[1], extend_factor)
+
+    def extended_bounds_func(x):
+        return get_extended_bounds(x[0], x[1], extend_factor)
+
     extended_polygons_bounds = list(
         map(extended_bounds_func, zip(croped_polygons, image_bounds_list))
     )
-    get_scales_func = lambda x: get_scales(
-        min_row=x[0],
-        min_col=x[1],
-        max_row=x[2],
-        max_col=x[3],
-        target_height=target_height,
-        target_width=target_width,
-    )
+
+    def get_scales_func(x):
+        return get_scales(
+            min_row=x[0],
+            min_col=x[1],
+            max_row=x[2],
+            max_col=x[3],
+            target_height=target_height,
+            target_width=target_width,
+        )
+
     scales = list(map(get_scales_func, extended_polygons_bounds))
 
     return [
@@ -495,7 +512,9 @@ def crop_and_rescale_polygons_to_bounding_boxes(
     ]
 
 
-def target_list_to_dict(targets):
+def target_list_to_dict(
+    targets: List[Dict[str, torch.Tensor]]
+) -> Dict[str, torch.Tensor]:
     """
     Converts a list of targets to a dictionary of targets.
 
@@ -506,29 +525,33 @@ def target_list_to_dict(targets):
         Dict[str, Dict]: dictionary of targets
     """
     result_dict = {key: [i[key] for i in targets] for key in targets[0].keys()}
+    output_result_dict = dict()
     for key, value in result_dict.items():
         value = list(itertools.chain.from_iterable(value))
         if value == []:
-            result_dict[key] = torch.tensor([])
+            output_result_dict[key] = torch.tensor([])
             continue
-        result_dict[key] = torch.stack(value)
-    return result_dict
+        output_result_dict[key] = torch.stack(value)
+    return output_result_dict
 
 
 def build_polygonrnn_extra_info_from_bboxes(
-    bboxes: torch.Tensor, target_height=224.0, target_width=224.0
+    bboxes: torch.Tensor, target_height: float = 224.0, target_width: float = 224.0
 ):
     outputs_dict = {}
     outputs_dict["min_row"] = bboxes[:, 0]
     outputs_dict["min_col"] = bboxes[:, 1]
-    get_scales_func = lambda x: get_scales(
-        min_row=x[0],
-        min_col=x[1],
-        max_row=x[2],
-        max_col=x[3],
-        target_height=target_height,
-        target_width=target_width,
-    )
+
+    def get_scales_func(x):
+        return get_scales(
+            min_row=x[0],
+            min_col=x[1],
+            max_row=x[2],
+            max_col=x[3],
+            target_height=target_height,
+            target_width=target_width,
+        )
+
     scales = torch.tensor(list(map(get_scales_func, list(bboxes))))
     outputs_dict["scale_h"] = scales[:, 0]
     outputs_dict["scale_w"] = scales[:, 1]

@@ -49,7 +49,7 @@ from pytorch_segmentation_models_trainer.custom_models.mod_polymapper.modpolymap
 )
 from pytorch_segmentation_models_trainer.train import train
 
-from tests.utils import CustomTestCase, get_config_from_hydra
+from tests.utils import BasicTestCase, CustomTestCase, get_config_from_hydra
 
 current_dir = os.path.dirname(__file__)
 detection_root_dir = os.path.join(
@@ -63,7 +63,7 @@ poly_csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
 torch.manual_seed(0)
 
 
-class Test_ModPolyMapperModel(unittest.TestCase):
+class Test_ModPolyMapperModel(BasicTestCase):
     def _get_model(
         self, backbone_trainable_layers=3, pretrained=False
     ) -> ModPolyMapper:
@@ -119,9 +119,16 @@ class Test_ModPolyMapperModel(unittest.TestCase):
         for n, x in model.named_parameters():
             assert x.grad is not None, f"No gradient for {n}"
 
-    def test_pl_model_train(self) -> None:
+    @parameterized.expand(
+        [
+            ("experiment_mod_polymapper.yaml", ["+pl_trainer.fast_dev_run=true"]),
+            ("experiment_mod_polymapper_with_callback.yaml", None),
+        ]
+    )
+    def test_pl_model_train(self, experiment_name, extra_overrides=None) -> None:
+        extra_overrides = extra_overrides if extra_overrides is not None else []
         cfg = get_config_from_hydra(
-            config_name="experiment_mod_polymapper.yaml",
+            config_name=experiment_name,
             overrides_list=[
                 f"train_dataset.dataset.object_detection_dataset.input_csv_path={csv_path}",
                 f"train_dataset.dataset.object_detection_dataset.root_dir={detection_root_dir}",
@@ -131,7 +138,8 @@ class Test_ModPolyMapperModel(unittest.TestCase):
                 f"val_dataset.dataset.object_detection_dataset.root_dir={detection_root_dir}",
                 f"val_dataset.dataset.polygon_rnn_dataset.input_csv_path={poly_csv_path}",
                 f"val_dataset.dataset.polygon_rnn_dataset.root_dir={polygon_rnn_root_dir}",
-                "+pl_trainer.fast_dev_run=true",
-            ],
+            ]
+            + extra_overrides,
         )
         trainer = train(cfg)
+        return

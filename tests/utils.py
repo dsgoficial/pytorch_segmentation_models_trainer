@@ -51,12 +51,34 @@ def get_config_from_hydra(config_name, overrides_list, config_path=None):
     return cfg
 
 
-class CustomTestCase(unittest.TestCase):
+class BasicTestCase(unittest.TestCase):
+    """
+    Basic test case for the tests.
+    """
+
     def setUp(self):
+        """
+        Setup the test case.
+        """
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)
         warnings.simplefilter("ignore", category=FutureWarning)
         warnings.simplefilter("ignore", category=UserWarning)
+
+    def tearDown(self) -> None:
+        outputs_path = os.path.join(os.path.dirname(__file__), "..", "outputs")
+        if os.path.exists(outputs_path):
+            shutil.rmtree(outputs_path)
+        lightning_logs_path = os.path.join(
+            os.path.dirname(__file__), "..", "lightning_logs"
+        )
+        if os.path.exists(lightning_logs_path):
+            shutil.rmtree(lightning_logs_path)
+
+
+class CustomTestCase(BasicTestCase):
+    def setUp(self):
+        super(CustomTestCase, self).setUp()
         current_dir = os.path.dirname(__file__)
         self.root_dir = os.path.join(current_dir, "testing_data", "data")
         image_list = get_file_list(os.path.join(self.root_dir, "images"), ".png")
@@ -79,11 +101,4 @@ class CustomTestCase(unittest.TestCase):
     def tearDown(self):
         os.remove(self.csv_ds_file)
         os.remove(self.csv_ds_file_without_root)
-        outputs_path = os.path.join(os.path.dirname(__file__), "..", "outputs")
-        if os.path.exists(outputs_path):
-            shutil.rmtree(outputs_path)
-        lightning_logs_path = os.path.join(
-            os.path.dirname(__file__), "..", "lightning_logs"
-        )
-        if os.path.exists(lightning_logs_path):
-            shutil.rmtree(lightning_logs_path)
+        super(CustomTestCase, self).tearDown()

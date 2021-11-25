@@ -75,7 +75,7 @@ class ObjectDetectionPLModel(Model):
         )
 
     def training_step(self, batch, batch_idx):
-        images, targets = batch
+        images, targets, _ = batch
         loss_dict = self.model(images, targets)
         return {
             "loss": sum(loss for loss in loss_dict.values()),
@@ -84,7 +84,7 @@ class ObjectDetectionPLModel(Model):
         }
 
     def validation_step(self, batch, batch_idx):
-        images, targets = batch
+        images, targets, _ = batch
         self.model.train()
         loss_dict = self.model(images, targets)
         self.model.eval()

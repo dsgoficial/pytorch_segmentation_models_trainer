@@ -19,30 +19,24 @@
  ****
 """
 import datetime
-import io
 import os
-import math
-import logging
 from pathlib import Path
-from typing import Any, List
+from typing import Dict, List
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl
+import torch
+from PIL import Image
+from pytorch_lightning.utilities import rank_zero_only
 from pytorch_segmentation_models_trainer.tools.visualization.base_plot_tools import (
     batch_denormalize_tensor,
     denormalize_np_array,
     generate_visualization,
     visualize_image_with_bboxes,
 )
-import torch
-from PIL import Image
-from torch.utils.tensorboard import SummaryWriter
-from pytorch_lightning.utilities import rank_zero_only
 from pytorch_segmentation_models_trainer.tools.visualization.crossfield_plot import (
-    get_image_plot_crossfield,
     get_tensorboard_image_seg_display,
-    plot_crossfield,
     plot_polygons,
 )
 from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
@@ -223,7 +217,9 @@ class FrameFieldOverlayedResultCallback(ImageSegmentationResultCallback):
                 image_seg_display = get_tensorboard_image_seg_display(
                     image_display[idx].unsqueeze(0),
                     seg[idx].unsqueeze(0),
-                    crossfield=crossfield[idx].unsqueeze(0),
+                    crossfield=crossfield[idx].unsqueeze(0)
+                    if crossfield is not None
+                    else None,
                 )
                 trainer.logger.experiment.add_images(
                     f"overlay-{batch['path'][idx]}",
@@ -252,28 +248,6 @@ class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
         )
         self.threshold = threshold
 
-    def build_vis(self, val_ds, n_samples, pl_module, trainer):
-        current_item = 0
-        for images, targets in val_ds:
-            if current_item >= n_samples:
-                break
-            image_display = batch_denormalize_tensor(
-                images, clip_range=[0, 255], output_type=torch.uint8
-            ).to("cpu")
-            outputs = pl_module(images.to(pl_module.device))
-            boxes = [
-                out["boxes"][out["scores"] > self.threshold].to("cpu")
-                for out in outputs
-            ]
-            visualization_list = visualize_image_with_bboxes(
-                image_display.to("cpu"), boxes
-            )
-            for vis in visualization_list:
-                trainer.logger.experiment.add_image(
-                    val_ds.dataset.get_path(current_item), vis, trainer.current_epoch
-                )
-                current_item += 1
-
     @rank_zero_only
     def on_validation_end(self, trainer, pl_module):
         if not self.save_outputs:
@@ -284,8 +258,37 @@ class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
             if self.n_samples is None
             else self.n_samples
         )
-        self.build_vis(val_ds, n_samples, pl_module, trainer)
+        current_item = 0
+        for images, targets, indexes in val_ds:
+            if current_item >= n_samples:
+                break
+            image_display = batch_denormalize_tensor(
+                images, clip_range=[0, 255], output_type=torch.uint8
+            ).to("cpu")
+            outputs = pl_module(images.to(pl_module.device))
+            visualization_list = self.generate_vis_list(
+                pl_module, image_display, outputs
+            )
+            for idx, vis in enumerate(visualization_list):
+                trainer.logger.experiment.add_image(
+                    val_ds.dataset.get_path(int(indexes[idx])),
+                    vis,
+                    trainer.current_epoch,
+                )
+                current_item += 1
         return
+
+    def generate_vis_list(
+        self,
+        pl_module: pl.LightningModule,
+        image_display: torch.Tensor,
+        outputs: List[Dict[str, torch.Tensor]],
+    ) -> List[torch.Tensor]:
+        boxes: List[torch.Tensor] = [
+            out["boxes"][out["scores"] > self.threshold].to("cpu") for out in outputs
+        ]
+        visualization_list = visualize_image_with_bboxes(image_display.to("cpu"), boxes)
+        return visualization_list
 
 
 class PolygonRNNResultCallback(ImageSegmentationResultCallback):
@@ -309,6 +312,7 @@ class PolygonRNNResultCallback(ImageSegmentationResultCallback):
         fig.subplots_adjust(top=0.95)
         plot_polygons(gt_axes, gt_polygon_list, markersize=5)
         plot_polygons(predicted_axes, predicted_polygon_list, markersize=5)
+        saved_image = None
         if self.save_outputs:
             saved_image = self.save_plot_to_disk(plt, plot_title, trainer.current_epoch)
             self.log_data_to_tensorboard(
@@ -371,18 +375,6 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
         )
         self.threshold = threshold
 
-    def build_bbox_vis(self, current_item, image_display, outputs, trainer, val_ds):
-        boxes = [
-            out["boxes"][out["scores"] > self.threshold].to("cpu") for out in outputs
-        ]
-        visualization_list = visualize_image_with_bboxes(image_display.to("cpu"), boxes)
-        for vis in visualization_list:
-            trainer.logger.experiment.add_image(
-                val_ds.dataset.get_path(current_item), vis, trainer.current_epoch
-            )
-            current_item += 1
-        return current_item
-
     def get_polygon_lists(self, targets, outputs):
         targets_dict = polygonrnn_utils.target_list_to_dict(targets)
         outputs_dict = polygonrnn_utils.target_list_to_dict(outputs)
@@ -412,19 +404,37 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
             else self.n_samples
         )
         current_item = 0
-        for images, targets in val_ds:
-            if current_item >= n_samples:
+        for images, targets, indexes in val_ds:
+            if current_item >= self.n_samples:
                 break
             image_display = batch_denormalize_tensor(
                 images, clip_range=[0, 255], output_type=torch.uint8
             ).to("cpu")
             outputs = pl_module(images.to(pl_module.device))
-            visualization_list = self.build_bbox_vis(
-                image_display, outputs, trainer, val_ds
+            boxes = [
+                out["boxes"][out["scores"] > self.threshold].to("cpu")
+                for out in outputs
+            ]
+            visualization_list = visualize_image_with_bboxes(
+                image_display.to("cpu"), boxes
             )
-            polygon_visualization_list = self.build_polygon_vis(
-                image_display, targets, outputs, trainer, val_ds
-            )
-            gt_polygon_list, predicted_polygon_list = self.get_polygon_lists(
-                targets, outputs
-            )
+            for idx, vis in enumerate(visualization_list):
+                trainer.logger.experiment.add_image(
+                    val_ds.dataset.object_detection_dataset.get_path(int(indexes[idx])),
+                    vis,
+                    trainer.current_epoch,
+                )
+                gt_polygon_list, predicted_polygon_list = self.get_polygon_lists(
+                    [targets[idx]], [outputs[idx]]
+                )
+                self.build_polygon_vis(
+                    image_path=val_ds.dataset.object_detection_dataset.get_path(
+                        int(indexes[idx])
+                    ),
+                    original_image=image_display[idx].cpu().numpy().transpose(1, 2, 0),
+                    gt_polygon_list=gt_polygon_list,
+                    predicted_polygon_list=predicted_polygon_list,
+                    trainer=trainer,
+                )
+                current_item += 1
+        return

@@ -122,7 +122,7 @@ class GenericPolyMapperPLModel(Model):
         return tensorboard_logs
 
     def training_step(self, batch, batch_idx):
-        images, targets = batch
+        images, targets, _ = batch
         loss_dict, acc = self.model(images, targets)
         detached_loss_dict = {k: v.detach() for k, v in loss_dict.items()}
         return {
@@ -132,7 +132,7 @@ class GenericPolyMapperPLModel(Model):
         }
 
     def validation_step(self, batch, batch_idx):
-        images, targets = batch
+        images, targets, _ = batch
         self.model.train()
         loss_dict, acc = self.model(images, targets)
         loss = sum(loss for loss in loss_dict.values())
@@ -180,7 +180,10 @@ class GenericPolyMapperPLModel(Model):
         batch_polis = torch.from_numpy(
             metrics.batch_polis(predicted_polygon_list, gt_polygon_list)
         )
-        iou = lambda x: metrics.polygon_iou(x[0], x[1])
+
+        def iou(x):
+            return metrics.polygon_iou(x[0], x[1])
+
         output_tensor_iou = torch.tensor(
             list(map(iou, zip(predicted_polygon_list, gt_polygon_list)))
         )

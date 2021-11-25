@@ -20,6 +20,7 @@
  ****
 """
 import logging
+from typing import List, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -134,7 +135,9 @@ def generate_visualization(fig_title=None, fig_size=None, font_size=16, **images
 
 
 def visualize_image_with_bboxes(
-    image_batch: torch.Tensor, batch_boxes: torch.Tensor, width: int = 4
+    image_batch: torch.Tensor,
+    batch_boxes: Union[torch.Tensor, List[torch.Tensor]],
+    width: int = 4,
 ):
     return [
         draw_bounding_boxes(img, boxes=boxes, width=width)
