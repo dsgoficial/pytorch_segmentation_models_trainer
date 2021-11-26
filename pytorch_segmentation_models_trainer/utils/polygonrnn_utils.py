@@ -574,9 +574,7 @@ def target_list_to_dict(
 def build_polygonrnn_extra_info_from_bboxes(
     bboxes: torch.Tensor, target_height: float = 224.0, target_width: float = 224.0
 ):
-    outputs_dict = {}
-    outputs_dict["min_row"] = bboxes[:, 0]
-    outputs_dict["min_col"] = bboxes[:, 1]
+    outputs_dict = {"min_row": bboxes[:, 0], "min_col": bboxes[:, 1]}
 
     def get_scales_func(x):
         return get_scales(

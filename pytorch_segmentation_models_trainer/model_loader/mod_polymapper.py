@@ -22,6 +22,7 @@ import os
 from collections import OrderedDict
 from logging import log
 from pathlib import Path
+from typing import Dict
 
 import segmentation_models_pytorch as smp
 import torch
@@ -29,6 +30,8 @@ import torch.nn as nn
 import torch.nn.init
 from hydra.utils import instantiate
 from omegaconf.dictconfig import DictConfig
+import pytorch_lightning as pl
+from pytorch_lightning.trainer.supporters import CombinedLoader
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
 from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import PolygonRNN
 from pytorch_segmentation_models_trainer.model_loader.model import Model
@@ -43,17 +46,56 @@ from torch.utils.data import DataLoader
 current_dir = os.path.dirname(__file__)
 
 
-class GenericPolyMapperPLModel(Model):
-    def __init__(self, cfg, grid_size=28):
-        super(GenericPolyMapperPLModel, self).__init__(cfg)
-        self.train_ds = instantiate(self.cfg.train_dataset.dataset, _recursive_=True)
-        self.val_ds = instantiate(self.cfg.val_dataset.dataset, _recursive_=True)
-        self.perform_evaluation = False
+class GenericPolyMapperPLModel(pl.LightningModule):
+    def __init__(self, cfg, grid_size=28, perform_evaluation=False):
+        super(GenericPolyMapperPLModel, self).__init__()
+        self.cfg = cfg
+        self.model = self.get_model()
+        self.grid_size = grid_size
+        self.perform_evaluation = perform_evaluation
+        self.object_detection_train_ds = instantiate(
+            self.cfg.train_dataset.object_detection, _recursive_=False
+        )
+        self.object_detection_val_ds = instantiate(
+            self.cfg.val_dataset.object_detection, _recursive_=False
+        )
+        self.polygonrnn_train_ds = instantiate(
+            self.cfg.train_dataset.polygon_rnn, _recursive_=False
+        )
+        self.polygonrnn_val_ds = instantiate(
+            self.cfg.val_dataset.polygon_rnn, _recursive_=False
+        )
 
-    def train_dataloader(self):
+    def get_model(self):
+        model = instantiate(self.cfg.model, _recursive_=False)
+        return model
+
+    def get_optimizer(self):
+        return instantiate(
+            self.cfg.optimizer, params=self.parameters(), _recursive_=False
+        )
+
+    def configure_optimizers(self):
+        # REQUIRED
+        optimizer = self.get_optimizer()
+        scheduler_list = []
+        if "scheduler_list" not in self.cfg:
+            return [optimizer], scheduler_list
+        for item in self.cfg.scheduler_list:
+            dict_item = dict(item)
+            dict_item["scheduler"] = instantiate(
+                item.scheduler, optimizer=optimizer, _recursive_=False
+            )
+            scheduler_list.append(dict_item)
+        return [optimizer], scheduler_list
+
+    def forward(self, x):
+        return self.model(x)
+
+    def get_train_dataloader(self, ds, batch_size):
         return DataLoader(
-            self.train_ds,
-            batch_size=self.cfg.hyperparameters.batch_size,
+            ds,
+            batch_size=batch_size,
             shuffle=self.cfg.train_dataset.data_loader.shuffle,
             num_workers=self.cfg.train_dataset.data_loader.num_workers,
             pin_memory=self.cfg.train_dataset.data_loader.pin_memory
@@ -62,18 +104,14 @@ class GenericPolyMapperPLModel(Model):
             drop_last=self.cfg.train_dataset.data_loader.drop_last
             if "drop_last" in self.cfg.train_dataset.data_loader
             else True,
-            prefetch_factor=self.cfg.train_dataset.data_loader.prefetch_factor
-            if "prefetch_factor" in self.cfg.train_dataset.data_loader
-            else 4 * self.hyperparameters.batch_size,
-            collate_fn=self.train_ds.collate_fn
-            if hasattr(self.train_ds, "collate_fn")
-            else self.train_ds.train_dataset.collate_fn,
+            prefetch_factor=self.cfg.train_dataset.data_loader.prefetch_factor,
+            collate_fn=ds.collate_fn if hasattr(ds, "collate_fn") else None,
         )
 
-    def val_dataloader(self):
+    def get_val_dataloader(self, ds, batch_size):
         return DataLoader(
-            self.val_ds,
-            batch_size=self.cfg.hyperparameters.batch_size,
+            ds,
+            batch_size=batch_size,
             shuffle=self.cfg.val_dataset.data_loader.shuffle
             if "shuffle" in self.cfg.val_dataset.data_loader
             else False,
@@ -84,13 +122,34 @@ class GenericPolyMapperPLModel(Model):
             drop_last=self.cfg.val_dataset.data_loader.drop_last
             if "drop_last" in self.cfg.val_dataset.data_loader
             else True,
-            prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor
-            if "prefetch_factor" in self.cfg.val_dataset.data_loader
-            else 4 * self.hyperparameters.batch_size,
-            collate_fn=self.val_ds.collate_fn
-            if hasattr(self.val_ds, "collate_fn")
-            else self.val_ds.val_dataset.collate_fn,
+            prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor,
+            collate_fn=ds.collate_fn if hasattr(ds, "collate_fn") else None,
         )
+
+    def train_dataloader(self) -> Dict[str, DataLoader]:
+        return {
+            "object_detection": self.get_train_dataloader(
+                self.object_detection_train_ds,
+                self.cfg.hyperparameters.object_detection_batch_size,
+            ),
+            "polygon_rnn": self.get_train_dataloader(
+                self.polygonrnn_train_ds,
+                self.cfg.hyperparameters.polygon_rnn_batch_size,
+            ),
+        }
+
+    def val_dataloader(self) -> CombinedLoader:
+        loader_dict = {
+            "object_detection": self.get_val_dataloader(
+                self.object_detection_val_ds,
+                self.cfg.hyperparameters.object_detection_batch_size,
+            ),
+            "polygon_rnn": self.get_val_dataloader(
+                self.polygonrnn_val_ds, self.cfg.hyperparameters.polygon_rnn_batch_size
+            ),
+        }
+        combined_loaders = CombinedLoader(loader_dict, "max_size_cycle")
+        return combined_loaders
 
     def get_loss_function(self):
         return nn.CrossEntropyLoss()
@@ -122,9 +181,11 @@ class GenericPolyMapperPLModel(Model):
         return tensorboard_logs
 
     def training_step(self, batch, batch_idx):
-        images, targets, _ = batch
-        loss_dict, acc = self.model(images, targets)
-        detached_loss_dict = {k: v.detach() for k, v in loss_dict.items()}
+        obj_det_images, obj_det_targets, _ = batch["object_detection"]
+        polygon_rnn_batch = batch["polygon_rnn"]
+        loss_dict, acc = self.model(obj_det_images, obj_det_targets, polygon_rnn_batch)
+        detached_loss_dict = {k: v for k, v in loss_dict.items()}
+        detached_loss_dict.update({"acc": acc})
         return {
             "loss": sum(loss for loss in loss_dict.values()),
             "log": detached_loss_dict,
@@ -132,10 +193,13 @@ class GenericPolyMapperPLModel(Model):
         }
 
     def validation_step(self, batch, batch_idx):
-        images, targets, _ = batch
+        obj_det_images, obj_det_targets, _ = batch["object_detection"]
+        polygon_rnn_batch = batch["polygon_rnn"]
         self.model.train()
-        loss_dict, acc = self.model(images, targets)
+        loss_dict, acc = self.model(obj_det_images, obj_det_targets, polygon_rnn_batch)
         loss = sum(loss for loss in loss_dict.values())
+        # detached_loss_dict = {k: v for k, v in loss_dict.items()}
+        # detached_loss_dict.update({"acc": acc})
         self.log(
             "validation_loss",
             loss,
@@ -145,17 +209,17 @@ class GenericPolyMapperPLModel(Model):
             logger=True,
             sync_dist=True,
         )
-
-        self.model.eval()
-        outputs = self.model(images)
         return_dict = {
             "loss": loss,
-            "log": {k: v.detach() for k, v in loss_dict.items()},
+            # "log": detached_loss_dict,
         }
         if self.perform_evaluation:
+            self.model.eval()
+            outputs = self.model(obj_det_images)
             metrics_dict_item = self.evaluate_output(batch, outputs)
             return_dict.update(metrics_dict_item)
         return return_dict
+        return {}
 
     def evaluate_output(self, batch, outputs):
         images, targets = batch
@@ -205,9 +269,12 @@ class GenericPolyMapperPLModel(Model):
         }
 
     def training_epoch_end(self, outputs):
-        tensorboard_logs = self._build_tensorboard_logs(outputs)
-        self.log_dict(tensorboard_logs, logger=True)
+        # tensorboard_logs = self._build_tensorboard_logs(outputs)
+        # self.log_dict(tensorboard_logs, logger=True)
+        pass
 
     def validation_epoch_end(self, outputs):
-        tensorboard_logs = self._build_tensorboard_logs(outputs, step_type="val")
-        self.log_dict(tensorboard_logs, logger=True)
+        # tensorboard_logs = self._build_tensorboard_logs(
+        #     outputs, step_type="val")
+        # self.log_dict(tensorboard_logs, logger=True)
+        pass

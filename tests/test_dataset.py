@@ -25,6 +25,7 @@ import json
 import os
 
 import albumentations as A
+from albumentations.pytorch.transforms import ToTensorV2
 import hydra
 import numpy as np
 from hydra import compose, initialize
@@ -547,7 +548,7 @@ class Test_Dataset(CustomTestCase):
             input_csv_path=csv_path,
             sequence_length=60,
             root_dir=polygon_rnn_root_dir,
-            augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
+            augmentation_list=[A.Normalize(), ToTensorV2()],
         )
         self.assertEqual(len(polygon_rnn_ds), 587)
 
@@ -566,7 +567,7 @@ class Test_Dataset(CustomTestCase):
             input_csv_path=csv_path,
             root_dir=os.path.dirname(csv_path),
             augmentation_list=A.Compose(
-                [A.CenterCrop(512, 512), A.Normalize(), A.pytorch.ToTensorV2()],
+                [A.CenterCrop(512, 512), A.Normalize(), ToTensorV2()],
                 bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
             ),
         )
@@ -589,7 +590,7 @@ class Test_Dataset(CustomTestCase):
             input_csv_path=csv_path,
             root_dir=os.path.dirname(csv_path),
             augmentation_list=A.Compose(
-                [A.Normalize(), A.pytorch.ToTensorV2()],
+                [A.Normalize(), ToTensorV2()],
                 bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
             ),
         )
@@ -608,7 +609,7 @@ class Test_Dataset(CustomTestCase):
                 input_csv_path=csv_path,
                 root_dir=os.path.dirname(csv_path),
                 augmentation_list=A.Compose(
-                    [A.CenterCrop(512, 512), A.Normalize(), A.pytorch.ToTensorV2()],
+                    [A.CenterCrop(512, 512), A.Normalize(), ToTensorV2()],
                     bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
                 ),
             ),
@@ -616,12 +617,13 @@ class Test_Dataset(CustomTestCase):
                 input_csv_path=poly_csv_path,
                 sequence_length=60,
                 root_dir=polygon_rnn_root_dir,
-                augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
+                augmentation_list=[A.Normalize(), ToTensorV2()],
             ),
         )
         self.assertEqual(len(ds), 12)
-        image, target = ds[0]
+        image, croped_images, target, index = ds[0]
         self.assertEqual(image.shape, (3, 512, 512))
+        self.assertEqual(croped_images.shape, (3, 224, 224))
         self.assertEqual(target["boxes"].shape, (1, 4))
         self.assertEqual(target["labels"].shape, (1,))
         self.assertEqual(len(target["polygon_rnn_data"]), 2)
@@ -640,7 +642,7 @@ class Test_Dataset(CustomTestCase):
                 input_csv_path=csv_path,
                 root_dir=os.path.dirname(csv_path),
                 augmentation_list=A.Compose(
-                    [A.CenterCrop(512, 512), A.Normalize(), A.pytorch.ToTensorV2()],
+                    [A.CenterCrop(512, 512), A.Normalize(), ToTensorV2()],
                     bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
                 ),
             ),
@@ -648,15 +650,33 @@ class Test_Dataset(CustomTestCase):
                 input_csv_path=poly_csv_path,
                 sequence_length=60,
                 root_dir=polygon_rnn_root_dir,
-                augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
+                augmentation_list=[A.Normalize(), ToTensorV2()],
             ),
         )
         self.assertEqual(len(ds), 12)
-        image, target = ds[0]
+        image, target, index = ds[0]
         self.assertEqual(image.shape, (3, 512, 512))
         self.assertEqual(target["boxes"].shape, (1, 4))
         self.assertEqual(target["labels"].shape, (1,))
-        self.assertEqual(target["x1"].shape, (1, 787))
-        self.assertEqual(target["x2"].shape, (1, 58, 787))
-        self.assertEqual(target["x3"].shape, (1, 58, 787))
-        self.assertEqual(target["ta"].shape, (1, 58))
+        self.assertEqual(target["x1"].shape, (2, 787))
+        self.assertEqual(target["x2"].shape, (2, 58, 787))
+        self.assertEqual(target["x3"].shape, (2, 58, 787))
+        self.assertEqual(target["ta"].shape, (2, 58))
+        self.assertEqual(target["croped_images"].shape, (2, 3, 224, 224))
+        # test batch build
+        data_loader = torch.utils.data.DataLoader(
+            ds,
+            batch_size=2,
+            shuffle=False,
+            drop_last=True,
+            num_workers=1,
+            collate_fn=ds.collate_fn,
+        )
+        images, targets, indexes = next(iter(data_loader))
+        self.assertEqual(images.shape, (2, 3, 512, 512))
+        self.assertEqual(targets[0]["boxes"].shape, (1, 4))
+        self.assertEqual(targets[0]["labels"].shape, (1,))
+        self.assertEqual(targets[0]["x1"].shape, (2, 787))
+        self.assertEqual(targets[0]["x2"].shape, (2, 58, 787))
+        self.assertEqual(targets[0]["x3"].shape, (2, 58, 787))
+        self.assertEqual(targets[0]["ta"].shape, (2, 58))

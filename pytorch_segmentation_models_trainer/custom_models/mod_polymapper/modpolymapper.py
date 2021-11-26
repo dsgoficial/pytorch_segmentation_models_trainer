@@ -23,7 +23,7 @@ from torch import nn
 from torch.nn.modules.loss import _Loss
 from torchvision.models.detection.faster_rcnn import FasterRCNN
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
-from torchvision.ops import RoIAlign
+from torchvision.ops import RoIAlign, roi_align
 from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import (
     make_basic_conv_block,
     PolygonRNN,
@@ -36,25 +36,17 @@ from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 from typing import List, Tuple, Union, Dict, Optional
 
 
-class RoiAlignBlock(torch.nn.Module):
+class FinalConvBlock(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
-        spatial_scale: float,
-        roi_output: int,
         kernel_size: Tuple = (3, 3),
         apply_pooling: bool = False,
         upsample_factor: int = 1.0,
     ):
         super().__init__()
         assert upsample_factor >= 1, "upsample_factor must be equal or greater than 1.0"
-        self.roi_align = RoIAlign(
-            output_size=roi_output,
-            spatial_scale=spatial_scale,
-            sampling_ratio=-1,
-            aligned=False,
-        )
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.conv_block = torch.nn.Sequential(
@@ -87,51 +79,38 @@ class RoiAlignBlock(torch.nn.Module):
                 if m.biase is not None:
                     nn.init.constant_(m.bias, 0)
 
-    def forward(self, x, rois):
-        x = self.roi_align(x, rois)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv_block(x)
         return x
 
 
-class GenericPolyMapperRnnBlock(torch.nn.Module):
+class GenericPolygonRNN(torch.nn.Module):
     def __init__(self, backbone, grid_size=28):
         super().__init__()
         self.backbone = backbone
         self.grid_size = grid_size
-        self.roi_align_block1 = RoiAlignBlock(
-            in_channels=256,
-            out_channels=128,
-            spatial_scale=56 / 224,
-            roi_output=56,
-            kernel_size=(3, 3),
-            apply_pooling=True,
+        self.final_conv_block1 = FinalConvBlock(
+            in_channels=256, out_channels=128, kernel_size=(3, 3), apply_pooling=True
         )
-        self.roi_align_block2 = RoiAlignBlock(
-            in_channels=256,
-            out_channels=128,
-            spatial_scale=28 / 224,
-            roi_output=28,
-            kernel_size=(3, 3),
-            apply_pooling=False,
+        self.final_conv_block2 = FinalConvBlock(
+            in_channels=256, out_channels=128, kernel_size=(3, 3), apply_pooling=False
         )
-        self.roi_align_block3 = RoiAlignBlock(
+        self.final_conv_block3 = FinalConvBlock(
             in_channels=256,
             out_channels=128,
-            spatial_scale=14 / 224,
-            roi_output=14,
             kernel_size=(3, 3),
             apply_pooling=False,
             upsample_factor=2.0,
         )
-        self.roi_align_block4 = RoiAlignBlock(
+        self.final_conv_block4 = FinalConvBlock(
             in_channels=256,
             out_channels=128,
-            spatial_scale=14 / 224,
-            roi_output=7,
             kernel_size=(3, 3),
             apply_pooling=False,
             upsample_factor=4.0,
         )
+        self.upsample1 = torch.nn.Upsample(scale_factor=2.0, mode="bilinear")
+        self.upsample2 = torch.nn.Upsample(scale_factor=4.0, mode="bilinear")
         self.convlayer5 = make_basic_conv_block(512, 128, 3, 1, 1)
         self.convlstm = ConvLSTM(
             input_size=(grid_size, grid_size),
@@ -161,7 +140,7 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
         self._init_convlstm()
         self._init_convlstmlayer()
         self._init_convlayer()
-        self._init_roialign()
+        self._init_final_conv_blocks()
 
     def _init_convlayer(self):
         for name, param in self.named_parameters():
@@ -185,21 +164,21 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
             elif "weight" in name:
                 nn.init.xavier_normal_(param)
 
-    def _init_roialign(self):
+    def _init_final_conv_blocks(self):
         for block in [
-            self.roi_align_block1,
-            self.roi_align_block2,
-            self.roi_align_block3,
-            self.roi_align_block4,
+            self.final_conv_block1,
+            self.final_conv_block2,
+            self.final_conv_block3,
+            self.final_conv_block4,
         ]:
             block.init_weights()
 
-    def get_backbone_output_features(self, x, rois):
+    def get_backbone_output_features(self, x):
         backbone_output = self.backbone(x)
-        roi_output11 = self.roi_align_block1(backbone_output["0"], rois)
-        roi_output22 = self.roi_align_block2(backbone_output["1"], rois)
-        roi_output33 = self.roi_align_block3(backbone_output["2"], rois)
-        roi_output44 = self.roi_align_block4(backbone_output["3"], rois)
+        roi_output11 = self.final_conv_block1(backbone_output["0"])
+        roi_output22 = self.final_conv_block2(backbone_output["1"])
+        roi_output33 = self.final_conv_block3(backbone_output["2"])
+        roi_output44 = self.final_conv_block4(backbone_output["3"])
         output = torch.cat(
             [roi_output11, roi_output22, roi_output33, roi_output44], dim=1
         )
@@ -244,27 +223,20 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
 
         return output
 
-    def forward(self, x, targets):
-        bboxes = [target["boxes"] for target in targets]
-        bboxes = torch.stack(
-            [
-                torch.cat([torch.tensor([idx], device=roi_row.device), roi_row])
-                for idx, roi in enumerate(bboxes)
-                for roi_row in roi
-            ]
-        )  # num_rois, 5
-        output = self.get_backbone_output_features(x, bboxes)
-        return self.get_rnn_output(
-            output,
-            first=torch.cat([item["x1"] for item in targets]),
-            second=torch.cat([item["x2"] for item in targets]),
-            third=torch.cat([item["x3"] for item in targets]),
-        )
+    def forward(
+        self,
+        input_data1: torch.Tensor,
+        first: torch.Tensor,
+        second: torch.Tensor,
+        third: torch.Tensor,
+    ) -> torch.Tensor:
+        output = self.get_backbone_output_features(input_data1)
+        return self.get_rnn_output(output, first=first, second=second, third=third)
 
-    def test(self, input_data1: torch.Tensor, rois: torch.Tensor, len_s: int):
-        bs = rois.shape[0]
+    def test(self, input_data1: torch.Tensor, len_s: int):
+        bs = input_data1.shape[0]
         result = torch.zeros([bs, len_s]).to(input_data1.device)
-        feature = self.get_backbone_output_features(input_data1, rois)
+        feature = self.get_backbone_output_features(input_data1)
         if feature.shape[0] == 0:
             return torch.zeros([bs, 1, self.grid_size * self.grid_size + 3])
 
@@ -327,9 +299,18 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
 
         return result
 
-    def compute(self, images: torch.Tensor, targets) -> torch.Tensor:
-        output = self.forward(images, targets)
-        return output.contiguous().view(-1, self.grid_size * self.grid_size + 3)
+    def get_polygonrnn_losses_and_accuracy(
+        self,
+        croped_images: torch.Tensor,
+        first: torch.Tensor,
+        second: torch.Tensor,
+        third: torch.Tensor,
+        ta: torch.Tensor,
+    ) -> Tuple[_Loss, torch.Tensor]:
+        output = self.forward(croped_images, first, second, third)
+        result = output.contiguous().view(-1, self.grid_size * self.grid_size + 3)
+        loss, acc = self.compute_loss_and_accuracy(ta=ta, result=result)
+        return loss, acc
 
     def compute_loss_and_accuracy(
         self, ta: torch.Tensor, result: torch.Tensor
@@ -341,21 +322,12 @@ class GenericPolyMapperRnnBlock(torch.nn.Module):
         acc = torch.tensor(correct * 1.0 / target.shape[0], device=loss.device)
         return loss, acc
 
-    def get_polygonrnn_losses_and_accuracy(
-        self, x: torch.Tensor, targets: torch.Tensor
-    ) -> Tuple[Dict[str, Union[_Loss, torch.Tensor]], torch.Tensor]:
-        result = self.compute(x, targets)
-        loss, acc = self.compute_loss_and_accuracy(
-            ta=torch.cat([i["ta"] for i in targets]), result=result
-        )
-        return {"polygonrnn_loss": loss}, acc
-
 
 class GenericModPolyMapper(nn.Module):
     def __init__(
         self,
         obj_detection_model: Union[ObjectDetectionModel, torch.nn.Module],
-        polygonrnn_model: Optional[Union[GenericPolyMapperRnnBlock, PolygonRNN]] = None,
+        polygonrnn_model: Optional[Union[GenericPolygonRNN, PolygonRNN]] = None,
         grid_size: int = 28,
         val_seq_len: int = 60,
     ):
@@ -363,74 +335,64 @@ class GenericModPolyMapper(nn.Module):
         self.obj_detection_model = obj_detection_model
         self.backbone = self.obj_detection_model.backbone
         self.polygonrnn_model = (
-            GenericPolyMapperRnnBlock(backbone=self.backbone, grid_size=grid_size)
+            GenericPolygonRNN(backbone=self.backbone, grid_size=grid_size)
             if polygonrnn_model is None
             else polygonrnn_model
         )
         self.val_seq_len = val_seq_len
 
-    def _get_empty_entries(self, detections):
-        empty_entries = []
-        for idx, det in enumerate(detections):
-            detections[idx].update({"polygonrnn_output": []})
-            if det["boxes"].shape[0] == 0:
-                empty_entries.append(idx)
-        return empty_entries
-
     def forward(
-        self, x: torch.Tensor, targets: Optional[torch.Tensor] = None
+        self,
+        obj_det_images: torch.Tensor,
+        obj_det_targets: Optional[torch.Tensor] = None,
+        polygon_rnn_batch: Optional[Dict[str, torch.Tensor]] = None,
     ) -> Union[torch.Tensor, Tuple[Dict[str, torch.Tensor], torch.Tensor]]:
         if self.training:
-            assert targets is not None, "Targets are required for training"
-            losses = self.obj_detection_model(x, targets)
+            assert (
+                obj_det_targets is not None
+            ), "Object detection targets are required for training"
+            assert (
+                polygon_rnn_batch is not None
+            ), "Polygon RNN batches are required for training"
+            losses = self.obj_detection_model(obj_det_images, obj_det_targets)
             polygonrnn_loss, acc = self.polygonrnn_model.get_polygonrnn_losses_and_accuracy(  # type: ignore
-                x, targets
+                croped_images=polygon_rnn_batch["image"],
+                first=polygon_rnn_batch["x1"],
+                second=polygon_rnn_batch["x2"],
+                third=polygon_rnn_batch["x3"],
+                ta=polygon_rnn_batch["ta"],
             )
-            losses.update(polygonrnn_loss)
+            losses.update({"polygonrnn_loss": polygonrnn_loss})
             return losses, acc
-        detections = self.obj_detection_model(x)
-        empty_entries = self._get_empty_entries(detections)
-        if len(empty_entries) == len(detections):
-            for idx, _ in enumerate(detections):
+        detections = self.obj_detection_model(obj_det_images)
+
+        for idx, item in enumerate(detections):
+            if item["boxes"].shape[0] == 0:
                 detections[idx].update(
-                    {key: [] for key in ["min_row", "min_col", "scale_h", "scale_w"]}
-                )
-            return detections
-        bboxes = [
-            item["boxes"]
-            for idx, item in enumerate(detections)
-            if idx not in empty_entries
-        ]
-        bboxes = torch.cat(
-            [
-                torch.column_stack(
-                    [idx * torch.ones(bbox.shape[0], device=bbox.device), bbox]
-                )
-                for idx, bbox in enumerate(bboxes)
-            ]
-        )  # num_rois, 5
-        polygonrnn_output = self.polygonrnn_model.test(
-            x, bboxes, self.val_seq_len  # type: ignore
-        )
-        min_bound = 0
-        for idx, det in enumerate(detections):
-            if idx in empty_entries:
-                detections[idx].update(
-                    {key: [] for key in ["min_row", "min_col", "scale_h", "scale_w"]}
+                    {
+                        key: []
+                        for key in [
+                            "polygonrnn_output",
+                            "min_row",
+                            "min_col",
+                            "scale_h",
+                            "scale_w",
+                        ]
+                    }
                 )
                 continue
-            n_items = len(det["boxes"])
-            detections[idx].update(
-                {
-                    "polygonrnn_output": polygonrnn_output[
-                        min_bound : min_bound + n_items
-                    ]
-                }
+            croped_images = roi_align(
+                obj_det_images[idx].unsqueeze(0),
+                boxes=[item["boxes"]],
+                output_size=(224, 224),
             )
-            detections[idx].update(
-                polygonrnn_utils.build_polygonrnn_extra_info_from_bboxes(det["boxes"])
+            polygonrnn_output = self.polygonrnn_model.test(
+                croped_images, self.val_seq_len  # type: ignore
             )
-            min_bound += n_items
+            detections[idx].update(polygonrnn_output)
+            detections[idx].update(
+                polygonrnn_utils.build_polygonrnn_extra_info_from_bboxes(item["boxes"])
+            )
         return detections
 
 

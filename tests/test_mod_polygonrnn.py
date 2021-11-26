@@ -25,6 +25,7 @@ import unittest
 from importlib import import_module
 
 import albumentations as A
+from albumentations.pytorch.transforms import ToTensorV2
 import hydra
 import numpy as np
 import segmentation_models_pytorch as smp
@@ -74,30 +75,37 @@ class Test_ModPolyMapperModel(BasicTestCase):
         )
 
     def _get_dataloader(self) -> torch.utils.data.DataLoader:
-        ds = ModPolyMapperDataset(
-            object_detection_dataset=ObjectDetectionDataset(
-                input_csv_path=csv_path,
-                root_dir=os.path.dirname(csv_path),
-                augmentation_list=A.Compose(
-                    [A.CenterCrop(512, 512), A.Normalize(), A.pytorch.ToTensorV2()],
-                    bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
-                ),
-            ),
-            polygon_rnn_dataset=PolygonRNNDataset(
-                input_csv_path=poly_csv_path,
-                sequence_length=60,
-                root_dir=polygon_rnn_root_dir,
+        obj_det_ds = ObjectDetectionDataset(
+            input_csv_path=csv_path,
+            root_dir=os.path.dirname(csv_path),
+            augmentation_list=A.Compose(
+                [A.CenterCrop(512, 512), A.Normalize(), ToTensorV2()],
+                bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
             ),
         )
-        data_loader = torch.utils.data.DataLoader(
-            ds,
-            batch_size=2,
-            shuffle=False,
-            drop_last=True,
-            num_workers=1,
-            collate_fn=ds.collate_fn,
+        polygon_rnn_dataset = PolygonRNNDataset(
+            input_csv_path=poly_csv_path,
+            sequence_length=60,
+            root_dir=polygon_rnn_root_dir,
+            augmentation_list=A.Compose([A.Normalize(), ToTensorV2()]),
         )
-        return data_loader
+        return {
+            "object_detection_dataloader": torch.utils.data.DataLoader(
+                obj_det_ds,
+                batch_size=2,
+                shuffle=False,
+                drop_last=True,
+                num_workers=1,
+                collate_fn=obj_det_ds.collate_fn,
+            ),
+            "polygon_rnn_dataloader": torch.utils.data.DataLoader(
+                polygon_rnn_dataset,
+                batch_size=2,
+                shuffle=False,
+                drop_last=True,
+                num_workers=1,
+            ),
+        }
 
     def test_model_forward(self) -> None:
         model = self._get_model()
@@ -106,14 +114,17 @@ class Test_ModPolyMapperModel(BasicTestCase):
         with torch.no_grad():
             out = model(sample)
         self.assertEqual(len(out), 2)
-        self.assertEqual(len(out[0].keys()), 4)
+        self.assertEqual(len(out[0].keys()), 8)
 
     def test_model_backwards(self) -> None:
         model = self._get_model(backbone_trainable_layers=5, pretrained=True)
         data_loader = self._get_dataloader()
         model.train()
-        image, target = next(iter(data_loader))
-        losses, acc = model(image, target)
+        obj_det_images, obj_det_targets, index = next(
+            iter(data_loader["object_detection_dataloader"])
+        )
+        polygon_rnn_batch = next(iter(data_loader["polygon_rnn_dataloader"]))
+        losses, acc = model(obj_det_images, obj_det_targets, polygon_rnn_batch)
         loss = sum(losses.values())
         loss.backward()
         for n, x in model.named_parameters():
@@ -130,14 +141,14 @@ class Test_ModPolyMapperModel(BasicTestCase):
         cfg = get_config_from_hydra(
             config_name=experiment_name,
             overrides_list=[
-                f"train_dataset.dataset.object_detection_dataset.input_csv_path={csv_path}",
-                f"train_dataset.dataset.object_detection_dataset.root_dir={detection_root_dir}",
-                f"train_dataset.dataset.polygon_rnn_dataset.input_csv_path={poly_csv_path}",
-                f"train_dataset.dataset.polygon_rnn_dataset.root_dir={polygon_rnn_root_dir}",
-                f"val_dataset.dataset.object_detection_dataset.input_csv_path={csv_path}",
-                f"val_dataset.dataset.object_detection_dataset.root_dir={detection_root_dir}",
-                f"val_dataset.dataset.polygon_rnn_dataset.input_csv_path={poly_csv_path}",
-                f"val_dataset.dataset.polygon_rnn_dataset.root_dir={polygon_rnn_root_dir}",
+                f"train_dataset.object_detection.input_csv_path={csv_path}",
+                f"train_dataset.object_detection.root_dir={detection_root_dir}",
+                f"train_dataset.polygon_rnn.input_csv_path={poly_csv_path}",
+                f"train_dataset.polygon_rnn.root_dir={polygon_rnn_root_dir}",
+                f"val_dataset.object_detection.input_csv_path={csv_path}",
+                f"val_dataset.object_detection.root_dir={detection_root_dir}",
+                f"val_dataset.polygon_rnn.input_csv_path={poly_csv_path}",
+                f"val_dataset.polygon_rnn.root_dir={polygon_rnn_root_dir}",
             ]
             + extra_overrides,
         )

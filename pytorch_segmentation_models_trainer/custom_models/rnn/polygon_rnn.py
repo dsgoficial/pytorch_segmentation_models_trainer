@@ -24,6 +24,7 @@ from collections import OrderedDict
 from logging import log
 import os
 from pathlib import Path
+from typing import Dict
 
 import segmentation_models_pytorch as smp
 import torch
@@ -568,7 +569,9 @@ class PolygonRNN(nn.Module):
 
         return result
 
-    def compute(self, batch: torch.Tensor, image_key=None) -> torch.Tensor:
+    def compute(
+        self, batch: Dict[str, torch.Tensor], image_key: str = None
+    ) -> torch.Tensor:
         image_key = "image" if image_key is None else image_key
         output = self.forward(batch[image_key], batch["x1"], batch["x2"], batch["x3"])
         return output.contiguous().view(-1, self.grid_size * self.grid_size + 3)
