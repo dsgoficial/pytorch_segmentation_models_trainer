@@ -184,13 +184,10 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         obj_det_images, obj_det_targets, _ = batch["object_detection"]
         polygon_rnn_batch = batch["polygon_rnn"]
         loss_dict, acc = self.model(obj_det_images, obj_det_targets, polygon_rnn_batch)
-        detached_loss_dict = {k: v for k, v in loss_dict.items()}
-        detached_loss_dict.update({"acc": acc})
-        return {
-            "loss": sum(loss for loss in loss_dict.values()),
-            "log": detached_loss_dict,
-            "progress_bar": detached_loss_dict,
-        }
+        self.log(
+            "train_acc", acc, on_step=True, prog_bar=True, logger=True, sync_dist=False
+        )
+        return {"loss": sum(loss for loss in loss_dict.values()), "log": loss_dict}
 
     def validation_step(self, batch, batch_idx):
         obj_det_images, obj_det_targets, _ = batch["object_detection"]
@@ -198,8 +195,6 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         self.model.train()
         loss_dict, acc = self.model(obj_det_images, obj_det_targets, polygon_rnn_batch)
         loss = sum(loss for loss in loss_dict.values())
-        # detached_loss_dict = {k: v for k, v in loss_dict.items()}
-        # detached_loss_dict.update({"acc": acc})
         self.log(
             "validation_loss",
             loss,
@@ -209,10 +204,7 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             logger=True,
             sync_dist=True,
         )
-        return_dict = {
-            "loss": loss,
-            # "log": detached_loss_dict,
-        }
+        return_dict = {"loss": loss, "log": loss_dict}
         if self.perform_evaluation:
             self.model.eval()
             outputs = self.model(obj_det_images)
