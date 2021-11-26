@@ -450,11 +450,19 @@ def get_extended_bounds(
         Tuple: extended bounds
     """
     np_polygon = np.array(polygon.exterior.coords)
+    return get_extended_bounds_from_np_array_polygon(
+        np_polygon, image_bounds, extend_factor=extend_factor
+    )
+
+
+def get_extended_bounds_from_np_array_polygon(
+    np_polygon, image_bounds, extend_factor: float = 0.1
+):
     image_width, image_height = image_bounds
     min_c = np.min(np_polygon, axis=0)
     max_c = np.max(np_polygon, axis=0)
-    h_extend = int(round(0.1 * (max_c[1] - min_c[1])))
-    w_extend = int(round(0.1 * (max_c[0] - min_c[0])))
+    h_extend = int(round(extend_factor * (max_c[1] - min_c[1])))
+    w_extend = int(round(extend_factor * (max_c[0] - min_c[0])))
     min_row = np.maximum(0, min_c[1] - h_extend)
     min_col = np.maximum(0, min_c[0] - w_extend)
     max_row = np.minimum(image_height, max_c[1] + h_extend)

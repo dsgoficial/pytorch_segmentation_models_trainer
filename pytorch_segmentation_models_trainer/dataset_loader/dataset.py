@@ -23,7 +23,7 @@ import json
 import os
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import albumentations as A
 import numpy as np
@@ -406,18 +406,18 @@ class PolygonRNNDataset(AbstractDataset):
         root_dir=None,
         augmentation_list=None,
         data_loader=None,
-        image_key=None,
-        mask_key=None,
-        image_width_key=None,
-        image_height_key=None,
-        scale_h_key=None,
-        scale_w_key=None,
-        min_col_key=None,
-        min_row_key=None,
-        original_image_path_key=None,
-        original_polygon_key=None,
-        n_first_rows_to_read=None,
-        dataset_type="train",
+        image_key: str = None,
+        mask_key: str = None,
+        image_width_key: str = None,
+        image_height_key: str = None,
+        scale_h_key: str = None,
+        scale_w_key: str = None,
+        min_col_key: str = None,
+        min_row_key: str = None,
+        original_image_path_key: str = None,
+        original_polygon_key: str = None,
+        n_first_rows_to_read: str = None,
+        dataset_type: str = "train",
         grid_size=28,
     ) -> None:
         super(PolygonRNNDataset, self).__init__(
@@ -462,25 +462,31 @@ class PolygonRNNDataset(AbstractDataset):
         point_num = len(json_file["polygon"])
         return polygon, point_num
 
-    def __getitem__(self, index: int) -> Dict[str, Any]:
-        image = self.load_image(
-            index, key=self.image_key, is_mask=False, force_rgb=True
-        )
+    def __getitem__(
+        self,
+        index: int,
+        load_images: bool = True,
+        get_bbox: bool = False,
+        original_image_bounds: Optional[Tuple] = None,
+    ) -> Dict[str, Any]:
         polygon, num_vertexes = self.load_polygon(index)
         label_array, label_index_array = polygonrnn_utils.build_arrays(
             polygon, num_vertexes, self.sequence_length, grid_size=self.grid_size
         )
-
-        if self.transform is not None:
-            augmented = self.transform(image=image)
-            image = augmented["image"]
         output_dict: Dict[str, Any] = {
-            "image": self.to_tensor(image).float(),
             "x1": self.to_tensor(label_array[2]).float(),
             "x2": self.to_tensor(label_array[:-2]).float(),
             "x3": self.to_tensor(label_array[1:-1]).float(),
             "ta": self.to_tensor(label_index_array[2:]).long(),
         }
+        if get_bbox:
+            img_bounds = (
+                (300, 300) if original_image_bounds is None else original_image_bounds
+            )
+            bbox = polygonrnn_utils.get_extended_bounds_from_np_array_polygon(
+                polygon, img_bounds, extend_factor=0.1
+            )
+            output_dict.update({"bbox": torch.floor(torch.tensor(bbox))})
         if self.dataset_type == "val":
             output_dict.update(
                 {
@@ -494,6 +500,14 @@ class PolygonRNNDataset(AbstractDataset):
                     ),
                 }
             )
+        if load_images:
+            image = self.load_image(
+                index, key=self.image_key, is_mask=False, force_rgb=True
+            )
+            if self.transform is not None:
+                augmented = self.transform(image=image)
+                image = augmented["image"]
+            output_dict.update({"image": self.to_tensor(image).float()})
         return output_dict
 
     def get_images_from_image_path(self, image_path: str) -> Dict[str, Any]:
@@ -753,21 +767,32 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
         self,
         object_detection_dataset: ObjectDetectionDataset,
         polygon_rnn_dataset: PolygonRNNDataset,
+        crop_polygons_to_bboxes: bool = True,
     ) -> None:
         super(ModPolyMapperDataset, self).__init__(
             object_detection_dataset=object_detection_dataset,
             polygon_rnn_dataset=polygon_rnn_dataset,
         )
+        self.crop_polygons_to_bboxes = crop_polygons_to_bboxes
 
     def get_polygonrnn_data_within_bboxes(
         self, idx: int, bboxes: Union[torch.Tensor, List], image_bounds_list: List
     ) -> Dict[str, torch.Tensor]:
-        polygon_list = self.get_polygonrnn_polygons(idx)
-        croped_polygon_dict_list = polygonrnn_utils.crop_and_rescale_polygons_to_bounding_boxes(
-            polygon_list, bboxes, image_bounds_list
+        polygon_data = self.get_polygonrnn_polygon_data(
+            idx, original_image_bounds=tuple(image_bounds_list[0])
+        )
+        polygon_dict_list = (
+            polygonrnn_utils.crop_and_rescale_polygons_to_bounding_boxes(
+                polygon_data, bboxes, image_bounds_list
+            )
+            if self.crop_polygons_to_bboxes
+            else polygon_data
         )
         targets = []
-        for list_item in croped_polygon_dict_list:
+        for list_item in polygon_dict_list:
+            if not self.crop_polygons_to_bboxes:
+                targets.append(list_item)
+                continue
             polygon = list_item.pop("polygon")
             if np.isnan(polygon).any():
                 continue
@@ -788,28 +813,55 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
             item.update({k: torch.tensor(v) for k, v in list_item.items()})
             targets.append(item)
 
-        return {
+        return_dict = {
             "x1": torch.stack([item["x1"] for item in targets]),
             "x2": torch.stack([item["x2"] for item in targets]),
             "x3": torch.stack([item["x3"] for item in targets]),
             "ta": torch.stack([item["ta"] for item in targets]),
-            "scale_h": torch.stack([item["scale_h"] for item in targets]),
-            "scale_w": torch.stack([item["scale_w"] for item in targets]),
-            "min_row": torch.stack([item["min_row"] for item in targets]),
-            "min_col": torch.stack([item["min_col"] for item in targets]),
-            # this is done to consider cases where cropped boxes lead to multipolygon
-            "boxes": torch.stack([item["bbox"] for item in targets]),
+            "boxes": torch.stack([item["bbox"] for item in targets]).float(),
         }
+        if self.polygon_rnn_dataset.dataset_type == "val":
+            return_dict.update(
+                {
+                    "scale_h": torch.stack(
+                        [torch.tensor(item["scale_h"]) for item in targets]
+                    ),
+                    "scale_w": torch.stack(
+                        [torch.tensor(item["scale_w"]) for item in targets]
+                    ),
+                    "min_row": torch.stack(
+                        [torch.tensor(item["min_row"]) for item in targets]
+                    ),
+                    "min_col": torch.stack(
+                        [torch.tensor(item["min_col"]) for item in targets]
+                    ),
+                }
+            )
+        return return_dict
 
-    def get_polygonrnn_polygons(self, idx: int) -> List[Union[BaseGeometry, Polygon]]:
+    def get_polygonrnn_polygon_data(
+        self, idx: int, original_image_bounds: Optional[Tuple] = None
+    ) -> List[Any]:
         image_path = self.object_detection_dataset.get_path(
             idx, key=self.object_detection_dataset.image_key, add_root_dir=False
         )
         entries = self.polygon_rnn_dataset.get_entries_from_image_path(image_path)
-        return [
-            shapely.wkt.loads(polygon_wkt)
-            for polygon_wkt in entries["original_polygon_wkt"]
-        ]
+        return (
+            [
+                shapely.wkt.loads(polygon_wkt)
+                for polygon_wkt in entries["original_polygon_wkt"]
+            ]
+            if self.crop_polygons_to_bboxes
+            else [
+                self.polygon_rnn_dataset.__getitem__(
+                    idx,
+                    load_images=False,
+                    get_bbox=True,
+                    original_image_bounds=original_image_bounds,
+                )
+                for idx in entries.index.tolist()
+            ]
+        )
 
     def __getitem__(
         self, index: int
