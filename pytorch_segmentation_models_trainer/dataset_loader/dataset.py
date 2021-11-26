@@ -767,7 +767,6 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
         self,
         object_detection_dataset: ObjectDetectionDataset,
         polygon_rnn_dataset: PolygonRNNDataset,
-        crop_polygons_to_bboxes: bool = True,
     ) -> None:
         super(ModPolyMapperDataset, self).__init__(
             object_detection_dataset=object_detection_dataset,
@@ -794,7 +793,7 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
         }
         croped_images = dict_items_to_update.pop("image")
         ds_item_dict.update(dict_items_to_update)
-        return image, croped_images, ds_item_dict, index
+        return image, ds_item_dict, index
 
     @staticmethod
     def collate_fn(
@@ -805,11 +804,10 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
         :return: a tensor of images, lists of varying-size tensors of bounding boxes, labels, and difficulties
         """
 
-        images, croped_images, targets, indexes = tuple(zip(*batch))
+        images, targets, indexes = tuple(zip(*batch))
         images = torch.stack(images, dim=0)
-        croped_images = torch.cat(croped_images, dim=0)
         indexes = torch.tensor(indexes, dtype=torch.int64)
-        return images, croped_images, list(targets), indexes
+        return images, list(targets), indexes
 
 
 if __name__ == "__main__":

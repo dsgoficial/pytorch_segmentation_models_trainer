@@ -662,7 +662,6 @@ class Test_Dataset(CustomTestCase):
         self.assertEqual(target["x2"].shape, (2, 58, 787))
         self.assertEqual(target["x3"].shape, (2, 58, 787))
         self.assertEqual(target["ta"].shape, (2, 58))
-        self.assertEqual(target["croped_images"].shape, (2, 3, 224, 224))
         # test batch build
         data_loader = torch.utils.data.DataLoader(
             ds,

@@ -397,14 +397,14 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
 
     @rank_zero_only
     def on_validation_end(self, trainer, pl_module):
-        val_ds = pl_module.val_dataloader()
+        val_ds = pl_module.val_dataloader().loaders
         self.n_samples = (
-            pl_module.val_dataloader().batch_size
+            val_ds["object_detection"].batch_size
             if self.n_samples is None
             else self.n_samples
         )
         current_item = 0
-        for images, targets, indexes in val_ds:
+        for images, targets, indexes in val_ds["object_detection"]:
             if current_item >= self.n_samples:
                 break
             image_display = batch_denormalize_tensor(
@@ -428,9 +428,7 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
                     [targets[idx]], [outputs[idx]]
                 )
                 self.build_polygon_vis(
-                    image_path=val_ds.dataset.object_detection_dataset.get_path(
-                        int(indexes[idx])
-                    ),
+                    image_path=val_ds["object_detection"].get_path(int(indexes[idx])),
                     original_image=image_display[idx].cpu().numpy().transpose(1, 2, 0),
                     gt_polygon_list=gt_polygon_list,
                     predicted_polygon_list=predicted_polygon_list,
