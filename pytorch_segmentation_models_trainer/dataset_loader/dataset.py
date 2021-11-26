@@ -769,6 +769,8 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
         targets = []
         for list_item in croped_polygon_dict_list:
             polygon = list_item.pop("polygon")
+            if np.isnan(polygon).any():
+                continue
             num_vertexes = len(polygon) - 1
             label_array, label_index_array = polygonrnn_utils.build_arrays(
                 polygon,

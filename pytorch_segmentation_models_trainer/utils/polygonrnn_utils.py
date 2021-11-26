@@ -385,7 +385,10 @@ def crop_polygons_to_bounding_boxes(
     polygons: List[Polygon], bounding_boxes: List
 ) -> List[Polygon]:
     polygons_to_crop = []
-    for polygon in polygons:
+    valid_polygons = itertools.chain.from_iterable(
+        list(map(validate_polygon, polygons))
+    )
+    for polygon in valid_polygons:
         for bbox in bounding_boxes:
             if polygon.intersects(bbox):
                 polygon = polygon.intersection(bbox)
@@ -533,6 +536,7 @@ def crop_and_rescale_polygons_to_bounding_boxes(
         for polygon, bbox, (scale_h, scale_w), (min_row, min_col, _, __) in zip(
             croped_polygons, bboxes, scales, extended_polygons_bounds
         )
+        if scale_w
     ]
 
 
