@@ -577,8 +577,8 @@ def target_list_to_dict(
 def build_polygonrnn_extra_info_from_bboxes(
     bboxes: torch.Tensor, target_height: float = 224.0, target_width: float = 224.0
 ) -> Dict[str, torch.Tensor]:
-    object_h = bboxes[:, 2] - bboxes[:, 0]
-    object_w = bboxes[:, 3] - bboxes[:, 1]
+    object_h = bboxes[:, 3] - bboxes[:, 1]
+    object_w = bboxes[:, 2] - bboxes[:, 0]
     scale_h = target_height / object_h
     scale_w = target_width / object_w
     return {
