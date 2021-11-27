@@ -207,6 +207,9 @@ def get_vertex_list_from_batch_tensors(
     def cast_func(x):
         return np.array(x, dtype=np.float32)
 
+    if input_batch == []:
+        return []
+
     return [
         get_vertex_list_from_numpy(
             x,
@@ -573,20 +576,33 @@ def target_list_to_dict(
 
 def build_polygonrnn_extra_info_from_bboxes(
     bboxes: torch.Tensor, target_height: float = 224.0, target_width: float = 224.0
-):
-    outputs_dict = {"min_row": bboxes[:, 0], "min_col": bboxes[:, 1]}
+) -> Dict[str, torch.Tensor]:
+    object_h = bboxes[:, 2] - bboxes[:, 0]
+    object_w = bboxes[:, 3] - bboxes[:, 1]
+    scale_h = target_height / object_h
+    scale_w = target_width / object_w
+    return {
+        "scale_h": scale_h,
+        "scale_w": scale_w,
+        "min_row": bboxes[:, 1],
+        "min_col": bboxes[:, 0],
+    }
 
-    def get_scales_func(x):
-        return get_scales(
-            min_row=x[0],
-            min_col=x[1],
-            max_row=x[2],
-            max_col=x[3],
-            target_height=target_height,
-            target_width=target_width,
-        )
 
-    scales = torch.tensor(list(map(get_scales_func, list(bboxes))))
-    outputs_dict["scale_h"] = scales[:, 0]
-    outputs_dict["scale_w"] = scales[:, 1]
-    return outputs_dict
+def get_extended_bounds_from_tensor_bbox(
+    boxes: torch.Tensor, image_bounds: Tuple, extend_factor: float = 0.1
+) -> torch.Tensor:
+    image_rows, image_cols = image_bounds
+    y1 = boxes[:, 0]  # min_row
+    x1 = boxes[:, 1]  # min_col
+    y2 = boxes[:, 2]  # max_row
+    x2 = boxes[:, 3]  # max_col
+    h_extend = (extend_factor * (y2 - y1)).int()
+    w_extend = (extend_factor * (x2 - x1)).int()
+
+    min_row = (y1 - h_extend).clamp(min=0, max=image_rows).int()
+    min_col = (x1 - w_extend).clamp(min=0, max=image_cols).int()
+    max_row = (y2 + h_extend).clamp(min=0, max=image_rows).int()
+    max_col = (x2 + w_extend).clamp(min=0, max=image_cols).int()
+
+    return torch.stack([min_row, min_col, max_row, max_col], dim=-1)

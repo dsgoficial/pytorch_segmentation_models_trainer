@@ -346,6 +346,7 @@ class GenericModPolyMapper(nn.Module):
         obj_det_images: torch.Tensor,
         obj_det_targets: Optional[torch.Tensor] = None,
         polygon_rnn_batch: Optional[Dict[str, torch.Tensor]] = None,
+        threshold: Optional[float] = None,
     ) -> Union[torch.Tensor, Tuple[Dict[str, torch.Tensor], torch.Tensor]]:
         if self.training:
             assert (
@@ -365,6 +366,11 @@ class GenericModPolyMapper(nn.Module):
             losses.update({"polygonrnn_loss": polygonrnn_loss})
             return losses, acc
         detections = self.obj_detection_model(obj_det_images)
+        if threshold is not None:
+            detections = [
+                {key: det[key][det["scores"] > threshold] for key in det.keys()}
+                for det in detections
+            ]
 
         for idx, item in enumerate(detections):
             if item["boxes"].shape[0] == 0:
@@ -381,18 +387,24 @@ class GenericModPolyMapper(nn.Module):
                     }
                 )
                 continue
+            extended_bboxes = polygonrnn_utils.get_extended_bounds_from_tensor_bbox(
+                item["boxes"], obj_det_images[idx].shape[1::], extend_factor=0.1
+            )
+            detections[idx].update({"extended_bboxes": extended_bboxes})
+            detections[idx].update(
+                polygonrnn_utils.build_polygonrnn_extra_info_from_bboxes(
+                    extended_bboxes
+                )
+            )
             croped_images = roi_align(
                 obj_det_images[idx].unsqueeze(0),
-                boxes=[item["boxes"]],
+                boxes=[extended_bboxes.float()],
                 output_size=(224, 224),
             )
             polygonrnn_output = self.polygonrnn_model.test(
                 croped_images, self.val_seq_len  # type: ignore
             )
-            detections[idx].update(polygonrnn_output)
-            detections[idx].update(
-                polygonrnn_utils.build_polygonrnn_extra_info_from_bboxes(item["boxes"])
-            )
+            detections[idx].update({"polygonrnn_output": polygonrnn_output})
         return detections
 
 
