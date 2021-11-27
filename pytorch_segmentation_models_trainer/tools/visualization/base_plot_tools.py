@@ -154,15 +154,17 @@ def generate_bbox_visualization(
     show_scores: bool = False,
     colors: Optional[List] = None,
     boxes_key: str = "boxes",
+    labels_key: str = "labels",
+    scores_key: str = "scores",
 ) -> None:
     cmap = plt.get_cmap("tab20b")
     colors = [cmap(i) for i in np.linspace(0, 1, 20)] if colors is None else colors
-    labels = set(label for label in detection_dict["labels"])
+    labels = set(label for label in detection_dict[labels_key])
     color_dict = {label: color for label, color in zip(labels, colors)}
     for idx, (x1, y1, x2, y2) in enumerate(detection_dict[boxes_key]):
         box_h = y2 - y1
         box_w = x2 - x1
-        color = color_dict[detection_dict["labels"][idx]]
+        color = color_dict[detection_dict[labels_key][idx]]
         bbox = patches.Rectangle(
             (x1, y1),
             box_w,
@@ -174,7 +176,7 @@ def generate_bbox_visualization(
         obj_det_axis.add_patch(bbox)
         if not show_scores:
             continue
-        score = 100 * detection_dict["scores"][idx]
+        score = 100 * detection_dict[scores_key][idx]
         obj_det_axis.text(
             x1,
             y1,

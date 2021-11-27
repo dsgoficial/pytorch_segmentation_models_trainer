@@ -430,13 +430,6 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
             min_row=detection_dict["min_row"],
             min_col=detection_dict["min_col"],
         )
-        # predicted_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
-        #     prepared_item["ta"],
-        #     scale_h=prepared_item["scale_h"],
-        #     scale_w=prepared_item["scale_w"],
-        #     min_col=prepared_item["min_col"],
-        #     min_row=prepared_item["min_row"],
-        # )
         self.build_obj_det_and_polygon_vis(
             image_path=image_path,
             original_image=prepared_item["original_image"],
@@ -460,11 +453,10 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
             fig_title=plot_title,
             fig_size=(10, 6),
             detected_bboxes=original_image,
-            expanded_bboxes=original_image,
             expected_polygons=original_image,
             predicted_polygons=original_image,
         )
-        bbox_axes, expanded_axes, gt_axes, predicted_axes = plt.gcf().get_axes()
+        bbox_axes, gt_axes, predicted_axes = plt.gcf().get_axes()
         if detection_dict["boxes"].shape[0] > 0:
             generate_bbox_visualization(
                 bbox_axes,
@@ -475,17 +467,6 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
                 },
                 show_scores=self.show_label_scores,
                 colors=["chartreuse"],
-            )
-            generate_bbox_visualization(
-                expanded_axes,
-                {
-                    k: v.cpu().numpy()
-                    for k, v in detection_dict.items()
-                    if k in ["extended_bboxes", "labels", "scores"]
-                },
-                show_scores=self.show_label_scores,
-                colors=["chartreuse"],
-                boxes_key="extended_bboxes",
             )
         plot_polygons(gt_axes, gt_polygon_list, markersize=5)
         plot_polygons(predicted_axes, predicted_polygon_list, markersize=5)
