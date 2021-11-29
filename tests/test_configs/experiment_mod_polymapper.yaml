@@ -13,8 +13,8 @@ optimizer:
 
 hyperparameters:
   batch_size: 2
-  object_detection_batch_size: 2
-  polygon_rnn_batch_size: 2
+  object_detection_batch_size: 4
+  polygon_rnn_batch_size: 4
   epochs: 1
   max_lr: 0.1
 
@@ -31,8 +31,8 @@ train_dataset:
     augmentation_list:
       - _target_: albumentations.CenterCrop
         always_apply: true
-        height: 512
-        width: 512
+        height: 300
+        width: 300
         p: 1.0
       - _target_: albumentations.HueSaturationValue
         always_apply: false

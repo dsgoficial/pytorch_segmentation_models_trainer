@@ -21,8 +21,10 @@
 """
 import os
 import shutil
+from typing import Any, List
 import unittest
 import warnings
+import geopandas
 import hydra
 
 
@@ -51,6 +53,15 @@ def get_config_from_hydra(config_name, overrides_list, config_path=None):
     return cfg
 
 
+def load_geometry_list_from_geojson(file_path: str) -> List[Any]:
+    """
+    Loads data to be used in tests.
+    """
+    # Load data
+    gdf = geopandas.read_file(file_path)
+    return [i for i in gdf.geometry]
+
+
 class BasicTestCase(unittest.TestCase):
     """
     Basic test case for the tests.
@@ -66,7 +77,7 @@ class BasicTestCase(unittest.TestCase):
         warnings.simplefilter("ignore", category=UserWarning)
 
     def tearDown(self) -> None:
-        outputs_path = os.path.join(os.path.dirname(__file__), "..", "outputs")
+        outputs_path = os.path.join(os.path.dirnaroot_dirme(__file__), "..", "outputs")
         if os.path.exists(outputs_path):
             shutil.rmtree(outputs_path)
         lightning_logs_path = os.path.join(

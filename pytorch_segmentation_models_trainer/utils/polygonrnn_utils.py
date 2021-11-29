@@ -356,7 +356,7 @@ def _initialize_label_index_array(
     label_index_array[point_count] = index
 
 
-def handle_vertices(vertices):
+def handle_vertices(vertices: Union[List, BaseGeometry]) -> BaseGeometry:
     if isinstance(vertices, BaseGeometry):
         return vertices
     vertices_array = np.array(vertices)
