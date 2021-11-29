@@ -156,21 +156,17 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             tensorboard_logs.update(
                 {
                     f"avg_{key}": {
-                        step_type: torch.stack([x["log"][key] for x in outputs]).mean()
+                        step_type: torch.cat(
+                            [
+                                x["log"][key].unsqueeze(0).float()
+                                if x["log"][key].shape == torch.Size([])
+                                else x["log"][key].float()
+                                for x in outputs
+                            ]
+                        ).mean()
                     }
                 }
             )
-        if self.perform_evaluation:
-            for metric_key in outputs[0]["log"].keys():
-                tensorboard_logs.update(
-                    {
-                        f"avg_{metric_key}": {
-                            step_type: torch.stack(
-                                [x["log"][metric_key] for x in outputs]
-                            ).mean()
-                        }
-                    }
-                )
         return tensorboard_logs
 
     def training_step(self, batch, batch_idx):
@@ -257,7 +253,7 @@ class GenericPolyMapperPLModel(pl.LightningModule):
                 object_detection_utils.evaluate_box_iou(t, o)
                 for t, o in zip(obj_det_targets, outputs)
             ]
-        ).mean()
+        )
         mAP = self.val_mAP(outputs, obj_det_targets)
 
         return box_iou, mAP
