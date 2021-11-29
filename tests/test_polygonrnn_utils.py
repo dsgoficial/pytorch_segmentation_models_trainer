@@ -155,6 +155,7 @@ class Test_PolygonRNNUtils(unittest.TestCase):
         ]
         for idx, output in enumerate(output_polygon_list):
             polygon = shapely.geometry.Polygon(output.pop("polygon"))
+            output.pop("bbox")
             scaled_polygon = polygonrnn_utils.scale_shapely_polygon(polygon, **output)
             self.assertTrue(
                 scaled_polygon.almost_equals(expected_outputs[idx])

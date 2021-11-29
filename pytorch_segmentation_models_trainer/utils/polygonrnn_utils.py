@@ -502,9 +502,12 @@ def crop_and_rescale_polygons_to_bounding_boxes(
     croped_polygons = crop_polygons_to_bounding_boxes(polygons, shapely_boxes)
     bboxes = (
         torch.Tensor(
-            get_bboxes_from_polygons(croped_polygons), device=bounding_boxes.device
+            get_bboxes_from_polygons(croped_polygons),
+            device=bounding_boxes.device
+            if isinstance(bounding_boxes, torch.Tensor)
+            else "cpu",
         )
-        if len(croped_polygons) > bounding_boxes.shape[0]
+        if len(croped_polygons) > len(bounding_boxes)
         else bounding_boxes
     )
 
