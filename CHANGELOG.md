@@ -1,4 +1,4 @@
-# Veresion 0.16.0
+# Version 0.16.0
 
 - New Mod PolyMapper model;
 - Matching methods added;
