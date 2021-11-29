@@ -23,6 +23,9 @@ import os
 from pathlib import Path
 from typing import Dict, List
 
+import albumentations as A
+from albumentations.pytorch.transforms import ToTensorV2
+from pytorch_toolbelt.utils import image_to_tensor, rgb_image_from_tensor
 import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl
@@ -32,6 +35,7 @@ from pytorch_lightning.utilities import rank_zero_only
 from pytorch_segmentation_models_trainer.tools.visualization.base_plot_tools import (
     batch_denormalize_tensor,
     denormalize_np_array,
+    generate_bbox_visualization,
     generate_visualization,
     visualize_image_with_bboxes,
 )
@@ -365,6 +369,7 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
         norm_params=None,
         log_every_k_epochs=1,
         threshold=0.5,
+        show_label_scores=False,
     ) -> None:
         super().__init__(
             n_samples=n_samples,
@@ -374,65 +379,104 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
             log_every_k_epochs=log_every_k_epochs,
         )
         self.threshold = threshold
-
-    def get_polygon_lists(self, targets, outputs):
-        targets_dict = polygonrnn_utils.target_list_to_dict(targets)
-        outputs_dict = polygonrnn_utils.target_list_to_dict(outputs)
-        gt_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
-            targets_dict["ta"],
-            targets_dict["scale_h"],
-            targets_dict["scale_w"],
-            targets_dict["min_col"],
-            targets_dict["min_row"],
-        )
-
-        predicted_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
-            outputs_dict["polygonrnn_output"],
-            outputs_dict["scale_h"],
-            outputs_dict["scale_w"],
-            outputs_dict["min_col"],
-            outputs_dict["min_row"],
-        )
-        return gt_polygon_list, predicted_polygon_list
+        self.show_label_scores = show_label_scores
 
     @rank_zero_only
-    def on_validation_end(self, trainer, pl_module):
-        val_ds = pl_module.val_dataloader().loaders
+    def on_validation_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+        val_ds = pl_module.val_dataloader().loaders  # type: ignore
         self.n_samples = (
-            val_ds["object_detection"].batch_size
+            val_ds["object_detection"].loader.batch_size
             if self.n_samples is None
             else self.n_samples
         )
         current_item = 0
-        for images, targets, indexes in val_ds["object_detection"]:
+        prepared_input = val_ds[
+            "polygon_rnn"
+        ].loader.dataset.get_n_image_path_dict_list(self.n_samples)
+        model = pl_module.model
+        model.eval()  # type: ignore
+        aug_func = A.Compose([A.Normalize(), ToTensorV2()])
+        for image_path, prepared_item in prepared_input.items():
             if current_item >= self.n_samples:
                 break
-            image_display = batch_denormalize_tensor(
-                images, clip_range=[0, 255], output_type=torch.uint8
-            ).to("cpu")
-            outputs = pl_module(images.to(pl_module.device))
-            boxes = [
-                out["boxes"][out["scores"] > self.threshold].to("cpu")
-                for out in outputs
-            ]
-            visualization_list = visualize_image_with_bboxes(
-                image_display.to("cpu"), boxes
+            image_tensor = aug_func(image=prepared_item["original_image"])["image"].to(
+                pl_module.device
             )
-            for idx, vis in enumerate(visualization_list):
-                trainer.logger.experiment.add_image(
-                    val_ds.dataset.object_detection_dataset.get_path(int(indexes[idx])),
-                    vis,
-                    trainer.current_epoch,
-                )
-                gt_polygon_list, predicted_polygon_list = self.get_polygon_lists(
-                    [targets[idx]], [outputs[idx]]
-                )
-                self.build_polygon_vis(
-                    image_path=val_ds["object_detection"].get_path(int(indexes[idx])),
-                    original_image=image_display[idx].cpu().numpy().transpose(1, 2, 0),
-                    gt_polygon_list=gt_polygon_list,
-                    predicted_polygon_list=predicted_polygon_list,
-                    trainer=trainer,
-                )
-                current_item += 1
+            with torch.no_grad():
+                outputs = model(
+                    image_tensor.unsqueeze(0), threshold=self.threshold
+                )  # type: ignore
+            self.prepare_and_build_polygonrnn_vis(
+                trainer=trainer,
+                image_path=image_path,
+                prepared_item=prepared_item,
+                detection_dict=outputs[0],
+            )
+            current_item += 1
         return
+
+    def prepare_and_build_polygonrnn_vis(
+        self,
+        trainer: pl.Trainer,
+        image_path: str,
+        prepared_item: Dict[str, torch.Tensor],
+        detection_dict: Dict[str, torch.Tensor],
+    ) -> None:
+        gt_polygon_list = prepared_item["shapely_polygon_list"]
+        predicted_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
+            detection_dict["polygonrnn_output"],
+            scale_h=detection_dict["scale_h"],
+            scale_w=detection_dict["scale_w"],
+            min_row=detection_dict["min_row"],
+            min_col=detection_dict["min_col"],
+        )
+        self.build_obj_det_and_polygon_vis(
+            image_path=image_path,
+            original_image=prepared_item["original_image"],
+            detection_dict=detection_dict,
+            gt_polygon_list=gt_polygon_list,
+            predicted_polygon_list=predicted_polygon_list,
+            trainer=trainer,
+        )
+
+    def build_obj_det_and_polygon_vis(
+        self,
+        image_path,
+        original_image,
+        detection_dict,
+        gt_polygon_list,
+        predicted_polygon_list,
+        trainer,
+    ):
+        plot_title = image_path
+        plt_result, fig = generate_visualization(
+            fig_title=plot_title,
+            fig_size=(10, 6),
+            detected_bboxes=original_image,
+            expected_polygons=original_image,
+            predicted_polygons=original_image,
+        )
+        bbox_axes, gt_axes, predicted_axes = plt.gcf().get_axes()
+        if detection_dict["boxes"].shape[0] > 0:
+            generate_bbox_visualization(
+                bbox_axes,
+                {
+                    k: v.cpu().numpy()
+                    for k, v in detection_dict.items()
+                    if k in ["boxes", "labels", "scores"]
+                },
+                show_scores=self.show_label_scores,
+                colors=["chartreuse"],
+            )
+        plot_polygons(gt_axes, gt_polygon_list, markersize=5)
+        plot_polygons(predicted_axes, predicted_polygon_list, markersize=5)
+        fig.tight_layout()
+        fig.subplots_adjust(top=0.95)
+        saved_image = None
+        if self.save_outputs:
+            saved_image = self.save_plot_to_disk(plt, plot_title, trainer.current_epoch)
+            self.log_data_to_tensorboard(
+                saved_image, plot_title, trainer.logger, trainer.current_epoch
+            )
+        plt.close(fig)
+        return saved_image
