@@ -575,11 +575,11 @@ class Test_Dataset(CustomTestCase):
             obj_det_ds, batch_size=4, shuffle=False, collate_fn=obj_det_ds.collate_fn
         )
         for _, batch_item in enumerate(batch):
-            batch_images, batch_targets = batch_item
+            batch_images, batch_targets, indexes = batch_item
             self.assertEqual(batch_images.shape, (4, 3, 512, 512))
             self.assertEqual(len(batch_targets), 4)
         self.assertEqual(len(obj_det_ds), 12)
-        image, target = obj_det_ds[0]
+        image, target, index = obj_det_ds[0]
         self.assertEqual(image.shape, (3, 512, 512))
         self.assertEqual(target["boxes"].shape, (1, 4))
         self.assertEqual(target["labels"].shape, (1,))
@@ -595,7 +595,7 @@ class Test_Dataset(CustomTestCase):
             ),
         )
         self.assertEqual(len(obj_det_ds), 12)
-        image, target = obj_det_ds[0]
+        image, target, index = obj_det_ds[0]
         self.assertEqual(image.shape, (3, 571, 571))
         self.assertEqual(target["boxes"].shape, (2, 4))
         self.assertEqual(target["labels"].shape, (2,))
@@ -621,9 +621,8 @@ class Test_Dataset(CustomTestCase):
             ),
         )
         self.assertEqual(len(ds), 12)
-        image, croped_images, target, index = ds[0]
+        image, target, index = ds[0]
         self.assertEqual(image.shape, (3, 512, 512))
-        self.assertEqual(croped_images.shape, (3, 224, 224))
         self.assertEqual(target["boxes"].shape, (1, 4))
         self.assertEqual(target["labels"].shape, (1,))
         self.assertEqual(len(target["polygon_rnn_data"]), 2)

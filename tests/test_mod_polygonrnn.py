@@ -130,10 +130,6 @@ class Test_ModPolyMapperModel(BasicTestCase):
         for n, x in model.named_parameters():
             assert x.grad is not None, f"No gradient for {n}"
 
-    @unittest.skipIf(
-        not torch.cuda.is_available(),
-        reason="No GPU available, test is too memory expensive to be run on CPU",
-    )
     @parameterized.expand(
         [
             (
@@ -142,6 +138,10 @@ class Test_ModPolyMapperModel(BasicTestCase):
             ),
             ("experiment_mod_polymapper_with_callback.yaml", None),
         ]
+    )
+    @unittest.skipIf(
+        not torch.cuda.is_available(),
+        reason="No GPU available, test is too memory expensive to be run on CPU",
     )
     def test_pl_model_train(self, experiment_name, extra_overrides=None) -> None:
         extra_overrides = extra_overrides if extra_overrides is not None else []
