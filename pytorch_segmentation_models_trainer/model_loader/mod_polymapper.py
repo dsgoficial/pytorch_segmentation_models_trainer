@@ -18,32 +18,22 @@
  *                                                                         *
  ****
 """
-import os
-from collections import OrderedDict
-from logging import log
-from pathlib import Path
-from typing import Dict
 
-import segmentation_models_pytorch as smp
+from typing import Dict, List, Union
+
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.init
 from hydra.utils import instantiate
-from omegaconf.dictconfig import DictConfig
-import pytorch_lightning as pl
 from pytorch_lightning.trainer.supporters import CombinedLoader
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
-from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import PolygonRNN
-from pytorch_segmentation_models_trainer.model_loader.model import Model
 from pytorch_segmentation_models_trainer.utils import (
     object_detection_utils,
     polygonrnn_utils,
-    tensor_utils,
 )
 from torch import nn
 from torch.utils.data import DataLoader
-
-current_dir = os.path.dirname(__file__)
 
 
 class GenericPolyMapperPLModel(pl.LightningModule):
@@ -234,22 +224,41 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             self.model.eval()
             outputs = self.model(obj_det_images)
             metrics_dict_item = self.evaluate_output(batch, outputs)
-            return_dict.update(metrics_dict_item)
+            return_dict["log"].update(metrics_dict_item)
         return return_dict
 
-    def evaluate_output(self, batch, outputs):
-        images, targets = batch
-        targets_dict = polygonrnn_utils.target_list_to_dict(targets)
-        outputs_dict = polygonrnn_utils.target_list_to_dict(outputs)
+    def evaluate_output(
+        self, batch, outputs: List[Dict[str, torch.Tensor]]
+    ) -> Dict[str, Union[float, torch.Tensor]]:
+        obj_det_images, obj_det_targets, _ = batch["object_detection"]
+        polygon_rnn_batch = batch["polygon_rnn"]
+        box_iou = torch.stack(
+            [
+                object_detection_utils.evaluate_box_iou(t, o)
+                for t, o in zip(obj_det_targets, outputs)
+            ]
+        ).mean()
 
-        gt_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
-            targets_dict["ta"],
-            targets_dict["scale_h"],
-            targets_dict["scale_w"],
-            targets_dict["min_col"],
-            targets_dict["min_row"],
+        batch_polis, intersection, union = self._compute_polygonrnn_metrics(
+            outputs, polygon_rnn_batch
         )
 
+        return {
+            "polis": batch_polis,
+            "intersection": intersection,
+            "union": union,
+            "box_iou": box_iou,
+        }
+
+    def _compute_polygonrnn_metrics(self, outputs, polygon_rnn_batch):
+        outputs_dict = polygonrnn_utils.target_list_to_dict(outputs)
+        gt_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
+            polygon_rnn_batch["ta"],
+            polygon_rnn_batch["scale_h"],
+            polygon_rnn_batch["scale_w"],
+            polygon_rnn_batch["min_col"],
+            polygon_rnn_batch["min_row"],
+        )
         predicted_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
             outputs_dict["polygonrnn_output"],
             outputs_dict["scale_h"],
@@ -269,27 +278,12 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         )
         intersection = output_tensor_iou[:, 1]
         union = output_tensor_iou[:, 2]
-
-        box_iou = torch.stack(
-            [
-                object_detection_utils.evaluate_box_iou(t, o)
-                for t, o in zip(targets_dict["boxes"], outputs_dict["boxes"])
-            ]
-        ).mean()
-
-        return {
-            "polis": batch_polis,
-            "intersection": intersection,
-            "union": union,
-            "box_iou": box_iou,
-        }
+        return batch_polis, intersection, union
 
     def training_epoch_end(self, outputs):
         tensorboard_logs = self._build_tensorboard_logs(outputs)
         self.log_dict(tensorboard_logs, logger=True)
-        pass
 
     def validation_epoch_end(self, outputs):
         tensorboard_logs = self._build_tensorboard_logs(outputs, step_type="val")
         self.log_dict(tensorboard_logs, logger=True)
-        pass

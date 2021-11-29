@@ -16,8 +16,6 @@
  *   the Free Software Foundation; either version 2 of the License, or     *
  *   (at your option) any later version.                                   *
  *                                                                         *
- *   Code inspired by the one in                                           *
- *   https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning/     *
  ****
 """
 
@@ -32,7 +30,7 @@ import torch
 from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 
 
-def iou(y_pred, y_true, threshold):
+def iou(y_pred: torch.Tensor, y_true: torch.Tensor, threshold: float) -> float:
     assert (
         len(y_pred.shape) == len(y_true.shape) == 2
     ), "Input tensor shapes should be (N, .)"
@@ -125,7 +123,7 @@ def polis(polygon_a: Polygon, polygon_b: Polygon) -> float:
     )
 
 
-def _one_side_polis(coords: List, bounds: LineString) -> float:
+def _one_side_polis(coords: List[Tuple[float, float]], bounds: LineString) -> float:
     """Compute the polis metric for one side of a polygon.
 
     Args:
@@ -141,7 +139,10 @@ def _one_side_polis(coords: List, bounds: LineString) -> float:
     return float(distance_sum / float(2 * len(coords)))
 
 
-def batch_polis(batch_polygon_a: np.ndarray, batch_polygon_b: np.ndarray) -> np.ndarray:
+def batch_polis(
+    batch_polygon_a: Union[np.ndarray, List[np.ndarray]],
+    batch_polygon_b: Union[np.ndarray, List[np.ndarray]],
+) -> np.ndarray:
     """Compute the polis metric between two polygon batches.
 
     Args:

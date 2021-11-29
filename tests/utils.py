@@ -77,7 +77,7 @@ class BasicTestCase(unittest.TestCase):
         warnings.simplefilter("ignore", category=UserWarning)
 
     def tearDown(self) -> None:
-        outputs_path = os.path.join(os.path.dirnaroot_dirme(__file__), "..", "outputs")
+        outputs_path = os.path.join(os.path.dirname(__file__), "..", "outputs")
         if os.path.exists(outputs_path):
             shutil.rmtree(outputs_path)
         lightning_logs_path = os.path.join(

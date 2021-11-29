@@ -1,6 +1,8 @@
 # Veresion 0.16.0
 
 - New Mod PolyMapper model;
+- Matching methods added;
+- Evaluation methods added;
 
 # Veresion 0.15.0
 
