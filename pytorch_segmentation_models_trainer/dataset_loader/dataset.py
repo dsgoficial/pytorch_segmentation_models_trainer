@@ -709,7 +709,10 @@ class NaiveModPolyMapperDataset(Dataset):
 
     def __getitem__(self, index) -> Dict[str, torch.Tensor]:
         image, ds_item_dict = self.object_detection_dataset[index]
-        _, polygon_rnn_data = self.polygon_rnn_dataset.get_training_images_from_image_path(
+        (
+            _,
+            polygon_rnn_data,
+        ) = self.polygon_rnn_dataset.get_training_images_from_image_path(
             self.object_detection_dataset.get_path(
                 index, key=self.object_detection_dataset.image_key, add_root_dir=False
             )

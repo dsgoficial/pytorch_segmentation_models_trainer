@@ -618,18 +618,15 @@ def _hrnet(arch, pretrained, progress, **kwargs):
 
 
 def hrnet18(pretrained=True, progress=True, **kwargs):
-    r"""HRNet-18 model
-    """
+    r"""HRNet-18 model"""
     return _hrnet("hrnet18", pretrained, progress, **kwargs)
 
 
 def hrnet32(pretrained=True, progress=True, **kwargs):
-    r"""HRNet-32 model
-    """
+    r"""HRNet-32 model"""
     return _hrnet("hrnet32", pretrained, progress, **kwargs)
 
 
 def hrnet48(pretrained=True, progress=True, **kwargs):
-    r"""HRNet-48 model
-    """
+    r"""HRNet-48 model"""
     return _hrnet("hrnet48", pretrained, progress, **kwargs)

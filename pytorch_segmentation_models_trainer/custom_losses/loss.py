@@ -37,11 +37,13 @@ class KnowledgeDistillationLoss(nn.Module):
         self.T = T
 
     def forward(self, input, target, teacher_target):
-        loss = self.KLDivLoss(
-            F.log_softmax(input / self.T, dim=1),
-            F.softmax(teacher_target / self.T, dim=1),
-        ) * (self.alpha * self.T * self.T) + self.criterion(input, target) * (
-            1.0 - self.alpha
+        loss = (
+            self.KLDivLoss(
+                F.log_softmax(input / self.T, dim=1),
+                F.softmax(teacher_target / self.T, dim=1),
+            )
+            * (self.alpha * self.T * self.T)
+            + self.criterion(input, target) * (1.0 - self.alpha)
         )
         return loss
 
