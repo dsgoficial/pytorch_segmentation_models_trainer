@@ -26,6 +26,7 @@ import torch
 import torch.nn as nn
 import torch.nn.init
 from hydra.utils import instantiate
+from shapely.geometry import Polygon
 from pytorch_lightning.trainer.supporters import CombinedLoader
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
 from pytorch_segmentation_models_trainer.utils import (
@@ -34,10 +35,11 @@ from pytorch_segmentation_models_trainer.utils import (
 )
 from torch import nn
 from torch.utils.data import DataLoader
+from torchmetrics.detection import MAP
 
 
 class GenericPolyMapperPLModel(pl.LightningModule):
-    def __init__(self, cfg, grid_size=28, perform_evaluation=False):
+    def __init__(self, cfg, grid_size=28, perform_evaluation=True):
         super(GenericPolyMapperPLModel, self).__init__()
         self.cfg = cfg
         self.model = self.get_model()
@@ -55,6 +57,7 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         self.polygonrnn_val_ds = instantiate(
             self.cfg.val_dataset.polygon_rnn, _recursive_=False
         )
+        self.val_mAP = MAP()
 
     def get_model(self):
         model = instantiate(self.cfg.model, _recursive_=False)
@@ -158,12 +161,12 @@ class GenericPolyMapperPLModel(pl.LightningModule):
                 }
             )
         if self.perform_evaluation:
-            for metric_key in outputs[0]["metrics"].keys():
+            for metric_key in outputs[0]["log"].keys():
                 tensorboard_logs.update(
                     {
                         f"avg_{metric_key}": {
                             step_type: torch.stack(
-                                [x["metrics"][metric_key] for x in outputs]
+                                [x["log"][metric_key] for x in outputs]
                             ).mean()
                         }
                     }
@@ -230,25 +233,34 @@ class GenericPolyMapperPLModel(pl.LightningModule):
     def evaluate_output(
         self, batch, outputs: List[Dict[str, torch.Tensor]]
     ) -> Dict[str, Union[float, torch.Tensor]]:
+        return_dict = dict()
+        box_iou, mAP = self._evaluate_obj_det(outputs, batch)
+        return_dict.update(mAP)
+        batch_polis, intersection, union = self._compute_polygonrnn_metrics(
+            outputs, batch["polygon_rnn"]
+        )
+
+        return_dict.update(
+            {
+                "polis": batch_polis,
+                "intersection": intersection,
+                "union": union,
+                "box_iou": box_iou,
+            }
+        )
+        return return_dict
+
+    def _evaluate_obj_det(self, outputs, batch):
         obj_det_images, obj_det_targets, _ = batch["object_detection"]
-        polygon_rnn_batch = batch["polygon_rnn"]
         box_iou = torch.stack(
             [
                 object_detection_utils.evaluate_box_iou(t, o)
                 for t, o in zip(obj_det_targets, outputs)
             ]
         ).mean()
+        mAP = self.val_mAP(outputs, obj_det_targets)
 
-        batch_polis, intersection, union = self._compute_polygonrnn_metrics(
-            outputs, polygon_rnn_batch
-        )
-
-        return {
-            "polis": batch_polis,
-            "intersection": intersection,
-            "union": union,
-            "box_iou": box_iou,
-        }
+        return box_iou, mAP
 
     def _compute_polygonrnn_metrics(self, outputs, polygon_rnn_batch):
         outputs_dict = polygonrnn_utils.target_list_to_dict(outputs)
@@ -276,8 +288,15 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         output_tensor_iou = torch.tensor(
             list(map(iou, zip(predicted_polygon_list, gt_polygon_list)))
         )
-        intersection = output_tensor_iou[:, 1]
-        union = output_tensor_iou[:, 2]
+        intersection = (
+            output_tensor_iou[:, 1] if len(output_tensor_iou) > 0 else torch.tensor(0.0)
+        )
+        union = (
+            output_tensor_iou[:, 2]
+            if len(output_tensor_iou) > 0
+            else torch.tensor(sum(Polygon(p).area for p in gt_polygon_list))
+        )
+
         return batch_polis, intersection, union
 
     def training_epoch_end(self, outputs):
