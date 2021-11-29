@@ -21,6 +21,7 @@
  ****
 """
 
+from collections import defaultdict
 from typing import Callable, List, Optional, Union, Tuple, Dict
 from PIL import Image, ImageDraw
 import numpy as np
@@ -566,7 +567,10 @@ def target_list_to_dict(
     Returns:
         Dict[str, Dict]: dictionary of targets
     """
-    result_dict = {key: [i[key] for i in targets] for key in targets[0].keys()}
+    result_dict = defaultdict(list)
+    for target in targets:
+        for key, value in target.items():
+            result_dict[key].append(value)
     output_result_dict = dict()
     for key, value in result_dict.items():
         value = list(itertools.chain.from_iterable(value))
