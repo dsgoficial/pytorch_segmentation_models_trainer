@@ -107,7 +107,7 @@ frame_field_root_dir = os.path.join(
 )
 
 
-class Test_TestFrameFieldModel(CustomTestCase):
+class Test_FrameFieldModel(CustomTestCase):
     def make_inference(self, sample, frame_field_model):
         with torch.no_grad():
             out = frame_field_model(sample)

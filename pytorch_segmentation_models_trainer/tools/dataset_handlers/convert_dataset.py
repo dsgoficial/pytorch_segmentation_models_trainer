@@ -42,6 +42,7 @@ from pytorch_segmentation_models_trainer.tools.parallel_processing.process_execu
     ProcessPoolExecutor,
 )
 from pytorch_segmentation_models_trainer.utils.os_utils import create_folder
+from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 
 
 @dataclass
@@ -127,7 +128,9 @@ class PolygonRNNDatasetConversionStrategy(AbstractConversionStrategy):
             min_row, min_col, max_row, max_col = self._get_bounds(json_object, item)
             if max_row - min_row == 0 or max_col - min_col == 0:
                 continue
-            scale_h, scale_w = self._get_scales(min_row, min_col, max_row, max_col)
+            scale_h, scale_w = polygonrnn_utils.get_scales(
+                min_row, min_col, max_row, max_col
+            )
             csv_entries_list.append(
                 {
                     "image": os.path.join(
@@ -192,27 +195,6 @@ class PolygonRNNDatasetConversionStrategy(AbstractConversionStrategy):
         I_obj = image.crop(box=(min_col, min_row, max_col, max_row))
         I_obj_new = I_obj.resize((self.image_size, self.image_size), Image.BILINEAR)
         I_obj_new.save(output_image_name, "PNG")
-
-    def _get_scales(
-        self, min_row: int, min_col: int, max_row: int, max_col: int
-    ) -> tuple:
-        """
-        Gets scales for the image.
-
-        Args:
-            min_row (int): min row
-            min_col (int): min col
-            max_row (int): max row
-            max_col (int): max col
-
-        Returns:
-            tuple: scale_h, scale_w
-        """
-        object_h = max_row - min_row
-        object_w = max_col - min_col
-        scale_h = 224.0 / object_h
-        scale_w = 224.0 / object_w
-        return scale_h, scale_w
 
     def _get_bounds(self, json_object: dict, obj: dict) -> tuple:
         """

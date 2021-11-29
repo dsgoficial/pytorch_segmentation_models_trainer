@@ -25,6 +25,7 @@ import warnings
 from pathlib import Path
 
 import albumentations as A
+from albumentations.pytorch.transforms import ToTensorV2
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
@@ -48,7 +49,7 @@ root_dir = os.path.join(current_dir, "testing_data")
 detection_root_dir = os.path.join(current_dir, "testing_data", "data", "detection_data")
 
 
-class Test_TestBasePlotTools(unittest.TestCase):
+class Test_BasePlotTools(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)
@@ -65,14 +66,14 @@ class Test_TestBasePlotTools(unittest.TestCase):
             input_csv_path=csv_path,
             root_dir=os.path.dirname(csv_path),
             augmentation_list=A.Compose(
-                [A.RandomCrop(512, 512), A.pytorch.ToTensorV2()],
+                [A.RandomCrop(512, 512), ToTensorV2()],
                 bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
             ),
         )
         dataloader = torch.utils.data.DataLoader(
             obj_det_ds, batch_size=4, shuffle=False, collate_fn=obj_det_ds.collate_fn
         )
-        images, targets = next(iter(dataloader))
+        images, targets, indexes = next(iter(dataloader))
         output = visualize_image_with_bboxes(
             images, [target["boxes"] for target in targets]
         )

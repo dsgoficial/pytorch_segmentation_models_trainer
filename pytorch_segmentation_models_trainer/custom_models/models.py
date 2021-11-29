@@ -292,11 +292,6 @@ class NaiveModPolyMapper(torch.nn.Module):
             losses.update(self.get_polygonrnn_losses(x, targets))
             return losses
         detections = self.obj_det_model(x)
-        if detections == []:
-            for idx, det in enumerate(detections):
-                det.update({"polygonrnn_output": None})
-                detections[idx] = det
-            return detections
         for idx, det in enumerate(detections):
             resized_inputs = torchvision.ops.roi_align(
                 x, [det["boxes"]], output_size=(224, 224)

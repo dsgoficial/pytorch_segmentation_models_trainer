@@ -41,8 +41,7 @@ from pytorch_segmentation_models_trainer.model_loader.polygon_rnn_model import (
     PolygonRNN,
 )
 from pytorch_segmentation_models_trainer.train import train
-
-from tests.utils import CustomTestCase
+from tests.utils import BasicTestCase
 
 current_dir = os.path.dirname(__file__)
 polygon_rnn_root_dir = os.path.join(
@@ -50,12 +49,12 @@ polygon_rnn_root_dir = os.path.join(
 )
 
 
-class Test_TestPolygonRNNModel(CustomTestCase):
+class Test_PolygonRNNModel(BasicTestCase):
     def test_create_instance(self) -> None:
         polygonrnn = PolygonRNN()
         return True
 
-    def test_create_inference_from_model(self) -> None:
+    def _get_dataloader(self):
         csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
         polygon_rnn_ds = PolygonRNNDataset(
             input_csv_path=csv_path,
@@ -63,14 +62,29 @@ class Test_TestPolygonRNNModel(CustomTestCase):
             root_dir=polygon_rnn_root_dir,
             augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
         )
-        polygonrnn = PolygonRNN()
         data_loader = torch.utils.data.DataLoader(
             polygon_rnn_ds, batch_size=2, shuffle=False, drop_last=True, num_workers=1
         )
+        return data_loader
+
+    def test_create_inference_from_model(self) -> None:
+        data_loader = self._get_dataloader()
+        polygonrnn = PolygonRNN()
         with torch.no_grad():
             batch = next(iter(data_loader))
             output = polygonrnn(batch["image"], batch["x1"], batch["x2"], batch["x3"])
         self.assertEqual(output.shape, (2, 18, 787))
+
+    def test_model_backward(self) -> None:
+        data_loader = self._get_dataloader()
+        model = PolygonRNN()
+        model.train()
+        batch = next(iter(data_loader))
+        output = model(batch["image"], batch["x1"], batch["x2"], batch["x3"])
+        loss = output.mean()
+        loss.backward()
+        for n, x in model.named_parameters():
+            assert x.grad is not None, f"No gradient for {n}"
 
     def test_train_polygon_rnn_model(self) -> None:
         csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")

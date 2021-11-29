@@ -1,0 +1,115 @@
+# @package _group_
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.mod_polymapper.GenericPolyMapperPLModel
+
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.mod_polymapper.modpolymapper.ModPolyMapper
+  num_classes: 2
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.001
+  weight_decay: 1e-4
+
+hyperparameters:
+  batch_size: 2
+  object_detection_batch_size: 4
+  polygon_rnn_batch_size: 4
+  epochs: 1
+  max_lr: 0.1
+
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  gpus: 0
+
+train_dataset:
+  object_detection:
+    _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.ObjectDetectionDataset
+    input_csv_path: teste
+    root_dir: teste
+    n_first_rows_to_read: 10
+    augmentation_list:
+      - _target_: albumentations.CenterCrop
+        always_apply: true
+        height: 300
+        width: 300
+        p: 1.0
+      - _target_: albumentations.HueSaturationValue
+        always_apply: false
+        hue_shift_limit: 0.2
+        p: 0.5
+      - _target_: albumentations.RandomBrightnessContrast
+        brightness_limit: 0.2
+        contrast_limit: 0.2
+        p: 0.5
+      - _target_: albumentations.Normalize
+        p: 1.0
+      - _target_: albumentations.pytorch.transforms.ToTensorV2
+        always_apply: true
+    bbox_params:
+      format: coco
+      label_fields:
+        - labels
+  polygon_rnn:
+    _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.PolygonRNNDataset
+    input_csv_path: teste
+    root_dir: teste
+    dataset_type: train
+    n_first_rows_to_read: 10
+    augmentation_list:
+      - _target_: albumentations.Normalize
+        p: 1.0
+      - _target_: albumentations.pytorch.transforms.ToTensorV2
+        always_apply: true
+  data_loader:
+    shuffle: False
+    num_workers: 2
+    pin_memory: True
+    drop_last: True
+    prefetch_factor: 2
+
+val_dataset:
+  object_detection:
+    _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.ObjectDetectionDataset
+    input_csv_path: teste
+    root_dir: teste
+    n_first_rows_to_read: 10
+    augmentation_list:
+      - _target_: albumentations.CenterCrop
+        always_apply: true
+        height: 512
+        width: 512
+        p: 1.0
+      - _target_: albumentations.HueSaturationValue
+        always_apply: false
+        hue_shift_limit: 0.2
+        p: 0.5
+      - _target_: albumentations.RandomBrightnessContrast
+        brightness_limit: 0.2
+        contrast_limit: 0.2
+        p: 0.5
+      - _target_: albumentations.Normalize
+        p: 1.0
+      - _target_: albumentations.pytorch.transforms.ToTensorV2
+        always_apply: true
+    bbox_params:
+      format: coco
+      label_fields:
+        - labels
+  polygon_rnn:
+    _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.PolygonRNNDataset
+    input_csv_path: teste
+    root_dir: teste
+    dataset_type: val
+    n_first_rows_to_read: 10
+    augmentation_list:
+      - _target_: albumentations.Normalize
+        p: 1.0
+      - _target_: albumentations.pytorch.transforms.ToTensorV2
+        always_apply: true
+  data_loader:
+    shuffle: False
+    num_workers: 2
+    pin_memory: True
+    drop_last: True
+    prefetch_factor: 2

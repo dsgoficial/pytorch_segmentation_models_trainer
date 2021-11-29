@@ -27,7 +27,7 @@ import segmentation_models_pytorch as smp
 from hydra.experimental import initialize, compose
 
 
-class Test_TestSegmentationModel(unittest.TestCase):
+class Test_SegmentationModel(unittest.TestCase):
     def test_create_instance(self) -> None:
         with initialize(config_path="./test_configs"):
             cfg = compose(config_name="model.yaml")

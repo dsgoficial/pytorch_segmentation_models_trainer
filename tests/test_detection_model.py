@@ -50,7 +50,7 @@ detection_root_dir = os.path.join(
 )
 
 
-class Test_TestDetectionModel(CustomTestCase):
+class Test_DetectionModel(CustomTestCase):
     @parameterized.expand(
         [
             ("experiment_object_detection.yaml",),

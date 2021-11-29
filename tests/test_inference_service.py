@@ -142,7 +142,7 @@ client = TestClient(app)
 app.dependency_overrides[get_inference_processor] = get_settings_override
 
 
-class Test_TestInferenceService(unittest.TestCase):
+class Test_InferenceService(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)

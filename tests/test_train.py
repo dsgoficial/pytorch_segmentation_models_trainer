@@ -37,7 +37,7 @@ config_name_list = [
 ]
 
 
-class Test_TestTrain(CustomTestCase):
+class Test_Train(CustomTestCase):
     @parameterized.expand(config_name_list)
     def test_run_train_from_object(self, config_name: str) -> None:
         with initialize(config_path="./test_configs"):

@@ -50,7 +50,7 @@ current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, "testing_data")
 
 
-class Test_TestBoxHandler(unittest.TestCase):
+class Test_BoxHandler(unittest.TestCase):
     def setUp(self) -> None:
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)

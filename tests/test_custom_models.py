@@ -45,7 +45,7 @@ input_model_list = [
 ]
 
 
-class Test_TestCustomModels(unittest.TestCase):
+class Test_CustomModels(unittest.TestCase):
     def setUp(self) -> None:
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)

@@ -93,7 +93,7 @@ pretrained_checkpoints_download_links = {
 }
 
 
-class Test_TestInference(unittest.TestCase):
+class Test_Inference(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)

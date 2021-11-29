@@ -25,6 +25,7 @@ import json
 import os
 
 import albumentations as A
+from albumentations.pytorch.transforms import ToTensorV2
 import hydra
 import numpy as np
 from hydra import compose, initialize
@@ -44,6 +45,7 @@ from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     PolygonRNNDataset,
     SegmentationDataset,
     load_augmentation_object,
+    ModPolyMapperDataset,
 )
 
 from tests.utils import CustomTestCase
@@ -58,7 +60,7 @@ polygon_rnn_root_dir = os.path.join(
 detection_root_dir = os.path.join(current_dir, "testing_data", "data", "detection_data")
 
 
-class Test_TestDataset(CustomTestCase):
+class Test_Dataset(CustomTestCase):
     def test_create_instance(self) -> None:
         with initialize(config_path="./test_configs"):
             cfg = compose(
@@ -546,7 +548,7 @@ class Test_TestDataset(CustomTestCase):
             input_csv_path=csv_path,
             sequence_length=60,
             root_dir=polygon_rnn_root_dir,
-            augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
+            augmentation_list=[A.Normalize(), ToTensorV2()],
         )
         self.assertEqual(len(polygon_rnn_ds), 587)
 
@@ -565,7 +567,7 @@ class Test_TestDataset(CustomTestCase):
             input_csv_path=csv_path,
             root_dir=os.path.dirname(csv_path),
             augmentation_list=A.Compose(
-                [A.CenterCrop(512, 512), A.Normalize(), A.pytorch.ToTensorV2()],
+                [A.CenterCrop(512, 512), A.Normalize(), ToTensorV2()],
                 bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
             ),
         )
@@ -573,11 +575,11 @@ class Test_TestDataset(CustomTestCase):
             obj_det_ds, batch_size=4, shuffle=False, collate_fn=obj_det_ds.collate_fn
         )
         for _, batch_item in enumerate(batch):
-            batch_images, batch_targets = batch_item
+            batch_images, batch_targets, indexes = batch_item
             self.assertEqual(batch_images.shape, (4, 3, 512, 512))
             self.assertEqual(len(batch_targets), 4)
         self.assertEqual(len(obj_det_ds), 12)
-        image, target = obj_det_ds[0]
+        image, target, index = obj_det_ds[0]
         self.assertEqual(image.shape, (3, 512, 512))
         self.assertEqual(target["boxes"].shape, (1, 4))
         self.assertEqual(target["labels"].shape, (1,))
@@ -588,12 +590,12 @@ class Test_TestDataset(CustomTestCase):
             input_csv_path=csv_path,
             root_dir=os.path.dirname(csv_path),
             augmentation_list=A.Compose(
-                [A.Normalize(), A.pytorch.ToTensorV2()],
+                [A.Normalize(), ToTensorV2()],
                 bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
             ),
         )
         self.assertEqual(len(obj_det_ds), 12)
-        image, target = obj_det_ds[0]
+        image, target, index = obj_det_ds[0]
         self.assertEqual(image.shape, (3, 571, 571))
         self.assertEqual(target["boxes"].shape, (2, 4))
         self.assertEqual(target["labels"].shape, (2,))
@@ -607,7 +609,7 @@ class Test_TestDataset(CustomTestCase):
                 input_csv_path=csv_path,
                 root_dir=os.path.dirname(csv_path),
                 augmentation_list=A.Compose(
-                    [A.CenterCrop(512, 512), A.Normalize(), A.pytorch.ToTensorV2()],
+                    [A.CenterCrop(512, 512), A.Normalize(), ToTensorV2()],
                     bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
                 ),
             ),
@@ -615,11 +617,11 @@ class Test_TestDataset(CustomTestCase):
                 input_csv_path=poly_csv_path,
                 sequence_length=60,
                 root_dir=polygon_rnn_root_dir,
-                augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
+                augmentation_list=[A.Normalize(), ToTensorV2()],
             ),
         )
         self.assertEqual(len(ds), 12)
-        image, target = ds[0]
+        image, target, index = ds[0]
         self.assertEqual(image.shape, (3, 512, 512))
         self.assertEqual(target["boxes"].shape, (1, 4))
         self.assertEqual(target["labels"].shape, (1,))
@@ -630,3 +632,49 @@ class Test_TestDataset(CustomTestCase):
             self.assertEqual(data["x2"].shape, (58, 787))
             self.assertEqual(data["x3"].shape, (58, 787))
             self.assertEqual(data["ta"].shape, (58,))
+
+    def test_mod_polymapper_dataset(self):
+        csv_path = os.path.join(detection_root_dir, "geo", "dsg_dataset.csv")
+        poly_csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")
+        ds = ModPolyMapperDataset(
+            object_detection_dataset=ObjectDetectionDataset(
+                input_csv_path=csv_path,
+                root_dir=os.path.dirname(csv_path),
+                augmentation_list=A.Compose(
+                    [A.CenterCrop(512, 512), A.Normalize(), ToTensorV2()],
+                    bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
+                ),
+            ),
+            polygon_rnn_dataset=PolygonRNNDataset(
+                input_csv_path=poly_csv_path,
+                sequence_length=60,
+                root_dir=polygon_rnn_root_dir,
+                augmentation_list=[A.Normalize(), ToTensorV2()],
+            ),
+        )
+        self.assertEqual(len(ds), 12)
+        image, target, index = ds[0]
+        self.assertEqual(image.shape, (3, 512, 512))
+        self.assertEqual(target["boxes"].shape, (1, 4))
+        self.assertEqual(target["labels"].shape, (1,))
+        self.assertEqual(target["x1"].shape, (2, 787))
+        self.assertEqual(target["x2"].shape, (2, 58, 787))
+        self.assertEqual(target["x3"].shape, (2, 58, 787))
+        self.assertEqual(target["ta"].shape, (2, 58))
+        # test batch build
+        data_loader = torch.utils.data.DataLoader(
+            ds,
+            batch_size=2,
+            shuffle=False,
+            drop_last=True,
+            num_workers=1,
+            collate_fn=ds.collate_fn,
+        )
+        images, targets, indexes = next(iter(data_loader))
+        self.assertEqual(images.shape, (2, 3, 512, 512))
+        self.assertEqual(targets[0]["boxes"].shape, (1, 4))
+        self.assertEqual(targets[0]["labels"].shape, (1,))
+        self.assertEqual(targets[0]["x1"].shape, (2, 787))
+        self.assertEqual(targets[0]["x2"].shape, (2, 58, 787))
+        self.assertEqual(targets[0]["x3"].shape, (2, 58, 787))
+        self.assertEqual(targets[0]["ta"].shape, (2, 58))

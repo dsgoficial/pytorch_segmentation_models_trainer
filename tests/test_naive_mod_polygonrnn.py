@@ -20,33 +20,19 @@
  ****
 """
 import os
-import subprocess
-import unittest
-from importlib import import_module
 
 import albumentations as A
 import hydra
-import numpy as np
-import segmentation_models_pytorch as smp
 import torch
+from albumentations.pytorch.transforms import ToTensorV2
 from hydra.experimental import compose, initialize
-from parameterized import parameterized
-from pytorch_segmentation_models_trainer.custom_models import models as pytorch_smt_cm
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     NaiveModPolyMapperDataset,
     ObjectDetectionDataset,
     PolygonRNNDataset,
 )
-from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
-    FrameFieldModel,
-    FrameFieldSegmentationPLModel,
-)
-from pytorch_segmentation_models_trainer.model_loader.polygon_rnn_model import (
-    PolygonRNN,
-)
-from pytorch_segmentation_models_trainer.train import train
 
-from tests.utils import CustomTestCase
+from tests.utils import BasicTestCase
 
 current_dir = os.path.dirname(__file__)
 detection_root_dir = os.path.join(
@@ -57,7 +43,7 @@ polygon_rnn_root_dir = os.path.join(
 )
 
 
-class Test_TestNaiveModPolymapperModel(CustomTestCase):
+class Test_NaiveModPolymapperModel(BasicTestCase):
     def _get_model(self):
         with initialize(config_path="./test_configs"):
             cfg = compose(config_name="naive_mod_polymapper_model.yaml")
@@ -80,7 +66,7 @@ class Test_TestNaiveModPolymapperModel(CustomTestCase):
                 input_csv_path=csv_path,
                 root_dir=os.path.dirname(csv_path),
                 augmentation_list=A.Compose(
-                    [A.CenterCrop(512, 512), A.Normalize(), A.pytorch.ToTensorV2()],
+                    [A.CenterCrop(512, 512), A.Normalize(), ToTensorV2()],
                     bbox_params=A.BboxParams(format="coco", label_fields=["labels"]),
                 ),
             ),
@@ -88,7 +74,7 @@ class Test_TestNaiveModPolymapperModel(CustomTestCase):
                 input_csv_path=poly_csv_path,
                 sequence_length=60,
                 root_dir=polygon_rnn_root_dir,
-                augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
+                augmentation_list=[A.Normalize(), ToTensorV2()],
             ),
         )
         data_loader = torch.utils.data.DataLoader(
@@ -101,7 +87,7 @@ class Test_TestNaiveModPolymapperModel(CustomTestCase):
         )
         model = self._get_model()
         with torch.no_grad():
-            image, target = next(iter(data_loader))
+            image, target, indexes = next(iter(data_loader))
             output = model(image, target)
         self.assertEqual(len(output), 6)
 
