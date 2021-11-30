@@ -1,0 +1,13 @@
+_target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.FrameFieldSegmentationDataset
+input_csv_path: teste
+root_dir: current
+augmentation_list:
+- _target_: albumentations.CenterCrop
+  always_apply: true
+  height: 448
+  width: 448
+  p: 1.0
+- _target_: albumentations.Normalize
+  p: 1.0
+- _target_: albumentations.pytorch.transforms.ToTensorV2
+  always_apply: true

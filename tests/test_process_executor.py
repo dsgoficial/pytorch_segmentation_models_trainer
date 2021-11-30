@@ -45,7 +45,7 @@ def copy_file(filepath, destination_folder):
     return shutil.copyfile(str(filepath), Path(destination_folder) / filepath.name)
 
 
-class Test_TestProcessExecutor(unittest.TestCase):
+class Test_ProcessExecutor(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)

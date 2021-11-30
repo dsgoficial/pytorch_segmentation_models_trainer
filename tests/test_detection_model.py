@@ -50,7 +50,7 @@ detection_root_dir = os.path.join(
 )
 
 
-class Test_TestDetectionModel(CustomTestCase):
+class Test_DetectionModel(CustomTestCase):
     @parameterized.expand(
         [
             ("experiment_object_detection.yaml",),
@@ -67,11 +67,6 @@ class Test_TestDetectionModel(CustomTestCase):
                     "train_dataset.root_dir=" + detection_root_dir,
                     "val_dataset.input_csv_path=" + csv_path,
                     "val_dataset.root_dir=" + detection_root_dir,
-                    # 'pl_trainer.gpus=1',
-                    # 'device=cuda',
-                    # 'optimizer.lr=0.00001',
-                    # 'hyperparameters.batch_size=4',
-                    # 'hyperparameters.epochs=10'
                 ],
             )
             trainer = train(cfg)
@@ -88,11 +83,7 @@ class Test_TestDetectionModel(CustomTestCase):
                     "val_dataset.input_csv_path=" + csv_path,
                     "val_dataset.root_dir=" + detection_root_dir,
                     "+val_dataset.return_mask=True",
-                    # 'pl_trainer.gpus=1',
-                    # 'device=cuda',
-                    # 'optimizer.lr=0.00001',
-                    # 'hyperparameters.batch_size=4',
-                    # 'hyperparameters.epochs=10'
+                    "+pl_trainer.fast_dev_run=true",
                 ],
             )
             trainer = train(cfg)

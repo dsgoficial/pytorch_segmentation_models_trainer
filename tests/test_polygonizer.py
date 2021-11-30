@@ -57,7 +57,7 @@ frame_field_root_dir = os.path.join(
 device = "cpu"
 
 
-class Test_TestPolygonize(unittest.TestCase):
+class Test_Polygonize(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)

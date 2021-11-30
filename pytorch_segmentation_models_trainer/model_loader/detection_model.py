@@ -19,18 +19,10 @@
  ****
 """
 
-from pytorch_segmentation_models_trainer.model_loader.model import Model
-from torch.utils.data import DataLoader
 import torch
-from torchvision.ops import box_iou
-
-
-def _evaluate_iou(target, pred):
-    """Evaluate intersection over union (IOU) for target from dataset and output prediction from model."""
-    if pred["boxes"].shape[0] == 0:
-        # no box detected, 0 IOU
-        return torch.tensor(0.0, device=pred["boxes"].device)
-    return box_iou(target["boxes"], pred["boxes"]).diag().mean()
+from pytorch_segmentation_models_trainer.model_loader.model import Model
+from pytorch_segmentation_models_trainer.utils import object_detection_utils
+from torch.utils.data import DataLoader
 
 
 class ObjectDetectionPLModel(Model):
@@ -55,7 +47,9 @@ class ObjectDetectionPLModel(Model):
             prefetch_factor=self.cfg.train_dataset.data_loader.prefetch_factor
             if "prefetch_factor" in self.cfg.train_dataset.data_loader
             else 4 * self.hyperparameters.batch_size,
-            collate_fn=self.train_ds.collate_fn,
+            collate_fn=self.train_ds.collate_fn
+            if hasattr(self.train_ds, "collate_fn")
+            else self.train_ds.train_dataset.collate_fn,
         )
 
     def val_dataloader(self):
@@ -75,47 +69,64 @@ class ObjectDetectionPLModel(Model):
             prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor
             if "prefetch_factor" in self.cfg.val_dataset.data_loader
             else 4 * self.hyperparameters.batch_size,
-            collate_fn=self.val_ds.collate_fn,
+            collate_fn=self.val_ds.collate_fn
+            if hasattr(self.val_ds, "collate_fn")
+            else self.val_ds.val_dataset.collate_fn,
         )
 
     def training_step(self, batch, batch_idx):
-        # images = batch.pop('images'
-        # tensorboard_logs = {'acc': {'train': acc}}
-        # self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
-        # return {'loss': loss, 'log': tensorboard_logs}
-        images, targets = batch
-        # targets = [{k: v for k, v in t.items()} for t in targets]
-        # separate losses
+        images, targets, _ = batch
         loss_dict = self.model(images, targets)
-        # total loss
-        losses = sum(loss for loss in loss_dict.values())
-
-        return {"loss": losses, "log": loss_dict, "progress_bar": loss_dict}
+        return {
+            "loss": sum(loss for loss in loss_dict.values()),
+            "log": loss_dict,
+            "progress_bar": loss_dict,
+        }
 
     def validation_step(self, batch, batch_idx):
-        # loss, acc = self.compute(batch)
-        # tensorboard_logs = {'acc': {'val': acc}}
-        # self.log('validation_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
-        # return {'val_loss': loss, 'log': tensorboard_logs}
-        images, targets = batch
+        images, targets, _ = batch
+        self.model.train()
+        loss_dict = self.model(images, targets)
+        self.model.eval()
         outs = self.model(images)
-        iou = torch.stack([_evaluate_iou(t, o) for t, o in zip(targets, outs)]).mean()
-        return {"val_iou": iou}
+        iou = torch.stack(
+            [
+                object_detection_utils.evaluate_box_iou(t, o)
+                for t, o in zip(targets, outs)
+            ]
+        ).mean()
+        return {
+            "val_iou": iou,
+            "loss": sum(loss for loss in loss_dict.values()),
+            "log": loss_dict,
+        }
 
     def training_epoch_end(self, outputs):
-        # avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
-        # avg_acc = torch.stack([
-        #     torch.tensor(x['log']['acc']['train']) for x in outputs]).mean()
-        # tensorboard_logs = {
-        #     'avg_loss': {'train' : avg_loss},
-        #     'avg_acc': {'train' : avg_acc},
-        # }
-        # self.log_dict(tensorboard_logs, logger=True)
-        pass
+        tensorboard_logs = self._build_tensorboard_logs(outputs)
+        self.log_dict(tensorboard_logs, logger=True)
 
-    def validation_epoch_end(self, outs):
-        avg_iou = torch.stack([o["val_iou"] for o in outs]).mean()
+    def _build_tensorboard_logs(self, outputs, step_type="train"):
+        avg_loss = torch.stack([x["loss"] for x in outputs]).mean()
+        tensorboard_logs = {"avg_loss": {step_type: avg_loss}}
+        if len(outputs) == 0:
+            return tensorboard_logs
+        for loss_key in outputs[0]["log"].keys():
+            tensorboard_logs.update(
+                {
+                    f"avg_{loss_key}": {
+                        step_type: torch.stack(
+                            [x["log"][loss_key] for x in outputs]
+                        ).mean()
+                    }
+                }
+            )
+        return tensorboard_logs
+
+    def validation_epoch_end(self, outputs):
+        avg_iou = torch.stack([o["val_iou"] for o in outputs]).mean()
         logs = {"val_iou": avg_iou}
+        tensorboard_logs = self._build_tensorboard_logs(outputs, step_type="val")
+        self.log_dict(tensorboard_logs, logger=True)
         return {"avg_val_iou": avg_iou, "log": logs}
 
 

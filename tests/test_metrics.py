@@ -28,7 +28,7 @@ from shapely.geometry import Polygon
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
 
 
-class Test_TestMetrics(unittest.TestCase):
+class Test_Metrics(unittest.TestCase):
     def test_iou(self) -> None:
         y_pred = torch.tensor([[0, 0], [1, 0.5], [0.2, 0.8], [0.5, 0.5], [1, 1]])
         y_true = torch.tensor([[0, 0], [1, 1], [0, 0], [1, 1], [0, 0]])
@@ -44,6 +44,12 @@ class Test_TestMetrics(unittest.TestCase):
         polygon2 = [1, 1, 4, 1, 4, 4, 1, 4]
         iou, _, __ = metrics.polygon_iou(polygon1, polygon2)
         self.assertAlmostEqual(iou, 0.083333333333)
+
+    def test_polygon_iou_with_invalid_geom(self) -> None:
+        polygon1 = [2, 0, 2, 2, 0, 2, 0, 0]
+        polygon2 = [0, 0, 2, 2, 2, 0, 0, 2]  # invalid, bow-tie
+        iou, _, __ = metrics.polygon_iou(polygon1, polygon2)
+        self.assertAlmostEqual(iou, 0.5)
 
     def test_polis(self) -> None:
         polygon1 = Polygon([(0, 0), (0, 2), (2, 2), (2, 0), (0, 0)])

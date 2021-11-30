@@ -1,0 +1,11 @@
+_target_: pytorch_segmentation_models_trainer.custom_models.models.NaiveModPolyMapper
+obj_det_model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.models.ObjectDetectionModel
+  base_model:
+    _target_: torchvision.models.detection.fasterrcnn_resnet50_fpn
+    pretrained: true
+  head:
+    _target_: torchvision.models.detection.faster_rcnn.FastRCNNPredictor
+    num_classes: 2
+polygonrnn_model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn.PolygonRNN

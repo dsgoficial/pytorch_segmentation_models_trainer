@@ -22,18 +22,21 @@
 import os
 import dataclasses
 import logging
-from collections import OrderedDict
+import itertools
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Union
 
 import hydra
 import torch
 import torchvision
+import kornia
 from hydra.core.config_store import ConfigStore
 from hydra.utils import instantiate
 from omegaconf import MISSING, DictConfig, OmegaConf
 from segmentation_models_pytorch.base import SegmentationHead
 from segmentation_models_pytorch.base import initialization as init
+from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import PolygonRNN
 from pytorch_segmentation_models_trainer.custom_models.utils import (
     _SimpleSegmentationModel,
 )
@@ -224,6 +227,15 @@ class HRNetOCRW48(torch.nn.Module):
             else self.segmentation_head(self.backbone(x)["out"])
         )
 
+    def set_model_trainable(self, trainable=True):
+        self.set_component_trainable(self.backbone, trainable=trainable)
+        self.set_component_trainable(self.segmentation_head, trainable=trainable)
+
+    def set_component_trainable(self, component, trainable=True):
+        for child in component.children():
+            for param in child.parameters():
+                param.requires_grad = trainable
+
 
 class ObjectDetectionModel(torch.nn.Module):
     def __init__(self, base_model, head):
@@ -254,6 +266,69 @@ class InstanceSegmentationModel(torch.nn.Module):
 
     def forward(self, x, targets=None):
         return self.model(x, targets=targets)
+
+
+class NaiveModPolyMapper(torch.nn.Module):
+    """
+    This class implements a naive mod poly mapper.
+    """
+
+    def __init__(
+        self,
+        obj_det_model: ObjectDetectionModel,
+        polygonrnn_model: PolygonRNN,
+        val_seq_len: Optional[int] = None,
+    ):
+        super().__init__()
+        self.obj_det_model = instantiate(obj_det_model, _recursive_=False)
+        self.polygonrnn_model = instantiate(polygonrnn_model, _recursive_=False)
+        self.val_seq_len = val_seq_len if val_seq_len is not None else 60
+
+    def forward(
+        self, x: torch.Tensor, targets: Optional[torch.Tensor] = None
+    ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
+        if self.training:
+            losses = self.get_obj_det_losses(x, targets)
+            losses.update(self.get_polygonrnn_losses(x, targets))
+            return losses
+        detections = self.obj_det_model(x)
+        for idx, det in enumerate(detections):
+            resized_inputs = torchvision.ops.roi_align(
+                x, [det["boxes"]], output_size=(224, 224)
+            )
+            polygonrnn_output = self.polygonrnn_model.test(
+                resized_inputs, self.val_seq_len
+            )
+            det.update({"polygonrnn_output": polygonrnn_output})
+            detections[idx] = det
+        return detections
+
+    def get_obj_det_losses(
+        self, x: torch.Tensor, targets: torch.Tensor
+    ) -> Dict[str, torch.Tensor]:
+        return self.obj_det_model(x, targets)
+
+    def build_polygon_rnn_batch(self, targets):
+        aux_list = list(
+            itertools.chain.from_iterable(
+                target["polygon_rnn_data"] for target in targets
+            )
+        )
+        return {
+            "cropped_image": torch.stack([item["image"] for item in aux_list]),
+            "x1": torch.stack([item["x1"] for item in aux_list]),
+            "x2": torch.stack([item["x2"] for item in aux_list]),
+            "x3": torch.stack([item["x3"] for item in aux_list]),
+            "ta": torch.stack([item["ta"] for item in aux_list]),
+        }
+
+    def get_polygonrnn_losses(
+        self, x: torch.Tensor, targets: torch.Tensor
+    ) -> Dict[str, torch.Tensor]:
+        batch = self.build_polygon_rnn_batch(targets)
+        result = self.polygonrnn_model.compute(batch, image_key="cropped_image")
+        loss, acc = self.polygonrnn_model.compute_loss_and_accuracy(batch, result)
+        return {"polygonrnn_loss": loss, "polygonrnn_accuracy": acc}
 
 
 if __name__ == "__main__":

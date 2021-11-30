@@ -28,6 +28,8 @@ import albumentations as A
 import hydra
 import numpy as np
 import segmentation_models_pytorch as smp
+import shapely
+import shapely.geometry
 import torch
 from hydra.experimental import compose, initialize
 from parameterized import parameterized
@@ -40,10 +42,8 @@ from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
 from pytorch_segmentation_models_trainer.model_loader.polygon_rnn_model import (
     PolygonRNN,
 )
-from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 from pytorch_segmentation_models_trainer.train import train
-
-from tests.utils import CustomTestCase
+from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 
 current_dir = os.path.dirname(__file__)
 polygon_rnn_root_dir = os.path.join(
@@ -51,7 +51,7 @@ polygon_rnn_root_dir = os.path.join(
 )
 
 
-class Test_TestPolygonRNNUtils(CustomTestCase):
+class Test_PolygonRNNUtils(unittest.TestCase):
     @parameterized.expand(
         [
             ([[100, 100], [100, 204], [204, 204], [204, 100]],),
@@ -133,3 +133,31 @@ class Test_TestPolygonRNNUtils(CustomTestCase):
             label_index_array[2::]
         )
         np.testing.assert_array_almost_equal(polygon, output_vertex_list)
+
+    def test_crop_and_rescale_polygons_to_bounding_boxes(self) -> None:
+        polygon1 = shapely.geometry.Polygon(
+            [(100, 100), (100, 604), (604, 604), (604, 100)]
+        )
+        polygon2 = shapely.geometry.Polygon(
+            [[100, 100], [100, 204], [204, 204], [204, 100]]
+        )
+        bounding_boxes = [[100, 100, 512, 512], [100, 100, 204, 204]]
+        image_bounds_list = [(512, 512), (512, 512)]
+        output_polygon_list = polygonrnn_utils.crop_and_rescale_polygons_to_bounding_boxes(
+            [polygon1, polygon2], bounding_boxes, image_bounds_list, extend_factor=0.1
+        )
+        self.assertEqual(len(output_polygon_list), 2)
+        expected_outputs = [
+            shapely.wkt.loads(
+                "POLYGON ((100 509.9776785714286, 509.9776785714286 509.9776785714286, 509.9776785714286 100, 100 100, 100 509.9776785714286))"
+            ),
+            polygon2,
+        ]
+        for idx, output in enumerate(output_polygon_list):
+            polygon = shapely.geometry.Polygon(output.pop("polygon"))
+            output.pop("bbox")
+            scaled_polygon = polygonrnn_utils.scale_shapely_polygon(polygon, **output)
+            self.assertTrue(
+                scaled_polygon.almost_equals(expected_outputs[idx])
+                or scaled_polygon.equals(expected_outputs[idx])
+            )

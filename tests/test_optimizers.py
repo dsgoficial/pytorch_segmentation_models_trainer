@@ -33,7 +33,7 @@ from tests.utils import CustomTestCase
 optimizer_name_list = ["Adam", "AdamW", "RAdam", "PlainRAdam", "SGD"]
 
 
-class Test_TestOptimizers(CustomTestCase):
+class Test_Optimizers(CustomTestCase):
     @parameterized.expand(optimizer_name_list)
     def test_run_train_using_optimizer(self, optimizer_class_name: str) -> None:
         with initialize(config_path="./test_configs"):
@@ -43,6 +43,7 @@ class Test_TestOptimizers(CustomTestCase):
                     "train_dataset.input_csv_path=" + self.csv_ds_file,
                     "val_dataset.input_csv_path=" + self.csv_ds_file,
                     f"optimizer._target_=pytorch_segmentation_models_trainer.optimizers.gradient_centralization.{optimizer_class_name}",
+                    "+pl_trainer.fast_dev_run=true",
                 ],
             )
             train_obj = train(cfg)

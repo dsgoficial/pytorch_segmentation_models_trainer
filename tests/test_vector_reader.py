@@ -53,7 +53,7 @@ test_list = [
 ]
 
 
-class Test_TestVectorReader(unittest.TestCase):
+class Test_VectorReader(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)

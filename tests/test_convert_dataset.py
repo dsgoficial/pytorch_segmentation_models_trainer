@@ -49,7 +49,7 @@ convert_dataset_dir = os.path.join(
 )
 
 
-class Test_TestConvertDataset(unittest.TestCase):
+class Test_ConvertDataset(unittest.TestCase):
     def setUp(self) -> None:
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)

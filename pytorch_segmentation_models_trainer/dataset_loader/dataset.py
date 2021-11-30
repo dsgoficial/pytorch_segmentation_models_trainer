@@ -18,32 +18,29 @@
  *                                                                         *
  ****
 """
-from abc import abstractmethod
-from collections import defaultdict
 import itertools
+import json
 import os
+from abc import abstractmethod
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import albumentations as A
+import numpy as np
+import pandas as pd
+import shapely.wkt
+import torch
+from hydra.utils import instantiate
+from omegaconf import OmegaConf
+from PIL import Image
+from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 from pytorch_segmentation_models_trainer.utils.object_detection_utils import (
     bbox_xywh_to_xyxy,
     bbox_xyxy_to_xywh,
 )
-from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
-from albumentations.pytorch import ToTensorV2
-from albumentations.augmentations.transforms import Normalize
-import torch
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-import shapely.wkt
-import albumentations as A
-import numpy as np
-import pandas as pd
-from hydra.utils import instantiate
-from PIL import Image
-from torch.utils.data import Dataset
-import json
-
 from shapely.geometry import Polygon
-
-from omegaconf import DictConfig, OmegaConf
+from shapely.geometry.base import BaseGeometry
+from torch.utils.data import Dataset
 
 
 def load_augmentation_object(input_list, bbox_params=None):
@@ -92,7 +89,9 @@ class AbstractDataset(Dataset):
         return self.len
 
     @abstractmethod
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
+    def __getitem__(
+        self, idx: int
+    ) -> Union[Dict[str, Any], Tuple[torch.Tensor, Any], Tuple[torch.Tensor, Any, Any]]:
         """Item getter. Must be reimplemented in each subclass.
 
         Args:
@@ -103,10 +102,10 @@ class AbstractDataset(Dataset):
         """
         pass
 
-    def get_path(self, idx, key=None):
+    def get_path(self, idx: int, key: str = None, add_root_dir: bool = True):
         key = self.image_key if key is None else key
         image_path = str(self.df.iloc[idx][key])
-        if self.root_dir is not None:
+        if self.root_dir is not None and add_root_dir:
             return self._add_root_dir_to_path(image_path)
         return image_path
 
@@ -407,18 +406,18 @@ class PolygonRNNDataset(AbstractDataset):
         root_dir=None,
         augmentation_list=None,
         data_loader=None,
-        image_key=None,
-        mask_key=None,
-        image_width_key=None,
-        image_height_key=None,
-        scale_h_key=None,
-        scale_w_key=None,
-        min_col_key=None,
-        min_row_key=None,
-        original_image_path_key=None,
-        original_polygon_key=None,
-        n_first_rows_to_read=None,
-        dataset_type="train",
+        image_key: str = None,
+        mask_key: str = None,
+        image_width_key: str = None,
+        image_height_key: str = None,
+        scale_h_key: str = None,
+        scale_w_key: str = None,
+        min_col_key: str = None,
+        min_row_key: str = None,
+        original_image_path_key: str = None,
+        original_polygon_key: str = None,
+        n_first_rows_to_read: str = None,
+        dataset_type: str = "train",
         grid_size=28,
     ) -> None:
         super(PolygonRNNDataset, self).__init__(
@@ -452,36 +451,42 @@ class PolygonRNNDataset(AbstractDataset):
             self.unique_image_path_list = self.df[self.original_image_path_key].unique()
         self.grid_size = grid_size
 
-    def load_polygon(self, idx):
+    def load_polygon(self, idx: int) -> Tuple[np.ndarray, int]:
         mask_name = os.path.join(self.root_dir, self.df.iloc[idx][self.mask_key])
         return self._load_polygon_from_path(mask_name)
 
-    def _load_polygon_from_path(self, mask_name):
+    def _load_polygon_from_path(self, mask_name: str) -> Tuple[np.ndarray, int]:
         with open(mask_name, "r") as f:
             json_file = json.load(f)
         polygon = np.array(json_file["polygon"])
         point_num = len(json_file["polygon"])
         return polygon, point_num
 
-    def __getitem__(self, index) -> Dict[str, torch.Tensor]:
-        image = self.load_image(
-            index, key=self.image_key, is_mask=False, force_rgb=True
-        )
+    def __getitem__(
+        self,
+        index: int,
+        load_images: bool = True,
+        get_bbox: bool = False,
+        original_image_bounds: Optional[Tuple] = None,
+    ) -> Dict[str, Any]:
         polygon, num_vertexes = self.load_polygon(index)
         label_array, label_index_array = polygonrnn_utils.build_arrays(
             polygon, num_vertexes, self.sequence_length, grid_size=self.grid_size
         )
-
-        if self.transform is not None:
-            augmented = self.transform(image=image)
-            image = augmented["image"]
-        output_dict = {
-            "image": self.to_tensor(image).float(),
+        output_dict: Dict[str, Any] = {
             "x1": self.to_tensor(label_array[2]).float(),
             "x2": self.to_tensor(label_array[:-2]).float(),
             "x3": self.to_tensor(label_array[1:-1]).float(),
             "ta": self.to_tensor(label_index_array[2:]).long(),
         }
+        if get_bbox:
+            img_bounds = (
+                (300, 300) if original_image_bounds is None else original_image_bounds
+            )
+            bbox = polygonrnn_utils.get_extended_bounds_from_np_array_polygon(
+                polygon, img_bounds, extend_factor=0.1
+            )
+            output_dict.update({"bbox": torch.floor(torch.tensor(bbox))})
         if self.dataset_type == "val":
             output_dict.update(
                 {
@@ -495,11 +500,18 @@ class PolygonRNNDataset(AbstractDataset):
                     ),
                 }
             )
+        if load_images:
+            image = self.load_image(
+                index, key=self.image_key, is_mask=False, force_rgb=True
+            )
+            if self.transform is not None:
+                augmented = self.transform(image=image)
+                image = augmented["image"]
+            output_dict.update({"image": self.to_tensor(image).float()})
         return output_dict
 
-    def get_images_from_image_path(self, image_path: str) -> List:
-        entries = self.df.loc[self.df[self.original_image_path_key] == image_path]
-        items = [self.__getitem__(idx) for idx in entries.index.tolist()]
+    def get_images_from_image_path(self, image_path: str) -> Dict[str, Any]:
+        entries, items = self.get_training_images_from_image_path(image_path)
         return {
             "original_image": self.load_image(
                 entries.index.tolist()[0], key=self.original_image_path_key
@@ -515,6 +527,16 @@ class PolygonRNNDataset(AbstractDataset):
             "ta": torch.stack([item["ta"] for item in items]),
         }
 
+    def get_entries_from_image_path(self, image_path: str) -> pd.DataFrame:
+        return self.df.loc[self.df[self.original_image_path_key] == image_path]
+
+    def get_training_images_from_image_path(
+        self, image_path: str
+    ) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
+        entries = self.get_entries_from_image_path(image_path)
+        items = [self.__getitem__(idx) for idx in entries.index.tolist()]
+        return entries, items
+
     def get_n_image_path_lists(self, n: int) -> List:
         return list(
             itertools.chain.from_iterable(
@@ -523,7 +545,7 @@ class PolygonRNNDataset(AbstractDataset):
             )
         )
 
-    def get_n_image_path_dict_list(self, n: int) -> Dict[str, List]:
+    def get_n_image_path_dict_list(self, n: int) -> Dict[str, Any]:
         output_dict = {
             image_path: self.get_images_from_image_path(image_path)
             for image_path in self.unique_image_path_list[:n]
@@ -566,7 +588,7 @@ class ObjectDetectionDataset(AbstractDataset):
         self.bbox_format = bbox_format
         self.bbox_output_format = bbox_output_format
 
-    def convert_bbox(self, bbox):
+    def convert_bbox(self, bbox: List) -> List:
         if self.bbox_format == self.bbox_output_format:
             return bbox
         elif self.bbox_format == "xywh" and self.bbox_output_format == "xyxy":
@@ -576,7 +598,9 @@ class ObjectDetectionDataset(AbstractDataset):
         else:
             raise NotImplementedError
 
-    def load_bounding_boxes_and_labels(self, idx):
+    def load_bounding_boxes_and_labels(
+        self, idx: int
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         bbox_path = self.get_path(idx, key=self.bounding_box_key)
         with open(bbox_path, "r") as f:
             json_file = json.load(f)
@@ -589,7 +613,9 @@ class ObjectDetectionDataset(AbstractDataset):
             torch.as_tensor(label_list, dtype=torch.int64),
         )
 
-    def __getitem__(self, index) -> Dict[str, torch.Tensor]:
+    def __getitem__(
+        self, index: int
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], int]:
         image = self.load_image(
             index, key=self.image_key, is_mask=False, force_rgb=True
         )
@@ -605,18 +631,21 @@ class ObjectDetectionDataset(AbstractDataset):
         ds_item_dict["labels"] = torch.as_tensor(
             ds_item_dict["labels"], dtype=torch.int64
         )
-        return image, ds_item_dict
+        return image, ds_item_dict, index
 
     @staticmethod
-    def collate_fn(batch: List) -> Dict[torch.Tensor, List[Dict]]:
+    def collate_fn(
+        batch: List
+    ) -> Tuple[torch.Tensor, List[Dict[str, torch.Tensor]], torch.Tensor]:
         """
         :param batch: an iterable of N sets from __getitem__()
         :return: a tensor of images, lists of varying-size tensors of bounding boxes, labels, and difficulties
         """
 
-        images, targets = tuple(zip(*batch))
+        images, targets, indexes = tuple(zip(*batch))
         images = torch.stack(images, dim=0)
-        return images, list(targets)
+        indexes = torch.tensor(indexes, dtype=torch.int64)
+        return images, list(targets), indexes
 
 
 class InstanceSegmentationDataset(ObjectDetectionDataset):
@@ -661,7 +690,9 @@ class InstanceSegmentationDataset(ObjectDetectionDataset):
             json_file = json.load(f)
         return torch.as_tensor(json_file[self.keypoint_key], dtype=torch.float32)
 
-    def __getitem__(self, index) -> Dict[str, torch.Tensor]:
+    def __getitem__(
+        self, index: int
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], int]:
         image = self.load_image(
             index, key=self.image_key, is_mask=False, force_rgb=True
         )
@@ -687,7 +718,96 @@ class InstanceSegmentationDataset(ObjectDetectionDataset):
             ds_item_dict["masks"] = torch.as_tensor(
                 ds_item_dict["masks"], dtype=torch.uint8
             )
-        return image, ds_item_dict
+        return image, ds_item_dict, index
+
+
+class NaiveModPolyMapperDataset(Dataset):
+    def __init__(
+        self,
+        object_detection_dataset: ObjectDetectionDataset,
+        polygon_rnn_dataset: PolygonRNNDataset,
+    ) -> None:
+        super(NaiveModPolyMapperDataset, self).__init__()
+        self.object_detection_dataset = object_detection_dataset
+        self.polygon_rnn_dataset = polygon_rnn_dataset
+
+    def __len__(self) -> int:
+        return len(self.object_detection_dataset)
+
+    def get_polygonrnn_data(self, idx: int) -> Dict[str, Any]:
+        _, polygon_rnn_data = self.polygon_rnn_dataset.get_training_images_from_image_path(
+            self.object_detection_dataset.get_path(
+                idx, key=self.object_detection_dataset.image_key, add_root_dir=False
+            )
+        )
+        return {"polygon_rnn_data": polygon_rnn_data}
+
+    def __getitem__(self, index: int) -> Tuple[torch.Tensor, Dict[str, Any], int]:
+        image, ds_item_dict, _ = self.object_detection_dataset[index]
+        ds_item_dict.update(self.get_polygonrnn_data(index))
+        return image, ds_item_dict, index
+
+    @staticmethod
+    def collate_fn(
+        batch: List
+    ) -> Tuple[torch.Tensor, List[Dict[str, torch.Tensor]], torch.Tensor]:
+        """
+        :param batch: an iterable of N sets from __getitem__()
+        :return: a tensor of images, lists of varying-size tensors of bounding boxes, labels, and difficulties
+        """
+
+        images, targets, indexes = tuple(zip(*batch))
+        images = torch.stack(images, dim=0)
+        indexes = torch.tensor(indexes, dtype=torch.int64)
+        return images, list(targets), indexes
+
+
+class ModPolyMapperDataset(NaiveModPolyMapperDataset):
+    def __init__(
+        self,
+        object_detection_dataset: ObjectDetectionDataset,
+        polygon_rnn_dataset: PolygonRNNDataset,
+    ) -> None:
+        super(ModPolyMapperDataset, self).__init__(
+            object_detection_dataset=object_detection_dataset,
+            polygon_rnn_dataset=polygon_rnn_dataset,
+        )
+
+    def get_polygonrnn_polygon_data(self, idx: int) -> List[Any]:
+        image_path = self.object_detection_dataset.get_path(
+            idx, key=self.object_detection_dataset.image_key, add_root_dir=False
+        )
+        entries = self.polygon_rnn_dataset.get_entries_from_image_path(image_path)
+        return [
+            self.polygon_rnn_dataset.__getitem__(idx) for idx in entries.index.tolist()
+        ]
+
+    def __getitem__(
+        self, index: int
+    ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor], int]:
+        image, ds_item_dict, _ = self.object_detection_dataset[index]
+        polygonrnn_data = self.get_polygonrnn_polygon_data(index)
+        dict_items_to_update = {
+            key: torch.stack([torch.tensor(item[key]) for item in polygonrnn_data])
+            for key in polygonrnn_data[0].keys()
+        }
+        croped_images = dict_items_to_update.pop("image")
+        ds_item_dict.update(dict_items_to_update)
+        return image, ds_item_dict, index
+
+    @staticmethod
+    def collate_fn(
+        batch: List
+    ) -> Tuple[torch.Tensor, List[Dict[str, torch.Tensor]], torch.Tensor]:
+        """
+        :param batch: an iterable of N sets from __getitem__()
+        :return: a tensor of images, lists of varying-size tensors of bounding boxes, labels, and difficulties
+        """
+
+        images, targets, indexes = tuple(zip(*batch))
+        images = torch.stack(images, dim=0)
+        indexes = torch.tensor(indexes, dtype=torch.int64)
+        return images, list(targets), indexes
 
 
 if __name__ == "__main__":

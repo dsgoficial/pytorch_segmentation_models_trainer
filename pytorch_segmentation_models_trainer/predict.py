@@ -92,7 +92,7 @@ def predict(cfg: DictConfig):
     compute_func = lambda image: inference_processor.process(
         image,
         threshold=cfg.inference_threshold,
-        save_inference_raster=cfg.save_inference if "save_inference" in cfg else True,
+        save_inference_output=cfg.save_inference if "save_inference" in cfg else True,
     )
     for image in tqdm(images):
         compute_func(image)

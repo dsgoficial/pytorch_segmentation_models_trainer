@@ -49,7 +49,7 @@ class WarmupCallback(pl.callbacks.base.Callback):
                 f"\nModel will warm up for {self.warmup_epochs} "
                 "epochs. Freezing encoder weights.\n"
             )
-            pl_module.set_encoder_trainable(trainable=False)
+            self.set_component_trainable(pl_module, trainable=False)
 
     def on_train_epoch_end(self, trainer, pl_module):
         if self.warmed_up:
@@ -59,8 +59,49 @@ class WarmupCallback(pl.callbacks.base.Callback):
                 f"\nModel warm up completed in the end of epoch {trainer.current_epoch}. "
                 "Unfreezing encoder weights.\n"
             )
-            pl_module.set_encoder_trainable(trainable=True)
+            self.set_component_trainable(pl_module, trainable=True)
             self.warmed_up = True
+
+    def set_component_trainable(self, pl_module, trainable=True):
+        pl_module.set_encoder_trainable(trainable=trainable)
+
+
+class FrameFieldOnlyCrossfieldWarmupCallback(pl.callbacks.base.Callback):
+    def __init__(self, warmup_epochs=2) -> None:
+        super().__init__()
+        self.warmup_epochs = warmup_epochs
+        self.warmed_up = False
+
+    def on_init_end(self, trainer):
+        print(
+            f"\nFrameFieldWarmupCallback initialization at epoch {trainer.current_epoch}.\n"
+        )
+        if trainer.current_epoch > self.warmup_epochs - 1:
+            self.warmed_up = True
+
+    def on_train_epoch_start(self, trainer, pl_module):
+        if self.warmed_up or trainer.current_epoch < self.warmup_epochs - 1:
+            return
+        if not self.warmed_up:
+            print(
+                f"\nFrame field model will warm up for {self.warmup_epochs} "
+                "epochs. Freezing all weights but crossfield's.\n"
+            )
+            self.set_component_trainable(pl_module, trainable=False)
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        if self.warmed_up:
+            return
+        if trainer.current_epoch >= self.warmup_epochs - 1:
+            print(
+                f"\nModel warm up completed in the end of epoch {trainer.current_epoch}. "
+                "Unfreezing weights.\n"
+            )
+            self.set_component_trainable(pl_module, trainable=True)
+            self.warmed_up = True
+
+    def set_component_trainable(self, pl_module, trainable=True):
+        pl_module.set_all_but_crossfield_trainable(trainable=trainable)
 
 
 class FrameFieldComputeWeightNormLossesCallback(pl.callbacks.base.Callback):

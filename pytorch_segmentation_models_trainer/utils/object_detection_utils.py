@@ -18,9 +18,22 @@
  *                                                                         *
  ****
 """
+from typing import Dict, List
+import torch
+from torchvision.ops import box_iou
 
 
-def bbox_xywh_to_xyxy(bbox):
+def evaluate_box_iou(
+    target: Dict[str, torch.Tensor], pred: Dict[str, torch.Tensor]
+) -> torch.Tensor:
+    """Evaluate intersection over union (IOU) for target from dataset and output prediction from model."""
+    if pred["boxes"].shape[0] == 0:
+        # no box detected, 0 IOU
+        return torch.tensor(0.0, device=pred["boxes"].device)
+    return box_iou(target["boxes"], pred["boxes"]).diag().mean()
+
+
+def bbox_xywh_to_xyxy(bbox: List) -> List:
     """
     Convert a bbox from [x, y, w, h] to [x1, y1, x2, y2]
     """
@@ -28,7 +41,7 @@ def bbox_xywh_to_xyxy(bbox):
     return [x, y, x + w, y + h]
 
 
-def bbox_xyxy_to_xywh(bbox):
+def bbox_xyxy_to_xywh(bbox: List) -> List:
     """
     Convert a bbox from [x1, y1, x2, y2] to [x, y, w, h]
     """

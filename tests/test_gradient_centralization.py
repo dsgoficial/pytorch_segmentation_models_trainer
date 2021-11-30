@@ -78,7 +78,7 @@ frame_field_root_dir = os.path.join(
 )
 
 
-class Test_TestGradientCentralization(CustomTestCase):
+class Test_GradientCentralization(CustomTestCase):
     @parameterized.expand(gradient_centralization_list)
     def test_train_with_gradient_centralization(self, overrides_list):
         csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
@@ -92,6 +92,7 @@ class Test_TestGradientCentralization(CustomTestCase):
                     "train_dataset.root_dir=" + frame_field_root_dir,
                     "val_dataset.input_csv_path=" + csv_path,
                     "val_dataset.root_dir=" + frame_field_root_dir,
+                    "+pl_trainer.fast_dev_run=true",
                 ],
             )
             trainer = train(cfg)

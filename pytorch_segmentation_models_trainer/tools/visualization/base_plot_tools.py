@@ -20,8 +20,11 @@
  ****
 """
 import logging
+import random
+from typing import Dict, List, Optional, Union
 
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import numpy as np
 import torch
 import torchvision.transforms.functional as F
@@ -120,7 +123,7 @@ def batch_denormalize_tensor(
 def generate_visualization(fig_title=None, fig_size=None, font_size=16, **images):
     n = len(images)
     fig_size = (16, 5) if fig_size is None else fig_size
-    fig = plt.figure(figsize=fig_size)
+    fig, axarr = plt.subplots(1, n, figsize=fig_size)
     if fig_title is not None:
         fig.suptitle(fig_title, fontsize=font_size)
     for i, (name, image) in enumerate(images.items()):
@@ -130,13 +133,55 @@ def generate_visualization(fig_title=None, fig_size=None, font_size=16, **images
         plt.title(" ".join(name.split("_")).title())
         plt.imshow(image)
     fig.subplots_adjust(top=0.8)
-    return plt, fig
+    return axarr, fig
 
 
 def visualize_image_with_bboxes(
-    image_batch: torch.Tensor, batch_boxes: torch.Tensor, width: int = 4
+    image_batch: torch.Tensor,
+    batch_boxes: Union[torch.Tensor, List[torch.Tensor]],
+    width: int = 4,
 ):
     return [
         draw_bounding_boxes(img, boxes=boxes, width=width)
         for img, boxes in zip(image_batch, batch_boxes)
     ]
+
+
+def generate_bbox_visualization(
+    obj_det_axis,
+    detection_dict: Dict[str, np.ndarray],
+    linewidth: int = 2,
+    show_scores: bool = False,
+    colors: Optional[List] = None,
+    boxes_key: str = "boxes",
+    labels_key: str = "labels",
+    scores_key: str = "scores",
+) -> None:
+    cmap = plt.get_cmap("tab20b")
+    colors = [cmap(i) for i in np.linspace(0, 1, 20)] if colors is None else colors
+    labels = set(label for label in detection_dict[labels_key])
+    color_dict = {label: color for label, color in zip(labels, colors)}
+    for idx, (x1, y1, x2, y2) in enumerate(detection_dict[boxes_key]):
+        box_h = y2 - y1
+        box_w = x2 - x1
+        color = color_dict[detection_dict[labels_key][idx]]
+        bbox = patches.Rectangle(
+            (x1, y1),
+            box_w,
+            box_h,
+            linewidth=linewidth,
+            edgecolor=color,
+            facecolor="none",
+        )
+        obj_det_axis.add_patch(bbox)
+        if not show_scores:
+            continue
+        score = 100 * detection_dict[scores_key][idx]
+        obj_det_axis.text(
+            x1,
+            y1,
+            s=f"{score:.2f}%",
+            color="white",
+            verticalalignment="top",
+            bbox={"color": color, "pad": 0},
+        )

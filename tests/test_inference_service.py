@@ -19,9 +19,11 @@
  *                                                                         *
  ****
 """
+from collections import OrderedDict
 import os
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 import warnings
 
 # from unittest import IsolatedAsyncioTestCase
@@ -78,27 +80,37 @@ def get_asm_polygonizer():
     return ASMPolygonizerProcessor(data_writer=data_writer, config=config)
 
 
-def get_model_for_eval():
+def get_frame_field_ds(with_center_crop=False):
+    config_name = (
+        "frame_field_dataset.yaml"
+        if not with_center_crop
+        else "frame_field_dataset_with_center_crop.yaml"
+    )
     csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
     with initialize(config_path="./test_configs"):
         cfg = compose(
-            config_name="frame_field_for_inference.yaml",
+            config_name=config_name,
             overrides=[
-                "train_dataset.input_csv_path=" + csv_path,
-                "train_dataset.root_dir=" + frame_field_root_dir,
-                "val_dataset.input_csv_path=" + csv_path,
-                "val_dataset.root_dir=" + frame_field_root_dir,
+                "input_csv_path=" + csv_path,
+                "root_dir=" + frame_field_root_dir,
             ],
         )
-    checkpoint_file_path = get_checkpoint_file(
-        "frame_field_resnet152_unet_200_epochs.ckpt"
+        frame_field_ds = hydra.utils.instantiate(cfg, _recursive_=False)
+    return frame_field_ds
+
+
+def get_model_for_eval():
+    ds_with_center_crop = get_frame_field_ds(with_center_crop=True)
+    b1, b2, _ = ds_with_center_crop[0]["gt_polygons_image"]
+    mock_model = Mock(spec=FrameFieldSegmentationPLModel)
+    mock_model.return_value = OrderedDict(
+        {
+            "seg": torch.stack([b1, b2]).unsqueeze(0),
+            "crossfield": ds_with_center_crop[0]["gt_crossfield_angle"].unsqueeze(0),
+        }
     )
-    pl_model = FrameFieldSegmentationPLModel.load_from_checkpoint(
-        checkpoint_file_path, cfg=cfg
-    )
-    model = pl_model.model
-    model.eval()
-    return model
+    mock_model.eval()
+    return mock_model
 
 
 def get_checkpoint_file(file_name):
@@ -117,7 +129,7 @@ def get_settings_override():
     inference_processor = SingleImageFromFrameFieldProcessor(
         model=get_model_for_eval(),
         device=device,
-        batch_size=8,
+        batch_size=1,
         export_strategy=None,
         mask_bands=2,
         polygonizer=get_asm_polygonizer(),
@@ -130,30 +142,17 @@ client = TestClient(app)
 app.dependency_overrides[get_inference_processor] = get_settings_override
 
 
-class Test_TestInferenceService(unittest.TestCase):
+class Test_InferenceService(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)
         warnings.simplefilter("ignore", category=FutureWarning)
         warnings.simplefilter("ignore", category=UserWarning)
         self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
-        self.frame_field_ds = self.get_frame_field_ds()
+        self.frame_field_ds = get_frame_field_ds()
 
     def tearDown(self):
         remove_folder(output_dir)
-
-    def get_frame_field_ds(self):
-        csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
-        with initialize(config_path="./test_configs"):
-            cfg = compose(
-                config_name="frame_field_dataset.yaml",
-                overrides=[
-                    "input_csv_path=" + csv_path,
-                    "root_dir=" + frame_field_root_dir,
-                ],
-            )
-            frame_field_ds = hydra.utils.instantiate(cfg, _recursive_=False)
-        return frame_field_ds
 
     @parameterized.expand(
         [
