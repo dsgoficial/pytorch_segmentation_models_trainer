@@ -1,3 +1,7 @@
+# Version 0.16.1
+
+- Dependencies fix.
+
 # Version 0.16.0
 
 - New Mod PolyMapper model;
