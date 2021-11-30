@@ -22,7 +22,7 @@ geoalchemy2
 rasterio
 numba
 sahi
-skan==0.9.0
+skan==0.10.0
 torch-scatter
 tqdm
 pygeos
