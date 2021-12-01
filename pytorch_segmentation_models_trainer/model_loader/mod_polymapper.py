@@ -43,8 +43,16 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         super(GenericPolyMapperPLModel, self).__init__()
         self.cfg = cfg
         self.model = self.get_model()
-        self.grid_size = grid_size
-        self.perform_evaluation = perform_evaluation
+        self.grid_size = (
+            grid_size
+            if "grid_size" not in self.cfg.pl_model
+            else self.cfg.pl_model.grid_size
+        )
+        self.perform_evaluation = (
+            perform_evaluation
+            if "perform_evaluation" not in self.cfg.pl_model
+            else self.cfg.pl_model.perform_evaluation
+        )
         self.object_detection_train_ds = instantiate(
             self.cfg.train_dataset.object_detection, _recursive_=False
         )
@@ -155,6 +163,8 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         if len(outputs) == 0:
             return tensorboard_logs
         for key in outputs[0]["log"].keys():
+            if key in ["intersection", "union"]:
+                continue
             tensorboard_logs.update(
                 {
                     f"avg_{key}": {
@@ -169,6 +179,13 @@ class GenericPolyMapperPLModel(pl.LightningModule):
                     }
                 }
             )
+        if "intersection" not in outputs[0]["log"] or "union" not in outputs[0]["log"]:
+            return tensorboard_logs
+        intersection = sum([x["log"]["intersection"] for x in outputs])
+        union = sum([x["log"]["intersection"] for x in outputs])
+        tensorboard_logs.update(
+            {"polygon_iou": {step_type: torch.tensor(intersection / union)}}
+        )
         return tensorboard_logs
 
     def training_step(self, batch, batch_idx):

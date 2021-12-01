@@ -1,3 +1,7 @@
+# Version 0.16.2
+
+- Bug fix on ModPolyMapper when choosing not to evaluate while training.
+
 # Version 0.16.1
 
 - Dependencies fix.
