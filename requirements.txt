@@ -21,7 +21,7 @@ geopandas==0.9.0
 geoalchemy2
 rasterio
 numba
-sahi
+sahi==0.4.3
 skan==0.9.0
 torch-scatter
 tqdm
