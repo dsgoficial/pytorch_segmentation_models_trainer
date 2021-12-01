@@ -268,8 +268,13 @@ class Test_ModPolyMapperModel(BasicTestCase):
             (
                 "experiment_mod_polymapper.yaml",
                 ["+pl_trainer.fast_dev_run=true", "+pl_model.perform_evaluation=true"],
-            )
+            ),
+            ("experiment_mod_polymapper_with_callback.yaml", None),
         ]
+    )
+    @unittest.skipIf(
+        torch.cuda.is_available(),
+        reason="GPU is available, features already tested in other tests.",
     )
     def test_pl_model(self, experiment_name, extra_overrides=None) -> None:
         extra_overrides = extra_overrides if extra_overrides is not None else []
