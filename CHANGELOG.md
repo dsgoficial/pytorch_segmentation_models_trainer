@@ -1,6 +1,7 @@
 # Version 0.16.2
 
 - Bug fix on ModPolyMapper when choosing not to evaluate while training.
+- Added the option of freezing some parts of ModPolyMapper.
 
 # Version 0.16.1
 
