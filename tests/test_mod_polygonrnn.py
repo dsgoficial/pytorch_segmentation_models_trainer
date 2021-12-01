@@ -266,10 +266,9 @@ class Test_ModPolyMapperModel(BasicTestCase):
     @parameterized.expand(
         [
             (
-                "experiment_mod_polymapper.yaml",
+                "experiment_mod_polymapper_with_callback.yaml",
                 ["+pl_trainer.fast_dev_run=true", "+pl_model.perform_evaluation=true"],
-            ),
-            ("experiment_mod_polymapper_with_callback.yaml", None),
+            )
         ]
     )
     @unittest.skipIf(
