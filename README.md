@@ -2,18 +2,18 @@
 
 
 [![Torch](https://img.shields.io/badge/-PyTorch-red?logo=pytorch&labelColor=gray)](https://pytorch.org/get-started/locally/)
-[![Pytorch Lightning](https://img.shields.io/badge/code-Lightning-blueviolet)](https://pytorchlightning.ai/)
+[![Pytorch Lightning](https://img.shields.io/badge/code-Lightning-blueviolet?logo=pytorchlightning&labelColor=gray)](https://pytorchlightning.ai/)
 [![Hydra](https://img.shields.io/badge/conf-hydra-blue)](https://hydra.cc/)
 [![Segmentation Models](https://img.shields.io/badge/models-segmentation_models_pytorch-yellow)](https://github.com/qubvel/segmentation_models.pytorch)
 [![Python application](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-app.yml/badge.svg)](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-app.yml)
 [![Upload Python Package](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-publish.yml/badge.svg)](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-publish.yml)
-[![PyPI](https://img.shields.io/pypi/v/pytorch-segmentation-models-trainer)](https://pypi.org/project/pytorch-segmentation-models-trainer/)
 [![Publish Docker image](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/docker-publish.yml)
+[![pre-commit.ci status](https://results.pre-commit.ci/badge/github/phborba/pytorch_segmentation_models_trainer/main.svg)](https://results.pre-commit.ci/latest/github/phborba/pytorch_segmentation_models_trainer/main)
+[![PyPI package](https://img.shields.io/pypi/v/pytorch-segmentation-models-trainer?logo=pypi&color=green)](https://pypi.org/project/pytorch-segmentation-models-trainer/)
+[![codecov](https://codecov.io/gh/phborba/pytorch_segmentation_models_trainer/branch/main/graph/badge.svg?token=PRJL5GVOL2)](https://codecov.io/gh/phborba/pytorch_segmentation_models_trainer)
 [![maintainer](https://img.shields.io/badge/maintainer-phborba-blue.svg)](https://github.com/phborba)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4573996.svg)](https://doi.org/10.5281/zenodo.4573996)
-[![codecov](https://codecov.io/gh/phborba/pytorch_segmentation_models_trainer/branch/main/graph/badge.svg?token=PRJL5GVOL2)](https://codecov.io/gh/phborba/pytorch_segmentation_models_trainer)
 [![Open in Visual Studio Code](https://open.vscode.dev/badges/open-in-vscode.svg)](https://open.vscode.dev/phborba/pytorch_segmentation_models_trainer)
-[![pre-commit.ci status](https://results.pre-commit.ci/badge/github/phborba/pytorch_segmentation_models_trainer/main.svg)](https://results.pre-commit.ci/latest/github/phborba/pytorch_segmentation_models_trainer/main)
 
 
 Framework based on Pytorch, Pytorch Lightning,  segmentation_models.pytorch and hydra to train semantic segmentation models using yaml config files as follows:
