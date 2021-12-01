@@ -25,6 +25,7 @@ import unittest
 from importlib import import_module
 
 import albumentations as A
+from albumentations.pytorch.transforms import ToTensorV2
 import hydra
 import numpy as np
 import segmentation_models_pytorch as smp
@@ -60,7 +61,7 @@ class Test_PolygonRNNModel(BasicTestCase):
             input_csv_path=csv_path,
             sequence_length=20,
             root_dir=polygon_rnn_root_dir,
-            augmentation_list=[A.Normalize(), A.pytorch.ToTensorV2()],
+            augmentation_list=[A.Normalize(), ToTensorV2()],
         )
         data_loader = torch.utils.data.DataLoader(
             polygon_rnn_ds, batch_size=2, shuffle=False, drop_last=True, num_workers=1

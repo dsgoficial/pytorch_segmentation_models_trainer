@@ -120,16 +120,18 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         )
 
     def train_dataloader(self) -> Dict[str, DataLoader]:
-        return {
-            "object_detection": self.get_train_dataloader(
+        dataloader_dict = dict()
+        if self.model.train_obj_detection_model:
+            dataloader_dict["object_detection"] = self.get_train_dataloader(
                 self.object_detection_train_ds,
                 self.cfg.hyperparameters.object_detection_batch_size,
-            ),
-            "polygon_rnn": self.get_train_dataloader(
+            )
+        if self.model.train_polygonrnn_model:
+            dataloader_dict["polygon_rnn"] = self.get_train_dataloader(
                 self.polygonrnn_train_ds,
                 self.cfg.hyperparameters.polygon_rnn_batch_size,
-            ),
-        }
+            )
+        return dataloader_dict
 
     def val_dataloader(self) -> CombinedLoader:
         loader_dict = {

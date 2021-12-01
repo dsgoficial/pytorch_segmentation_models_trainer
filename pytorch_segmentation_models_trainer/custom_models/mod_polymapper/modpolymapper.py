@@ -33,7 +33,11 @@ from pytorch_segmentation_models_trainer.custom_models.models import (
     ObjectDetectionModel,
 )
 from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
-from typing import List, Tuple, Union, Dict, Optional
+from typing import Any, List, Tuple, Union, Dict, Optional
+
+from pytorch_segmentation_models_trainer.utils.model_utils import (
+    set_model_components_trainable,
+)
 
 
 class FinalConvBlock(torch.nn.Module):
@@ -330,6 +334,9 @@ class GenericModPolyMapper(nn.Module):
         polygonrnn_model: Optional[Union[GenericPolygonRNN, PolygonRNN]] = None,
         grid_size: int = 28,
         val_seq_len: int = 60,
+        train_obj_detection_model: bool = True,
+        train_polygonrnn_model: bool = True,
+        train_backbone: bool = True,
     ):
         super(GenericModPolyMapper, self).__init__()
         self.obj_detection_model = obj_detection_model
@@ -340,6 +347,23 @@ class GenericModPolyMapper(nn.Module):
             else polygonrnn_model
         )
         self.val_seq_len = val_seq_len
+        self.train_obj_detection_model = train_obj_detection_model
+        self.train_polygonrnn_model = train_polygonrnn_model
+        self.train_backbone = train_backbone
+        if train_polygonrnn_model is False and train_obj_detection_model is False:
+            raise ValueError(
+                "train_polygonrnn_model and train_obj_detection_model cannot be both False"
+            )
+        freeze_exception_list = list(
+            filter(
+                lambda x: getattr(self, f"train_{x}"),
+                ["backbone", "polygonrnn_model", "obj_detection_model"],
+            )
+        )
+        if len(freeze_exception_list) < 3:
+            set_model_components_trainable(
+                self, trainable=False, exception_list=freeze_exception_list
+            )
 
     def forward(
         self,
@@ -347,23 +371,29 @@ class GenericModPolyMapper(nn.Module):
         obj_det_targets: Optional[torch.Tensor] = None,
         polygon_rnn_batch: Optional[Dict[str, torch.Tensor]] = None,
         threshold: Optional[float] = None,
-    ) -> Union[torch.Tensor, Tuple[Dict[str, torch.Tensor], torch.Tensor]]:
+    ) -> Union[
+        List[Dict[str, Any]], Dict[str, Any], Tuple[Dict[str, Any], torch.Tensor]
+    ]:
         if self.training:
-            assert (
-                obj_det_targets is not None
-            ), "Object detection targets are required for training"
-            assert (
-                polygon_rnn_batch is not None
-            ), "Polygon RNN batches are required for training"
-            losses = self.obj_detection_model(obj_det_images, obj_det_targets)
-            polygonrnn_loss, acc = self.polygonrnn_model.get_polygonrnn_losses_and_accuracy(  # type: ignore
-                croped_images=polygon_rnn_batch["image"],
-                first=polygon_rnn_batch["x1"],
-                second=polygon_rnn_batch["x2"],
-                third=polygon_rnn_batch["x3"],
-                ta=polygon_rnn_batch["ta"],
-            )
-            losses.update({"polygonrnn_loss": polygonrnn_loss})
+            losses = dict()
+            acc = torch.tensor(0.0, device=obj_det_images.device)
+            if self.train_obj_detection_model:
+                assert (
+                    obj_det_targets is not None
+                ), "Object detection targets are required for training object detection model."
+                losses.update(self.obj_detection_model(obj_det_images, obj_det_targets))
+            if self.train_polygonrnn_model:
+                assert (
+                    polygon_rnn_batch is not None
+                ), "Polygon RNN batches are required for training PolygonRNN model."
+                polygonrnn_loss, acc = self.polygonrnn_model.get_polygonrnn_losses_and_accuracy(  # type: ignore
+                    croped_images=polygon_rnn_batch["image"],
+                    first=polygon_rnn_batch["x1"],
+                    second=polygon_rnn_batch["x2"],
+                    third=polygon_rnn_batch["x3"],
+                    ta=polygon_rnn_batch["ta"],
+                )
+                losses.update({"polygonrnn_loss": polygonrnn_loss})
             return losses, acc
         detections = self.obj_detection_model(obj_det_images)
         if threshold is not None:
@@ -422,7 +452,10 @@ class ModPolyMapper(GenericModPolyMapper):
         pretrained: bool = True,
         grid_size: int = 28,
         val_seq_len: Optional[int] = 60,
-        **kwargs
+        train_obj_detection_model: bool = True,
+        train_polygonrnn_model: bool = True,
+        train_backbone: bool = True,
+        **kwargs,
     ):
         backbone = resnet_fpn_backbone(
             "resnet101",
@@ -431,5 +464,10 @@ class ModPolyMapper(GenericModPolyMapper):
         )
         model = FasterRCNN(backbone, num_classes, **kwargs)
         super(ModPolyMapper, self).__init__(
-            obj_detection_model=model, grid_size=grid_size, val_seq_len=val_seq_len
+            obj_detection_model=model,
+            grid_size=grid_size,
+            val_seq_len=val_seq_len,
+            train_obj_detection_model=train_obj_detection_model,
+            train_polygonrnn_model=train_polygonrnn_model,
+            train_backbone=train_backbone,
         )

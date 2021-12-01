@@ -18,6 +18,9 @@
  *                                                                         *
  ****
 """
+
+from typing import List, Optional
+import torch
 from copy import deepcopy
 
 
@@ -27,3 +30,20 @@ def replace_activation(model, old_activation, new_activation):
             setattr(model, child_name, deepcopy(new_activation))
         else:
             replace_activation(child, old_activation, new_activation)
+
+
+def set_model_components_trainable(
+    model: torch.nn.Module,
+    trainable: bool = False,
+    exception_list: Optional[List[str]] = None,
+):
+    """
+    Sets the trainable status of the model's parameters.
+    :param model: The model whose parameters will be set.
+    :param trainable: The trainable status.
+    :param exception_list: The list of parameters that will not be set.
+    """
+    exception_list = exception_list if exception_list is not None else []
+    for name, param in model.named_parameters():
+        if not any(exception in name for exception in exception_list):
+            param.requires_grad = trainable
