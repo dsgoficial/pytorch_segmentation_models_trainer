@@ -1,3 +1,7 @@
+# Version 0.16.3
+
+- Bug fixes on ModPolymapper training when some parts are frozen.
+
 # Version 0.16.2
 
 - Bug fix on ModPolyMapper when choosing not to evaluate while training.
