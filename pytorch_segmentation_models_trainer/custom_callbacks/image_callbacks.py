@@ -380,15 +380,11 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
         )
         self.threshold = threshold
         self.show_label_scores = show_label_scores
+        self.n_samples = 16 if n_samples is None else n_samples
 
     @rank_zero_only
     def on_validation_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         val_ds = pl_module.val_dataloader().loaders  # type: ignore
-        self.n_samples = (
-            val_ds["object_detection"].loader.batch_size
-            if self.n_samples is None
-            else self.n_samples
-        )
         current_item = 0
         prepared_input = val_ds[
             "polygon_rnn"
