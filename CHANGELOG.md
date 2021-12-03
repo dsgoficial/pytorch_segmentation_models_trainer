@@ -1,3 +1,7 @@
+# Version 0.16.4
+
+- Bug fix with parameter grid on image callbacks and mod polymapper.
+
 # Version 0.16.3
 
 - Bug fixes on ModPolymapper training when some parts are frozen.
