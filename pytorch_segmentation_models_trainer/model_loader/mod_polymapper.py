@@ -213,12 +213,7 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             obj_det_images, obj_det_targets, polygon_rnn_batch
         )
         self.log(
-            "train_loss",
-            loss,
-            on_step=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=False,
+            "train_loss", loss, on_step=True, prog_bar=True, logger=True, sync_dist=True
         )
         self.log(
             "train_acc", acc, on_step=True, prog_bar=True, logger=True, sync_dist=False
@@ -241,7 +236,7 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             on_epoch=True,
             prog_bar=False,
             logger=True,
-            sync_dist=False,
+            sync_dist=True,
         )
         self.log(
             "val_acc",
@@ -250,7 +245,7 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             on_epoch=True,
             prog_bar=False,
             logger=True,
-            sync_dist=False,
+            sync_dist=True,
         )
         return_dict = {"loss": loss, "log": detached_loss_dict}
         if self.perform_evaluation:
