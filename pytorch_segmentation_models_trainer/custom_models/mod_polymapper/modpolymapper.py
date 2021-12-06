@@ -376,12 +376,12 @@ class GenericModPolyMapper(nn.Module):
     ]:
         if self.training:
             losses = dict()
-            acc = torch.tensor(0.0, device=obj_det_images.device)
             if self.train_obj_detection_model:
                 assert (
                     obj_det_targets is not None
                 ), "Object detection targets are required for training object detection model."
                 losses.update(self.obj_detection_model(obj_det_images, obj_det_targets))
+                acc = torch.tensor(0.0, device=obj_det_images.device)
             if self.train_polygonrnn_model:
                 assert (
                     polygon_rnn_batch is not None
@@ -395,6 +395,14 @@ class GenericModPolyMapper(nn.Module):
                 )
                 losses.update({"polygonrnn_loss": polygonrnn_loss})
             return losses, acc
+        detections = (
+            self._forward_both_models(obj_det_images, threshold)
+            if obj_det_images is not None
+            else self._forward_only_polygonrnn(polygon_rnn_batch)
+        )
+        return detections
+
+    def _forward_both_models(self, obj_det_images, threshold):
         detections = self.obj_detection_model(obj_det_images)
         if threshold is not None:
             detections = [
@@ -436,6 +444,21 @@ class GenericModPolyMapper(nn.Module):
             )
             detections[idx].update({"polygonrnn_output": polygonrnn_output})
         return detections
+
+    def _forward_only_polygonrnn(
+        self, polygon_rnn_batch: Dict[str, torch.Tensor]
+    ) -> List[Dict[str, torch.Tensor]]:
+        polygonrnn_output = self.polygonrnn_model.test(
+            polygon_rnn_batch["image"], self.val_seq_len  # type: ignore
+        )
+        output_dict = {"polygonrnn_output": polygonrnn_output}
+        output_dict.update(
+            {
+                key: polygon_rnn_batch[key]
+                for key in ["min_row", "min_col", "scale_h", "scale_w"]
+            }
+        )
+        return [output_dict]
 
 
 class ModPolyMapper(GenericModPolyMapper):
