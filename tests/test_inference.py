@@ -36,7 +36,7 @@ from collections import OrderedDict
 from hydra import compose, initialize
 from hydra.utils import instantiate
 from parameterized import parameterized
-from build.lib.pytorch_segmentation_models_trainer.custom_models.models import (
+from pytorch_segmentation_models_trainer.custom_models.models import (
     ObjectDetectionModel,
 )
 from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import PolygonRNN
