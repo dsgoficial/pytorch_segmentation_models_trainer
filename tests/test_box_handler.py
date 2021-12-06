@@ -121,8 +121,8 @@ class Test_BoxHandler(unittest.TestCase):
         bboxes = torch.tensor([[0, 0, 10, 10], [1, 1, 5, 5], [5, 5, 12, 12]])
         scores = torch.tensor([0.9, 0.5, 0.5])
         labels = torch.tensor([1, 1, 1])
-        expected_bbox1 = torch.tensor([[0, 0, 10, 10], [1, 1, 5, 5], [5, 5, 12, 12]])
-        expected_bbox2 = torch.tensor([[0, 0, 10, 10]])
+        expected_bbox1 = torch.tensor([[0, 0, 10, 10]])
+        expected_bbox2 = torch.tensor([[0, 0, 10, 10], [1, 1, 5, 5]])
         (result_boxes1, _, __) = bbox_handler.nms_postprocess(
             bboxes, scores, labels, threshold=0.5, match_metric="IOU"
         )
