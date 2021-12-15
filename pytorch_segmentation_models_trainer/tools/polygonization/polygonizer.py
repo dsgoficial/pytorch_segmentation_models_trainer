@@ -82,6 +82,8 @@ class TemplatePolygonizerProcessor(ABC):
         Args:
             polygons (List[Polygon]): list of shapely polygons
         """
+        if profile is None:
+            profile = {"crs": None}
         projected_polygons = polygons_to_world_coords(
             polygons,
             transform=profile["transform"]

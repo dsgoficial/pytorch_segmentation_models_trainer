@@ -26,6 +26,7 @@ from pytorch_segmentation_models_trainer.train import train
 from pytorch_segmentation_models_trainer.build_mask import build_masks
 from pytorch_segmentation_models_trainer.config_utils import validate_config
 from pytorch_segmentation_models_trainer.convert_ds import convert_dataset
+from pytorch_segmentation_models_trainer.predict_from_batch import predict_from_batch
 
 import logging
 import warnings
@@ -43,6 +44,8 @@ def main(cfg: DictConfig):
         return train(cfg)
     elif cfg.mode == "predict":
         return predict(cfg)
+    elif cfg.mode == "predict-from-batch":
+        return predict_from_batch(cfg)
     elif cfg.mode == "validate-config":
         return validate_config(cfg)
     elif cfg.mode == "build-mask":
