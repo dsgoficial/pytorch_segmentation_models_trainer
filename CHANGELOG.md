@@ -1,6 +1,8 @@
 # Version 0.16.4
 
+
 - sahi version bump;
+- Bug fix with parameter grid on image callbacks and mod polymapper.
 
 # Version 0.16.3
 

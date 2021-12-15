@@ -32,6 +32,9 @@ import pytorch_lightning as pl
 import torch
 from PIL import Image
 from pytorch_lightning.utilities import rank_zero_only
+from pytorch_segmentation_models_trainer.custom_models.mod_polymapper.modpolymapper import (
+    GenericModPolyMapper,
+)
 from pytorch_segmentation_models_trainer.tools.visualization.base_plot_tools import (
     batch_denormalize_tensor,
     denormalize_np_array,
@@ -389,7 +392,8 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
         prepared_input = val_ds[
             "polygon_rnn"
         ].loader.dataset.get_n_image_path_dict_list(self.n_samples)
-        model = pl_module.model
+        model: GenericModPolyMapper = pl_module.model  # type: ignore
+        grid_size = model.polygonrnn_model.grid_size
         model.eval()  # type: ignore
         aug_func = A.Compose([A.Normalize(), ToTensorV2()])
         for image_path, prepared_item in prepared_input.items():
@@ -407,6 +411,7 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
                 image_path=image_path,
                 prepared_item=prepared_item,
                 detection_dict=outputs[0],
+                grid_size=grid_size,
             )
             current_item += 1
         return
@@ -417,6 +422,7 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
         image_path: str,
         prepared_item: Dict[str, torch.Tensor],
         detection_dict: Dict[str, torch.Tensor],
+        grid_size: int,
     ) -> None:
         gt_polygon_list = prepared_item["shapely_polygon_list"]
         predicted_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
@@ -425,6 +431,7 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
             scale_w=detection_dict["scale_w"],
             min_row=detection_dict["min_row"],
             min_col=detection_dict["min_col"],
+            grid_size=grid_size,
         )
         self.build_obj_det_and_polygon_vis(
             image_path=image_path,
