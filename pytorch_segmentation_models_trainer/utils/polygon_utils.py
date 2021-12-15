@@ -458,9 +458,7 @@ def compute_polygon_contour_measures(
     return half_tangent_max_angles
 
 
-def compute_contour_measure(
-    pred_polygon, gt_contours, sampling_spacing, max_stretch, metric_name="cosine"
-):
+def compute_contour_measure(pred_polygon, gt_contours, sampling_spacing, max_stretch):
     pred_contours = shapely.geometry.GeometryCollection(
         [pred_polygon.exterior, *pred_polygon.interiors]
     )
@@ -497,26 +495,10 @@ def compute_contour_measure(
             np.sum(np.multiply(edges, proj_edges), axis=1)
             / (edge_norms * proj_edge_norms)
         )
-        try:
-            contour_measures.append(scalar_products.min())
-        except ValueError:
-            import matplotlib.pyplot as plt
-
-            fig, axes = plt.subplots(
-                nrows=1, ncols=3, figsize=(8, 4), sharex=True, sharey=True
-            )
-            ax = axes.ravel()
-            plot_geometries(ax[0], [contour])
-            plot_geometries(ax[1], [proj_contour])
-            plot_geometries(ax[2], gt_contours)
-            fig.tight_layout()
-            plt.show()
-    if len(contour_measures):
-        min_scalar_product = min(contour_measures)
-        measure = np.arccos(min_scalar_product)
-        return measure
-    else:
-        return None
+        contour_measures.append(scalar_products.min())
+    min_scalar_product = min(contour_measures)
+    measure = np.arccos(min_scalar_product)
+    return measure
 
 
 def sample_geometry(geom, density):

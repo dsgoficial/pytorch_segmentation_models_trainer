@@ -1,3 +1,8 @@
+# Version 0.17.0
+
+- New evaluation metrics;
+- New evaluation on test set;
+
 # Version 0.16.4
 
 - Bug fix with parameter grid on image callbacks and mod polymapper.

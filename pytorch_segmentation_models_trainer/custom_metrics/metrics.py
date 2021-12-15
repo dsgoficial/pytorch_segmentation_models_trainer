@@ -27,7 +27,7 @@ from shapely.geometry import Polygon, LineString, Point
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.multipolygon import MultiPolygon
 import torch
-from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
+from pytorch_segmentation_models_trainer.utils import polygon_utils, polygonrnn_utils
 
 
 def iou(y_pred: torch.Tensor, y_true: torch.Tensor, threshold: float) -> float:
@@ -173,10 +173,56 @@ def hausdorff_distance(geom1: BaseGeometry, geom2: BaseGeometry) -> float:
 
 
 def frechet_distance(
-    polygon1: Polygon, polygon2: Polygon, minkowski_p_norm: float = 2
+    gt_polygon: Polygon, polygon2: Polygon, minkowski_p_norm: float = 2
 ) -> float:
     return sm.frechet_dist(
-        np.array(polygon1.exterior.coords),
+        np.array(gt_polygon.exterior.coords),
         np.array(polygon2.exterior.coords),
         p=minkowski_p_norm,
+    )
+
+
+def polygon_accuracy(
+    gt_polygon: Polygon,
+    pred_polygon: Polygon,
+    grid_size: int = 28,
+    sequence_length: int = 60,
+) -> float:
+    """Compute the polygon accuracy between two polygons.
+
+    Args:
+        polygon1 (Polygon): Shapely polygon
+        polygon2 (Polygon): Shapely polygon
+
+    Returns:
+        float: polygon accuracy
+    """
+    _, label_index_array1 = polygonrnn_utils.build_arrays(
+        np.array(gt_polygon.exterior.coords),
+        len(gt_polygon.exterior.coords) - 1,
+        sequence_length,
+        grid_size=grid_size,
+    )
+    _, label_index_array2 = polygonrnn_utils.build_arrays(
+        np.array(pred_polygon.exterior.coords),
+        len(pred_polygon.exterior.coords) - 1,
+        sequence_length,
+        grid_size=grid_size,
+    )
+    ta1, ta2 = label_index_array1[2:], label_index_array2[2:]
+    correct = (ta1 == ta2).astype(float).sum()
+    return correct / ta1.shape[0]
+
+
+def polygon_mean_max_tangent_angle_errors(
+    gt_polygon: Polygon,
+    pred_polygon: Polygon,
+    sampling_spacing: float = 1.0,
+    max_stretch: int = 2,
+) -> float:
+    return polygon_utils.compute_contour_measure(
+        pred_polygon=pred_polygon,
+        gt_contours=gt_polygon,
+        sampling_spacing=sampling_spacing,
+        max_stretch=max_stretch,
     )
