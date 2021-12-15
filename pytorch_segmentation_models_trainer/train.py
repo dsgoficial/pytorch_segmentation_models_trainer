@@ -52,6 +52,9 @@ def train(cfg: DictConfig):
         OmegaConf.to_yaml(cfg),
     )
     if "resume_from_checkpoint" in cfg.hyperparameters:
+        logger.info(
+            f"Resuming from checkpoint: {cfg.hyperparameters.resume_from_checkpoint}"
+        )
         model = import_module_from_cfg(cfg.pl_model).load_from_checkpoint(
             cfg.hyperparameters.resume_from_checkpoint, cfg=cfg
         )
