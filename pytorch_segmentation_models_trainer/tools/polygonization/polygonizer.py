@@ -68,11 +68,24 @@ class TemplatePolygonizerProcessor(ABC):
                 Defaults to None.
         """
         out_contours_batch, out_probs_batch = self.polygonize_method(
-            inference["seg"], inference["crossfield"], self.config, pool=pool
+            inference["seg"], inference["crossfield"], self.config
         )
-        return self.post_process(
-            out_contours_batch[0], profile, parent_dir_name=parent_dir_name
-        )
+        if inference["seg"].shape[0] == 1:
+            return self.post_process(
+                out_contours_batch[0], profile, parent_dir_name=parent_dir_name
+            )
+        # ignore profile for now, just wanna get some results, I'll fix it later
+        if pool is None:
+            return [
+                self.post_process(out_contour, None, parent_dir_name=parent_dir)
+                for out_contour, parent_dir in zip(out_contours_batch, parent_dir_name)
+            ]
+        futures = []
+        for out_contour, parent_dir in zip(out_contours_batch, parent_dir_name):
+            futures.append(
+                pool.submit(self.post_process, out_contour, None, parent_dir)
+            )
+        return futures
 
     def post_process(
         self, polygons: List[Polygon], profile: dict, parent_dir_name: str = None

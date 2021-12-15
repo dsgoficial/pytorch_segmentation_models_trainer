@@ -19,6 +19,7 @@
  ****
 """
 import concurrent.futures
+from concurrent.futures.thread import ThreadPoolExecutor
 import logging
 from pathlib import Path
 from pytorch_segmentation_models_trainer.predict import (
@@ -46,8 +47,8 @@ from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import
     TemplatePolygonizerProcessor,
 )
 from pytorch_segmentation_models_trainer.utils.os_utils import import_module_from_cfg
-from multiprocess import Pool
 from functools import partial
+import copy
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ def instantiate_dataloader(cfg):
         batch_size=cfg.hyperparameters.batch_size,
         shuffle=False,
         drop_last=False,
-        num_workers=4,
+        num_workers=8,
     )
 
     return dataloader
@@ -74,20 +75,28 @@ def predict_from_batch(cfg: DictConfig):
         OmegaConf.to_yaml(cfg),
     )
     model = instantiate_model_from_checkpoint(cfg)
-    polygonizer = instantiate_polygonizer(cfg)
     dataloader = instantiate_dataloader(cfg)
-    pool = Pool()
-    for batch in tqdm(dataloader):
-        images = batch["image"].to(cfg.device)
-        paths = batch["path"]
-        batch_predictions = model(images)
-        for i, prediction in enumerate(batch_predictions):
-            if i > 3:
-                break
-            polygonizer.process(
-                prediction, profile=None, pool=pool, parent_dir_name=Path(paths[i]).stem
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        futures = []
+        for batch in tqdm(dataloader, desc="Processing batches"):
+            images = batch["image"].to(cfg.device)
+            paths = batch["path"]
+            with torch.no_grad():
+                batch_predictions = model(images)
+            seg_batch, crossfield_batch = batch_predictions.values()
+            parent_dir_name_list = [Path(path).stem for path in paths]
+            polygonizer = instantiate_polygonizer(cfg)
+            new_futures = polygonizer.process(
+                {"seg": seg_batch, "crossfield": crossfield_batch},
+                profile=None,
+                parent_dir_name=parent_dir_name_list,
+                pool=pool,
             )
-    pool.close()
+            futures.extend(new_futures)
+        for future in tqdm(
+            concurrent.futures.as_completed(futures), desc="Finishing writing polygons"
+        ):
+            future.result()
 
 
 if __name__ == "__main__":
