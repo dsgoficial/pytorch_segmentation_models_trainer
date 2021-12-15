@@ -33,6 +33,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from PIL import Image
+from albumentations.pytorch import ToTensorV2
 from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 from pytorch_segmentation_models_trainer.utils.object_detection_utils import (
     bbox_xywh_to_xyxy,
@@ -232,7 +233,7 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
         )
         self.size_mask_key = size_mask_key if size_mask_key is not None else "size_mask"
         self.alternative_transform = A.Compose(
-            [A.Resize(image_height, image_width), A.Normalize(), A.pytorch.ToTensorV2()]
+            [A.Resize(image_height, image_width), A.Normalize(), ToTensorV2()]
         )
         self.masks_to_load_dict = {
             mask_key: True,

@@ -65,6 +65,7 @@ class AbstractInferenceProcessor(ABC):
         step_shape=None,
         mask_bands=1,
         config=None,
+        group_output_by_image_basename=False,
     ):
         self.model = model
         self.device = device
@@ -79,6 +80,7 @@ class AbstractInferenceProcessor(ABC):
         self.step_shape = (224, 224) if step_shape is None else step_shape
         self.mask_bands = mask_bands
         self.normalize = A.Normalize()
+        self.group_output_by_image_basename = group_output_by_image_basename
 
     def get_profile(self, image_path, restore_geo_transform=True):
         with rasterio.open(image_path, "r") as raster_ds:
@@ -105,7 +107,12 @@ class AbstractInferenceProcessor(ABC):
         polygonizer = self.polygonizer if polygonizer is None else polygonizer
         if polygonizer is not None:
             output_dict["polygons"] += self.process_polygonizer(
-                polygonizer, inference, profile
+                polygonizer,
+                inference,
+                profile,
+                image_name=Path(image_path).stem
+                if self.group_output_by_image_basename
+                else None,
             )
         if save_inference_output:
             self.save_inference(image_path, threshold, profile, inference, output_dict)
@@ -113,13 +120,14 @@ class AbstractInferenceProcessor(ABC):
             output_dict["inference_output"].append(inference)
         return output_dict
 
-    def process_polygonizer(self, polygonizer, inference, profile):
+    def process_polygonizer(self, polygonizer, inference, profile, image_name):
         return polygonizer.process(
             {
                 key: image_to_tensor(value).unsqueeze(0)
                 for key, value in inference.items()
             },
             profile,
+            parent_dir_name=image_name,
         )
 
     def save_inference(self, image_path, threshold, profile, inference, output_dict):
@@ -157,6 +165,7 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
         step_shape=None,
         mask_bands=1,
         config=None,
+        group_output_by_image_basename=False,
     ):
         super(SingleImageInfereceProcessor, self).__init__(
             model,
@@ -168,6 +177,7 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
             step_shape=step_shape,
             mask_bands=mask_bands,
             config=config,
+            group_output_by_image_basename=group_output_by_image_basename,
         )
 
     def make_inference(
@@ -247,6 +257,7 @@ class SingleImageFromFrameFieldProcessor(SingleImageInfereceProcessor):
         step_shape=None,
         mask_bands=1,
         config=None,
+        group_output_by_image_basename=False,
     ):
         super(SingleImageFromFrameFieldProcessor, self).__init__(
             model,
@@ -258,6 +269,7 @@ class SingleImageFromFrameFieldProcessor(SingleImageInfereceProcessor):
             step_shape=step_shape,
             mask_bands=mask_bands,
             config=config,
+            group_output_by_image_basename=group_output_by_image_basename,
         )
 
     def get_merger_dict(self, tiler: ImageSlicer):
@@ -294,6 +306,7 @@ class ObjectDetectionInferenceProcessor(AbstractInferenceProcessor):
         post_process_method=None,
         min_visibility=0.3,
         config=None,
+        group_output_by_image_basename=False,
     ):
         super(ObjectDetectionInferenceProcessor, self).__init__(
             model,
@@ -305,6 +318,7 @@ class ObjectDetectionInferenceProcessor(AbstractInferenceProcessor):
             step_shape=step_shape,
             mask_bands=mask_bands,
             config=config,
+            group_output_by_image_basename=group_output_by_image_basename,
         )
         self.post_process_method = (
             post_process_method if post_process_method is not None else "union"
@@ -387,6 +401,7 @@ class PolygonRNNInferenceProcessor(AbstractInferenceProcessor):
         polygonizer=None,
         config=None,
         sequence_length=60,
+        group_output_by_image_basename=False,
     ):
         super(PolygonRNNInferenceProcessor, self).__init__(
             model,
@@ -396,6 +411,7 @@ class PolygonRNNInferenceProcessor(AbstractInferenceProcessor):
             polygonizer=polygonizer,
             model_input_shape=(224, 224),
             config=config,
+            group_output_by_image_basename=group_output_by_image_basename,
         )
         self.image_size = 224
         self.sequence_length = sequence_length

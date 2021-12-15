@@ -73,23 +73,39 @@ class RasterDataWriter(AbstractDataWriter):
 
 @dataclass
 class VectorFileDataWriter(AbstractDataWriter):
-    output_file_path: str = MISSING
+    output_file_folder: str = MISSING
+    output_file_name: str = "output.geojson"
     driver: str = "GeoJSON"
     mode: str = "a"
+
+    def get_output_file_path(self, extra_folder) -> str:
+        if self.output_file_folder is MISSING:
+            raise ValueError("output_file_folder is missing")
+        output_file_folder = (
+            self.output_file_folder
+            if extra_folder is None
+            else os.path.join(self.output_file_folder, extra_folder)
+        )
+        if not os.path.isdir(output_file_folder):
+            pathlib.Path(output_file_folder).mkdir(parents=True, exist_ok=True)
+        output_file_path = os.path.join(output_file_folder, self.output_file_name)
+        return output_file_path
 
     def write_data(
         self,
         input_data: List[Union[BaseGeometry, BaseMultipartGeometry]],
         profile: dict,
+        folder_name: str = None,
     ) -> None:
+        output_file_path = self.get_output_file_path(folder_name)
         geoseries = GeoSeries(input_data, crs=profile["crs"])
         gdf = GeoDataFrame.from_features(geoseries, crs=profile["crs"])
         if len(gdf) == 0:
             return
-        if not os.path.isfile(self.output_file_path) and self.mode == "a":
-            gdf.to_file(self.output_file_path, driver=self.driver)
+        if not os.path.isfile(output_file_path) and self.mode == "a":
+            gdf.to_file(output_file_path, driver=self.driver)
         else:
-            gdf.to_file(self.output_file_path, driver=self.driver, mode=self.mode)
+            gdf.to_file(output_file_path, driver=self.driver, mode=self.mode)
 
 
 @dataclass
