@@ -19,6 +19,7 @@
 """
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Union
 
@@ -40,6 +41,8 @@ from pytorch_segmentation_models_trainer.utils.polygon_utils import (
     polygons_to_world_coords,
 )
 from shapely.geometry import Polygon
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -67,9 +70,30 @@ class TemplatePolygonizerProcessor(ABC):
             pool (concurrent.futures.ThreadPool, optional): Thread object in case of parallel execution.
                 Defaults to None.
         """
-        out_contours_batch, out_probs_batch = self.polygonize_method(
-            inference["seg"], inference["crossfield"], self.config
-        )
+        try:
+            out_contours_batch, out_probs_batch = self.polygonize_method(
+                inference["seg"], inference["crossfield"], self.config
+            )
+        except Exception as e:
+            logger.exception(
+                "An error occurred while polygonizing the batch. Retrying each image individualy this batch. The original error was: \n"
+            )
+            logger.exception(e)
+            out_contours_batch = []
+            for idx, (seg, crossfield) in enumerate(
+                zip(inference["seg"], inference["crossfield"])
+            ):
+                try:
+                    out_contours, _ = self.polygonize_method(
+                        seg.unsqueeze(0), crossfield.unsqueeze(0), self.config
+                    )
+                    out_contours_batch.append(out_contours[0])
+                except Exception as e:
+                    logger.exception(
+                        f"An error occurred while polygonizing the image {parent_dir_name[idx]}. Skipping this image."
+                    )
+                    logger.exception(e)
+
         if inference["seg"].shape[0] == 1:
             return self.post_process(
                 out_contours_batch[0], profile, parent_dir_name=parent_dir_name

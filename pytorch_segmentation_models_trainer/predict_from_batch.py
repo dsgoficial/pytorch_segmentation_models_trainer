@@ -62,7 +62,8 @@ def instantiate_dataloader(cfg):
         batch_size=cfg.hyperparameters.batch_size,
         shuffle=False,
         drop_last=False,
-        num_workers=8,
+        num_workers=cfg.val_dataset.data_loader.num_workers,
+        prefetch_factor=cfg.val_dataset.data_loader.prefetch_factor,
     )
 
     return dataloader
