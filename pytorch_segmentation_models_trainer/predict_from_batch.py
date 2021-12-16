@@ -3,7 +3,7 @@
 /***************************************************************************
  pytorch_segmentation_models_trainer
                               -------------------
-        begin                : 2021-03-02
+        begin                : 2021-12-15
         git sha              : $Format:%H$
         copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
                                                             @ Brazilian Army
@@ -73,13 +73,6 @@ def instantiate_dataloader(cfg):
     )
     device_count = 1 if cfg.device == "cpu" else torch.cuda.device_count()
     batch_size = cfg.hyperparameters.batch_size * device_count
-    sampler = (
-        torch.utils.data.distributed.DistributedSampler(
-            ds, rank=0, num_replicas=device_count, shuffle=False
-        )
-        if device_count > 1
-        else None
-    )
     dataloader = torch.utils.data.DataLoader(
         ds,
         batch_size=batch_size,
@@ -87,9 +80,7 @@ def instantiate_dataloader(cfg):
         drop_last=False,
         num_workers=cfg.val_dataset.data_loader.num_workers,
         prefetch_factor=cfg.val_dataset.data_loader.prefetch_factor * device_count,
-        sampler=sampler,
     )
-
     return dataloader
 
 
