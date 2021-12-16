@@ -22,6 +22,7 @@ import concurrent.futures
 from concurrent.futures.thread import ThreadPoolExecutor
 import logging
 from pathlib import Path
+from pytorch_segmentation_models_trainer.dataset_loader.dataset import ImageDataset
 from pytorch_segmentation_models_trainer.predict import (
     instantiate_model_from_checkpoint,
     instantiate_polygonizer,
@@ -49,24 +50,60 @@ from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import
 from pytorch_segmentation_models_trainer.utils.os_utils import import_module_from_cfg
 from functools import partial
 import copy
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
 logger = logging.getLogger(__name__)
 
+import os
+import torch.distributed as dist
+import torch.multiprocessing as mp
+
+WORLD_SIZE = torch.cuda.device_count()
+
 
 def instantiate_dataloader(cfg):
-    ds = instantiate(
-        cfg.val_dataset, return_distance_mask=False, return_size_mask=False
+    ds = ImageDataset(
+        input_csv_path=cfg.val_dataset.input_csv_path,
+        root_dir=cfg.val_dataset.root_dir,
+        augmentation_list=A.Compose([A.Normalize(), ToTensorV2()]),
+        n_first_rows_to_read=cfg.val_dataset.n_first_rows_to_read
+        if "n_first_rows_to_read" in cfg.val_dataset
+        else None,
+    )
+    device_count = 1 if cfg.device == "cpu" else torch.cuda.device_count()
+    batch_size = cfg.hyperparameters.batch_size * device_count
+    sampler = (
+        torch.utils.data.distributed.DistributedSampler(
+            ds, rank=0, num_replicas=device_count, shuffle=False
+        )
+        if device_count > 1
+        else None
     )
     dataloader = torch.utils.data.DataLoader(
         ds,
-        batch_size=cfg.hyperparameters.batch_size,
+        batch_size=batch_size,
         shuffle=False,
         drop_last=False,
         num_workers=cfg.val_dataset.data_loader.num_workers,
-        prefetch_factor=cfg.val_dataset.data_loader.prefetch_factor,
+        prefetch_factor=cfg.val_dataset.data_loader.prefetch_factor * device_count,
+        sampler=sampler,
     )
 
     return dataloader
+
+
+def instantiate_model_from_checkpoint_distributed(cfg: DictConfig) -> torch.nn.Module:
+    pl_model = import_module_from_cfg(cfg.pl_model).load_from_checkpoint(
+        cfg.checkpoint_path, cfg=cfg
+    )
+    model = pl_model.model
+    if torch.cuda.device_count() > 1:
+        model = torch.nn.parallel.DataParallel(model).to(cfg.device)
+    else:
+        model = model.to(cfg.device)
+    model.eval()
+    return model
 
 
 @hydra.main()
@@ -75,11 +112,12 @@ def predict_from_batch(cfg: DictConfig):
         "Starting the prediction of a model with the following configuration: \n%s",
         OmegaConf.to_yaml(cfg),
     )
-    model = instantiate_model_from_checkpoint(cfg)
+    model = instantiate_model_from_checkpoint_distributed(cfg)
     dataloader = instantiate_dataloader(cfg)
     with concurrent.futures.ThreadPoolExecutor() as pool:
         futures = []
-        for batch in tqdm(dataloader, desc="Processing batches"):
+
+        def process_batch(batch):
             images = batch["image"].to(cfg.device)
             paths = batch["path"]
             with torch.no_grad():
@@ -87,15 +125,20 @@ def predict_from_batch(cfg: DictConfig):
             seg_batch, crossfield_batch = batch_predictions.values()
             parent_dir_name_list = [Path(path).stem for path in paths]
             polygonizer = instantiate_polygonizer(cfg)
-            new_futures = polygonizer.process(
+            return polygonizer.process(
                 {"seg": seg_batch, "crossfield": crossfield_batch},
                 profile=None,
                 parent_dir_name=parent_dir_name_list,
                 pool=pool,
             )
-            futures.extend(new_futures)
+
+        for batch in tqdm(dataloader, desc="Processing polygonization for each batch"):
+            future = process_batch(batch)
+            futures.extend(future)
         for future in tqdm(
-            concurrent.futures.as_completed(futures), desc="Finishing writing polygons"
+            concurrent.futures.as_completed(futures),
+            desc="Writing outputs",
+            total=len(futures),
         ):
             future.result()
 

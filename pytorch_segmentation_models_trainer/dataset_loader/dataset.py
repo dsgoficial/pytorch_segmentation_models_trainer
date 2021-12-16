@@ -138,6 +138,36 @@ class AbstractDataset(Dataset):
         return x if isinstance(x, torch.Tensor) else torch.from_numpy(x)
 
 
+class ImageDataset(AbstractDataset):
+    def __init__(
+        self,
+        input_csv_path: Path,
+        root_dir=None,
+        augmentation_list=None,
+        data_loader=None,
+        image_key=None,
+        n_first_rows_to_read=None,
+    ) -> None:
+        super(ImageDataset, self).__init__(
+            input_csv_path=input_csv_path,
+            root_dir=root_dir,
+            augmentation_list=augmentation_list,
+            data_loader=data_loader,
+            image_key=image_key,
+            n_first_rows_to_read=n_first_rows_to_read,
+        )
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        idx = idx % self.len
+
+        image = self.load_image(idx, key=self.image_key)
+        result = (
+            {"image": image} if self.transform is None else self.transform(image=image)
+        )
+        result.update({"path": self.get_path(idx, key=self.image_key)})
+        return result
+
+
 class SegmentationDataset(AbstractDataset):
     """[summary]
 
