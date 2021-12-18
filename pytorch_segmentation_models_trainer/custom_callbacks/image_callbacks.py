@@ -169,7 +169,7 @@ class FrameFieldResultCallback(ImageSegmentationResultCallback):
                 mask = batch["gt_polygons_image"][i]
                 predicted_mask = pred["seg"][i]
                 predicted_mask = predicted_mask.to("cpu")
-                plot_title = val_ds.dataset.get_path(i)
+                plot_title = batch["path"][i]
                 image_to_plot = np.transpose(image_display[i], (1, 2, 0))
                 axarr, fig = generate_visualization(
                     fig_title=plot_title,
