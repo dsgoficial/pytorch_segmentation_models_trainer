@@ -20,6 +20,7 @@
 """
 import concurrent.futures
 from concurrent.futures.thread import ThreadPoolExecutor
+import itertools
 import logging
 from pathlib import Path
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import ImageDataset
@@ -52,6 +53,7 @@ from functools import partial
 import copy
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -62,26 +64,34 @@ import torch.multiprocessing as mp
 WORLD_SIZE = torch.cuda.device_count()
 
 
-def instantiate_dataloader(cfg):
-    ds = ImageDataset(
-        input_csv_path=cfg.val_dataset.input_csv_path,
+def instantiate_dataloaders(cfg):
+    df = (
+        pd.read_csv(
+            cfg.val_dataset.input_csv_path, nrows=cfg.val_dataset.n_first_rows_to_read
+        )
+        if "n_first_rows_to_read" in cfg.val_dataset
+        and cfg.val_dataset.n_first_rows_to_read is not None
+        else pd.read_csv(cfg.val_dataset.input_csv_path)
+    )
+    ds_dict = ImageDataset.get_grouped_datasets(
+        df,
+        group_by_keys=["width", "height"],
         root_dir=cfg.val_dataset.root_dir,
         augmentation_list=A.Compose([A.Normalize(), ToTensorV2()]),
-        n_first_rows_to_read=cfg.val_dataset.n_first_rows_to_read
-        if "n_first_rows_to_read" in cfg.val_dataset
-        else None,
     )
     device_count = 1 if cfg.device == "cpu" else torch.cuda.device_count()
     batch_size = cfg.hyperparameters.batch_size * device_count
-    dataloader = torch.utils.data.DataLoader(
-        ds,
-        batch_size=batch_size,
-        shuffle=False,
-        drop_last=False,
-        num_workers=cfg.val_dataset.data_loader.num_workers,
-        prefetch_factor=cfg.val_dataset.data_loader.prefetch_factor * device_count,
-    )
-    return dataloader
+    return [
+        torch.utils.data.DataLoader(
+            ds,
+            batch_size=batch_size,
+            shuffle=False,
+            drop_last=False,
+            num_workers=cfg.val_dataset.data_loader.num_workers,
+            prefetch_factor=cfg.val_dataset.data_loader.prefetch_factor * device_count,
+        )
+        for ds in ds_dict.values()
+    ]
 
 
 def instantiate_model_from_checkpoint_distributed(cfg: DictConfig) -> torch.nn.Module:
@@ -104,7 +114,7 @@ def predict_from_batch(cfg: DictConfig):
         OmegaConf.to_yaml(cfg),
     )
     model = instantiate_model_from_checkpoint_distributed(cfg)
-    dataloader = instantiate_dataloader(cfg)
+    dataloader_list = instantiate_dataloaders(cfg)
     with concurrent.futures.ThreadPoolExecutor() as pool:
         futures = []
 
@@ -123,7 +133,11 @@ def predict_from_batch(cfg: DictConfig):
                 pool=pool,
             )
 
-        for batch in tqdm(dataloader, desc="Processing polygonization for each batch"):
+        for batch in tqdm(
+            itertools.chain.from_iterable(dataloader_list),
+            total=sum(len(i) for i in dataloader_list),
+            desc="Processing polygonization for each batch",
+        ):
             future = process_batch(batch)
             futures.extend(future)
         for future in tqdm(

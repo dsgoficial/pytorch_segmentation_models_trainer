@@ -42,6 +42,7 @@ from pytorch_segmentation_models_trainer.utils.object_detection_utils import (
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 from torch.utils.data import Dataset
+import copy
 
 
 def load_augmentation_object(input_list, bbox_params=None):
@@ -61,7 +62,8 @@ def load_augmentation_object(input_list, bbox_params=None):
 class AbstractDataset(Dataset):
     def __init__(
         self,
-        input_csv_path: Path,
+        input_csv_path: Path = None,
+        df: pd.DataFrame = None,
         root_dir=None,
         augmentation_list=None,
         data_loader=None,
@@ -69,22 +71,31 @@ class AbstractDataset(Dataset):
         mask_key=None,
         n_first_rows_to_read=None,
     ) -> None:
+        if input_csv_path is None and df is None:
+            raise ValueError("Must provide either input_csv_path or df")
         self.input_csv_path = input_csv_path
         self.root_dir = root_dir
-        self.df = (
-            pd.read_csv(input_csv_path)
-            if n_first_rows_to_read is None
-            else pd.read_csv(input_csv_path, nrows=n_first_rows_to_read)
-        )
+        if df is not None:
+            self.df = df
+        else:
+            self.df = (
+                pd.read_csv(input_csv_path)
+                if n_first_rows_to_read is None
+                else pd.read_csv(input_csv_path, nrows=n_first_rows_to_read)
+            )
+        self.len = len(self.df)
         self.transform = (
             None
             if augmentation_list is None
             else load_augmentation_object(augmentation_list)
         )
         self.data_loader = data_loader
-        self.len = len(self.df)
         self.image_key = image_key if image_key is not None else "image"
         self.mask_key = mask_key if mask_key is not None else "mask"
+
+    def update_df(self, new_df):
+        self.df = new_df
+        self.len = len(self.df)
 
     def __len__(self) -> int:
         return self.len
@@ -141,7 +152,8 @@ class AbstractDataset(Dataset):
 class ImageDataset(AbstractDataset):
     def __init__(
         self,
-        input_csv_path: Path,
+        input_csv_path: Path = None,
+        df=None,
         root_dir=None,
         augmentation_list=None,
         data_loader=None,
@@ -150,12 +162,34 @@ class ImageDataset(AbstractDataset):
     ) -> None:
         super(ImageDataset, self).__init__(
             input_csv_path=input_csv_path,
+            df=df,
             root_dir=root_dir,
             augmentation_list=augmentation_list,
             data_loader=data_loader,
             image_key=image_key,
             n_first_rows_to_read=n_first_rows_to_read,
         )
+
+    @classmethod
+    def get_grouped_datasets(
+        cls,
+        df,
+        group_by_keys: List[str],
+        root_dir=None,
+        augmentation_list=None,
+        image_key=None,
+        n_first_rows_to_read=None,
+    ):
+        return {
+            str(k): cls(
+                df=pd.DataFrame(df.iloc[v]).reset_index(),
+                root_dir=root_dir,
+                augmentation_list=augmentation_list,
+                image_key=image_key,
+                n_first_rows_to_read=n_first_rows_to_read,
+            )
+            for k, v in df.groupby(group_by_keys).groups.items()
+        }
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         idx = idx % self.len
