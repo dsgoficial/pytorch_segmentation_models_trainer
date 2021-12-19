@@ -67,28 +67,30 @@ WORLD_SIZE = torch.cuda.device_count()
 def instantiate_dataloaders(cfg):
     df = (
         pd.read_csv(
-            cfg.val_dataset.input_csv_path, nrows=cfg.val_dataset.n_first_rows_to_read
+            cfg.inference_dataset.input_csv_path,
+            nrows=cfg.inference_dataset.n_first_rows_to_read,
         )
-        if "n_first_rows_to_read" in cfg.val_dataset
-        and cfg.val_dataset.n_first_rows_to_read is not None
-        else pd.read_csv(cfg.val_dataset.input_csv_path)
+        if "n_first_rows_to_read" in cfg.inference_dataset
+        and cfg.inference_dataset.n_first_rows_to_read is not None
+        else pd.read_csv(cfg.inference_dataset.input_csv_path)
     )
     ds_dict = ImageDataset.get_grouped_datasets(
         df,
         group_by_keys=["width", "height"],
-        root_dir=cfg.val_dataset.root_dir,
+        root_dir=cfg.inference_dataset.root_dir,
         augmentation_list=A.Compose([A.Normalize(), ToTensorV2()]),
     )
     device_count = 1 if cfg.device == "cpu" else torch.cuda.device_count()
-    batch_size = cfg.hyperparameters.batch_size * device_count
+    batch_size = cfg.hyperparameters.batch_size
     return [
         torch.utils.data.DataLoader(
             ds,
             batch_size=batch_size,
             shuffle=False,
             drop_last=False,
-            num_workers=cfg.val_dataset.data_loader.num_workers,
-            prefetch_factor=cfg.val_dataset.data_loader.prefetch_factor * device_count,
+            num_workers=cfg.inference_dataset.data_loader.num_workers,
+            prefetch_factor=cfg.inference_dataset.data_loader.prefetch_factor
+            * device_count,
         )
         for ds in ds_dict.values()
     ]
@@ -119,7 +121,9 @@ def predict_mod_polymapper_from_batch(cfg: DictConfig):
         total=sum(len(i) for i in dataloader_list),
         desc="Processing polygonization for each batch",
     ) as pbar:
-        with concurrent.futures.ThreadPoolExecutor() as pool:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=cfg.max_workers if "max_workers" in cfg else 1
+        ) as pool:
             futures = []
 
             def process_batch(batch):
