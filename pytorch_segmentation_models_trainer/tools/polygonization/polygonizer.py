@@ -62,6 +62,7 @@ class TemplatePolygonizerProcessor(ABC):
         profile: dict,
         pool: ThreadPoolExecutor = None,
         parent_dir_name: str = None,
+        convert_output_to_world_coords: bool = True,
     ):
         """Processes the polygonization.
 
@@ -96,23 +97,41 @@ class TemplatePolygonizerProcessor(ABC):
 
         if inference["seg"].shape[0] == 1:
             return self.post_process(
-                out_contours_batch[0], profile, parent_dir_name=parent_dir_name
+                out_contours_batch[0],
+                profile,
+                parent_dir_name=parent_dir_name,
+                convert_output_to_world_coords=convert_output_to_world_coords,
             )
         # ignore profile for now, just wanna get some results, I'll fix it later
         if pool is None:
             return [
-                self.post_process(out_contour, None, parent_dir_name=parent_dir)
+                self.post_process(
+                    out_contour,
+                    None,
+                    parent_dir_name=parent_dir,
+                    convert_output_to_world_coords=convert_output_to_world_coords,
+                )
                 for out_contour, parent_dir in zip(out_contours_batch, parent_dir_name)
             ]
         futures = []
         for out_contour, parent_dir in zip(out_contours_batch, parent_dir_name):
             futures.append(
-                pool.submit(self.post_process, out_contour, None, parent_dir)
+                pool.submit(
+                    self.post_process,
+                    out_contour,
+                    None,
+                    parent_dir,
+                    convert_output_to_world_coords=convert_output_to_world_coords,
+                )
             )
         return futures
 
     def post_process(
-        self, polygons: List[Polygon], profile: dict, parent_dir_name: str = None
+        self,
+        polygons: List[Polygon],
+        profile: dict,
+        parent_dir_name: str = None,
+        convert_output_to_world_coords: bool = True,
     ):
         """Post-processes generated polygons from process method.
 
@@ -121,14 +140,18 @@ class TemplatePolygonizerProcessor(ABC):
         """
         if profile is None:
             profile = {"crs": None}
-        projected_polygons = polygons_to_world_coords(
-            polygons,
-            transform=profile["transform"]
-            if profile["crs"] is not None
-            else Affine(1, 0, 0, 0, -1, 0),
-            epsg_number=profile["crs"].to_epsg()
-            if profile["crs"] is not None
-            else None,
+        projected_polygons = (
+            polygons_to_world_coords(
+                polygons,
+                transform=profile["transform"]
+                if profile["crs"] is not None
+                else Affine(1, 0, 0, 0, -1, 0),
+                epsg_number=profile["crs"].to_epsg()
+                if profile["crs"] is not None
+                else None,
+            )
+            if convert_output_to_world_coords
+            else polygons
         )
         if self.data_writer is not None:
             self.data_writer.write_data(

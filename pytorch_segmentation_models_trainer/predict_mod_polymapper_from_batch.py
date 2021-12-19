@@ -137,6 +137,7 @@ def predict_mod_polymapper_from_batch(cfg: DictConfig):
                         detection,
                         profile=None,
                         parent_dir_name=parent_dir_name_list[idx],
+                        convert_output_to_world_coords=False,
                     )
 
             for batch in itertools.chain.from_iterable(dataloader_list):
