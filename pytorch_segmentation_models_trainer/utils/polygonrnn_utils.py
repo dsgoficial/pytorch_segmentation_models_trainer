@@ -208,7 +208,9 @@ def get_vertex_list_from_batch_tensors(
     def cast_func(x):
         return np.array(x, dtype=np.float32)
 
-    if input_batch == []:
+    if input_batch == [] or (
+        isinstance(input_batch, torch.Tensor) and input_batch.numel() == 0
+    ):
         return []
 
     return [

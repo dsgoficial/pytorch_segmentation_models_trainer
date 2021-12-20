@@ -117,14 +117,16 @@ def predict_mod_polymapper_from_batch(cfg: DictConfig):
     )
     model = instantiate_model_from_checkpoint_distributed(cfg)
     dataloader_list = instantiate_dataloaders(cfg)
-    with concurrent.futures.ThreadPoolExecutor() as pool:
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=cfg.max_workers if "max_workers" in cfg else os.cpu_count()
+    ) as pool:
         futures = []
 
         def process_batch(batch):
             images = batch["image"].to(cfg.device)
             paths = batch["path"]
             with torch.no_grad():
-                detections = model(images, threshold=0.8)
+                detections = model(images, threshold=cfg.detection_threshold)
             parent_dir_name_list = [Path(path).stem for path in paths]
             return detections, parent_dir_name_list
 
