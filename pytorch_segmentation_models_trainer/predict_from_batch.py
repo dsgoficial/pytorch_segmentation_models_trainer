@@ -73,6 +73,14 @@ def instantiate_dataloaders(cfg):
         and cfg.val_dataset.n_first_rows_to_read is not None
         else pd.read_csv(cfg.val_dataset.input_csv_path)
     )
+    return (
+        get_grouped_dataloaders(cfg, df)
+        if "center_crop" not in cfg
+        else get_dataloader_with_center_crop(cfg, df)
+    )
+
+
+def get_grouped_dataloaders(cfg, df):
     ds_dict = ImageDataset.get_grouped_datasets(
         df,
         group_by_keys=["width", "height"],
@@ -91,6 +99,37 @@ def instantiate_dataloaders(cfg):
             prefetch_factor=cfg.val_dataset.data_loader.prefetch_factor * device_count,
         )
         for ds in ds_dict.values()
+    ]
+
+
+def get_dataloader_with_center_crop(cfg, df):
+    ds = ImageDataset(
+        df,
+        root_dir=cfg.val_dataset.root_dir,
+        augmentation_list=A.Compose(
+            [
+                A.CenterCrop(
+                    height=cfg.center_crop.height,
+                    width=cfg.center_crop.width,
+                    always_apply=True,
+                    p=1,
+                ),
+                A.Normalize(),
+                ToTensorV2(),
+            ]
+        ),
+    )
+    device_count = 1 if cfg.device == "cpu" else torch.cuda.device_count()
+    batch_size = cfg.hyperparameters.batch_size * device_count
+    return [
+        torch.utils.data.DataLoader(
+            ds,
+            batch_size=batch_size,
+            shuffle=False,
+            drop_last=False,
+            num_workers=cfg.val_dataset.data_loader.num_workers,
+            prefetch_factor=cfg.val_dataset.data_loader.prefetch_factor * device_count,
+        )
     ]
 
 
@@ -131,6 +170,7 @@ def predict_from_batch(cfg: DictConfig):
                 profile=None,
                 parent_dir_name=parent_dir_name_list,
                 pool=pool,
+                convert_output_to_world_coords=False,
             )
 
         for batch in tqdm(

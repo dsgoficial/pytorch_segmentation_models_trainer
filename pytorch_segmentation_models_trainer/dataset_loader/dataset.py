@@ -181,7 +181,7 @@ class ImageDataset(AbstractDataset):
         n_first_rows_to_read=None,
     ):
         return {
-            str(k): cls(
+            k: cls(
                 df=pd.DataFrame(df.iloc[v]).reset_index(),
                 root_dir=root_dir,
                 augmentation_list=augmentation_list,
