@@ -20,6 +20,7 @@
 """
 import itertools
 import json
+import math
 import os
 from abc import abstractmethod
 from pathlib import Path
@@ -43,6 +44,14 @@ from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 from torch.utils.data import Dataset
 import copy
+
+from pytorch_toolbelt.inference.tiles import ImageSlicer, TileMerger
+from pytorch_toolbelt.utils.torch_utils import (
+    image_to_tensor,
+    tensor_from_rgb_image,
+    to_numpy,
+)
+import kornia as K
 
 
 def load_augmentation_object(input_list, bbox_params=None):
@@ -179,6 +188,7 @@ class ImageDataset(AbstractDataset):
         augmentation_list=None,
         image_key=None,
         n_first_rows_to_read=None,
+        **kwargs,
     ):
         return {
             k: cls(
@@ -187,6 +197,7 @@ class ImageDataset(AbstractDataset):
                 augmentation_list=augmentation_list,
                 image_key=image_key,
                 n_first_rows_to_read=n_first_rows_to_read,
+                **kwargs,
             )
             for k, v in df.groupby(group_by_keys).groups.items()
         }
@@ -200,6 +211,105 @@ class ImageDataset(AbstractDataset):
         )
         result.update({"path": self.get_path(idx, key=self.image_key)})
         return result
+
+
+class TiledInferenceImageDataset(ImageDataset):
+    def __init__(
+        self,
+        input_csv_path: Path = None,
+        df=None,
+        root_dir=None,
+        augmentation_list=None,
+        data_loader=None,
+        image_key=None,
+        normalize_output=True,
+        n_first_rows_to_read=None,
+        pad_if_needed=False,
+        model_input_shape=None,
+        step_shape=None,
+    ) -> None:
+        super(TiledInferenceImageDataset, self).__init__(
+            input_csv_path=input_csv_path,
+            df=df,
+            root_dir=root_dir,
+            augmentation_list=None,
+            data_loader=data_loader,
+            image_key=image_key,
+            n_first_rows_to_read=n_first_rows_to_read,
+        )
+        if pad_if_needed and model_input_shape is None:
+            raise ValueError("Must provide model_input_shape if pad_if_needed is True")
+        self.pad_if_needed = pad_if_needed
+        self.model_input_shape = model_input_shape
+        self.step_shape = (224, 224) if step_shape is None else step_shape
+        self.transform = A.Normalize() if normalize_output else None
+        self.tiler_dict = dict()
+        self.shape_dict = dict()
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        idx = idx % self.len
+
+        image = self.load_image(idx, key=self.image_key)
+        self.shape_dict[idx] = image.shape[0:2]
+        result = (
+            {"image": image} if self.transform is None else self.transform(image=image)
+        )
+        if self.pad_if_needed:
+            pad_func = A.PadIfNeeded(
+                math.ceil(image.shape[0] / self.model_input_shape[0])
+                * self.model_input_shape[0],
+                math.ceil(image.shape[1] / self.model_input_shape[1])
+                * self.model_input_shape[1],
+            )
+            result = pad_func(**result)
+        result.update({"path": self.get_path(idx, key=self.image_key)})
+        tiler = ImageSlicer(
+            result["image"].shape,
+            tile_size=self.model_input_shape,
+            tile_step=self.step_shape,
+        )
+        tiles = [image_to_tensor(tile) for tile in tiler.split(result.pop("image"))]
+        result.update({"tiles": torch.stack(tiles)})
+        result.update(
+            {"tile_image_idx": idx * torch.ones(len(tiles), dtype=torch.int64)}
+        )
+        result.update({"tiler_object": tiler})
+        return result
+
+    def integrate_tiles(self, idx: int, tensor_tiles: torch.Tensor, tiler):
+        """ tiles: B x C x H x W
+
+        """
+        merger = TileMerger(
+            tiler.target_shape,
+            tensor_tiles.shape[1],
+            tiler.weight,
+            device=tensor_tiles.device,
+        )
+        merger.integrate_batch(tensor_tiles, tiler.crops)
+        merged = merger.merge()
+        if not self.pad_if_needed:
+            return merged.unsqueeze(0)
+        return K.center_crop(
+            merged.unsqueeze(0), size=tuple(self.df[["width", "height"]].iloc[int(idx)])
+        )
+
+    @staticmethod
+    def collate_fn(batch: List) -> Dict[str, Union[torch.Tensor, List[str]]]:
+        """
+        :param batch: an iterable of N sets from __getitem__()
+        :return: a tensor of images, lists of varying-size tensors of bounding boxes, labels, and difficulties
+        """
+        paths = [item["path"] for item in batch]
+        tiles = torch.cat([item["tiles"] for item in batch], dim=0)
+        indexes = torch.cat([item["tile_image_idx"] for item in batch], dim=0)
+        tiler_object_list = [item["tiler_object"] for item in batch]
+        return {
+            "path": paths,
+            "tiles": tiles,
+            "tile_image_idx": indexes,
+            "tiler_object_list": tiler_object_list,
+        }
 
 
 class SegmentationDataset(AbstractDataset):
