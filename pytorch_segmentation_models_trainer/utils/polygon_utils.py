@@ -74,15 +74,20 @@ def polygons_to_pixel_coords(polygons, transform):
 
 
 def polygons_to_world_coords(polygons, transform, epsg_number):
-    item_list = []
-    for polygon in polygons:
-        item_list += polygon.geoms if polygon.geom_type == "MultiPolygon" else [polygon]
+    item_list = coerce_polygons_to_single_geometry(polygons)
     return [
         shapely.geometry.Polygon(
             np.array([transform * point for point in np.array(polygon.exterior.coords)])
         )
         for polygon in item_list
     ]
+
+
+def coerce_polygons_to_single_geometry(polygons):
+    item_list = []
+    for polygon in polygons:
+        item_list += polygon.geoms if polygon.geom_type == "MultiPolygon" else [polygon]
+    return item_list
 
 
 def build_crossfield(polygons, shape, transform, line_width=2):

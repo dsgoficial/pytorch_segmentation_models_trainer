@@ -81,7 +81,7 @@ def instantiate_dataloaders(cfg):
         augmentation_list=A.Compose([A.Normalize(), ToTensorV2()]),
     )
     device_count = 1 if cfg.device == "cpu" else torch.cuda.device_count()
-    batch_size = cfg.hyperparameters.batch_size
+    batch_size = cfg.hyperparameters.batch_size * device_count
     return [
         torch.utils.data.DataLoader(
             ds,
@@ -117,37 +117,42 @@ def predict_mod_polymapper_from_batch(cfg: DictConfig):
     )
     model = instantiate_model_from_checkpoint_distributed(cfg)
     dataloader_list = instantiate_dataloaders(cfg)
-    with tqdm(
-        total=sum(len(i) for i in dataloader_list),
-        desc="Processing polygonization for each batch",
-    ) as pbar:
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=cfg.max_workers if "max_workers" in cfg else 1
-        ) as pool:
-            futures = []
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        futures = []
 
-            def process_batch(batch):
-                images = batch["image"].to(cfg.device)
-                paths = batch["path"]
-                with torch.no_grad():
-                    detections = model(images)
-                parent_dir_name_list = [Path(path).stem for path in paths]
-                polygonizer = instantiate_polygonizer(cfg)
-                for idx, detection in enumerate(detections):
-                    detection["output_batch_polygons"] = detection.pop(
-                        "polygonrnn_output"
-                    )
-                    polygonizer.process(
-                        detection,
-                        profile=None,
-                        parent_dir_name=parent_dir_name_list[idx],
-                        convert_output_to_world_coords=False,
-                    )
+        def process_batch(batch):
+            images = batch["image"].to(cfg.device)
+            paths = batch["path"]
+            with torch.no_grad():
+                detections = model(images, threshold=0.8)
+            parent_dir_name_list = [Path(path).stem for path in paths]
+            return detections, parent_dir_name_list
 
-            for batch in itertools.chain.from_iterable(dataloader_list):
-                future = pool.submit(process_batch, batch)
-                future.add_done_callback(lambda p: pbar.update())
+        def process_polygonizer(detection, parent_dir_name):
+            polygonizer = instantiate_polygonizer(cfg)
+            detection["output_batch_polygons"] = detection.pop("polygonrnn_output")
+            polygonizer.process(
+                detection,
+                profile=None,
+                parent_dir_name=parent_dir_name,
+                convert_output_to_world_coords=False,
+            )
+
+        for batch in tqdm(
+            itertools.chain.from_iterable(dataloader_list),
+            total=sum(len(i) for i in dataloader_list),
+            desc="Processing polygonization for each batch",
+        ):
+            detections, parent_dir_name_list = process_batch(batch)
+            for detection, parent_dir_name in zip(detections, parent_dir_name_list):
+                future = pool.submit(process_polygonizer, detection, parent_dir_name)
                 futures.append(future)
+        for future in tqdm(
+            concurrent.futures.as_completed(futures),
+            desc="Writing outputs",
+            total=len(futures),
+        ):
+            future.result()
 
 
 if __name__ == "__main__":

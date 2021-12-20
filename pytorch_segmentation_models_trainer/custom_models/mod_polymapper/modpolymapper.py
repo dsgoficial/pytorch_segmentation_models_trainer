@@ -414,13 +414,14 @@ class GenericModPolyMapper(nn.Module):
             if item["boxes"].shape[0] == 0:
                 detections[idx].update(
                     {
-                        key: []
+                        key: torch.tensor([], device=item["boxes"].device)
                         for key in [
                             "polygonrnn_output",
                             "min_row",
                             "min_col",
                             "scale_h",
                             "scale_w",
+                            "extended_bboxes",
                         ]
                     }
                 )

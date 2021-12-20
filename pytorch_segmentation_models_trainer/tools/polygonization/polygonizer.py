@@ -38,6 +38,7 @@ from pytorch_segmentation_models_trainer.tools.polygonization.methods import (
     polygon_rnn_polygonization,
 )
 from pytorch_segmentation_models_trainer.utils.polygon_utils import (
+    coerce_polygons_to_single_geometry,
     polygons_to_world_coords,
 )
 from shapely.geometry import Polygon
@@ -151,7 +152,7 @@ class TemplatePolygonizerProcessor(ABC):
                 else None,
             )
             if convert_output_to_world_coords
-            else polygons
+            else coerce_polygons_to_single_geometry(polygons)
         )
         if self.data_writer is not None:
             self.data_writer.write_data(
@@ -300,6 +301,7 @@ class PolygonRNNPolygonizerProcessor(TemplatePolygonizerProcessor):
         profile: dict,
         pool: ThreadPoolExecutor = None,
         parent_dir_name: str = None,
+        convert_output_to_world_coords: bool = True,
     ):
         """Processes the polygonization. Reimplemented from template due to signature
         differences on polygonize method.
@@ -311,5 +313,8 @@ class PolygonRNNPolygonizerProcessor(TemplatePolygonizerProcessor):
         """
         out_contours_batch = self.polygonize_method(inference, self.config, pool=pool)
         return self.post_process(
-            out_contours_batch, profile, parent_dir_name=parent_dir_name
+            out_contours_batch,
+            profile,
+            parent_dir_name=parent_dir_name,
+            convert_output_to_world_coords=convert_output_to_world_coords,
         )
