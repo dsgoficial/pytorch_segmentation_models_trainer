@@ -55,6 +55,8 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import pandas as pd
 
+from pytorch_segmentation_models_trainer.utils.tensor_utils import tensor_dict_to_device
+
 logger = logging.getLogger(__name__)
 
 import os
@@ -81,7 +83,7 @@ def instantiate_dataloaders(cfg):
         augmentation_list=A.Compose([A.Normalize(), ToTensorV2()]),
     )
     device_count = 1 if cfg.device == "cpu" else torch.cuda.device_count()
-    batch_size = cfg.hyperparameters.batch_size * device_count
+    batch_size = cfg.hyperparameters.batch_size
     return [
         torch.utils.data.DataLoader(
             ds,
@@ -143,11 +145,15 @@ def predict_mod_polymapper_from_batch(cfg: DictConfig):
         for batch in tqdm(
             itertools.chain.from_iterable(dataloader_list),
             total=sum(len(i) for i in dataloader_list),
-            desc="Processing polygonization for each batch",
+            desc="Processing inference for each batch",
         ):
             detections, parent_dir_name_list = process_batch(batch)
             for detection, parent_dir_name in zip(detections, parent_dir_name_list):
-                future = pool.submit(process_polygonizer, detection, parent_dir_name)
+                future = pool.submit(
+                    process_polygonizer,
+                    tensor_dict_to_device(detection, "cpu"),
+                    parent_dir_name,
+                )
                 futures.append(future)
         for future in tqdm(
             concurrent.futures.as_completed(futures),
