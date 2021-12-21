@@ -288,6 +288,7 @@ class TiledInferenceImageDataset(ImageDataset):
         )
         merger.integrate_batch(tensor_tiles, tiler.crops)
         merged = merger.merge()
+        del merger
         if not self.pad_if_needed:
             return merged.unsqueeze(0)
         return K.center_crop(

@@ -161,41 +161,45 @@ def predict_from_batch(cfg: DictConfig):
             )
 
         def _process(batch):
-            images = batch["image"].to(cfg.device)
             paths = batch["path"]
-            with torch.no_grad():
-                batch_predictions = model(images)
+            with torch.cuda.amp.autocast():
+                with torch.no_grad():
+                    batch_predictions = model(batch["image"].to(cfg.device))
             seg_batch, crossfield_batch = batch_predictions.values()
             parent_dir_name_list = [Path(path).stem for path in paths]
             return seg_batch, crossfield_batch, parent_dir_name_list
 
         def _process_like_inference_processor(batch, ds):
-            images = batch["tiles"].to(cfg.device)
             parent_dir_name_list = [Path(path).stem for path in batch["path"]]
             ids = torch.unique_consecutive(
                 batch["tile_image_idx"]
             )  # we use unique_consecutive instead of unique because we want to preserve the order of ids
-            with torch.no_grad():
-                batch_predictions = model(images)
-            seg_list, crossfield_list = [], []
+            with torch.cuda.amp.autocast():
+                with torch.no_grad():
+                    batch_predictions = model(batch["tiles"].to(cfg.device))
             seg_batch, crossfield_batch = batch_predictions.values()
-            for idx, tile_id in enumerate(ids):
-                seg = seg_batch[batch["tile_image_idx"] == tile_id]
-                crossfield = crossfield_batch[batch["tile_image_idx"] == tile_id]
-                seg_list.append(
-                    ds.integrate_tiles(
-                        tile_id, seg, copy.deepcopy(batch["tiler_object_list"][idx])
-                    )
-                )
-                crossfield_list.append(
+            seg_batch = torch.cat(
+                [
                     ds.integrate_tiles(
                         tile_id,
-                        crossfield,
+                        seg_batch[batch["tile_image_idx"] == tile_id],
                         copy.deepcopy(batch["tiler_object_list"][idx]),
                     )
-                )
-            seg_batch = torch.cat(seg_list, dim=0)
-            crossfield_batch = torch.cat(crossfield_list, dim=0)
+                    for idx, tile_id in enumerate(ids)
+                ],
+                dim=0,
+            )
+            crossfield_batch = torch.cat(
+                [
+                    ds.integrate_tiles(
+                        tile_id,
+                        crossfield_batch[batch["tile_image_idx"] == tile_id],
+                        copy.deepcopy(batch["tiler_object_list"][idx]),
+                    )
+                    for idx, tile_id in enumerate(ids)
+                ],
+                dim=0,
+            )
 
             return seg_batch, crossfield_batch, parent_dir_name_list
 

@@ -100,7 +100,7 @@ class TemplatePolygonizerProcessor(ABC):
             return self.post_process(
                 out_contours_batch[0],
                 profile,
-                parent_dir_name=parent_dir_name,
+                parent_dir_name=parent_dir_name[0],
                 convert_output_to_world_coords=convert_output_to_world_coords,
             )
         # ignore profile for now, just wanna get some results, I'll fix it later
