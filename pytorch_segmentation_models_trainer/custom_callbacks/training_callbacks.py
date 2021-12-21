@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+from pathlib import Path
 import albumentations as A
 import pytorch_lightning as pl
 import torch
@@ -28,6 +29,10 @@ from hydra.utils import instantiate
 from torch.utils.data import DataLoader
 
 from typing import List, Any
+
+import concurrent.futures
+
+from pytorch_segmentation_models_trainer.predict import instantiate_polygonizer
 
 
 class WarmupCallback(pl.callbacks.base.Callback):
@@ -130,3 +135,24 @@ class FrameFieldComputeWeightNormLossesCallback(pl.callbacks.base.Callback):
             )
             pl_module.compute_loss_norms(init_dl, loss_norm_batches)
         self.loss_norm_is_initializated = True
+
+
+class FrameFieldPolygonizerCallback(pl.callbacks.BasePredictionWriter):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def on_predict_batch_end(self, trainer, pl_module, outputs):
+        seg_batch, crossfield_batch, parent_dir_name_list = outputs
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            polygonizer = instantiate_polygonizer(pl_module.cfg)
+            with torch.enable_grad():
+                polygonizer.process(
+                    {
+                        "seg": seg_batch.detach(),
+                        "crossfield": crossfield_batch.detach(),
+                    },
+                    profile=None,
+                    parent_dir_name=parent_dir_name_list,
+                    pool=pool,
+                    convert_output_to_world_coords=False,
+                )

@@ -78,9 +78,9 @@ class TemplatePolygonizerProcessor(ABC):
             )
         except Exception as e:
             logger.exception(
-                "An error occurred while polygonizing the batch. Retrying each image individualy this batch. The original error was: \n"
+                "An error occurred while polygonizing the batch. Retrying each image individualy this batch.: \n"
             )
-            logger.exception(e)
+            # logger.exception(e)
             out_contours_batch = []
             for idx, (seg, crossfield) in enumerate(
                 zip(inference["seg"], inference["crossfield"])

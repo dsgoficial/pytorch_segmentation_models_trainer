@@ -24,6 +24,7 @@ import copy
 from logging import log
 from collections import OrderedDict
 from pathlib import Path
+from pytorch_toolbelt.inference.tiles import TileMerger
 import torch
 import torch.nn as nn
 import segmentation_models_pytorch as smp
@@ -44,6 +45,7 @@ from pytorch_segmentation_models_trainer.predict import instantiate_polygonizer
 from pytorch_segmentation_models_trainer.utils import tensor_utils
 from tqdm import tqdm
 import concurrent.futures
+import kornia as K
 
 
 class FrameFieldModel(nn.Module):
@@ -260,6 +262,9 @@ class FrameFieldSegmentationPLModel(Model):
             self.set_crossfield_trainable(
                 trainable=self.cfg.pl_model.set_crossfield_trainable
             )
+
+    def set_test_dataset(self, dataset):
+        self.test_dataset = dataset
 
     def get_loss_function(self) -> MultiLoss:
         """Multi-loss model defined in frame field article
@@ -510,55 +515,66 @@ class FrameFieldSegmentationPLModel(Model):
         with torch.no_grad():
             batch_predictions = self.model(batch["image"])
         seg_batch, crossfield_batch = batch_predictions.values()
-        parent_dir_name_list = [Path(path).stem for path in paths]
-        return seg_batch, crossfield_batch, parent_dir_name_list
+        return seg_batch, crossfield_batch
 
     def _process_test_like_inference_processor(self, batch):
-        parent_dir_name_list = [Path(path).stem for path in batch["path"]]
         ids = torch.unique_consecutive(
             batch["tile_image_idx"]
         )  # we use unique_consecutive instead of unique because we want to preserve the order of ids
         with torch.no_grad():
             batch_predictions = self.model(batch["tiles"])
-            seg_batch, crossfield_batch = batch_predictions.values()
-            seg_batch = torch.cat(
-                [
-                    self.test_dataloader.dataset.integrate_tiles(
-                        tile_id,
-                        seg_batch[batch["tile_image_idx"] == tile_id],
-                        copy.deepcopy(batch["tiler_object_list"][idx]),
-                    )
-                    for idx, tile_id in enumerate(ids)
-                ],
-                dim=0,
-            )
-            crossfield_batch = torch.cat(
-                [
-                    self.test_dataloader.dataset.integrate_tiles(
-                        tile_id,
-                        crossfield_batch[batch["tile_image_idx"] == tile_id],
-                        copy.deepcopy(batch["tiler_object_list"][idx]),
-                    )
-                    for idx, tile_id in enumerate(ids)
-                ],
-                dim=0,
-            )
+        seg_batch, crossfield_batch = batch_predictions.values()
+        seg_batch = torch.cat(
+            [
+                self._integrate_tiles(
+                    seg_batch[batch["tile_image_idx"] == tile_id],
+                    copy.deepcopy(batch["tiler_object_list"][idx]),
+                    batch["original_shape"][idx],
+                    pad_if_needed=True,
+                )
+                for idx, tile_id in enumerate(ids)
+            ],
+            dim=0,
+        )
+        crossfield_batch = torch.cat(
+            [
+                self._integrate_tiles(
+                    crossfield_batch[batch["tile_image_idx"] == tile_id],
+                    copy.deepcopy(batch["tiler_object_list"][idx]),
+                    batch["original_shape"][idx],
+                    pad_if_needed=True,
+                )
+                for idx, tile_id in enumerate(ids)
+            ],
+            dim=0,
+        )
 
-        return seg_batch, crossfield_batch, parent_dir_name_list
+        return seg_batch, crossfield_batch
+
+    def _integrate_tiles(
+        self, tensor_tiles: torch.Tensor, tiler, original_shape, pad_if_needed=True
+    ):
+        """ tiles: B x C x H x W
+
+        """
+        merger = TileMerger(
+            tiler.target_shape,
+            tensor_tiles.shape[1],
+            tiler.weight,
+            device=tensor_tiles.device,
+        )
+        merger.integrate_batch(tensor_tiles, tiler.crops)
+        merged = merger.merge()
+        del merger
+        if not pad_if_needed:
+            return merged.unsqueeze(0)
+        return K.center_crop(merged.unsqueeze(0), size=original_shape)
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        seg_batch, crossfield_batch, parent_dir_name_list = (
+        seg_batch, crossfield_batch = (
             self._process_test(batch)
             if not self.cfg.use_inference_processor
             else self._process_test_like_inference_processor(batch)
         )
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            polygonizer = instantiate_polygonizer(self.cfg)
-            futures = polygonizer.process(
-                {"seg": seg_batch, "crossfield": crossfield_batch},
-                profile=None,
-                parent_dir_name=parent_dir_name_list,
-                pool=pool,
-                convert_output_to_world_coords=False,
-            )
-        return
+        parent_dir_name_list = [Path(path).stem for path in batch["path"]]
+        return seg_batch, crossfield_batch, parent_dir_name_list

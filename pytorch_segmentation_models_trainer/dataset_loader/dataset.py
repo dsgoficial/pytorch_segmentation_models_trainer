@@ -274,26 +274,8 @@ class TiledInferenceImageDataset(ImageDataset):
             {"tile_image_idx": idx * torch.ones(len(tiles), dtype=torch.int64)}
         )
         result.update({"tiler_object": tiler})
+        result.update({"original_shape": tuple(self.df[["width", "height"]].iloc[idx])})
         return result
-
-    def integrate_tiles(self, idx: int, tensor_tiles: torch.Tensor, tiler):
-        """ tiles: B x C x H x W
-
-        """
-        merger = TileMerger(
-            tiler.target_shape,
-            tensor_tiles.shape[1],
-            tiler.weight,
-            device=tensor_tiles.device,
-        )
-        merger.integrate_batch(tensor_tiles, tiler.crops)
-        merged = merger.merge()
-        del merger
-        if not self.pad_if_needed:
-            return merged.unsqueeze(0)
-        return K.center_crop(
-            merged.unsqueeze(0), size=tuple(self.df[["width", "height"]].iloc[int(idx)])
-        )
 
     @staticmethod
     def collate_fn(batch: List) -> Dict[str, Union[torch.Tensor, List[str]]]:
@@ -305,11 +287,13 @@ class TiledInferenceImageDataset(ImageDataset):
         tiles = torch.cat([item["tiles"] for item in batch], dim=0)
         indexes = torch.cat([item["tile_image_idx"] for item in batch], dim=0)
         tiler_object_list = [item["tiler_object"] for item in batch]
+        original_shape_list = [item["original_shape"] for item in batch]
         return {
             "path": paths,
             "tiles": tiles,
             "tile_image_idx": indexes,
             "tiler_object_list": tiler_object_list,
+            "original_shape": original_shape_list,
         }
 
 

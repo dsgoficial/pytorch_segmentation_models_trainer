@@ -108,13 +108,12 @@ def predict_mod_polymapper_from_batch(cfg: DictConfig):
         cfg.hyperparameters.resume_from_checkpoint, cfg=cfg
     )
     dataloader_list = instantiate_dataloaders(cfg)
-    trainer = Trainer(**cfg.pl_trainer, progress_position=1)
+    trainer = Trainer(**cfg.pl_trainer)
     for dataloader in tqdm(
         dataloader_list,
         total=len(dataloader_list),
         desc="Processing inference for each group of images",
         colour="green",
-        position=0,
     ):
         trainer.predict(model, dataloader)
 

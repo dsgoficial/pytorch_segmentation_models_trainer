@@ -26,6 +26,9 @@ import math
 from pathlib import Path
 
 from pytorch_lightning.trainer.trainer import Trainer
+from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
+    FrameFieldPolygonizerCallback,
+)
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     ImageDataset,
     TiledInferenceImageDataset,
@@ -127,19 +130,6 @@ def get_grouped_datasets(cfg, df, windowed):
     return ds_dict
 
 
-def instantiate_model_from_checkpoint_distributed(cfg: DictConfig) -> torch.nn.Module:
-    pl_model = import_module_from_cfg(cfg.pl_model).load_from_checkpoint(
-        cfg.checkpoint_path, cfg=cfg
-    )
-    model = pl_model.model
-    if torch.cuda.device_count() > 1:
-        model = torch.nn.parallel.DataParallel(model).to(cfg.device)
-    else:
-        model = model.to(cfg.device)
-    model.eval()
-    return model
-
-
 @hydra.main()
 def predict_from_batch(cfg: DictConfig):
     logger.info(
@@ -151,101 +141,14 @@ def predict_from_batch(cfg: DictConfig):
         cfg.hyperparameters.resume_from_checkpoint, cfg=cfg
     )
     dataloader_list = instantiate_dataloaders(cfg)
-    trainer = Trainer(**cfg.pl_trainer, progress_position=1)
+    trainer = Trainer(**cfg.pl_trainer, callbacks=[FrameFieldPolygonizerCallback()])
     for dataloader in tqdm(
         dataloader_list,
         total=len(dataloader_list),
         desc="Processing inference for each group of images",
         colour="green",
-        position=0,
     ):
         trainer.predict(model, dataloader)
-
-    # with concurrent.futures.ThreadPoolExecutor() as pool:
-    #     futures = []
-
-    #     def process_batch(batch, ds, like_inference_processor=False):
-    #         seg_batch, crossfield_batch, parent_dir_name_list = (
-    #             _process(batch)
-    #             if not like_inference_processor
-    #             else _process_like_inference_processor(batch, ds)
-    #         )
-    #         polygonizer = instantiate_polygonizer(cfg)
-    #         return polygonizer.process(
-    #             {"seg": seg_batch, "crossfield": crossfield_batch},
-    #             profile=None,
-    #             parent_dir_name=parent_dir_name_list,
-    #             pool=pool,
-    #             convert_output_to_world_coords=False,
-    #         )
-
-    #     def _process(batch):
-    #         paths = batch["path"]
-    #         with torch.cuda.amp.autocast():
-    #             with torch.no_grad():
-    #                 batch_predictions = model(batch["image"].to(cfg.device))
-    #         seg_batch, crossfield_batch = batch_predictions.values()
-    #         parent_dir_name_list = [Path(path).stem for path in paths]
-    #         return seg_batch, crossfield_batch, parent_dir_name_list
-
-    #     def _process_like_inference_processor(batch, ds):
-    #         parent_dir_name_list = [Path(path).stem for path in batch["path"]]
-    #         ids = torch.unique_consecutive(
-    #             batch["tile_image_idx"]
-    #         )  # we use unique_consecutive instead of unique because we want to preserve the order of ids
-    #         with torch.cuda.amp.autocast():
-    #             with torch.no_grad():
-    #                 batch_predictions = model(batch["tiles"].to(cfg.device))
-    #         seg_batch, crossfield_batch = batch_predictions.values()
-    #         seg_batch = torch.cat(
-    #             [
-    #                 ds.integrate_tiles(
-    #                     tile_id,
-    #                     seg_batch[batch["tile_image_idx"] == tile_id],
-    #                     copy.deepcopy(batch["tiler_object_list"][idx]),
-    #                 )
-    #                 for idx, tile_id in enumerate(ids)
-    #             ],
-    #             dim=0,
-    #         )
-    #         crossfield_batch = torch.cat(
-    #             [
-    #                 ds.integrate_tiles(
-    #                     tile_id,
-    #                     crossfield_batch[batch["tile_image_idx"] == tile_id],
-    #                     copy.deepcopy(batch["tiler_object_list"][idx]),
-    #                 )
-    #                 for idx, tile_id in enumerate(ids)
-    #             ],
-    #             dim=0,
-    #         )
-
-    #         return seg_batch, crossfield_batch, parent_dir_name_list
-
-    #     with tqdm(
-    #         total=sum(len(i) for i in dataloader_list),
-    #         desc="Processing polygonization for each batch",
-    #     ) as pbar:
-    #         for dl in dataloader_list:
-    #             ds = (
-    #                 dl.dataset
-    #             )  # we removed the chain_from_iterable so that we can access the ds object
-    #             for batch in dl:
-    #                 future = process_batch(
-    #                     batch,
-    #                     ds,
-    #                     like_inference_processor=False
-    #                     if not "use_inference_processor" in cfg
-    #                     else cfg.use_inference_processor,
-    #                 )
-    #                 futures.extend(future)
-    #                 pbar.update()
-    #     for future in tqdm(
-    #         concurrent.futures.as_completed(futures),
-    #         desc="Writing outputs",
-    #         total=len(futures),
-    #     ):
-    #         future.result()
 
 
 if __name__ == "__main__":

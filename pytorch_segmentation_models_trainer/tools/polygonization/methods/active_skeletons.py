@@ -318,8 +318,16 @@ class PolygonizerASM:
             seg_batch.shape[0] == crossfield_batch.shape[0]
         ), "Batch size for seg and crossfield should match"
 
-        seg_batch = seg_batch.to(self.config.device)
-        crossfield_batch = crossfield_batch.to(self.config.device)
+        seg_batch = (
+            seg_batch.to(self.config.device)
+            if self.config.device not in seg_batch.device.type
+            else seg_batch
+        )
+        crossfield_batch = (
+            crossfield_batch.to(self.config.device)
+            if self.config.device not in crossfield_batch.device.type
+            else crossfield_batch
+        )
         skeletons_batch = compute_skeletons(
             seg_batch, self.config, self.spatial_gradient, pool=self.pool
         )

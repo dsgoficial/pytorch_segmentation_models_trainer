@@ -37,8 +37,11 @@ from rasterio.errors import NotGeoreferencedWarning
 
 logging.getLogger("shapely.geos").setLevel(logging.CRITICAL)
 logging.getLogger("rasterio.errors").setLevel(logging.CRITICAL)
+logging.getLogger("tensorboard").setLevel(logging.CRITICAL)
+logging.getLogger("numpy").setLevel(logging.CRITICAL)
 warnings.filterwarnings("ignore", category=NotGeoreferencedWarning)
 warnings.simplefilter(action="ignore", category=Warning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 @hydra.main(config_path="conf")
