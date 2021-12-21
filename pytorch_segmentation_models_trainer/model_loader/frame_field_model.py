@@ -20,8 +20,10 @@
  *   https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning/     *
  ****
 """
+import copy
 from logging import log
 from collections import OrderedDict
+from pathlib import Path
 import torch
 import torch.nn as nn
 import segmentation_models_pytorch as smp
@@ -38,8 +40,10 @@ from segmentation_models_pytorch.base.initialization import (
     initialize_head,
 )
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
+from pytorch_segmentation_models_trainer.predict import instantiate_polygonizer
 from pytorch_segmentation_models_trainer.utils import tensor_utils
 from tqdm import tqdm
+import concurrent.futures
 
 
 class FrameFieldModel(nn.Module):
@@ -501,3 +505,60 @@ class FrameFieldSegmentationPLModel(Model):
         )
         self.log_dict(tensorboard_logs, logger=True)
         self.log("avg_train_loss", avg_loss, logger=True)
+
+    def _process_test(self, batch):
+        with torch.no_grad():
+            batch_predictions = self.model(batch["image"])
+        seg_batch, crossfield_batch = batch_predictions.values()
+        parent_dir_name_list = [Path(path).stem for path in paths]
+        return seg_batch, crossfield_batch, parent_dir_name_list
+
+    def _process_test_like_inference_processor(self, batch):
+        parent_dir_name_list = [Path(path).stem for path in batch["path"]]
+        ids = torch.unique_consecutive(
+            batch["tile_image_idx"]
+        )  # we use unique_consecutive instead of unique because we want to preserve the order of ids
+        with torch.no_grad():
+            batch_predictions = self.model(batch["tiles"])
+            seg_batch, crossfield_batch = batch_predictions.values()
+            seg_batch = torch.cat(
+                [
+                    self.test_dataloader.dataset.integrate_tiles(
+                        tile_id,
+                        seg_batch[batch["tile_image_idx"] == tile_id],
+                        copy.deepcopy(batch["tiler_object_list"][idx]),
+                    )
+                    for idx, tile_id in enumerate(ids)
+                ],
+                dim=0,
+            )
+            crossfield_batch = torch.cat(
+                [
+                    self.test_dataloader.dataset.integrate_tiles(
+                        tile_id,
+                        crossfield_batch[batch["tile_image_idx"] == tile_id],
+                        copy.deepcopy(batch["tiler_object_list"][idx]),
+                    )
+                    for idx, tile_id in enumerate(ids)
+                ],
+                dim=0,
+            )
+
+        return seg_batch, crossfield_batch, parent_dir_name_list
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        seg_batch, crossfield_batch, parent_dir_name_list = (
+            self._process_test(batch)
+            if not self.cfg.use_inference_processor
+            else self._process_test_like_inference_processor(batch)
+        )
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            polygonizer = instantiate_polygonizer(self.cfg)
+            futures = polygonizer.process(
+                {"seg": seg_batch, "crossfield": crossfield_batch},
+                profile=None,
+                parent_dir_name=parent_dir_name_list,
+                pool=pool,
+                convert_output_to_world_coords=False,
+            )
+        return

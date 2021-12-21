@@ -245,6 +245,12 @@ class TiledInferenceImageDataset(ImageDataset):
         self.transform = A.Normalize() if normalize_output else None
         self.tiler_dict = dict()
         self.shape_dict = dict()
+        self.pad_func = A.PadIfNeeded(
+            math.ceil(self.df["width"].max() / self.model_input_shape[0])
+            * self.model_input_shape[0],
+            math.ceil(self.df["height"].max() / self.model_input_shape[1])
+            * self.model_input_shape[1],
+        )
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         idx = idx % self.len
@@ -255,13 +261,7 @@ class TiledInferenceImageDataset(ImageDataset):
             {"image": image} if self.transform is None else self.transform(image=image)
         )
         if self.pad_if_needed:
-            pad_func = A.PadIfNeeded(
-                math.ceil(image.shape[0] / self.model_input_shape[0])
-                * self.model_input_shape[0],
-                math.ceil(image.shape[1] / self.model_input_shape[1])
-                * self.model_input_shape[1],
-            )
-            result = pad_func(**result)
+            result = self.pad_func(**result)
         result.update({"path": self.get_path(idx, key=self.image_key)})
         tiler = ImageSlicer(
             result["image"].shape,
