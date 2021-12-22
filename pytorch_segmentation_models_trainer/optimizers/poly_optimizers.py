@@ -21,6 +21,7 @@
  ****
 """
 
+import logging
 import torch
 import tqdm
 from pytorch_segmentation_models_trainer.custom_losses.crossfield_losses import (
@@ -32,6 +33,8 @@ from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor
     TensorSkeleton,
 )
 from pytorch_segmentation_models_trainer.optimizers import gradient_centralization
+
+logger = logging.getLogger(__name__)
 
 
 class TensorPolyOptimizer:
@@ -253,7 +256,7 @@ class TensorSkeletonOptimizer:
         loss.backward()
         pos_gard_is_nan = torch.isnan(self.tensorskeleton.pos.grad).any().item()
         if pos_gard_is_nan:
-            print(f"{iter_num} pos.grad is nan")
+            logger.warn(f"{iter_num} pos.grad is nan")
         self.optimizer.step()
         with torch.no_grad():
             self.tensorskeleton.pos[self.is_tip] = self.tip_pos
