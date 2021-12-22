@@ -59,15 +59,15 @@ logger = logging.getLogger(__name__)
 
 
 def shapely_postprocess(polylines, np_indicator, tolerance, config):
-    if isinstance(tolerance, (list, ListConfig)):
-        # Use several tolerance values for simplification. return a dict with all results
-        out_polygons_dict, out_probs_dict = {}, {}
-        for tol in tolerance:
-            (
-                out_polygons_dict[f"tol_{tol}"],
-                out_probs_dict[f"tol_{tol}"],
-            ) = shapely_postprocess(polylines, np_indicator, tol, config)
-        return out_polygons_dict, out_probs_dict
+    # if isinstance(tolerance, (list, ListConfig)):
+    #     # Use several tolerance values for simplification. return a dict with all results
+    #     out_polygons_dict, out_probs_dict = {}, {}
+    #     for tol in tolerance:
+    #         (
+    #             out_polygons_dict[f"tol_{tol}"],
+    #             out_probs_dict[f"tol_{tol}"],
+    #         ) = shapely_postprocess(polylines, np_indicator, tol, config)
+    #     return out_polygons_dict, out_probs_dict
     height, width = np_indicator.shape[0:2]
     linestring_list = _get_linestring_list(polylines, width, height, tolerance)
     filtered_polygons, filtered_polygon_probs = [], []
@@ -164,8 +164,8 @@ def get_skeleton(np_edge_mask, config):
             "skeleton_image has {skeleton_image.sum()} true values. "
             "Continuing without detecting skeleton in this image..."
         )
-        skimage.io.imsave("np_edge_mask.png", np_edge_mask.astype(np.uint8) * 255)
-        skimage.io.imsave("skeleton_image.png", skeleton_image.astype(np.uint8) * 255)
+        # skimage.io.imsave("np_edge_mask.png", np_edge_mask.astype(np.uint8) * 255)
+        # skimage.io.imsave("skeleton_image.png", skeleton_image.astype(np.uint8) * 255)
     return skeleton
 
 

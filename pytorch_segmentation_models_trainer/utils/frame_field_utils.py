@@ -22,6 +22,8 @@
 """
 
 import numpy as np
+from shapely.geometry.linestring import LineString
+from shapely.geometry.polygon import Polygon
 import torch
 from pytorch_segmentation_models_trainer.utils.complex_utils import (
     complex_abs_squared,
@@ -123,6 +125,12 @@ def detect_corners(polylines, u, v):
 
     corner_masks = []
     for polyline in polylines:
+        if isinstance(polyline, Polygon):
+            polyline = np.array(polyline.exterior.coords)
+        elif isinstance(polyline, LineString):
+            polyline = np.array(polyline.coords)
+        else:
+            polyline = np.array(polyline)
         corner_mask = np.zeros(polyline.shape[0], dtype=np.bool)
         if np.max(np.abs(polyline[0] - polyline[-1])) < 1e-6:
             # Closed polyline

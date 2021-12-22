@@ -99,7 +99,7 @@ def instantiate_dataloaders(cfg):
         cfg,
         df,
         windowed=False
-        if "use_inference_processor" not in cfg
+        if not hasattr(cfg, "use_inference_processor")
         else cfg.use_inference_processor,
     )
 
@@ -123,6 +123,7 @@ def get_grouped_dataloaders(cfg, df, windowed=False):
         for key, ds in sorted(
             ds_dict.items(), key=lambda x: x[0][0] * x[0][1], reverse=True
         )
+        if key not in [(513, 513)]
     ]
 
 
@@ -184,7 +185,7 @@ def predict_from_batch(cfg: DictConfig):
     )
     # model = instantiate_model_from_checkpoint_distributed(cfg)
     model = import_module_from_cfg(cfg.pl_model).load_from_checkpoint(
-        cfg.hyperparameters.resume_from_checkpoint, cfg=cfg
+        cfg.checkpoint_path, cfg=cfg
     )
     dataloader_list = instantiate_dataloaders(cfg)
     trainer = Trainer(**cfg.pl_trainer, callbacks=[FrameFieldPolygonizerCallback()])

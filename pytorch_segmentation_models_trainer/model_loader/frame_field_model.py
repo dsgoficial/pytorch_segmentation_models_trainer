@@ -575,9 +575,12 @@ class FrameFieldSegmentationPLModel(Model):
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         seg_batch, crossfield_batch = (
-            self._process_test(batch)
-            if not self.cfg.use_inference_processor
-            else self._process_test_like_inference_processor(batch)
+            self._process_test_like_inference_processor(batch)
+            if (
+                hasattr(self.cfg, "use_inference_processor")
+                and self.cfg.use_inference_processor
+            )
+            else self._process_test(batch)
         )
 
         return seg_batch, crossfield_batch
