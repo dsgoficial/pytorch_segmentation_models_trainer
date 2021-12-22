@@ -141,7 +141,9 @@ class FrameFieldPolygonizerCallback(pl.callbacks.BasePredictionWriter):
     def __init__(self) -> None:
         super().__init__()
 
-    def on_predict_batch_end(self, trainer, pl_module, outputs):
+    def on_predict_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
+    ):
         seg_batch, crossfield_batch, parent_dir_name_list = outputs
         with concurrent.futures.ThreadPoolExecutor() as pool:
             polygonizer = instantiate_polygonizer(pl_module.cfg)

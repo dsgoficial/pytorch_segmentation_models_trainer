@@ -95,16 +95,21 @@ def get_grouped_dataloaders(cfg, df, windowed=False):
     ds_dict = get_grouped_datasets(cfg, df, windowed)
     batch_size = cfg.hyperparameters.batch_size
     return [
-        torch.utils.data.DataLoader(
-            ds,
-            batch_size=batch_size,
-            shuffle=False,
-            drop_last=False,
-            num_workers=cfg.val_dataset.data_loader.num_workers,
-            prefetch_factor=cfg.val_dataset.data_loader.prefetch_factor,
-            collate_fn=ds.collate_fn if hasattr(ds, "collate_fn") else None,
+        (
+            key,
+            torch.utils.data.DataLoader(
+                ds,
+                batch_size=batch_size,
+                shuffle=False,
+                drop_last=False,
+                num_workers=cfg.val_dataset.data_loader.num_workers,
+                prefetch_factor=cfg.val_dataset.data_loader.prefetch_factor,
+                collate_fn=ds.collate_fn if hasattr(ds, "collate_fn") else None,
+            ),
         )
-        for ds in ds_dict.values()
+        for key, ds in sorted(
+            ds_dict.items(), key=lambda x: x[0][0] * x[0][1], reverse=True
+        )
     ]
 
 
@@ -142,12 +147,13 @@ def predict_from_batch(cfg: DictConfig):
     )
     dataloader_list = instantiate_dataloaders(cfg)
     trainer = Trainer(**cfg.pl_trainer, callbacks=[FrameFieldPolygonizerCallback()])
-    for dataloader in tqdm(
+    for key, dataloader in tqdm(
         dataloader_list,
         total=len(dataloader_list),
         desc="Processing inference for each group of images",
         colour="green",
     ):
+        logger.info(f"Processing inference for images of shape {key}")
         trainer.predict(model, dataloader)
 
 

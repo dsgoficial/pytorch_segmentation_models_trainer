@@ -76,10 +76,7 @@ class TemplatePolygonizerProcessor(ABC):
             out_contours_batch, out_probs_batch = self.polygonize_method(
                 inference["seg"], inference["crossfield"], self.config
             )
-        except Exception as e:
-            logger.exception(
-                "An error occurred while polygonizing the batch. Retrying each image individualy this batch.: \n"
-            )
+        except RuntimeError as e:
             # logger.exception(e)
             out_contours_batch = []
             for idx, (seg, crossfield) in enumerate(
@@ -90,11 +87,11 @@ class TemplatePolygonizerProcessor(ABC):
                         seg.unsqueeze(0), crossfield.unsqueeze(0), self.config
                     )
                     out_contours_batch.append(out_contours[0])
-                except Exception as e:
+                except Exception as e1:
                     logger.exception(
                         f"An error occurred while polygonizing the image {parent_dir_name[idx]}. Skipping this image."
                     )
-                    logger.exception(e)
+                    logger.exception(e1)
 
         if inference["seg"].shape[0] == 1:
             return self.post_process(
