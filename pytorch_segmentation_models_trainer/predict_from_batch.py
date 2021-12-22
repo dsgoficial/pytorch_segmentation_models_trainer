@@ -24,6 +24,7 @@ import itertools
 import logging
 import math
 from pathlib import Path
+import warnings
 
 from pytorch_lightning.trainer.trainer import Trainer
 from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
@@ -50,6 +51,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf.omegaconf import OmegaConf
 from tqdm import tqdm
+import swifter
 
 from pytorch_segmentation_models_trainer.tools.inference.inference_processors import (
     AbstractInferenceProcessor,
@@ -63,6 +65,7 @@ import copy
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import pandas as pd
+from rasterio.errors import NotGeoreferencedWarning
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +74,16 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 
 WORLD_SIZE = torch.cuda.device_count()
+
+logging.getLogger("shapely.geos").setLevel(logging.CRITICAL)
+logging.getLogger("rasterio.errors").setLevel(logging.CRITICAL)
+logging.getLogger("tensorboard").setLevel(logging.CRITICAL)
+logging.getLogger("numpy").setLevel(logging.CRITICAL)
+logging.getLogger("skan").setLevel(logging.CRITICAL)
+warnings.filterwarnings("ignore", category=NotGeoreferencedWarning)
+warnings.simplefilter(action="ignore", category=Warning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
 
 
 def instantiate_dataloaders(cfg):
@@ -114,6 +127,34 @@ def get_grouped_dataloaders(cfg, df, windowed=False):
 
 
 def get_grouped_datasets(cfg, df, windowed):
+    from tqdm import tqdm
+
+    tqdm.pandas()
+    if "skip_existing_polygons" in cfg and cfg.skip_existing_polygons:
+        logger.info("Filtering out images with polygonization that already exist.")
+        if (
+            hasattr(cfg, "skip_if_folder_or_file_created")
+            and cfg.skip_if_folder_or_file_created == "file"
+        ):
+            df["output_exists"] = df["image"].swifter.apply(
+                lambda x: Path(
+                    os.path.join(
+                        cfg.polygonizer.data_writer.output_file_folder,
+                        Path(x).stem,
+                        "output.geojson",
+                    )
+                ).exists()
+            )
+        else:
+            df["output_exists"] = df["image"].swifter.apply(
+                lambda x: Path(
+                    os.path.join(
+                        cfg.polygonizer.data_writer.output_file_folder, Path(x).stem
+                    )
+                ).exists()
+            )
+        df = df[df["output_exists"] == False].reset_index(drop=True)
+
     ds_dict = (
         ImageDataset.get_grouped_datasets(
             df,
@@ -154,7 +195,13 @@ def predict_from_batch(cfg: DictConfig):
         colour="green",
     ):
         logger.info(f"Processing inference for images of shape {key}")
-        trainer.predict(model, dataloader)
+        try:
+            trainer.predict(model, dataloader)
+        except Exception as e:
+            logger.exception(e)
+            logger.exception(
+                f"Error occurred during inference of batch group {key}. The process will continue, but you may want to run the inference again for the missing results."
+            )
 
 
 if __name__ == "__main__":

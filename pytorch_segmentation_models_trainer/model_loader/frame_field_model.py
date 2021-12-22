@@ -23,6 +23,7 @@
 import copy
 from logging import log
 from collections import OrderedDict
+import os
 from pathlib import Path
 from pytorch_toolbelt.inference.tiles import TileMerger
 import torch
@@ -522,7 +523,9 @@ class FrameFieldSegmentationPLModel(Model):
             batch["tile_image_idx"]
         )  # we use unique_consecutive instead of unique because we want to preserve the order of ids
         with torch.no_grad():
-            batch_predictions = self.model(batch["tiles"])
+            tiles = batch.pop("tiles")
+            batch_predictions = self.model(tiles)
+        del tiles
         seg_batch, crossfield_batch = batch_predictions.values()
         seg_batch = torch.cat(
             [
@@ -576,5 +579,5 @@ class FrameFieldSegmentationPLModel(Model):
             if not self.cfg.use_inference_processor
             else self._process_test_like_inference_processor(batch)
         )
-        parent_dir_name_list = [Path(path).stem for path in batch["path"]]
-        return seg_batch, crossfield_batch, parent_dir_name_list
+
+        return seg_batch, crossfield_batch

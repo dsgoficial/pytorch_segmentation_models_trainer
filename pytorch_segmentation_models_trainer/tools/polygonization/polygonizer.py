@@ -76,7 +76,7 @@ class TemplatePolygonizerProcessor(ABC):
             out_contours_batch, out_probs_batch = self.polygonize_method(
                 inference["seg"], inference["crossfield"], self.config
             )
-        except RuntimeError as e:
+        except Exception as e:
             # logger.exception(e)
             out_contours_batch = []
             for idx, (seg, crossfield) in enumerate(

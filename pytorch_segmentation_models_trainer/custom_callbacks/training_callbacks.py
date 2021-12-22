@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+import logging
 from pathlib import Path
 import albumentations as A
 import pytorch_lightning as pl
@@ -33,6 +34,9 @@ from typing import List, Any
 import concurrent.futures
 
 from pytorch_segmentation_models_trainer.predict import instantiate_polygonizer
+from concurrent.futures import Future
+
+logger = logging.getLogger(__name__)
 
 
 class WarmupCallback(pl.callbacks.base.Callback):
@@ -144,17 +148,37 @@ class FrameFieldPolygonizerCallback(pl.callbacks.BasePredictionWriter):
     def on_predict_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
     ):
-        seg_batch, crossfield_batch, parent_dir_name_list = outputs
+        parent_dir_name_list = [Path(path).stem for path in batch["path"]]
+        seg_batch, crossfield_batch = outputs
+        if seg_batch is None and crossfield_batch is None:
+            return
         with concurrent.futures.ThreadPoolExecutor() as pool:
             polygonizer = instantiate_polygonizer(pl_module.cfg)
-            with torch.enable_grad():
-                polygonizer.process(
-                    {
-                        "seg": seg_batch.detach(),
-                        "crossfield": crossfield_batch.detach(),
-                    },
-                    profile=None,
-                    parent_dir_name=parent_dir_name_list,
-                    pool=pool,
-                    convert_output_to_world_coords=False,
+            try:
+                with torch.enable_grad():
+                    futures = polygonizer.process(
+                        {"seg": seg_batch, "crossfield": crossfield_batch},
+                        profile=None,
+                        parent_dir_name=parent_dir_name_list,
+                        pool=None,
+                        convert_output_to_world_coords=False,
+                    )
+            except Exception as e:
+                logger.error(f"Error in polygonizer: {e}")
+                logger.warning(
+                    "Skipping polygonizer for batch with error. Check it later."
                 )
+            if (
+                isinstance(futures, list)
+                and len(futures) > 0
+                and isinstance(futures[0], Future)
+            ):
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logger.error(f"Error in polygonizer: {e}")
+                        logger.warning(
+                            "Skipping polygonizer for batch with error. Check it later."
+                        )
+        del seg_batch, crossfield_batch, parent_dir_name_list
