@@ -181,4 +181,3 @@ class FrameFieldPolygonizerCallback(pl.callbacks.BasePredictionWriter):
                         logger.warning(
                             "Skipping polygonizer for batch with error. Check it later."
                         )
-        del seg_batch, crossfield_batch, parent_dir_name_list

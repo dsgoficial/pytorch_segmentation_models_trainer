@@ -525,7 +525,6 @@ class FrameFieldSegmentationPLModel(Model):
         with torch.no_grad():
             tiles = batch.pop("tiles")
             batch_predictions = self.model(tiles)
-        del tiles
         seg_batch, crossfield_batch = batch_predictions.values()
         seg_batch = torch.cat(
             [
@@ -568,7 +567,6 @@ class FrameFieldSegmentationPLModel(Model):
         )
         merger.integrate_batch(tensor_tiles, tiler.crops)
         merged = merger.merge()
-        del merger
         if not pad_if_needed:
             return merged.unsqueeze(0)
         return K.center_crop(merged.unsqueeze(0), size=original_shape)
