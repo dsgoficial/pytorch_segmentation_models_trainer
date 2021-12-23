@@ -99,7 +99,7 @@ class TemplatePolygonizerProcessor(ABC):
                 profile,
                 parent_dir_name=parent_dir_name[0],
                 convert_output_to_world_coords=convert_output_to_world_coords,
-                np_crossfield=inference["crossfield"][0],
+                np_crossfield=inference["crossfield"][0].cpu().numpy(),
                 np_indicator=inference["seg"][:, 0, :, :].cpu().numpy(),
             )
         # ignore profile for now, just wanna get some results, I'll fix it later

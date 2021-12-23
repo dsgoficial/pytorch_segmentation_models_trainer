@@ -123,7 +123,7 @@ def get_grouped_dataloaders(cfg, df, windowed=False):
         for key, ds in sorted(
             ds_dict.items(), key=lambda x: x[0][0] * x[0][1], reverse=True
         )
-        if key not in [(513, 513)]
+        # if key not in [(513, 513)]
     ]
 
 
