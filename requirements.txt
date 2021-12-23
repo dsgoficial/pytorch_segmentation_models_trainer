@@ -5,7 +5,7 @@ torchmetrics>=0.6.0
 segmentation-models-pytorch>=0.2.0
 hydra-core==1.1.1
 kornia
-albumentations
+albumentations==1.0.0
 pandas
 tensorboardX
 pillow
