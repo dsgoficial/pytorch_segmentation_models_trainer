@@ -74,9 +74,13 @@ class TensorPolyOptimizer:
             dist=dist,
             dist_coef=dist_coef,
         )
-        # self.optimizer = torch.optim.SGD([tensorpoly.pos], lr=config.poly_lr)
+        # self.optimizer = torch.optim.SGD([tensorpoly.pos], lr=config.poly_lr, weight_decay=1e-4, momentum=0.9)
         self.optimizer = gradient_centralization.SGD(
-            [tensorpoly.pos], lr=config.poly_lr, use_gc=True
+            [tensorpoly.pos],
+            lr=config.poly_lr,
+            weight_decay=1e-5,
+            momentum=0.9,
+            use_gc=True,
         )
 
         def lr_warmup_func(iter):
@@ -97,6 +101,7 @@ class TensorPolyOptimizer:
         self.optimizer.zero_grad()
         loss, losses_dict = self.criterion(self.tensorpoly)
         loss.backward()
+        self.tensorpoly.pos.grad.data.clamp_(min=-1, max=1)
         self.optimizer.step()
         self.lr_scheduler.step(iter_num)
         with torch.no_grad():
@@ -244,8 +249,11 @@ class TensorSkeletonOptimizer:
             self.tensorskeleton, indicator, level, c0c2, config.loss_params
         )
         self.optimizer = gradient_centralization.Adam(
-            [tensorskeleton.pos], lr=config.lr, use_gc=True
+            [tensorskeleton.pos], lr=config.lr, weight_decay=1e-5, use_gc=True
         )
+        # self.optimizer = torch.optim.Adam(
+        #     [tensorskeleton.pos], lr=config.lr, weight_decay=1e-5
+        # )
         self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
             self.optimizer, config.gamma
         )
@@ -254,6 +262,7 @@ class TensorSkeletonOptimizer:
         self.optimizer.zero_grad()
         loss, losses_dict = self.criterion(self.tensorskeleton.pos, iter_num)
         loss.backward()
+        self.tensorskeleton.pos.grad.data.clamp_(min=-1, max=1)
         pos_gard_is_nan = torch.isnan(self.tensorskeleton.pos.grad).any().item()
         if pos_gard_is_nan:
             logger.warn(f"{iter_num} pos.grad is nan")
