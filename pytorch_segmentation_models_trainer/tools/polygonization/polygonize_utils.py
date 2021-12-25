@@ -82,6 +82,8 @@ def split_polylines_corner(polylines, corner_masks):
 
 
 def compute_geom_prob(geom, prob_map, output_debug=False):
+    if len(prob_map.shape) == 3 and prob_map.shape[0] == 1:
+        prob_map = prob_map[0]
     assert len(prob_map.shape) == 2, "prob_map should have size (H, W), not {}".format(
         prob_map.shape
     )
