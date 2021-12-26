@@ -523,8 +523,8 @@ class FrameFieldSegmentationPLModel(Model):
             batch["tile_image_idx"]
         )  # we use unique_consecutive instead of unique because we want to preserve the order of ids
         with torch.no_grad():
-            tiles = batch.pop("tiles")
-            batch_predictions = self.model(tiles)
+            # tiles = batch.pop("tiles")
+            batch_predictions = self.model(batch["tiles"])
         seg_batch, crossfield_batch = batch_predictions.values()
         seg_batch = torch.cat(
             [
