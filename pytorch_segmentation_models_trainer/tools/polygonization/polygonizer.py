@@ -218,38 +218,6 @@ class ASMPolygonizerProcessor(TemplatePolygonizerProcessor):
     def __post_init__(self):
         self.polygonize_method = active_skeletons.polygonize
 
-    def post_process(
-        self,
-        polygons: List[Polygon],
-        profile: dict,
-        parent_dir_name: str = None,
-        convert_output_to_world_coords: bool = True,
-        np_crossfield: np.ndarray = None,
-        np_indicator: np.ndarray = None,
-    ):
-        """Post-processes generated polygons from process method."""
-        try:
-            new_polygons, _ = active_skeletons.post_process(
-                polygons,
-                np_indicator=np_indicator,
-                np_crossfield=np_crossfield,
-                config=self.config,
-            )
-        except Exception as e:
-            logger.exception(e)
-            logger.warn(
-                f"Error in post_process. Using geometries without post processing."
-            )
-            new_polygons = polygons
-        return super().post_process(
-            new_polygons,
-            profile,
-            parent_dir_name,
-            convert_output_to_world_coords,
-            np_crossfield,
-            np_indicator,
-        )
-
 
 @dataclass
 class InnerPolylinesParams:
@@ -307,7 +275,7 @@ class SimplePolygonizerProcessor(TemplatePolygonizerProcessor):
 
     def process(
         self,
-        inference: Dict[str, np.array],
+        inference: Dict[str, np.ndarray],
         profile: dict,
         pool: ThreadPoolExecutor = None,
         parent_dir_name: str = None,
@@ -344,7 +312,7 @@ class PolygonRNNPolygonizerProcessor(TemplatePolygonizerProcessor):
 
     def process(
         self,
-        inference: Dict[str, Union[torch.Tensor, np.array]],
+        inference: Dict[str, Union[torch.Tensor, np.ndarray]],
         profile: dict,
         pool: ThreadPoolExecutor = None,
         parent_dir_name: str = None,
