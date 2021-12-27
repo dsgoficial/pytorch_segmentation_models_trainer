@@ -59,7 +59,7 @@ class TemplatePolygonizerProcessor(ABC):
 
     def process(
         self,
-        inference: Dict[str, np.array],
+        inference: Dict[str, Union[np.ndarray, torch.Tensor]],
         profile: dict,
         pool: ThreadPoolExecutor = None,
         parent_dir_name: str = None,
@@ -99,8 +99,6 @@ class TemplatePolygonizerProcessor(ABC):
                 profile,
                 parent_dir_name=parent_dir_name[0],
                 convert_output_to_world_coords=convert_output_to_world_coords,
-                np_crossfield=inference["crossfield"][0].cpu().numpy(),
-                np_indicator=inference["seg"][:, 0, :, :].cpu().numpy(),
             )
         # ignore profile for now, just wanna get some results, I'll fix it later
         if pool is None:
@@ -116,17 +114,12 @@ class TemplatePolygonizerProcessor(ABC):
                 for out_contour, parent_dir, np_crossfield, np_indicator in zip(
                     out_contours_batch,
                     parent_dir_name,
-                    inference["crossfield"].cpu().numpy(),
-                    inference["seg"][:, 0, :, :].cpu().numpy(),
+                    inference["crossfield"],
+                    inference["seg"],
                 )
             ]
         futures = []
-        for out_contour, parent_dir, np_crossfield, np_indicator in zip(
-            out_contours_batch,
-            parent_dir_name,
-            inference["crossfield"].cpu().numpy(),
-            inference["seg"][:, 0, :, :].cpu().numpy(),
-        ):
+        for out_contour, parent_dir in zip(out_contours_batch, parent_dir_name):
             futures.append(
                 pool.submit(
                     self.post_process,
@@ -134,8 +127,6 @@ class TemplatePolygonizerProcessor(ABC):
                     None,
                     parent_dir,
                     convert_output_to_world_coords=convert_output_to_world_coords,
-                    np_crossfield=np_crossfield,
-                    np_indicator=np_indicator,
                 )
             )
         return futures
@@ -146,8 +137,6 @@ class TemplatePolygonizerProcessor(ABC):
         profile: dict,
         parent_dir_name: str = None,
         convert_output_to_world_coords: bool = True,
-        np_crossfield: np.ndarray = None,
-        np_indicator: np.ndarray = None,
     ):
         """Post-processes generated polygons from process method.
 

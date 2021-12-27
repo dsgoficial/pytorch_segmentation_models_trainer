@@ -29,6 +29,7 @@ import warnings
 from pytorch_lightning.trainer.trainer import Trainer
 from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
     FrameFieldPolygonizerCallback,
+    ActiveSkeletonsPolygonizerCallback,
 )
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     ImageDataset,
@@ -80,6 +81,9 @@ logging.getLogger("rasterio.errors").setLevel(logging.CRITICAL)
 logging.getLogger("tensorboard").setLevel(logging.CRITICAL)
 logging.getLogger("numpy").setLevel(logging.CRITICAL)
 logging.getLogger("skan").setLevel(logging.CRITICAL)
+logging.getLogger(
+    "pytorch_segmentation_models_trainer.optimizers.poly_optimizers"
+).setLevel(logging.CRITICAL)
 warnings.filterwarnings("ignore", category=NotGeoreferencedWarning)
 warnings.simplefilter(action="ignore", category=Warning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -188,7 +192,9 @@ def predict_from_batch(cfg: DictConfig):
         cfg.checkpoint_path, cfg=cfg
     )
     dataloader_list = instantiate_dataloaders(cfg)
-    trainer = Trainer(**cfg.pl_trainer, callbacks=[FrameFieldPolygonizerCallback()])
+    trainer = Trainer(
+        **cfg.pl_trainer, callbacks=[ActiveSkeletonsPolygonizerCallback()]
+    )
     for key, dataloader in tqdm(
         dataloader_list,
         total=len(dataloader_list),

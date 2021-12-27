@@ -35,6 +35,12 @@ import concurrent.futures
 
 from pytorch_segmentation_models_trainer.predict import instantiate_polygonizer
 from concurrent.futures import Future
+from pytorch_segmentation_models_trainer.tools.polygonization.methods import (
+    active_skeletons,
+)
+from pytorch_segmentation_models_trainer.utils.polygon_utils import (
+    coerce_polygons_to_single_geometry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +166,7 @@ class FrameFieldPolygonizerCallback(pl.callbacks.BasePredictionWriter):
                         {"seg": seg_batch, "crossfield": crossfield_batch},
                         profile=None,
                         parent_dir_name=parent_dir_name_list,
-                        pool=None,
+                        pool=pool,
                         convert_output_to_world_coords=False,
                     )
             except Exception as e:
@@ -181,3 +187,77 @@ class FrameFieldPolygonizerCallback(pl.callbacks.BasePredictionWriter):
                         logger.warning(
                             "Skipping polygonizer for batch with error. Check it later."
                         )
+
+
+class FrameFieldComputeWeightNormLossesCallback(pl.callbacks.base.Callback):
+    def __init__(self) -> None:
+        super().__init__()
+        self.loss_norm_is_initializated = False
+
+    def on_train_epoch_start(self, trainer, pl_module) -> None:
+        if self.loss_norm_is_initializated or trainer.current_epoch > 1:
+            return
+        pl_module.model.train()  # Important for batchnorm and dropout, even in computing loss norms
+        init_dl = pl_module.train_dataloader()
+        with torch.no_grad():
+            loss_norm_batches_min = (
+                pl_module.cfg.loss_params.multiloss.normalization_params.min_samples
+                // (2 * pl_module.cfg.hyperparameters.batch_size)
+                + 1
+            )
+            loss_norm_batches_max = (
+                pl_module.cfg.loss_params.multiloss.normalization_params.max_samples
+                // (2 * pl_module.cfg.hyperparameters.batch_size)
+                + 1
+            )
+            loss_norm_batches = max(
+                loss_norm_batches_min, min(loss_norm_batches_max, len(init_dl))
+            )
+            pl_module.compute_loss_norms(init_dl, loss_norm_batches)
+        self.loss_norm_is_initializated = True
+
+
+class ActiveSkeletonsPolygonizerCallback(pl.callbacks.BasePredictionWriter):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def on_predict_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
+    ):
+        parent_dir_name_list = [Path(path).stem for path in batch["path"]]
+        seg_batch, crossfield_batch = outputs
+        if seg_batch is None and crossfield_batch is None:
+            return
+        polygonizer = instantiate_polygonizer(pl_module.cfg)
+        try:
+            polys = self._run_polygonize(pl_module, seg_batch, crossfield_batch)
+        except Exception as e:
+            polys = []
+            for idx, (seg, crossfield) in enumerate(zip(seg_batch, crossfield_batch)):
+                try:
+                    out_contours = self._run_polygonize(
+                        pl_module, seg.unsqueeze(0), crossfield.unsqueeze(0)
+                    )
+                    polys.append(out_contours[0])
+                except Exception as e1:
+                    logger.exception(
+                        f"An error occurred while polygonizing the image {parent_dir_name_list[idx]}. Skipping this image."
+                    )
+                    logger.exception(e1)
+                    polys.append([])
+        for idx, polygon_list in enumerate(polys):
+            if polygon_list == []:
+                continue
+            polygonizer.data_writer.write_data(
+                coerce_polygons_to_single_geometry(polygon_list),
+                profile={"crs": None},
+                folder_name=parent_dir_name_list[idx],
+            )
+
+    def _run_polygonize(self, pl_module, seg_batch, crossfield_batch):
+        with torch.enable_grad():
+            polys, probs = active_skeletons.polygonize(
+                seg_batch, crossfield_batch, pl_module.cfg.polygonizer.config
+            )
+
+        return polys
