@@ -32,6 +32,7 @@ from torch.utils.data import DataLoader
 from typing import List, Any
 
 import concurrent.futures
+import itertools
 
 from pytorch_segmentation_models_trainer.predict import instantiate_polygonizer
 from concurrent.futures import Future
@@ -41,6 +42,7 @@ from pytorch_segmentation_models_trainer.tools.polygonization.methods import (
 from pytorch_segmentation_models_trainer.utils.polygon_utils import (
     coerce_polygons_to_single_geometry,
 )
+from pytorch_segmentation_models_trainer.utils.tensor_utils import tensor_dict_to_device
 
 logger = logging.getLogger(__name__)
 
@@ -189,34 +191,6 @@ class FrameFieldPolygonizerCallback(pl.callbacks.BasePredictionWriter):
                         )
 
 
-class FrameFieldComputeWeightNormLossesCallback(pl.callbacks.base.Callback):
-    def __init__(self) -> None:
-        super().__init__()
-        self.loss_norm_is_initializated = False
-
-    def on_train_epoch_start(self, trainer, pl_module) -> None:
-        if self.loss_norm_is_initializated or trainer.current_epoch > 1:
-            return
-        pl_module.model.train()  # Important for batchnorm and dropout, even in computing loss norms
-        init_dl = pl_module.train_dataloader()
-        with torch.no_grad():
-            loss_norm_batches_min = (
-                pl_module.cfg.loss_params.multiloss.normalization_params.min_samples
-                // (2 * pl_module.cfg.hyperparameters.batch_size)
-                + 1
-            )
-            loss_norm_batches_max = (
-                pl_module.cfg.loss_params.multiloss.normalization_params.max_samples
-                // (2 * pl_module.cfg.hyperparameters.batch_size)
-                + 1
-            )
-            loss_norm_batches = max(
-                loss_norm_batches_min, min(loss_norm_batches_max, len(init_dl))
-            )
-            pl_module.compute_loss_norms(init_dl, loss_norm_batches)
-        self.loss_norm_is_initializated = True
-
-
 class ActiveSkeletonsPolygonizerCallback(pl.callbacks.BasePredictionWriter):
     def __init__(self) -> None:
         super().__init__()
@@ -254,12 +228,25 @@ class ActiveSkeletonsPolygonizerCallback(pl.callbacks.BasePredictionWriter):
                     )
                     logger.exception(e1)
                     polys.append([])
-        for idx, polygon_list in enumerate(polys):
-            polygonizer.data_writer.write_data(
-                coerce_polygons_to_single_geometry(polygon_list),
-                profile={"crs": None},
-                folder_name=parent_dir_name_list[idx],
-            )
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            futures = []
+            for idx, polygon_list in enumerate(polys):
+                futures.append(
+                    pool.submit(
+                        polygonizer.data_writer.write_data,
+                        coerce_polygons_to_single_geometry(polygon_list),
+                        profile={"crs": None},
+                        folder_name=parent_dir_name_list[idx],
+                    )
+                )
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.error(f"Error on writing output: {e}")
+                    logger.warning(
+                        "Skipping writer for batch with error. Check it later."
+                    )
 
     def _run_polygonize(self, pl_module, seg_batch, crossfield_batch):
         with torch.enable_grad():
@@ -268,3 +255,40 @@ class ActiveSkeletonsPolygonizerCallback(pl.callbacks.BasePredictionWriter):
             )
 
         return polys
+
+
+class ModPolymapperPolygonizerCallback(pl.callbacks.BasePredictionWriter):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def on_predict_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
+    ):
+        def process_polygonizer(detection, parent_dir_name):
+            polygonizer = instantiate_polygonizer(self.cfg)
+            detection["output_batch_polygons"] = detection.pop("polygonrnn_output")
+            polygonizer.process(
+                detection,
+                profile=None,
+                parent_dir_name=parent_dir_name,
+                convert_output_to_world_coords=False,
+            )
+
+        parent_dir_name_list = [Path(path).stem for path in batch["path"]]
+        if len(outputs) != len(parent_dir_name_list):
+            raise ValueError(
+                "The number of detections and the number of parent_dir_name_list must be the same"
+            )
+        futures = []
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            for detection, parent_dir_name in itertools.zip_longest(
+                outputs, parent_dir_name_list
+            ):
+                future = pool.submit(
+                    process_polygonizer,
+                    tensor_dict_to_device(detection, "cpu"),
+                    parent_dir_name,
+                )
+                futures.append(future)
+        for future in concurrent.futures.as_completed(futures):
+            future.result()

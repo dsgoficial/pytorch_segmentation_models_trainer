@@ -340,36 +340,8 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         self.log_dict(tensorboard_logs, logger=True)
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        def process_polygonizer(detection, parent_dir_name):
-            polygonizer = instantiate_polygonizer(self.cfg)
-            detection["output_batch_polygons"] = detection.pop("polygonrnn_output")
-            polygonizer.process(
-                detection,
-                profile=None,
-                parent_dir_name=parent_dir_name,
-                convert_output_to_world_coords=False,
-            )
-
         with torch.no_grad():
             detections = self.model(
                 batch["image"], threshold=self.cfg.detection_threshold
             )
-        parent_dir_name_list = [Path(path).stem for path in batch["path"]]
-        if len(detections) != len(parent_dir_name_list):
-            raise ValueError(
-                "The number of detections and the number of parent_dir_name_list must be the same"
-            )
-        futures = []
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            for detection, parent_dir_name in itertools.zip_longest(
-                detections, parent_dir_name_list
-            ):
-                future = pool.submit(
-                    process_polygonizer,
-                    tensor_dict_to_device(detection, "cpu"),
-                    parent_dir_name,
-                )
-                futures.append(future)
-        for future in concurrent.futures.as_completed(futures):
-            future.result()
-        return
+        return detections

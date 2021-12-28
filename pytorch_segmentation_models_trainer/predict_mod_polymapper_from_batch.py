@@ -25,6 +25,9 @@ import logging
 from pathlib import Path
 
 from pytorch_lightning.trainer.trainer import Trainer
+from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
+    ModPolymapperPolygonizerCallback,
+)
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import ImageDataset
 from pytorch_segmentation_models_trainer.predict import (
     instantiate_model_from_checkpoint,
@@ -78,6 +81,41 @@ def instantiate_dataloaders(cfg):
         and cfg.inference_dataset.n_first_rows_to_read is not None
         else pd.read_csv(cfg.inference_dataset.input_csv_path)
     )
+    from tqdm import tqdm
+
+    tqdm.pandas()
+    if "skip_existing_polygons" in cfg and cfg.skip_existing_polygons:
+        logger.info("Filtering out images with polygonization that already exist.")
+        if (
+            hasattr(cfg, "skip_if_folder_or_file_created")
+            and cfg.skip_if_folder_or_file_created == "file"
+        ):
+            df["output_exists"] = df["image"].swifter.apply(
+                lambda x: Path(
+                    os.path.join(
+                        cfg.polygonizer.data_writer.output_file_folder,
+                        Path(x).stem,
+                        "output.geojson",
+                    )
+                ).exists()
+            )
+            if (
+                hasattr(cfg, "save_not_found_image_list_to_csv")
+                and cfg.save_not_found_image_list_to_csv
+            ):
+                df[df["output_exists"] == False].to_csv(
+                    cfg.polygonizer.data_writer.output_file_folder
+                    + "/not_found_image_list.csv"
+                )
+        else:
+            df["output_exists"] = df["image"].swifter.apply(
+                lambda x: Path(
+                    os.path.join(
+                        cfg.polygonizer.data_writer.output_file_folder, Path(x).stem
+                    )
+                ).exists()
+            )
+        df = df[df["output_exists"] == False].reset_index(drop=True)
     ds_dict = ImageDataset.get_grouped_datasets(
         df,
         group_by_keys=["width", "height"],
@@ -105,10 +143,10 @@ def predict_mod_polymapper_from_batch(cfg: DictConfig):
         OmegaConf.to_yaml(cfg),
     )
     model = import_module_from_cfg(cfg.pl_model).load_from_checkpoint(
-        cfg.hyperparameters.resume_from_checkpoint, cfg=cfg
+        cfg.checkpoint_path, cfg=cfg
     )
     dataloader_list = instantiate_dataloaders(cfg)
-    trainer = Trainer(**cfg.pl_trainer)
+    trainer = Trainer(**cfg.pl_trainer, callbacks=[ModPolymapperPolygonizerCallback()])
     for dataloader in tqdm(
         dataloader_list,
         total=len(dataloader_list),
