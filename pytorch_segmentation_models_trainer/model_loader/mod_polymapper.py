@@ -46,7 +46,7 @@ from pytorch_segmentation_models_trainer.utils.tensor_utils import tensor_dict_t
 
 
 class GenericPolyMapperPLModel(pl.LightningModule):
-    def __init__(self, cfg, grid_size=28, perform_evaluation=True):
+    def __init__(self, cfg, grid_size=28, val_seq_len=60, perform_evaluation=True):
         super(GenericPolyMapperPLModel, self).__init__()
         self.cfg = cfg
         self.model = self.get_model()
@@ -54,6 +54,11 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             grid_size
             if "grid_size" not in self.cfg.pl_model
             else self.cfg.pl_model.grid_size
+        )
+        self.val_seq_len = (
+            val_seq_len
+            if "val_seq_len" not in self.cfg.pl_model
+            else self.cfg.pl_model.val_seq_len
         )
         self.perform_evaluation = (
             perform_evaluation

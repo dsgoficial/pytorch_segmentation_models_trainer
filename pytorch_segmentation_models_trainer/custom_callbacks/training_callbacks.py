@@ -292,3 +292,15 @@ class ModPolymapperPolygonizerCallback(pl.callbacks.BasePredictionWriter):
                 futures.append(future)
         for future in concurrent.futures.as_completed(futures):
             future.result()
+
+        # polygonizer = instantiate_polygonizer(pl_module.cfg)
+        # for detection, parent_dir_name in itertools.zip_longest(
+        #     outputs, parent_dir_name_list
+        # ):
+        #     detection["output_batch_polygons"] = detection["polygonrnn_output"]
+        #     polygonizer.process(
+        #         tensor_dict_to_device(detection, "cpu"),
+        #         profile=None,
+        #         parent_dir_name=parent_dir_name,
+        #         convert_output_to_world_coords=False,
+        #     )
