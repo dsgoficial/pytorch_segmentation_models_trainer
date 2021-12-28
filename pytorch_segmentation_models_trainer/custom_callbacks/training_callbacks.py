@@ -265,7 +265,7 @@ class ModPolymapperPolygonizerCallback(pl.callbacks.BasePredictionWriter):
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
     ):
         def process_polygonizer(detection, parent_dir_name):
-            polygonizer = instantiate_polygonizer(self.cfg)
+            polygonizer = instantiate_polygonizer(pl_module.cfg)
             detection["output_batch_polygons"] = detection.pop("polygonrnn_output")
             polygonizer.process(
                 detection,
