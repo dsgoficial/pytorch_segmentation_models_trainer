@@ -150,6 +150,14 @@ def get_grouped_datasets(cfg, df, windowed):
                     )
                 ).exists()
             )
+            if (
+                hasattr(cfg, "save_not_found_image_list_to_csv")
+                and cfg.save_not_found_image_list_to_csv
+            ):
+                df[df["output_exists"] == False].to_csv(
+                    cfg.polygonizer.data_writer.output_file_folder
+                    + "/not_found_image_list.csv"
+                )
         else:
             df["output_exists"] = df["image"].swifter.apply(
                 lambda x: Path(

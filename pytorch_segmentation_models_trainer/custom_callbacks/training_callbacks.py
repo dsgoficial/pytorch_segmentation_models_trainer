@@ -235,9 +235,18 @@ class ActiveSkeletonsPolygonizerCallback(pl.callbacks.BasePredictionWriter):
             polys = []
             for idx, (seg, crossfield) in enumerate(zip(seg_batch, crossfield_batch)):
                 try:
+                    if (
+                        torch.sum(seg > pl_module.cfg.polygonizer.config.seg_threshold)
+                        == 0
+                    ):
+                        polys.append([])
+                        continue
                     out_contours = self._run_polygonize(
                         pl_module, seg.unsqueeze(0), crossfield.unsqueeze(0)
                     )
+                    if len(out_contours) == 0:
+                        polys.append([])
+                        continue
                     polys.append(out_contours[0])
                 except Exception as e1:
                     logger.exception(
@@ -246,8 +255,6 @@ class ActiveSkeletonsPolygonizerCallback(pl.callbacks.BasePredictionWriter):
                     logger.exception(e1)
                     polys.append([])
         for idx, polygon_list in enumerate(polys):
-            if polygon_list == []:
-                continue
             polygonizer.data_writer.write_data(
                 coerce_polygons_to_single_geometry(polygon_list),
                 profile={"crs": None},
