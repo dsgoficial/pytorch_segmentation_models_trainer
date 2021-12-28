@@ -147,6 +147,7 @@ def predict_mod_polymapper_from_batch(cfg: DictConfig):
     )
     dataloader_list = instantiate_dataloaders(cfg)
     trainer = Trainer(**cfg.pl_trainer, callbacks=[ModPolymapperPolygonizerCallback()])
+    model.model.eval()
     for dataloader in tqdm(
         dataloader_list,
         total=len(dataloader_list),

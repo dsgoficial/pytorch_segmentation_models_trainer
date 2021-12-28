@@ -25,6 +25,7 @@ from collections import defaultdict
 from typing import Callable, List, Optional, Union, Tuple, Dict
 from PIL import Image, ImageDraw
 import numpy as np
+from shapely.geometry.collection import GeometryCollection
 import torch
 import itertools
 from shapely.geometry import Polygon, LineString, Point, MultiPolygon, box
@@ -381,7 +382,7 @@ def validate_polygon(geom: Polygon) -> List[Union[Polygon, MultiPolygon]]:
     valid_output = make_valid(geom)
     if isinstance(valid_output, (Polygon, MultiPolygon)):
         return [valid_output]
-    if isinstance(valid_output, list):
+    if isinstance(valid_output, (list, GeometryCollection)):
         return [p for p in valid_output if isinstance(p, (Polygon, MultiPolygon))]
     else:
         return []

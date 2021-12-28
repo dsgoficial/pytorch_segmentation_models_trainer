@@ -65,4 +65,4 @@ def polygonize(
         batch["min_row"],
         grid_size=config.grid_size,
     )
-    return shapely_postprocess(map(Polygon, predicted_polygon_list), config)
+    return shapely_postprocess(list(map(Polygon, predicted_polygon_list)), config)
