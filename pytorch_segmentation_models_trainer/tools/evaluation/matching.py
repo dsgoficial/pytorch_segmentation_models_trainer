@@ -24,6 +24,7 @@ import numpy as np
 from shapely.geometry import Polygon, Point
 from shapely.geometry.base import BaseGeometry
 from shapely.strtree import STRtree
+import shapely.wkt
 
 from pytorch_segmentation_models_trainer.custom_metrics.metrics import (
     frechet_distance,
