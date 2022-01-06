@@ -26,8 +26,9 @@ import unittest
 from shapely.geometry.base import BaseGeometry
 import torch
 import geopandas
+import json
 import numpy as np
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, Point
 from parameterized import parameterized
 
 from pytorch_segmentation_models_trainer.tools.evaluation import matching
@@ -75,3 +76,17 @@ class Test_Matching(unittest.TestCase):
             self.assertTrue(
                 matched_dict["reference"].equals(expected_reference_matches[idx])
             )
+
+    def test_per_vertex_error_list(self) -> None:
+        gt_polygon = Polygon([(0, 0), (0, 2), (2, 2), (2, 0), (0, 0)])
+        pred_polygon = Polygon(
+            [(0.1, 0.1), (0.1, 2.1), (30, 30), (2.4, 2.4), (2.1, 0.1), (0.1, 0.1)]
+        )
+        output_dict_list = matching.per_vertex_error_list(gt_polygon, pred_polygon)
+        self.assertEqual(len(output_dict_list), 4)
+        expected_json_str = '[{"gt_vertex": "POINT (0 0)", "pred_vertex": "POINT (0.1 0.1)", "distance": 0.14142135623730953}, {"gt_vertex": "POINT (0 2)", "pred_vertex": "POINT (0.1 2.1)", "distance": 0.14142135623730956}, {"gt_vertex": "POINT (2 2)", "pred_vertex": "POINT (2.4 2.4)", "distance": 0.5656854249492379}, {"gt_vertex": "POINT (2 0)", "pred_vertex": "POINT (2.1 0.1)", "distance": 0.14142135623730956}]'
+        output_transformed_dict_list = [
+            {k: (v.wkt if isinstance(v, Point) else v) for k, v in d.items()}
+            for d in output_dict_list
+        ]
+        self.assertEqual(expected_json_str, json.dumps(output_transformed_dict_list))

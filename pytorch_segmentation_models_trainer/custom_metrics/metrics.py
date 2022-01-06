@@ -228,34 +228,3 @@ def polygon_mean_max_tangent_angle_errors(
         sampling_spacing=sampling_spacing,
         max_stretch=max_stretch,
     )
-
-
-def per_vertex_error_list(
-    gt_polygon: Polygon, pred_polygon: Polygon
-) -> List[Dict[str, Union[Point, float]]]:
-    paired_dict = dict()
-    gt_vertexes = list(map(Point, gt_polygon.exterior.coords))
-    pred_vertexes = list(map(Point, pred_polygon.exterior.coords))
-    gt_tree = STRtree(gt_vertexes)
-    for pred_vertex in pred_vertexes:
-        gt_vertex = gt_tree.nearest(pred_vertex)
-        if gt_vertex.wkt not in paired_dict:
-            paired_dict[gt_vertex.wkt] = {
-                "pred_vertex": pred_vertex,
-                "distance": pred_vertex.distance(gt_vertex),
-            }
-            continue
-        if paired_dict[gt_vertex.wkt]["distance"] > pred_vertex.distance(gt_vertex):
-            paired_dict[gt_vertex.wkt] = {
-                "pred_vertex": pred_vertex,
-                "distance": pred_vertex.distance(gt_vertex),
-            }
-    output_dict_list = [
-        {
-            "gt_vertex": shapely.wkt.loads(gt_vertex_wkt),
-            "pred_vertex": paired_dict["pred_vertex"],
-            "distance": paired_dict["distance"],
-        }
-        for gt_vertex_wkt, paired_dict in paired_dict.items()
-    ]
-    return output_dict_list
