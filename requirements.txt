@@ -34,6 +34,6 @@ pyyaml
 pycocotools
 multiprocess
 wget
-fastapi==0.70.0
+fastapi==0.73.0
 uvicorn==0.16.0
 similaritymeasures
