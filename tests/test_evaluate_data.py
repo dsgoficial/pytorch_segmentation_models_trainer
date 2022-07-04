@@ -51,12 +51,16 @@ def _load_test_data() -> Tuple[List[Polygon], List[Polygon], List[Polygon]]:
 
 class Test_EvaluateData(unittest.TestCase):
     def test_compute_metrics_on_match_list_dict(self) -> None:
-        reference_polygons, candidate_polygons, expected_reference_matches = (
-            _load_test_data()
-        )
-        matched_dict_list, unmatched_references_list, unmatched_targets_list = matching.match_polygon_lists_by_iou(
-            reference_polygons, candidate_polygons
-        )
+        (
+            reference_polygons,
+            candidate_polygons,
+            expected_reference_matches,
+        ) = _load_test_data()
+        (
+            matched_dict_list,
+            unmatched_references_list,
+            unmatched_targets_list,
+        ) = matching.match_polygon_lists_by_iou(reference_polygons, candidate_polygons)
         evaluated_data = evaluate_data.compute_metrics_on_match_list_dict(
             matched_dict_list,
             metric_list=[

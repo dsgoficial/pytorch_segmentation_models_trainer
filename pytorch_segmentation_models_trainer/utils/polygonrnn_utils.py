@@ -110,7 +110,7 @@ def get_vertex_list_from_numpy(
         return x.cpu().numpy() if isinstance(x, torch.Tensor) else x
 
     input_array = cast_to_np(input_array)
-    if np.max(input_array) >= grid_size ** 2:
+    if np.max(input_array) >= grid_size**2:
         length = np.argmax(input_array)
         input_array = input_array[:length]
     if input_array.shape[0] == 0:
@@ -421,17 +421,17 @@ def get_scales(
     target_width: float = 224.0,
 ) -> tuple:
     """
-        Gets scales for the image.
+    Gets scales for the image.
 
-        Args:
-            min_row (int): min row
-            min_col (int): min col
-            max_row (int): max row
-            max_col (int): max col
+    Args:
+        min_row (int): min row
+        min_col (int): min col
+        max_row (int): max row
+        max_col (int): max col
 
-        Returns:
-            tuple: scale_h, scale_w
-        """
+    Returns:
+        tuple: scale_h, scale_w
+    """
     object_h = max_row - min_row
     object_w = max_col - min_col
     scale_h = target_height / object_h

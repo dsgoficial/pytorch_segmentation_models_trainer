@@ -345,13 +345,15 @@ class PolygonRNNResultCallback(ImageSegmentationResultCallback):
                 pl_module.val_seq_len,
             )
             gt_polygon_list = prepared_item["shapely_polygon_list"]
-            predicted_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
-                output_batch_polygons,
-                prepared_item["scale_h"],
-                prepared_item["scale_w"],
-                prepared_item["min_col"],
-                prepared_item["min_row"],
-                grid_size=val_ds.dataset.grid_size,
+            predicted_polygon_list = (
+                polygonrnn_utils.get_vertex_list_from_batch_tensors(
+                    output_batch_polygons,
+                    prepared_item["scale_h"],
+                    prepared_item["scale_w"],
+                    prepared_item["min_col"],
+                    prepared_item["min_row"],
+                    grid_size=val_ds.dataset.grid_size,
+                )
             )
             saved_image = self.build_polygon_vis(
                 image_path,

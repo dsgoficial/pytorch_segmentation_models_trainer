@@ -635,7 +635,7 @@ class ObjectDetectionDataset(AbstractDataset):
 
     @staticmethod
     def collate_fn(
-        batch: List
+        batch: List,
     ) -> Tuple[torch.Tensor, List[Dict[str, torch.Tensor]], torch.Tensor]:
         """
         :param batch: an iterable of N sets from __getitem__()
@@ -735,7 +735,10 @@ class NaiveModPolyMapperDataset(Dataset):
         return len(self.object_detection_dataset)
 
     def get_polygonrnn_data(self, idx: int) -> Dict[str, Any]:
-        _, polygon_rnn_data = self.polygon_rnn_dataset.get_training_images_from_image_path(
+        (
+            _,
+            polygon_rnn_data,
+        ) = self.polygon_rnn_dataset.get_training_images_from_image_path(
             self.object_detection_dataset.get_path(
                 idx, key=self.object_detection_dataset.image_key, add_root_dir=False
             )
@@ -749,7 +752,7 @@ class NaiveModPolyMapperDataset(Dataset):
 
     @staticmethod
     def collate_fn(
-        batch: List
+        batch: List,
     ) -> Tuple[torch.Tensor, List[Dict[str, torch.Tensor]], torch.Tensor]:
         """
         :param batch: an iterable of N sets from __getitem__()
@@ -797,7 +800,7 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
 
     @staticmethod
     def collate_fn(
-        batch: List
+        batch: List,
     ) -> Tuple[torch.Tensor, List[Dict[str, torch.Tensor]], torch.Tensor]:
         """
         :param batch: an iterable of N sets from __getitem__()

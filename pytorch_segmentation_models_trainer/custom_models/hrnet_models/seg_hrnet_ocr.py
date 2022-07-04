@@ -45,9 +45,9 @@ def conv3x3(in_planes, out_planes, stride=1):
 
 class SpatialGather_Module(nn.Module):
     """
-        Aggregate the context features according to the initial
-        predicted probability distribution.
-        Employ the soft-weighted method to aggregate the context.
+    Aggregate the context features according to the initial
+    predicted probability distribution.
+    Employ the soft-weighted method to aggregate the context.
     """
 
     def __init__(self, cls_num=0, scale=1):
@@ -165,7 +165,7 @@ class _ObjectAttentionBlock(nn.Module):
         value = value.permute(0, 2, 1)
 
         sim_map = torch.matmul(query, key)
-        sim_map = (self.key_channels ** -0.5) * sim_map
+        sim_map = (self.key_channels**-0.5) * sim_map
         sim_map = F.softmax(sim_map, dim=-1)
 
         # add bg context ...

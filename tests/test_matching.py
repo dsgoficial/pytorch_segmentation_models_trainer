@@ -60,9 +60,11 @@ class Test_Matching(unittest.TestCase):
         ]
     )
     def test_match_polygon_lists_method(self, method: Callable) -> None:
-        reference_polygons, candidate_polygons, expected_reference_matches = (
-            _load_test_data()
-        )
+        (
+            reference_polygons,
+            candidate_polygons,
+            expected_reference_matches,
+        ) = _load_test_data()
         matched_dict_list, unmatched_references_list, unmatched_targets_list = method(
             reference_polygons, candidate_polygons
         )

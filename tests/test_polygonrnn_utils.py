@@ -143,8 +143,13 @@ class Test_PolygonRNNUtils(unittest.TestCase):
         )
         bounding_boxes = [[100, 100, 512, 512], [100, 100, 204, 204]]
         image_bounds_list = [(512, 512), (512, 512)]
-        output_polygon_list = polygonrnn_utils.crop_and_rescale_polygons_to_bounding_boxes(
-            [polygon1, polygon2], bounding_boxes, image_bounds_list, extend_factor=0.1
+        output_polygon_list = (
+            polygonrnn_utils.crop_and_rescale_polygons_to_bounding_boxes(
+                [polygon1, polygon2],
+                bounding_boxes,
+                image_bounds_list,
+                extend_factor=0.1,
+            )
         )
         self.assertEqual(len(output_polygon_list), 2)
         expected_outputs = [
