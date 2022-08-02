@@ -355,9 +355,7 @@ class AlignLoss:
         ] = 0  # Zero out invalid angles between paths as well as corner angles
         vertex_angles[
             self.tensorskeleton.path_delim[1:-1] - 2
-        ] = (
-            0
-        )  # Zero out invalid angles between paths (caused by the junction points being in all paths of the junction)
+        ] = 0  # Zero out invalid angles between paths (caused by the junction points being in all paths of the junction)
         sub_path_vertex_angle_delim = sub_path_delim.clone()
         sub_path_vertex_angle_delim[-1] -= 2
         sub_path_sum_vertex_angle = torch_scatter.segment_sum_csr(
@@ -386,9 +384,7 @@ class AlignLoss:
         ] = 0  # Zero out loss for start vertex of inner sub-paths
         curvature_loss[
             self.tensorskeleton.path_delim[1:-1] - 2
-        ] = (
-            0
-        )  # Zero out loss for end vertex of inner paths (caused by the junction points being in all paths of the junction)
+        ] = 0  # Zero out loss for end vertex of inner paths (caused by the junction points being in all paths of the junction)
         return torch.sum(curvature_loss)
 
     def _compute_corner_loss(self, corner_angles):

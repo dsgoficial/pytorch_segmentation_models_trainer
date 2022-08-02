@@ -63,7 +63,7 @@ def split_polylines_corner(polylines, corner_masks):
             polyline = np.array(polyline.coords)
         else:
             polyline = np.array(polyline)
-        splits, = np.where(corner_mask)
+        (splits,) = np.where(corner_mask)
         if len(splits) == 0:
             new_polylines.append(polyline)
             continue

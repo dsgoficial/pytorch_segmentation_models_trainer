@@ -556,9 +556,7 @@ class FrameFieldSegmentationPLModel(Model):
     def _integrate_tiles(
         self, tensor_tiles: torch.Tensor, tiler, original_shape, pad_if_needed=True
     ):
-        """ tiles: B x C x H x W
-
-        """
+        """tiles: B x C x H x W"""
         merger = TileMerger(
             tiler.target_shape,
             tensor_tiles.shape[1],

@@ -101,7 +101,7 @@ class TemplatePolygonizerProcessor(ABC):
                 convert_output_to_world_coords=convert_output_to_world_coords,
             )
         # ignore profile for now, just wanna get some results, I'll fix it later
-        if pool is None:
+        if pool is None and profile is None:
             return [
                 self.post_process(
                     out_contour,
@@ -119,12 +119,15 @@ class TemplatePolygonizerProcessor(ABC):
                 )
             ]
         futures = []
-        for out_contour, parent_dir in zip(out_contours_batch, parent_dir_name):
+        profile_list = len(out_contours_batch) * [None] if profile is None else profile
+        for out_contour, parent_dir, profile in zip(
+            out_contours_batch, parent_dir_name, profile_list
+        ):
             futures.append(
                 pool.submit(
                     self.post_process,
                     out_contour,
-                    None,
+                    profile,
                     parent_dir,
                     convert_output_to_world_coords=convert_output_to_world_coords,
                 )

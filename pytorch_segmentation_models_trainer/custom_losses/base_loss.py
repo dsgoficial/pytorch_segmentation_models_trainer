@@ -458,7 +458,7 @@ def compute_seg_loss_weigths(pred_batch, gt_batch, cfg):
         distance_weights = gt_batch["distances"] * (
             height + width
         )  # Denormalize distances
-        distance_weights = w0 * torch.exp(-(distance_weights ** 2) / (sigma ** 2))
+        distance_weights = w0 * torch.exp(-(distance_weights**2) / (sigma**2))
 
     gt_batch["seg_loss_weights"] = freq_weights
     if use_dist:

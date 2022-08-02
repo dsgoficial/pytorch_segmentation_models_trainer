@@ -22,6 +22,7 @@ import logging
 from pathlib import Path
 import albumentations as A
 import pytorch_lightning as pl
+import rasterio
 import torch
 from hydra.utils import instantiate
 
@@ -258,40 +259,55 @@ class ActiveSkeletonsPolygonizerCallback(pl.callbacks.BasePredictionWriter):
 
 
 class ModPolymapperPolygonizerCallback(pl.callbacks.BasePredictionWriter):
-    def __init__(self) -> None:
+    def __init__(self, convert_output_to_world_coords=True) -> None:
         super().__init__()
+        self.convert_output_to_world_coords = convert_output_to_world_coords
 
     def on_predict_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
     ):
-        def process_polygonizer(detection, parent_dir_name):
+        def process_polygonizer(detection, parent_dir_name, profile=None):
             polygonizer = instantiate_polygonizer(pl_module.cfg)
             detection["output_batch_polygons"] = detection.pop("polygonrnn_output")
             polygonizer.process(
                 detection,
-                profile=None,
+                profile=profile,
                 parent_dir_name=parent_dir_name,
-                convert_output_to_world_coords=False,
+                convert_output_to_world_coords=self.convert_output_to_world_coords,
             )
 
         parent_dir_name_list = [Path(path).stem for path in batch["path"]]
+        profile_list = (
+            self.get_profile_list(batch)
+            if self.convert_output_to_world_coords
+            else len(parent_dir_name_list) * [None]
+        )
+
         if len(outputs) != len(parent_dir_name_list):
             raise ValueError(
                 "The number of detections and the number of parent_dir_name_list must be the same"
             )
         futures = []
         with concurrent.futures.ThreadPoolExecutor() as pool:
-            for detection, parent_dir_name in itertools.zip_longest(
-                outputs, parent_dir_name_list
+            for detection, parent_dir_name, profile in itertools.zip_longest(
+                outputs, parent_dir_name_list, profile_list
             ):
                 future = pool.submit(
                     process_polygonizer,
                     tensor_dict_to_device(detection, "cpu"),
                     parent_dir_name,
+                    profile,
                 )
                 futures.append(future)
         for future in concurrent.futures.as_completed(futures):
             future.result()
+
+    def get_profile_list(self, batch):
+        profile_list = []
+        for path in batch["path"]:
+            with rasterio.open(path) as raster_ds:
+                profile_list.append(raster_ds.profile.copy())
+        return profile_list
 
         # polygonizer = instantiate_polygonizer(pl_module.cfg)
         # for detection, parent_dir_name in itertools.zip_longest(

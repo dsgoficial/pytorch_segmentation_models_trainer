@@ -146,7 +146,20 @@ def predict_mod_polymapper_from_batch(cfg: DictConfig):
         cfg.checkpoint_path, cfg=cfg
     )
     dataloader_list = instantiate_dataloaders(cfg)
-    trainer = Trainer(**cfg.pl_trainer, callbacks=[ModPolymapperPolygonizerCallback()])
+    convert_output_to_world_coords = (
+        cfg.convert_output_to_world_coords
+        if "convert_output_to_world_coords" in cfg
+        else False
+    )
+    logger.info(f"Converting to world coords = {convert_output_to_world_coords}")
+    trainer = Trainer(
+        **cfg.pl_trainer,
+        callbacks=[
+            ModPolymapperPolygonizerCallback(
+                convert_output_to_world_coords=convert_output_to_world_coords
+            )
+        ],
+    )
     model.model.eval()
     for dataloader in tqdm(
         dataloader_list,

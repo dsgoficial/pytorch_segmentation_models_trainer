@@ -233,7 +233,7 @@ def plot_line_strings(
     artists = []
     marker = "o" if draw_vertices else None
     for line_string in line_strings:
-        artist, = axis.plot(*line_string.xy, marker=marker, markersize=markersize)
+        (artist,) = axis.plot(*line_string.xy, marker=marker, markersize=markersize)
         artists.append(artist)
     return artists
 
