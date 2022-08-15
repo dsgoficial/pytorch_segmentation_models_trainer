@@ -113,8 +113,8 @@ class BatchVectorFileDataWriter(VectorFileDataWriter):
     current_index: int = 0
 
     def _get_current_file_path(self) -> str:
-        suffix = pathlib.Path(self.output_file_path).suffix
-        return self.output_file_path.replace(
+        suffix = pathlib.Path(self.output_file_name).suffix
+        return self.output_file_name.replace(
             suffix, f"_{self.current_index:08}{suffix}"
         )
 
@@ -128,7 +128,9 @@ class BatchVectorFileDataWriter(VectorFileDataWriter):
         if len(gdf) == 0:
             self.current_index += 1
             return
-        current_file_path = self._get_current_file_path()
+        current_file_path = (
+            pathlib.Path(self.output_file_folder) / self._get_current_file_path()
+        )
         if not os.path.isfile(current_file_path) and self.mode == "a":
             gdf.to_file(current_file_path, driver=self.driver)
         else:

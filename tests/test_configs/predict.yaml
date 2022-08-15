@@ -67,7 +67,8 @@ polygonizer:
     min_area: 12
   data_writer:
     _target_: pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.VectorFileDataWriter
-    output_file_path: /data/output.geojson
+    output_file_folder: /data/
+    output_file_name: output.geojson
     driver: GeoJSON
     mode: a
 export_strategy:

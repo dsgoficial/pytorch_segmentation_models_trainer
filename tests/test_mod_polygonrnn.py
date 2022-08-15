@@ -178,7 +178,7 @@ class Test_ModPolyMapperModel(BasicTestCase):
         with torch.no_grad():
             out = model(sample)
         self.assertEqual(len(out), 2)
-        self.assertEqual(len(out[0].keys()), 8)
+        self.assertEqual(len(out[0].keys()), 9)
 
     def test_model_backwards(self) -> None:
         model = self._get_model(backbone_trainable_layers=5, pretrained=True)

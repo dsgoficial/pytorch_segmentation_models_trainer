@@ -75,8 +75,9 @@ output_dir = create_folder(os.path.join(root_dir, "test_output"))
 
 def get_asm_polygonizer():
     config = ASMConfig()
-    asm_output_file_path = os.path.join(output_dir, "asm_polygonizer.geojson")
-    data_writer = VectorFileDataWriter(output_file_path=asm_output_file_path)
+    data_writer = VectorFileDataWriter(
+        output_file_folder=output_dir, output_file_name="asm_polygonizer.geojson"
+    )
     return ASMPolygonizerProcessor(data_writer=data_writer, config=config)
 
 

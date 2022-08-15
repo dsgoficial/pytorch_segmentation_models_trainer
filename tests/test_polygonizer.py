@@ -89,7 +89,10 @@ class Test_Polygonize(unittest.TestCase):
     def test_polygonizer_simple_processor(self) -> None:
         config = SimplePolConfig()
         output_file_path = os.path.join(self.output_dir, "simple_polygonizer.geojson")
-        data_writer = VectorFileDataWriter(output_file_path=output_file_path)
+        data_writer = VectorFileDataWriter(
+            output_file_folder=self.output_dir,
+            output_file_name="simple_polygonizer.geojson",
+        )
         processor = SimplePolygonizerProcessor(data_writer=data_writer, config=config)
         processor.process(
             {
@@ -113,7 +116,10 @@ class Test_Polygonize(unittest.TestCase):
     def test_polygonizer_acm_processor(self) -> None:
         config = ACMConfig()
         output_file_path = os.path.join(self.output_dir, "acm_polygonizer.geojson")
-        data_writer = VectorFileDataWriter(output_file_path=output_file_path)
+        data_writer = VectorFileDataWriter(
+            output_file_folder=self.output_dir,
+            output_file_name="acm_polygonizer.geojson",
+        )
         processor = ACMPolygonizerProcessor(data_writer=data_writer, config=config)
         processor.process(
             {
@@ -140,7 +146,10 @@ class Test_Polygonize(unittest.TestCase):
     def test_polygonizer_asm_processor(self) -> None:
         config = ASMConfig()
         output_file_path = os.path.join(self.output_dir, "asm_polygonizer.geojson")
-        data_writer = VectorFileDataWriter(output_file_path=output_file_path)
+        data_writer = VectorFileDataWriter(
+            output_file_folder=self.output_dir,
+            output_file_name="asm_polygonizer.geojson",
+        )
         processor = ASMPolygonizerProcessor(data_writer=data_writer, config=config)
         processor.process(
             {

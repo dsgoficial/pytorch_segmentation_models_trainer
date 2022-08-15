@@ -88,7 +88,9 @@ class Test_DataWriter(unittest.TestCase):
     def test_vector_file_data_writer(self) -> None:
         input_data = [Polygon([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]])]
         output_file_path = os.path.join(self.output_dir, "output.geojson")
-        data_writer = VectorFileDataWriter(output_file_path=output_file_path)
+        data_writer = VectorFileDataWriter(
+            output_file_folder=self.output_dir, output_file_name="output.geojson"
+        )
         data_writer.write_data(input_data=input_data, profile={"crs": "EPSG:4326"})
         assert os.path.isfile(output_file_path)
         output_data = geopandas.read_file(filename=output_file_path)
@@ -97,7 +99,9 @@ class Test_DataWriter(unittest.TestCase):
     def test_batch_vector_file_data_writer(self) -> None:
         input_data = [Polygon([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]])]
         output_file_path = os.path.join(self.output_dir, "output.geojson")
-        data_writer = BatchVectorFileDataWriter(output_file_path=output_file_path)
+        data_writer = BatchVectorFileDataWriter(
+            output_file_folder=self.output_dir, output_file_name="output.geojson"
+        )
         for i in range(4):
             data_writer.write_data(input_data=input_data, profile={"crs": "EPSG:4326"})
             current_output_file_path = os.path.join(

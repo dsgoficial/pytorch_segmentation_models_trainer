@@ -503,5 +503,5 @@ class PolygonRNNInferenceProcessor(AbstractInferenceProcessor):
         scale_w = self.image_size / object_w
         return scale_h, scale_w
 
-    def process_polygonizer(self, polygonizer, inference, profile):
+    def process_polygonizer(self, polygonizer, inference, profile, image_name=None):
         return self.polygonizer.process(inference, profile)
