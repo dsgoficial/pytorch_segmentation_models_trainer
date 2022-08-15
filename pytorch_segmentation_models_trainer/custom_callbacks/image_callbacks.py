@@ -49,7 +49,7 @@ from pytorch_segmentation_models_trainer.tools.visualization.crossfield_plot imp
 from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 
 
-class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
+class ImageSegmentationResultCallback(pl.callbacks.Callback):
     def __init__(
         self,
         n_samples: int = None,

@@ -48,7 +48,7 @@ from pytorch_segmentation_models_trainer.utils.tensor_utils import tensor_dict_t
 logger = logging.getLogger(__name__)
 
 
-class WarmupCallback(pl.callbacks.base.Callback):
+class WarmupCallback(pl.callbacks.Callback):
     def __init__(self, warmup_epochs=2) -> None:
         super().__init__()
         self.warmup_epochs = warmup_epochs
@@ -84,7 +84,7 @@ class WarmupCallback(pl.callbacks.base.Callback):
         pl_module.set_encoder_trainable(trainable=trainable)
 
 
-class FrameFieldOnlyCrossfieldWarmupCallback(pl.callbacks.base.Callback):
+class FrameFieldOnlyCrossfieldWarmupCallback(pl.callbacks.Callback):
     def __init__(self, warmup_epochs=2) -> None:
         super().__init__()
         self.warmup_epochs = warmup_epochs
@@ -122,7 +122,7 @@ class FrameFieldOnlyCrossfieldWarmupCallback(pl.callbacks.base.Callback):
         pl_module.set_all_but_crossfield_trainable(trainable=trainable)
 
 
-class FrameFieldComputeWeightNormLossesCallback(pl.callbacks.base.Callback):
+class FrameFieldComputeWeightNormLossesCallback(pl.callbacks.Callback):
     def __init__(self) -> None:
         super().__init__()
         self.loss_norm_is_initializated = False

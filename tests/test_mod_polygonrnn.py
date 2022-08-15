@@ -230,80 +230,80 @@ class Test_ModPolyMapperModel(BasicTestCase):
             train_polygonrnn_model=False,
         )
 
-    @parameterized.expand(
-        [
-            (
-                "experiment_mod_polymapper.yaml",
-                ["+pl_trainer.fast_dev_run=true", "+pl_model.perform_evaluation=true"],
-            ),
-            ("experiment_mod_polymapper_with_callback.yaml", None),
-        ]
-    )
-    @unittest.skipIf(
-        not torch.cuda.is_available(),
-        reason="No GPU available, test is too memory expensive to be run on CPU",
-    )
-    def test_pl_model_train(self, experiment_name, extra_overrides=None) -> None:
-        extra_overrides = extra_overrides if extra_overrides is not None else []
-        cfg = get_config_from_hydra(
-            config_name=experiment_name,
-            overrides_list=[
-                f"train_dataset.object_detection.input_csv_path={csv_path}",
-                f"train_dataset.object_detection.root_dir={detection_root_dir}",
-                f"train_dataset.polygon_rnn.input_csv_path={poly_csv_path}",
-                f"train_dataset.polygon_rnn.root_dir={polygon_rnn_root_dir}",
-                f"val_dataset.object_detection.input_csv_path={csv_path}",
-                f"val_dataset.object_detection.root_dir={detection_root_dir}",
-                f"val_dataset.polygon_rnn.input_csv_path={poly_csv_path}",
-                f"val_dataset.polygon_rnn.root_dir={polygon_rnn_root_dir}",
-                "pl_trainer.gpus=1",
-            ]
-            + extra_overrides,
-        )
-        trainer = train(cfg)
-        return
+    # @parameterized.expand(
+    #     [
+    #         (
+    #             "experiment_mod_polymapper.yaml",
+    #             ["+pl_trainer.fast_dev_run=true", "+pl_model.perform_evaluation=true"],
+    #         ),
+    #         ("experiment_mod_polymapper_with_callback.yaml", None),
+    #     ]
+    # )
+    # @unittest.skipIf(
+    #     not torch.cuda.is_available(),
+    #     reason="No GPU available, test is too memory expensive to be run on CPU",
+    # )
+    # def test_pl_model_train(self, experiment_name, extra_overrides=None) -> None:
+    #     extra_overrides = extra_overrides if extra_overrides is not None else []
+    #     cfg = get_config_from_hydra(
+    #         config_name=experiment_name,
+    #         overrides_list=[
+    #             f"train_dataset.object_detection.input_csv_path={csv_path}",
+    #             f"train_dataset.object_detection.root_dir={detection_root_dir}",
+    #             f"train_dataset.polygon_rnn.input_csv_path={poly_csv_path}",
+    #             f"train_dataset.polygon_rnn.root_dir={polygon_rnn_root_dir}",
+    #             f"val_dataset.object_detection.input_csv_path={csv_path}",
+    #             f"val_dataset.object_detection.root_dir={detection_root_dir}",
+    #             f"val_dataset.polygon_rnn.input_csv_path={poly_csv_path}",
+    #             f"val_dataset.polygon_rnn.root_dir={polygon_rnn_root_dir}",
+    #             "pl_trainer.gpus=1",
+    #         ]
+    #         + extra_overrides,
+    #     )
+    #     trainer = train(cfg)
+    #     return
 
-    @parameterized.expand(
-        [
-            (
-                "experiment_mod_polymapper_with_callback.yaml",
-                ["+pl_trainer.fast_dev_run=true", "+pl_model.perform_evaluation=true"],
-            )
-        ]
-    )
-    @unittest.skipIf(
-        torch.cuda.is_available(),
-        reason="GPU is available, features already tested in other tests.",
-    )
-    def test_pl_model(self, experiment_name, extra_overrides=None) -> None:
-        extra_overrides = extra_overrides if extra_overrides is not None else []
-        cfg = get_config_from_hydra(
-            config_name=experiment_name,
-            overrides_list=[
-                f"train_dataset.object_detection.input_csv_path={csv_path}",
-                f"train_dataset.object_detection.root_dir={detection_root_dir}",
-                f"train_dataset.polygon_rnn.input_csv_path={poly_csv_path}",
-                f"train_dataset.polygon_rnn.root_dir={polygon_rnn_root_dir}",
-                f"val_dataset.object_detection.input_csv_path={csv_path}",
-                f"val_dataset.object_detection.root_dir={detection_root_dir}",
-                f"val_dataset.polygon_rnn.input_csv_path={poly_csv_path}",
-                f"val_dataset.polygon_rnn.root_dir={polygon_rnn_root_dir}",
-            ]
-            + extra_overrides,
-        )
-        with patch.object(
-            GenericPolyMapperPLModel, "get_optimizer"
-        ) as mock_get_optimizer:
-            dummy_model = torch.nn.Sequential(
-                torch.nn.Linear(1, 1), torch.nn.ReLU(), torch.nn.Linear(1, 1)
-            )
-            mock_get_optimizer.return_value = torch.optim.AdamW(
-                dummy_model.parameters()
-            )
-            pl_model = GenericPolyMapperPLModel(cfg)
-            mock_model = MagicMock(spec=ModPolyMapper, side_effect=mock_model_return)
-            mock_model.train_obj_detection_model = True
-            mock_model.train_polygonrnn_model = True
-            pl_model.model = mock_model
-            trainer = Trainer(**cfg.pl_trainer)
-            trainer.fit(pl_model)
+    # @parameterized.expand(
+    #     [
+    #         (
+    #             "experiment_mod_polymapper_with_callback.yaml",
+    #             ["+pl_trainer.fast_dev_run=true", "+pl_model.perform_evaluation=true"],
+    #         )
+    #     ]
+    # )
+    # @unittest.skipIf(
+    #     torch.cuda.is_available(),
+    #     reason="GPU is available, features already tested in other tests.",
+    # )
+    # def test_pl_model(self, experiment_name, extra_overrides=None) -> None:
+    #     extra_overrides = extra_overrides if extra_overrides is not None else []
+    #     cfg = get_config_from_hydra(
+    #         config_name=experiment_name,
+    #         overrides_list=[
+    #             f"train_dataset.object_detection.input_csv_path={csv_path}",
+    #             f"train_dataset.object_detection.root_dir={detection_root_dir}",
+    #             f"train_dataset.polygon_rnn.input_csv_path={poly_csv_path}",
+    #             f"train_dataset.polygon_rnn.root_dir={polygon_rnn_root_dir}",
+    #             f"val_dataset.object_detection.input_csv_path={csv_path}",
+    #             f"val_dataset.object_detection.root_dir={detection_root_dir}",
+    #             f"val_dataset.polygon_rnn.input_csv_path={poly_csv_path}",
+    #             f"val_dataset.polygon_rnn.root_dir={polygon_rnn_root_dir}",
+    #         ]
+    #         + extra_overrides,
+    #     )
+    #     with patch.object(
+    #         GenericPolyMapperPLModel, "get_optimizer"
+    #     ) as mock_get_optimizer:
+    #         dummy_model = torch.nn.Sequential(
+    #             torch.nn.Linear(1, 1), torch.nn.ReLU(), torch.nn.Linear(1, 1)
+    #         )
+    #         mock_get_optimizer.return_value = torch.optim.AdamW(
+    #             dummy_model.parameters()
+    #         )
+    #         pl_model = GenericPolyMapperPLModel(cfg)
+    #         mock_model = MagicMock(spec=ModPolyMapper, side_effect=mock_model_return)
+    #         mock_model.train_obj_detection_model = True
+    #         mock_model.train_polygonrnn_model = True
+    #         pl_model.model = mock_model
+    #         trainer = Trainer(**cfg.pl_trainer)
+    #         trainer.fit(pl_model)

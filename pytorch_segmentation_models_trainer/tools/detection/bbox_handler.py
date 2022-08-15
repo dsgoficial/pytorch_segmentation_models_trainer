@@ -24,7 +24,7 @@ from pytorch_toolbelt.inference.tiles import TileMerger
 
 import torch
 import torchvision
-from sahi.postprocess.combine import NMSPostprocess, UnionMergePostprocess
+from sahi.postprocess.legacy.combine import NMSPostprocess, UnionMergePostprocess
 from sahi.prediction import ObjectPrediction
 
 
