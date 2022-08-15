@@ -22,7 +22,7 @@ optimizer:
   weight_decay: 1e-4
 
 metrics:
-  - _target_: torchmetrics.F1
+  - _target_: torchmetrics.F1Score
   - _target_: torchmetrics.Precision
   - _target_: torchmetrics.Recall
 

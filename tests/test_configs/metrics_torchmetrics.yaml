@@ -2,7 +2,7 @@ metrics:
   - _target_: torchmetrics.Accuracy
   - _target_: torchmetrics.IoU
     num_classes: ${model.classes}
-  - _target_: torchmetrics.F1
+  - _target_: torchmetrics.F1Score
     num_classes: ${model.classes}
   - _target_: torchmetrics.Precision
   - _target_: torchmetrics.Recall
