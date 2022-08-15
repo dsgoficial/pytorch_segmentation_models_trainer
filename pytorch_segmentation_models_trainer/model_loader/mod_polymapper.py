@@ -40,7 +40,7 @@ from pytorch_segmentation_models_trainer.utils import (
 )
 from torch import nn
 from torch.utils.data import DataLoader
-from torchmetrics.detection import MAP
+from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
 from pytorch_segmentation_models_trainer.utils.tensor_utils import tensor_dict_to_device
 
@@ -77,7 +77,7 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         self.polygonrnn_val_ds = instantiate(
             self.cfg.val_dataset.polygon_rnn, _recursive_=False
         )
-        self.val_mAP = MAP()
+        self.val_mAP = MeanAveragePrecision()
 
     def get_model(self):
         model = instantiate(self.cfg.model, _recursive_=False)
@@ -194,10 +194,18 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             )
         if "intersection" not in outputs[0]["log"] or "union" not in outputs[0]["log"]:
             return tensorboard_logs
-        intersection = sum([x["log"]["intersection"] for x in outputs])
-        union = sum([x["log"]["intersection"] for x in outputs])
+        intersection = sum(sum([x["log"]["intersection"] for x in outputs])).unsqueeze(
+            0
+        )
+        union = sum(sum([x["log"]["intersection"] for x in outputs])).unsqueeze(0)
         tensorboard_logs.update(
-            {"polygon_iou": {step_type: torch.tensor(intersection / union)}}
+            {
+                "polygon_iou": {
+                    step_type: torch.tensor(intersection / union)
+                    if all(union != 0)
+                    else torch.zeros_like(intersection)
+                }
+            }
         )
         return tensorboard_logs
 
@@ -272,7 +280,7 @@ class GenericPolyMapperPLModel(pl.LightningModule):
     ) -> Dict[str, Union[float, torch.Tensor]]:
         return_dict = dict()
         box_iou, mAP = self._evaluate_obj_det(outputs, batch)
-        return_dict.update(mAP)
+        # return_dict.update(mAP)
         batch_polis, intersection, union = self._compute_polygonrnn_metrics(
             outputs, batch["polygon_rnn"]
         )
@@ -295,7 +303,7 @@ class GenericPolyMapperPLModel(pl.LightningModule):
                 for t, o in zip(obj_det_targets, outputs)
             ]
         )
-        mAP = self.val_mAP(outputs, obj_det_targets)
+        mAP = self.val_mAP.update(outputs, obj_det_targets)
 
         return box_iou, mAP
 
