@@ -1,6 +1,6 @@
 torch==1.10.0
 torchvision==0.11.1
-pytorch-lightning==1.5.5
+pytorch-lightning==1.7.1
 torchmetrics==0.6.0
 segmentation-models-pytorch>=0.2.0
 hydra-core==1.1.1
@@ -21,7 +21,7 @@ geopandas==0.9.0
 geoalchemy2==0.9.0
 rasterio==1.2.6
 numba==0.53.1
-sahi==0.8.13
+sahi==0.10.4
 skan==0.10.0
 torch-scatter==2.0.9
 tqdm==4.61.1
@@ -34,7 +34,7 @@ pyyaml==5.3.1
 pycocotools==2.0.2
 multiprocess==0.70.12.2
 wget==3.2
-fastapi==0.70.0
+fastapi==0.79.0
 uvicorn==0.16.0
 similaritymeasures==0.4.4
 colorama==0.4.4
