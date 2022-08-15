@@ -19,8 +19,12 @@
  ****
 """
 
+import itertools
+from pathlib import Path
 from typing import Dict, List, Union
+from cv2 import threshold
 
+import concurrent.futures
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -29,17 +33,20 @@ from hydra.utils import instantiate
 from shapely.geometry import Polygon
 from pytorch_lightning.trainer.supporters import CombinedLoader
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
+from pytorch_segmentation_models_trainer.predict import instantiate_polygonizer
 from pytorch_segmentation_models_trainer.utils import (
     object_detection_utils,
     polygonrnn_utils,
 )
 from torch import nn
 from torch.utils.data import DataLoader
-from torchmetrics.detection import MAP
+from torchmetrics.detection.mean_ap import MeanAveragePrecision
+
+from pytorch_segmentation_models_trainer.utils.tensor_utils import tensor_dict_to_device
 
 
 class GenericPolyMapperPLModel(pl.LightningModule):
-    def __init__(self, cfg, grid_size=28, perform_evaluation=True):
+    def __init__(self, cfg, grid_size=28, val_seq_len=60, perform_evaluation=True):
         super(GenericPolyMapperPLModel, self).__init__()
         self.cfg = cfg
         self.model = self.get_model()
@@ -47,6 +54,11 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             grid_size
             if "grid_size" not in self.cfg.pl_model
             else self.cfg.pl_model.grid_size
+        )
+        self.val_seq_len = (
+            val_seq_len
+            if "val_seq_len" not in self.cfg.pl_model
+            else self.cfg.pl_model.val_seq_len
         )
         self.perform_evaluation = (
             perform_evaluation
@@ -65,7 +77,7 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         self.polygonrnn_val_ds = instantiate(
             self.cfg.val_dataset.polygon_rnn, _recursive_=False
         )
-        self.val_mAP = MAP()
+        self.val_mAP = MeanAveragePrecision()
 
     def get_model(self):
         model = instantiate(self.cfg.model, _recursive_=False)
@@ -182,10 +194,18 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             )
         if "intersection" not in outputs[0]["log"] or "union" not in outputs[0]["log"]:
             return tensorboard_logs
-        intersection = sum([x["log"]["intersection"] for x in outputs])
-        union = sum([x["log"]["intersection"] for x in outputs])
+        intersection = sum(sum([x["log"]["intersection"] for x in outputs])).unsqueeze(
+            0
+        )
+        union = sum(sum([x["log"]["intersection"] for x in outputs])).unsqueeze(0)
         tensorboard_logs.update(
-            {"polygon_iou": {step_type: torch.tensor(intersection / union)}}
+            {
+                "polygon_iou": {
+                    step_type: torch.tensor(intersection / union)
+                    if all(union != 0)
+                    else torch.zeros_like(intersection)
+                }
+            }
         )
         return tensorboard_logs
 
@@ -260,7 +280,7 @@ class GenericPolyMapperPLModel(pl.LightningModule):
     ) -> Dict[str, Union[float, torch.Tensor]]:
         return_dict = dict()
         box_iou, mAP = self._evaluate_obj_det(outputs, batch)
-        return_dict.update(mAP)
+        # return_dict.update(mAP)
         batch_polis, intersection, union = self._compute_polygonrnn_metrics(
             outputs, batch["polygon_rnn"]
         )
@@ -283,7 +303,7 @@ class GenericPolyMapperPLModel(pl.LightningModule):
                 for t, o in zip(obj_det_targets, outputs)
             ]
         )
-        mAP = self.val_mAP(outputs, obj_det_targets)
+        mAP = self.val_mAP.update(outputs, obj_det_targets)
 
         return box_iou, mAP
 
@@ -331,3 +351,10 @@ class GenericPolyMapperPLModel(pl.LightningModule):
     def validation_epoch_end(self, outputs):
         tensorboard_logs = self._build_tensorboard_logs(outputs, step_type="val")
         self.log_dict(tensorboard_logs, logger=True)
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        with torch.no_grad():
+            detections = self.model(
+                batch["image"], threshold=self.cfg.detection_threshold
+            )
+        return detections

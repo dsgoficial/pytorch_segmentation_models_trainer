@@ -51,7 +51,9 @@ class DataLoaderConfig:
 
 @dataclass
 class DatasetConfig:
-    _target_: str = "pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset"
+    )
     input_csv_path: str = MISSING
     root_dir: str = MISSING
     gpu_augmentation_list: List = field(default_factory=list)

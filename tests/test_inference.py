@@ -86,7 +86,7 @@ frame_field_root_dir = os.path.join(
     current_dir, "testing_data", "data", "frame_field_data"
 )
 
-device = "cpu"
+device = "cpu" if not torch.cuda.is_available() else "cuda"
 
 pretrained_checkpoints_download_links = {
     "frame_field_resnet152_unet_200_epochs": "https://github.com/phborba/pytorch_smt_pretrained_weights/releases/download/v0.1/frame_field_resnet152_unet_200_epochs.ckpt"
@@ -140,7 +140,8 @@ class Test_Inference(unittest.TestCase):
             self.output_dir, "simple_polygonizer.geojson"
         )
         data_writer = VectorFileDataWriter(
-            output_file_path=self.simple_output_file_path
+            output_file_folder=self.output_dir,
+            output_file_name="simple_polygonizer.geojson",
         )
         return SimplePolygonizerProcessor(data_writer=data_writer, config=config)
 
@@ -149,7 +150,10 @@ class Test_Inference(unittest.TestCase):
         self.acm_output_file_path = os.path.join(
             self.output_dir, "acm_polygonizer.geojson"
         )
-        data_writer = VectorFileDataWriter(output_file_path=self.acm_output_file_path)
+        data_writer = VectorFileDataWriter(
+            output_file_folder=self.output_dir,
+            output_file_name="acm_polygonizer.geojson",
+        )
         return ACMPolygonizerProcessor(data_writer=data_writer, config=config)
 
     def get_asm_polygonizer(self):
@@ -157,7 +161,10 @@ class Test_Inference(unittest.TestCase):
         self.asm_output_file_path = os.path.join(
             self.output_dir, "asm_polygonizer.geojson"
         )
-        data_writer = VectorFileDataWriter(output_file_path=self.asm_output_file_path)
+        data_writer = VectorFileDataWriter(
+            output_file_folder=self.output_dir,
+            output_file_name="asm_polygonizer.geojson",
+        )
         return ASMPolygonizerProcessor(data_writer=data_writer, config=config)
 
     def get_polygonrnn_polygonizer(self):
@@ -166,7 +173,8 @@ class Test_Inference(unittest.TestCase):
             self.output_dir, "polygonrnn_polygonizer.geojson"
         )
         data_writer = VectorFileDataWriter(
-            output_file_path=self.polygonrnn_output_file_path
+            output_file_folder=self.output_dir,
+            output_file_name="polygonrnn_polygonizer.geojson",
         )
         return PolygonRNNPolygonizerProcessor(data_writer=data_writer, config=config)
 
@@ -238,9 +246,11 @@ class Test_Inference(unittest.TestCase):
             os.path.join(self.output_dir, f"crossfield_{name}_output.tif")
         )
 
-    @parameterized.expand([("simple",), ("acm",), ("asm",)])
+    @parameterized.expand(
+        [("simple", False), ("acm", False), ("asm", False), ("simple", True)]
+    )
     def test_create_frame_field_inference_from_pretrained_with_polygonize(
-        self, polygonizer_key
+        self, polygonizer_key, group_output_by_image_basename
     ) -> None:
         inference_processor = SingleImageFromFrameFieldProcessor(
             model=self.get_model_for_eval(),
@@ -252,11 +262,13 @@ class Test_Inference(unittest.TestCase):
             ),
             mask_bands=2,
             polygonizer=self.polygonizers_dict[polygonizer_key],
+            group_output_by_image_basename=group_output_by_image_basename,
         )
         inference_processor.process(
             image_path=self.frame_field_ds[0]["path"], threshold=0.5
         )
         name = Path(self.frame_field_ds[0]["path"]).stem
+        # alterar asserts para tratar caso do encapsulate with folder
         assert os.path.isfile(
             os.path.join(self.output_dir, f"seg_{name}_{polygonizer_key}_output.tif")
         )
@@ -265,7 +277,15 @@ class Test_Inference(unittest.TestCase):
                 self.output_dir, f"crossfield_{name}_{polygonizer_key}_output.tif"
             )
         )
-        assert os.path.isfile(getattr(self, f"{polygonizer_key}_output_file_path"))
+        assert (
+            os.path.isfile(getattr(self, f"{polygonizer_key}_output_file_path"))
+            if not group_output_by_image_basename
+            else os.path.isfile(
+                self.polygonizers_dict[
+                    polygonizer_key
+                ].data_writer.get_output_file_path(name)
+            )
+        )
 
     def test_create_polygonrnn_inference_from_model_with_polygonize(self) -> None:
         csv_path = os.path.join(polygon_rnn_root_dir, "polygonrnn_dataset.csv")

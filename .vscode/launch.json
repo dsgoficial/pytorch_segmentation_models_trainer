@@ -23,7 +23,8 @@
             "env" : {
                 "CONFIG_PATH": "../../mestrado_experimentos_dissertacao/pytorch/",
                 "CONFIG_NAME": "predict_polygons_hrnet_ocr_w48_frame_field_local"
-            }
+            },
+            "justMyCode": false,
         },
         {
             "name": "Python: Remote Attach",
@@ -45,7 +46,8 @@
             "type": "python",
             "request": "launch",
             "program": "${file}",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "justMyCode": false,
         }
     ]
 }

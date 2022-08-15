@@ -64,7 +64,11 @@ def instantiate_inference_processor(cfg: DictConfig) -> AbstractInferenceProcess
     obj_params = dict(cfg.inference_processor)
     obj_params["model"] = instantiate_model_from_checkpoint(cfg)
     obj_params["polygonizer"] = instantiate_polygonizer(cfg)
-    obj_params["export_strategy"] = instantiate(cfg.export_strategy, _recursive_=False)
+    obj_params["export_strategy"] = (
+        instantiate(cfg.export_strategy, _recursive_=False)
+        if "export_strategy" in cfg
+        else None
+    )
     obj_params["device"] = cfg.device
     obj_params["batch_size"] = cfg.hyperparameters.batch_size
     obj_params["mask_bands"] = sum(cfg.seg_params.values())

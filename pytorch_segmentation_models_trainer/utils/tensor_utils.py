@@ -21,6 +21,7 @@
  ****
 """
 
+from typing import Dict
 import numpy as np
 import torch
 import kornia
@@ -331,3 +332,11 @@ def batch_to_cuda(batch):
         if hasattr(item, "cuda"):
             batch[key] = item.cuda(non_blocking=True)
     return batch
+
+
+def tensor_dict_to_device(
+    tensor_dict: Dict[str, torch.Tensor], device: str
+) -> Dict[str, torch.Tensor]:
+    for key in tensor_dict.keys():
+        tensor_dict[key].to(device)
+    return tensor_dict

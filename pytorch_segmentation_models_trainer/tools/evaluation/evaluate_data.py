@@ -19,7 +19,12 @@
  ****
 """
 
+import copy
 from typing import Any, Callable, Dict, List
+from shapely.geometry import Point
+from pytorch_segmentation_models_trainer.tools.evaluation.matching import (
+    per_vertex_error_list,
+)
 
 
 def compute_metrics_on_match_list_dict(
@@ -41,4 +46,26 @@ def compute_metrics_on_match_list_dict(
                 continue
             item[metric.__name__] = computed_metric
         output_dict_list.append(item)
+    return output_dict_list
+
+
+def compute_vertex_errors_on_match_list_dict(
+    match_dict_list: List[Dict[str, Any]], convert_output_to_wkt: bool = True
+) -> List[Dict[str, Any]]:
+    output_dict_list = []
+    for idx, match_dict in enumerate(match_dict_list):
+        per_vertex_error_dict_list = per_vertex_error_list(
+            match_dict["reference"], match_dict["target"]
+        )
+        for error_dict in per_vertex_error_dict_list:
+            new_dict = (
+                copy.deepcopy(error_dict)
+                if not convert_output_to_wkt
+                else {
+                    k: (v.wkt if isinstance(v, Point) else v)
+                    for k, v in error_dict.items()
+                }
+            )
+            new_dict["id"] = idx
+            output_dict_list.append(new_dict)
     return output_dict_list

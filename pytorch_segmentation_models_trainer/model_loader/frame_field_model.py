@@ -20,8 +20,12 @@
  *   https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning/     *
  ****
 """
+import copy
 from logging import log
 from collections import OrderedDict
+import os
+from pathlib import Path
+from pytorch_toolbelt.inference.tiles import TileMerger
 import torch
 import torch.nn as nn
 import segmentation_models_pytorch as smp
@@ -38,8 +42,11 @@ from segmentation_models_pytorch.base.initialization import (
     initialize_head,
 )
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
+from pytorch_segmentation_models_trainer.predict import instantiate_polygonizer
 from pytorch_segmentation_models_trainer.utils import tensor_utils
 from tqdm import tqdm
+import concurrent.futures
+import kornia as K
 
 
 class FrameFieldModel(nn.Module):
@@ -256,6 +263,9 @@ class FrameFieldSegmentationPLModel(Model):
             self.set_crossfield_trainable(
                 trainable=self.cfg.pl_model.set_crossfield_trainable
             )
+
+    def set_test_dataset(self, dataset):
+        self.test_dataset = dataset
 
     def get_loss_function(self) -> MultiLoss:
         """Multi-loss model defined in frame field article
@@ -501,3 +511,72 @@ class FrameFieldSegmentationPLModel(Model):
         )
         self.log_dict(tensorboard_logs, logger=True)
         self.log("avg_train_loss", avg_loss, logger=True)
+
+    def _process_test(self, batch):
+        with torch.no_grad():
+            batch_predictions = self.model(batch["image"])
+        seg_batch, crossfield_batch = batch_predictions.values()
+        return seg_batch, crossfield_batch
+
+    def _process_test_like_inference_processor(self, batch):
+        ids = torch.unique_consecutive(
+            batch["tile_image_idx"]
+        )  # we use unique_consecutive instead of unique because we want to preserve the order of ids
+        with torch.no_grad():
+            # tiles = batch.pop("tiles")
+            batch_predictions = self.model(batch["tiles"])
+        seg_batch, crossfield_batch = batch_predictions.values()
+        seg_batch = torch.cat(
+            [
+                self._integrate_tiles(
+                    seg_batch[batch["tile_image_idx"] == tile_id],
+                    copy.deepcopy(batch["tiler_object_list"][idx]),
+                    batch["original_shape"][idx],
+                    pad_if_needed=True,
+                )
+                for idx, tile_id in enumerate(ids)
+            ],
+            dim=0,
+        )
+        crossfield_batch = torch.cat(
+            [
+                self._integrate_tiles(
+                    crossfield_batch[batch["tile_image_idx"] == tile_id],
+                    copy.deepcopy(batch["tiler_object_list"][idx]),
+                    batch["original_shape"][idx],
+                    pad_if_needed=True,
+                )
+                for idx, tile_id in enumerate(ids)
+            ],
+            dim=0,
+        )
+
+        return seg_batch, crossfield_batch
+
+    def _integrate_tiles(
+        self, tensor_tiles: torch.Tensor, tiler, original_shape, pad_if_needed=True
+    ):
+        """tiles: B x C x H x W"""
+        merger = TileMerger(
+            tiler.target_shape,
+            tensor_tiles.shape[1],
+            tiler.weight,
+            device=tensor_tiles.device,
+        )
+        merger.integrate_batch(tensor_tiles, tiler.crops)
+        merged = merger.merge()
+        if not pad_if_needed:
+            return merged.unsqueeze(0)
+        return K.center_crop(merged.unsqueeze(0), size=original_shape)
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        seg_batch, crossfield_batch = (
+            self._process_test_like_inference_processor(batch)
+            if (
+                hasattr(self.cfg, "use_inference_processor")
+                and self.cfg.use_inference_processor
+            )
+            else self._process_test(batch)
+        )
+
+        return seg_batch, crossfield_batch

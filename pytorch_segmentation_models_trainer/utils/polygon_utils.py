@@ -74,15 +74,20 @@ def polygons_to_pixel_coords(polygons, transform):
 
 
 def polygons_to_world_coords(polygons, transform, epsg_number):
-    item_list = []
-    for polygon in polygons:
-        item_list += polygon.geoms if polygon.geom_type == "MultiPolygon" else [polygon]
+    item_list = coerce_polygons_to_single_geometry(polygons)
     return [
         shapely.geometry.Polygon(
             np.array([transform * point for point in np.array(polygon.exterior.coords)])
         )
         for polygon in item_list
     ]
+
+
+def coerce_polygons_to_single_geometry(polygons):
+    item_list = []
+    for polygon in polygons:
+        item_list += polygon.geoms if polygon.geom_type == "MultiPolygon" else [polygon]
+    return item_list
 
 
 def build_crossfield(polygons, shape, transform, line_width=2):
@@ -340,8 +345,8 @@ def _draw_polygons(
     # Channels
     fill_channel_index = 0  # Always first channel
     edges_channel_index = (
-        fill
-    )  # If fill == True, take second channel. If not then take first
+        fill  # If fill == True, take second channel. If not then take first
+    )
     vertices_channel_index = fill + edges  # Same principle as above
     channel_count = fill + edges + vertices
     im_draw_list = []
@@ -458,9 +463,7 @@ def compute_polygon_contour_measures(
     return half_tangent_max_angles
 
 
-def compute_contour_measure(
-    pred_polygon, gt_contours, sampling_spacing, max_stretch, metric_name="cosine"
-):
+def compute_contour_measure(pred_polygon, gt_contours, sampling_spacing, max_stretch):
     pred_contours = shapely.geometry.GeometryCollection(
         [pred_polygon.exterior, *pred_polygon.interiors]
     )
@@ -497,26 +500,10 @@ def compute_contour_measure(
             np.sum(np.multiply(edges, proj_edges), axis=1)
             / (edge_norms * proj_edge_norms)
         )
-        try:
-            contour_measures.append(scalar_products.min())
-        except ValueError:
-            import matplotlib.pyplot as plt
-
-            fig, axes = plt.subplots(
-                nrows=1, ncols=3, figsize=(8, 4), sharex=True, sharey=True
-            )
-            ax = axes.ravel()
-            plot_geometries(ax[0], [contour])
-            plot_geometries(ax[1], [proj_contour])
-            plot_geometries(ax[2], gt_contours)
-            fig.tight_layout()
-            plt.show()
-    if len(contour_measures):
-        min_scalar_product = min(contour_measures)
-        measure = np.arccos(min_scalar_product)
-        return measure
-    else:
-        return None
+        contour_measures.append(scalar_products.min())
+    min_scalar_product = min(contour_measures)
+    measure = np.arccos(min_scalar_product)
+    return measure
 
 
 def sample_geometry(geom, density):

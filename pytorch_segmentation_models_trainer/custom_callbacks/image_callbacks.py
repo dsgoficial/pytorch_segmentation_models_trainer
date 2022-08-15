@@ -49,7 +49,7 @@ from pytorch_segmentation_models_trainer.tools.visualization.crossfield_plot imp
 from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 
 
-class ImageSegmentationResultCallback(pl.callbacks.base.Callback):
+class ImageSegmentationResultCallback(pl.callbacks.Callback):
     def __init__(
         self,
         n_samples: int = None,
@@ -151,48 +151,47 @@ class FrameFieldResultCallback(ImageSegmentationResultCallback):
         val_ds = pl_module.val_dataloader()
         device = pl_module.device
         logger = trainer.logger
-        batch = next(iter(val_ds))
-        image_display = batch_denormalize_tensor(batch["image"]).to("cpu")
-        pred = pl_module(batch["image"].to(device))
-        self.n_samples = (
+        n_samples = (
             pl_module.val_dataloader().batch_size
             if self.n_samples is None
             else self.n_samples
         )
-        for i in range(self.n_samples):
-            image = image_display[i].numpy()
-            mask = batch["gt_polygons_image"][i]
-            predicted_mask = pred["seg"][i]
-            predicted_mask = predicted_mask.to("cpu")
-            plot_title = val_ds.dataset.get_path(i)
-            crossfield = pred["crossfield"]
-            np_crossfield = crossfield.cpu().detach().numpy().transpose(0, 2, 3, 1)
-            image_to_plot = np.transpose(image, (1, 2, 0))
-            # image_plot_crossfield_list = [
-            #     get_image_plot_crossfield(
-            #         _crossfield, crossfield_stride=10, width=0.2
-            #     )
-            #     for _crossfield in np_crossfield
-            # ]
-            axarr, fig = generate_visualization(
-                fig_title=plot_title,
-                image=image_to_plot,
-                ground_truth_mask=self.prepare_mask_to_plot(mask.numpy()[0]),
-                predicted_mask=self.prepare_mask_to_plot(predicted_mask.numpy()[0]),
-                ground_truth_boundary=self.prepare_mask_to_plot(mask.numpy()[1]),
-                predicted_boundary=self.prepare_mask_to_plot(predicted_mask.numpy()[1]),
-                # crossfield=image_plot_crossfield_list[i],
-            )
-            fig.tight_layout()
-            fig.subplots_adjust(top=0.95)
-            if self.save_outputs:
-                saved_image = self.save_plot_to_disk(
-                    plt, plot_title, trainer.current_epoch
+        current_item = 0
+        for batch in val_ds:
+            if current_item >= n_samples:
+                break
+            images = batch["image"]
+            image_display = batch_denormalize_tensor(images).to("cpu")
+            pred = pl_module(images.to(device))
+            for i in range(images.shape[0]):
+                if current_item >= n_samples:
+                    break
+                mask = batch["gt_polygons_image"][i]
+                predicted_mask = pred["seg"][i]
+                predicted_mask = predicted_mask.to("cpu")
+                plot_title = batch["path"][i]
+                image_to_plot = np.transpose(image_display[i], (1, 2, 0))
+                axarr, fig = generate_visualization(
+                    fig_title=plot_title,
+                    image=image_to_plot,
+                    ground_truth_mask=self.prepare_mask_to_plot(mask.numpy()[0]),
+                    predicted_mask=self.prepare_mask_to_plot(predicted_mask.numpy()[0]),
+                    ground_truth_boundary=self.prepare_mask_to_plot(mask.numpy()[1]),
+                    predicted_boundary=self.prepare_mask_to_plot(
+                        predicted_mask.numpy()[1]
+                    ),
                 )
-                self.log_data_to_tensorboard(
-                    saved_image, plot_title, logger, trainer.current_epoch
-                )
-            plt.close(fig)
+                fig.tight_layout()
+                fig.subplots_adjust(top=0.95)
+                if self.save_outputs:
+                    saved_image = self.save_plot_to_disk(
+                        plt, plot_title, trainer.current_epoch
+                    )
+                    self.log_data_to_tensorboard(
+                        saved_image, plot_title, logger, trainer.current_epoch
+                    )
+                plt.close(fig)
+                current_item += 1
         return
 
 
@@ -345,13 +344,15 @@ class PolygonRNNResultCallback(ImageSegmentationResultCallback):
                 pl_module.val_seq_len,
             )
             gt_polygon_list = prepared_item["shapely_polygon_list"]
-            predicted_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
-                output_batch_polygons,
-                prepared_item["scale_h"],
-                prepared_item["scale_w"],
-                prepared_item["min_col"],
-                prepared_item["min_row"],
-                grid_size=val_ds.dataset.grid_size,
+            predicted_polygon_list = (
+                polygonrnn_utils.get_vertex_list_from_batch_tensors(
+                    output_batch_polygons,
+                    prepared_item["scale_h"],
+                    prepared_item["scale_w"],
+                    prepared_item["min_col"],
+                    prepared_item["min_row"],
+                    grid_size=val_ds.dataset.grid_size,
+                )
             )
             saved_image = self.build_polygon_vis(
                 image_path,

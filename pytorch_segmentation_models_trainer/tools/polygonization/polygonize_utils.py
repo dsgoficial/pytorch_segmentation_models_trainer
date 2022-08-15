@@ -28,6 +28,8 @@ import numpy as np
 import rasterio
 import shapely.affinity
 import shapely.geometry
+from shapely.geometry.linestring import LineString
+from shapely.geometry.polygon import Polygon
 import shapely.ops
 import skimage.measure
 
@@ -55,7 +57,13 @@ def compute_init_contours_batch(np_indicator_batch, level, pool=None):
 def split_polylines_corner(polylines, corner_masks):
     new_polylines = []
     for polyline, corner_mask in zip(polylines, corner_masks):
-        splits, = np.where(corner_mask)
+        if isinstance(polyline, Polygon):
+            polyline = np.array(polyline.exterior.coords)
+        elif isinstance(polyline, LineString):
+            polyline = np.array(polyline.coords)
+        else:
+            polyline = np.array(polyline)
+        (splits,) = np.where(corner_mask)
         if len(splits) == 0:
             new_polylines.append(polyline)
             continue
@@ -74,6 +82,8 @@ def split_polylines_corner(polylines, corner_masks):
 
 
 def compute_geom_prob(geom, prob_map, output_debug=False):
+    if len(prob_map.shape) == 3 and prob_map.shape[0] == 1:
+        prob_map = prob_map[0]
     assert len(prob_map.shape) == 2, "prob_map should have size (H, W), not {}".format(
         prob_map.shape
     )

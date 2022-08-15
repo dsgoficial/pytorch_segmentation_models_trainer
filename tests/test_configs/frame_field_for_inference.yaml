@@ -148,6 +148,6 @@ val_dataset:
     prefetch_factor: ${hyperparameters.batch_size}
 metrics:
 - _target_: torchmetrics.Accuracy
-- _target_: torchmetrics.F1
+- _target_: torchmetrics.F1Score
 - _target_: torchmetrics.Precision
 - _target_: torchmetrics.Recall

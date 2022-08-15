@@ -24,4 +24,5 @@
     "[json]": {
         "editor.defaultFormatter": "vscode.json-language-features"
     },
+    "python.analysis.extraPaths": [],
 }

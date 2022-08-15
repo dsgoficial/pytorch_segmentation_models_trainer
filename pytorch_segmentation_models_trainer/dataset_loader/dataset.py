@@ -20,6 +20,7 @@
 """
 import itertools
 import json
+import math
 import os
 from abc import abstractmethod
 from pathlib import Path
@@ -33,6 +34,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from PIL import Image
+from albumentations.pytorch import ToTensorV2
 from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 from pytorch_segmentation_models_trainer.utils.object_detection_utils import (
     bbox_xywh_to_xyxy,
@@ -41,6 +43,15 @@ from pytorch_segmentation_models_trainer.utils.object_detection_utils import (
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 from torch.utils.data import Dataset
+import copy
+
+from pytorch_toolbelt.inference.tiles import ImageSlicer, TileMerger
+from pytorch_toolbelt.utils.torch_utils import (
+    image_to_tensor,
+    tensor_from_rgb_image,
+    to_numpy,
+)
+import kornia as K
 
 
 def load_augmentation_object(input_list, bbox_params=None):
@@ -60,7 +71,8 @@ def load_augmentation_object(input_list, bbox_params=None):
 class AbstractDataset(Dataset):
     def __init__(
         self,
-        input_csv_path: Path,
+        input_csv_path: Path = None,
+        df: pd.DataFrame = None,
         root_dir=None,
         augmentation_list=None,
         data_loader=None,
@@ -68,22 +80,31 @@ class AbstractDataset(Dataset):
         mask_key=None,
         n_first_rows_to_read=None,
     ) -> None:
+        if input_csv_path is None and df is None:
+            raise ValueError("Must provide either input_csv_path or df")
         self.input_csv_path = input_csv_path
         self.root_dir = root_dir
-        self.df = (
-            pd.read_csv(input_csv_path)
-            if n_first_rows_to_read is None
-            else pd.read_csv(input_csv_path, nrows=n_first_rows_to_read)
-        )
+        if df is not None:
+            self.df = df
+        else:
+            self.df = (
+                pd.read_csv(input_csv_path)
+                if n_first_rows_to_read is None
+                else pd.read_csv(input_csv_path, nrows=n_first_rows_to_read)
+            )
+        self.len = len(self.df)
         self.transform = (
             None
             if augmentation_list is None
             else load_augmentation_object(augmentation_list)
         )
         self.data_loader = data_loader
-        self.len = len(self.df)
         self.image_key = image_key if image_key is not None else "image"
         self.mask_key = mask_key if mask_key is not None else "mask"
+
+    def update_df(self, new_df):
+        self.df = new_df
+        self.len = len(self.df)
 
     def __len__(self) -> int:
         return self.len
@@ -135,6 +156,145 @@ class AbstractDataset(Dataset):
 
     def to_tensor(self, x):
         return x if isinstance(x, torch.Tensor) else torch.from_numpy(x)
+
+
+class ImageDataset(AbstractDataset):
+    def __init__(
+        self,
+        input_csv_path: Path = None,
+        df=None,
+        root_dir=None,
+        augmentation_list=None,
+        data_loader=None,
+        image_key=None,
+        n_first_rows_to_read=None,
+    ) -> None:
+        super(ImageDataset, self).__init__(
+            input_csv_path=input_csv_path,
+            df=df,
+            root_dir=root_dir,
+            augmentation_list=augmentation_list,
+            data_loader=data_loader,
+            image_key=image_key,
+            n_first_rows_to_read=n_first_rows_to_read,
+        )
+
+    @classmethod
+    def get_grouped_datasets(
+        cls,
+        df,
+        group_by_keys: List[str],
+        root_dir=None,
+        augmentation_list=None,
+        image_key=None,
+        n_first_rows_to_read=None,
+        **kwargs,
+    ):
+        return {
+            k: cls(
+                df=pd.DataFrame(df.iloc[v]).reset_index(),
+                root_dir=root_dir,
+                augmentation_list=augmentation_list,
+                image_key=image_key,
+                n_first_rows_to_read=n_first_rows_to_read,
+                **kwargs,
+            )
+            for k, v in df.groupby(group_by_keys).groups.items()
+        }
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        idx = idx % self.len
+
+        image = self.load_image(idx, key=self.image_key)
+        result = (
+            {"image": image} if self.transform is None else self.transform(image=image)
+        )
+        result.update({"path": self.get_path(idx, key=self.image_key)})
+        return result
+
+
+class TiledInferenceImageDataset(ImageDataset):
+    def __init__(
+        self,
+        input_csv_path: Path = None,
+        df=None,
+        root_dir=None,
+        augmentation_list=None,
+        data_loader=None,
+        image_key=None,
+        normalize_output=True,
+        n_first_rows_to_read=None,
+        pad_if_needed=False,
+        model_input_shape=None,
+        step_shape=None,
+    ) -> None:
+        super(TiledInferenceImageDataset, self).__init__(
+            input_csv_path=input_csv_path,
+            df=df,
+            root_dir=root_dir,
+            augmentation_list=None,
+            data_loader=data_loader,
+            image_key=image_key,
+            n_first_rows_to_read=n_first_rows_to_read,
+        )
+        if pad_if_needed and model_input_shape is None:
+            raise ValueError("Must provide model_input_shape if pad_if_needed is True")
+        self.pad_if_needed = pad_if_needed
+        self.model_input_shape = model_input_shape
+        self.step_shape = (224, 224) if step_shape is None else step_shape
+        self.transform = A.Normalize() if normalize_output else None
+        self.tiler_dict = dict()
+        self.shape_dict = dict()
+        self.pad_func = A.PadIfNeeded(
+            math.ceil(self.df["width"].max() / self.model_input_shape[0])
+            * self.model_input_shape[0],
+            math.ceil(self.df["height"].max() / self.model_input_shape[1])
+            * self.model_input_shape[1],
+        )
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        idx = idx % self.len
+
+        image = self.load_image(idx, key=self.image_key)
+        self.shape_dict[idx] = image.shape[0:2]
+        result = (
+            {"image": image} if self.transform is None else self.transform(image=image)
+        )
+        if self.pad_if_needed:
+            result = self.pad_func(**result)
+        result.update({"path": self.get_path(idx, key=self.image_key)})
+        tiler = ImageSlicer(
+            result["image"].shape,
+            tile_size=self.model_input_shape,
+            tile_step=self.step_shape,
+        )
+        tiles = [image_to_tensor(tile) for tile in tiler.split(result.pop("image"))]
+        result.update({"tiles": torch.stack(tiles)})
+        result.update(
+            {"tile_image_idx": idx * torch.ones(len(tiles), dtype=torch.int64)}
+        )
+        result.update({"tiler_object": tiler})
+        result.update({"original_shape": tuple(self.df[["width", "height"]].iloc[idx])})
+        return result
+
+    @staticmethod
+    def collate_fn(batch: List) -> Dict[str, Union[torch.Tensor, List[str]]]:
+        """
+        :param batch: an iterable of N sets from __getitem__()
+        :return: a tensor of images, lists of varying-size tensors of bounding boxes, labels, and difficulties
+        """
+        paths = [item["path"] for item in batch]
+        tiles = torch.cat([item["tiles"] for item in batch], dim=0)
+        indexes = torch.cat([item["tile_image_idx"] for item in batch], dim=0)
+        tiler_object_list = [item["tiler_object"] for item in batch]
+        original_shape_list = [item["original_shape"] for item in batch]
+        return {
+            "path": paths,
+            "tiles": tiles,
+            "tile_image_idx": indexes,
+            "tiler_object_list": tiler_object_list,
+            "original_shape": original_shape_list,
+        }
 
 
 class SegmentationDataset(AbstractDataset):
@@ -232,7 +392,7 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
         )
         self.size_mask_key = size_mask_key if size_mask_key is not None else "size_mask"
         self.alternative_transform = A.Compose(
-            [A.Resize(image_height, image_width), A.Normalize(), A.pytorch.ToTensorV2()]
+            [A.Resize(image_height, image_width), A.Normalize(), ToTensorV2()]
         )
         self.masks_to_load_dict = {
             mask_key: True,
@@ -635,7 +795,7 @@ class ObjectDetectionDataset(AbstractDataset):
 
     @staticmethod
     def collate_fn(
-        batch: List
+        batch: List,
     ) -> Tuple[torch.Tensor, List[Dict[str, torch.Tensor]], torch.Tensor]:
         """
         :param batch: an iterable of N sets from __getitem__()
@@ -735,7 +895,10 @@ class NaiveModPolyMapperDataset(Dataset):
         return len(self.object_detection_dataset)
 
     def get_polygonrnn_data(self, idx: int) -> Dict[str, Any]:
-        _, polygon_rnn_data = self.polygon_rnn_dataset.get_training_images_from_image_path(
+        (
+            _,
+            polygon_rnn_data,
+        ) = self.polygon_rnn_dataset.get_training_images_from_image_path(
             self.object_detection_dataset.get_path(
                 idx, key=self.object_detection_dataset.image_key, add_root_dir=False
             )
@@ -749,7 +912,7 @@ class NaiveModPolyMapperDataset(Dataset):
 
     @staticmethod
     def collate_fn(
-        batch: List
+        batch: List,
     ) -> Tuple[torch.Tensor, List[Dict[str, torch.Tensor]], torch.Tensor]:
         """
         :param batch: an iterable of N sets from __getitem__()
@@ -797,7 +960,7 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
 
     @staticmethod
     def collate_fn(
-        batch: List
+        batch: List,
     ) -> Tuple[torch.Tensor, List[Dict[str, torch.Tensor]], torch.Tensor]:
         """
         :param batch: an iterable of N sets from __getitem__()

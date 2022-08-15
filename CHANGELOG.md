@@ -1,3 +1,10 @@
+# Version 0.17.0
+
+- New evaluation metrics;
+- New evaluation on test set;
+- New inference service with image upload;
+- Bug fixes;
+
 # Version 0.16.4
 
 

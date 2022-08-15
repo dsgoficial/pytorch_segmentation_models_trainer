@@ -414,15 +414,20 @@ class GenericModPolyMapper(nn.Module):
             if item["boxes"].shape[0] == 0:
                 detections[idx].update(
                     {
-                        key: []
-                        for key in [
-                            "polygonrnn_output",
-                            "min_row",
-                            "min_col",
-                            "scale_h",
-                            "scale_w",
-                        ]
+                        key: torch.tensor([], device=item["boxes"].device)
+                        for key in ["min_row", "min_col", "scale_h", "scale_w"]
                     }
+                )
+                detections[idx].update(
+                    {
+                        "polygonrnn_output": torch.empty(
+                            (item["boxes"].shape[0], self.val_seq_len),
+                            device=item["boxes"].device,
+                        )
+                    }
+                )
+                detections[idx].update(
+                    {"extended_bboxes": torch.empty_like(item["boxes"])}
                 )
                 continue
             extended_bboxes = polygonrnn_utils.get_extended_bounds_from_tensor_bbox(
