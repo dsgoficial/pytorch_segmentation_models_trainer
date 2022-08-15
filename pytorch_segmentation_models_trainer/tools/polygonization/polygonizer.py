@@ -98,7 +98,7 @@ class TemplatePolygonizerProcessor(ABC):
                 out_contours_batch[0],
                 profile,
                 parent_dir_name=parent_dir_name[0]
-                if parent_dir_name is not None and len(parent_dir)
+                if parent_dir_name is not None and len(parent_dir_name)
                 else None,
                 convert_output_to_world_coords=convert_output_to_world_coords,
             )
