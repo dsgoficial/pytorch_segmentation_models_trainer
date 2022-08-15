@@ -20,6 +20,8 @@
 """
 
 import io
+from pathlib import Path
+import shutil
 
 from fastapi.params import Depends
 from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import (
@@ -29,7 +31,7 @@ from typing import Optional
 
 import torch
 import torchvision
-from fastapi import FastAPI, File
+from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
 from hydra import compose, initialize
 from hydra.utils import instantiate
@@ -45,6 +47,8 @@ from pytorch_segmentation_models_trainer.predict import (
 )
 from functools import lru_cache
 from .config import Settings
+from rasterio.io import MemoryFile
+from tempfile import NamedTemporaryFile
 
 
 def get_hydra_config(config_path, config_name):
@@ -90,3 +94,21 @@ async def get_polygons_from_image_path(
             ],
         }
     )
+
+
+@app.post("/polygonize_image/")
+async def get_polygons_from_uploaded_image(
+    file: UploadFile = File(...),
+    inference_processor: Settings = Depends(get_inference_processor),
+    polygonizer: Optional[dict] = None,
+):
+    suffix = Path(file.filename).suffix
+    with NamedTemporaryFile(delete=True, suffix=suffix) as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        # tmp_path = Path(tmp.name)
+        response = await get_polygons_from_image_path(
+            file_path=tmp.name,
+            inference_processor=inference_processor,
+            polygonizer=polygonizer,
+        )
+    return response

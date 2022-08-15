@@ -177,3 +177,29 @@ class Test_InferenceService(unittest.TestCase):
         response = client.post(f"/polygonize/?file_path={file_path}", json=polygonizer)
         self.assertEqual(response.status_code, 200)
         self.assertGreater(len(response.json()["features"]), 0)
+
+    @parameterized.expand(
+        [
+            (
+                {
+                    "_target_": "pytorch_segmentation_models_trainer.tools.polygonization.polygonizer.SimplePolygonizerProcessor",
+                    "config": {
+                        "data_level": 0.9,
+                        "tolerance": 1.0,
+                        "seg_threshold": 0.9,
+                        "min_area": 10,
+                    },
+                    "data_writer": None,
+                },
+            ),
+        ]
+    )
+    def test_inference_from_service_with_image_payload(self, polygonizer) -> None:
+        filename = self.frame_field_ds[0]["path"]
+        response = client.post(
+            f"/polygonize_image/",
+            json=polygonizer,
+            files={"file": ("filename", open(filename, "rb"), "image/tiff")},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(len(response.json()["features"]), 0)

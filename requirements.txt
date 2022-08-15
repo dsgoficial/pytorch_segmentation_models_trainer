@@ -39,3 +39,4 @@ uvicorn==0.16.0
 similaritymeasures==0.4.4
 colorama==0.4.4
 swifter==1.0.9
+python-multipart==0.0.5
