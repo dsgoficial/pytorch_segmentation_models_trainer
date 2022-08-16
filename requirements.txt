@@ -6,7 +6,7 @@ segmentation-models-pytorch>=0.2.0
 hydra-core==1.1.1
 kornia==0.5.4
 albumentations==1.0.0
-pandas==1.2.4
+pandas==1.4.3
 tensorboardX
 pillow==9.2.0
 matplotlib==3.4.2
@@ -20,7 +20,7 @@ shapely==1.8.0
 geopandas==0.9.0
 geoalchemy2==0.9.0
 rasterio==1.2.6
-numba==0.53.1
+numba==0.56.0
 sahi==0.10.4
 skan==0.10.0
 torch-scatter==2.0.9
