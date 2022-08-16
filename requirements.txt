@@ -6,7 +6,7 @@ segmentation-models-pytorch>=0.2.0
 hydra-core==1.1.1
 kornia==0.5.4
 albumentations==1.0.0
-pandas==1.2.4
+pandas==1.4.3
 tensorboardX
 pillow==9.2.0
 matplotlib==3.4.2
