@@ -29,7 +29,7 @@ pygeos==0.10
 rtree==0.9.7
 bidict==0.21.2
 Cython==0.29.24
-ninja==1.10.0.post3
+ninja==1.10.2.3
 pyyaml>=5.4
 pycocotools==2.0.2
 multiprocess==0.70.13
