@@ -8,7 +8,7 @@ kornia==0.5.4
 albumentations==1.0.0
 pandas==1.4.3
 tensorboardX
-pillow==9.2.0
+pillow==9.3.0
 matplotlib==3.4.2
 scipy==1.7.0
 numpy==1.22.0
