@@ -416,7 +416,7 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
             }
         if self.return_crossfield_mask:
             mask_dict[self.crossfield_mask_key] = self.load_image(
-                idx, key=self.crossfield_mask_key, is_mask=True
+                idx, key=self.crossfield_mask_key, is_mask=False
             )
         if self.return_distance_mask:
             mask_dict[self.distance_mask_key] = self.load_image(

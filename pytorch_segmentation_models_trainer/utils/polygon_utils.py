@@ -113,7 +113,7 @@ def build_crossfield(polygons, shape, transform, line_width=2):
     for polygon in polygons:
         # --- edges:
         edge_vect_array = np.diff(polygon, axis=0)
-        edge_angle_array = np.angle(edge_vect_array[:, 0] + 1j * edge_vect_array[:, 1])
+        edge_angle_array = np.angle(edge_vect_array[:, 1] + 1j * edge_vect_array[:, 0])
         neg_indices = np.where(edge_angle_array < 0)
         edge_angle_array[neg_indices] += np.pi
 
