@@ -52,7 +52,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install mkdocs mkdocs-material mkdocstrings[python] mkdocs-jupyter
           # Install your package for API documentation
-          pip install -e .
+          cd docs && pip install -e .
 
       - name: Configure Git for mkdocs
         run: |
