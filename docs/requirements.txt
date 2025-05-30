@@ -1,24 +1,15 @@
-# Documentation build requirements
 mkdocs>=1.4.0
 mkdocs-material>=9.0.0
 mkdocstrings[python]>=0.20.0
 mkdocs-jupyter>=0.24.0
 
-# Optional documentation enhancements
-mkdocs-git-revision-date-localized-plugin>=1.1.0  # Git revision dates
-mkdocs-minify-plugin>=0.6.0                       # Minify HTML/CSS/JS
-mkdocs-redirects>=1.2.0                           # URL redirects
-mkdocs-awesome-pages-plugin>=2.8.0                # Better navigation
+# Additional plugins
+mkdocs-git-revision-date-localized-plugin>=1.1.0
+mkdocs-minify-plugin>=0.6.0
+mkdocs-redirects>=1.2.0
+mkdocs-awesome-pages-plugin>=2.8.0
 
-# For advanced features
-mkdocs-macros-plugin>=0.7.0                       # Template macros
-mkdocs-table-reader-plugin>=2.0.0                 # CSV/Excel tables
-mkdocs-glightbox>=0.3.0                          # Image lightbox
-mkdocs-social>=0.5.0                             # Social cards
-
-# Development and testing
-mkdocs-linkcheck>=1.0.0                          # Link validation
-markdown-link-check>=0.2.0                       # External link checking
-
-# For spell checking (optional)
-# cspell  # Install via npm: npm install -g cspell
+# Content plugins
+mkdocs-macros-plugin>=0.7.0
+mkdocs-table-reader-plugin>=2.0.0
+mkdocs-glightbox>=0.3.0
