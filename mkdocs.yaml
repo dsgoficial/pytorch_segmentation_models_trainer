@@ -1,0 +1,99 @@
+site_name: PyTorch Segmentation Models Trainer
+site_description: Framework for training semantic segmentation models with PyTorch Lightning and Hydra
+site_author: Philipe Borba
+site_url: https://your-username.github.io/pytorch_segmentation_models_trainer
+
+repo_name: pytorch_segmentation_models_trainer
+repo_url: https://github.com/phborba/pytorch_segmentation_models_trainer
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.share
+    - toc.integrate
+    - content.code.annotate
+  palette:
+    - scheme: default
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            show_root_toc_entry: false
+            docstring_style: google
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - admonition
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Configuration: getting-started/configuration.md
+  - User Guide:
+    - Training Models: user-guide/training.md
+    - Making Predictions: user-guide/prediction.md
+    - Dataset Formats: user-guide/datasets.md
+    - Model Types: user-guide/model-types.md
+    - Data Augmentation: user-guide/augmentation.md
+  - Advanced Features:
+    - Frame Field Models: advanced/frame-field.md
+    - Polygon RNN: advanced/polygon-rnn.md
+    - Object Detection: advanced/object-detection.md
+    - Polygonization: advanced/polygonization.md
+    - Mask Building: advanced/mask-building.md
+  - Examples:
+    - Basic Segmentation: examples/basic-segmentation.md
+    - Multi-class Segmentation: examples/multi-class.md
+    - Custom Dataset: examples/custom-dataset.md
+    - Advanced Workflows: examples/advanced-workflows.md
+  - API Reference:
+    - Core: 
+      - Main Module: api/main.md
+      - Training: api/train.md
+      - Prediction: api/predict.md
+    - Dataset Loaders: api/dataset-loaders.md
+    - Model Loaders: api/model-loaders.md
+    - Tools:
+      - Data Handlers: api/tools/data-handlers.md
+      - Inference: api/tools/inference.md
+      - Polygonization: api/tools/polygonization.md
+      - Visualization: api/tools/visualization.md
+    - Utils: api/utils.md
+  - Contributing: contributing.md
+  - Changelog: changelog.md
