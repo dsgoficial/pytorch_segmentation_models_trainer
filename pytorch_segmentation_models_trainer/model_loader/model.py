@@ -32,11 +32,7 @@ from pytorch_segmentation_models_trainer.utils.model_utils import replace_activa
 
 
 class Model(pl.LightningModule):
-    """[summary]
-
-    Args:
-        pl ([type]): [description]
-    """
+    """Base Model class compatible with PyTorch Lightning 2.0+"""
 
     def __init__(self, cfg):
         super(Model, self).__init__()
@@ -45,12 +41,18 @@ class Model(pl.LightningModule):
         self.train_ds = instantiate(self.cfg.train_dataset, _recursive_=False)
         self.val_ds = instantiate(self.cfg.val_dataset, _recursive_=False)
         self.loss_function = self.get_loss_function()
+        
+        # Save hyperparameters for better checkpointing
+        self.save_hyperparameters(ignore=['model', 'loss_function', 'train_ds', 'val_ds'])
+        
         if "metrics" in self.cfg:
             metrics = torchmetrics.MetricCollection(
                 [instantiate(i, _recursive_=False) for i in self.cfg.metrics]
             )
-            self.train_metrics = metrics.clone(prefix="train_")
-            self.val_metrics = metrics.clone(prefix="val_")
+            # Use forward slash for grouping in TensorBoard
+            self.train_metrics = metrics.clone(prefix="train/")
+            self.val_metrics = metrics.clone(prefix="val/")
+        
         self.gpu_train_transform = (
             None
             if "gpu_augmentation_list" not in self.cfg.train_dataset
@@ -76,32 +78,10 @@ class Model(pl.LightningModule):
             replace_activation(model, old_activation, new_activation)
         return model
 
-    def get_metrics(self):
-        if "metrics" not in self.cfg:
-            return None
-        return nn.ModuleDict(
-            [
-                [self.get_metric_name(i), instantiate(i, _recursive_=False)]
-                for i in self.cfg.metrics
-            ]
-        )
-
-    def get_metric_name(self, x):
-        return x["_target_"].split(".")[-1]
-
     def get_gpu_augmentations(self, augmentation_list):
         return torch.nn.Sequential(
             *[instantiate(aug, _recursive_=False) for aug in augmentation_list]
         )
-
-    def evaluate_metrics(self, predicted_masks, masks, step_type="train"):
-        if step_type not in ["train", "val"]:
-            raise NotImplementedError
-        iterate_dict = self.train_metrics if step_type == "train" else self.val_metrics
-        return {
-            name: metric(predicted_masks, masks)
-            for name, metric in iterate_dict.items()
-        }
 
     def get_loss_function(self):
         return instantiate(self.cfg.loss, _recursive_=False)
@@ -112,12 +92,7 @@ class Model(pl.LightningModule):
         )
 
     def set_encoder_trainable(self, trainable=False):
-        """Freezes or unfreezes the model encoder.
-
-        Args:
-            trainable (bool, optional): Sets the encoder weights trainable.
-            Defaults to False.
-        """
+        """Freezes or unfreezes the model encoder."""
         for child in self.model.encoder.children():
             for param in child.parameters():
                 param.requires_grad = trainable
@@ -128,7 +103,6 @@ class Model(pl.LightningModule):
         return self.model(x)
 
     def configure_optimizers(self):
-        # REQUIRED
         optimizer = self.get_optimizer()
         scheduler_list = []
         if "scheduler_list" not in self.cfg:
@@ -155,7 +129,7 @@ class Model(pl.LightningModule):
             else True,
             prefetch_factor=self.cfg.train_dataset.data_loader.prefetch_factor
             if "prefetch_factor" in self.cfg.train_dataset.data_loader
-            else 4 * self.hyperparameters.batch_size,
+            else 2,
         )
 
     def val_dataloader(self):
@@ -174,7 +148,7 @@ class Model(pl.LightningModule):
             else True,
             prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor
             if "prefetch_factor" in self.cfg.val_dataset.data_loader
-            else 4 * self.hyperparameters.batch_size,
+            else 2,
         )
 
     def training_step(self, batch, batch_idx):
@@ -182,64 +156,32 @@ class Model(pl.LightningModule):
         masks = masks.long()
         predicted_masks = self(images)
         loss = self.loss_function(predicted_masks, masks)
-        # evaluated_metrics = self.evaluate_metrics(
-        #     predicted_masks, masks, step_type='train'
-        # )
-        evaluated_metrics = self.train_metrics(predicted_masks, masks)
-        tensorboard_logs = {k: {"train": v} for k, v in evaluated_metrics.items()}
-        # use log_dict instead of log
-        self.log_dict(
-            evaluated_metrics, on_step=True, on_epoch=False, prog_bar=True, logger=False
-        )
-        return {"loss": loss, "log": tensorboard_logs}
+        
+        # Log loss with forward slash for grouping
+        self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True)
+        
+        # Compute and log metrics - automatically prefixed with train/
+        if hasattr(self, 'train_metrics'):
+            metrics = self.train_metrics(predicted_masks, masks)
+            self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=False)
+        
+        return loss
 
     def validation_step(self, batch, batch_idx):
         images, masks = batch.values()
         masks = masks.long()
         predicted_masks = self(images)
         loss = self.loss_function(predicted_masks, masks)
-        # evaluated_metrics = self.evaluate_metrics(
-        #     predicted_masks, masks, step_type='val'
-        # )
-        evaluated_metrics = self.val_metrics(predicted_masks, masks)
-        tensorboard_logs = {k: {"val": v} for k, v in evaluated_metrics.items()}
-        # use log_dict instead of log
-        self.log_dict(
-            evaluated_metrics, on_step=True, on_epoch=True, prog_bar=True, logger=False
-        )
-        self.log("validation_loss", loss, on_step=True, on_epoch=True)
-        return {"val_loss": loss, "log": tensorboard_logs}
+        
+        # Log loss with forward slash for grouping
+        self.log("loss/val", loss, on_step=False, on_epoch=True, prog_bar=True)
+        
+        # Compute and log metrics - automatically prefixed with val/
+        if hasattr(self, 'val_metrics'):
+            metrics = self.val_metrics(predicted_masks, masks)
+            self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False)
+        
+        return loss
 
-    def compute_average_metrics(self, outputs, metric_dict, step_type="train"):
-        return {
-            "avg_"
-            + name: {
-                step_type: torch.stack(
-                    [
-                        x["log"][name if step_type in name else f"{step_type}_" + name][
-                            step_type
-                        ]
-                        for x in outputs
-                    ]
-                ).mean()
-            }
-            for name in metric_dict.keys()
-        }
-
-    def training_epoch_end(self, outputs):
-        avg_loss = torch.stack([x["loss"] for x in outputs]).mean()
-        tensorboard_logs = {"avg_loss": {"train": avg_loss}}
-        tensorboard_logs.update(
-            self.compute_average_metrics(outputs, self.train_metrics)
-        )
-        self.log_dict(tensorboard_logs, logger=True)
-        self.log("avg_train_loss", avg_loss, logger=True)
-
-    def validation_epoch_end(self, outputs):
-        # OPTIONAL
-        avg_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
-        tensorboard_logs = {"avg_loss": {"val": avg_loss}}
-        tensorboard_logs.update(
-            self.compute_average_metrics(outputs, self.val_metrics, step_type="val")
-        )
-        return {"avg_val_loss": avg_loss, "log": tensorboard_logs}
+    # Removed training_epoch_end and validation_epoch_end
+    # Lightning 2.0+ automatically aggregates metrics

@@ -26,8 +26,6 @@ import rasterio
 import torch
 from hydra.utils import instantiate
 
-# precision e recall com problema no pytorch lightning 1.2,
-# retirar e depois ver o que fazer
 from torch.utils.data import DataLoader
 
 from typing import List, Any
@@ -54,7 +52,8 @@ class WarmupCallback(pl.callbacks.Callback):
         self.warmup_epochs = warmup_epochs
         self.warmed_up = False
 
-    def on_init_end(self, trainer):
+    def on_fit_start(self, trainer, pl_module):
+        """Called when fit begins - replaces on_init_end"""
         print(f"\nWarmupCallback initialization at epoch {trainer.current_epoch}.\n")
         if trainer.current_epoch > self.warmup_epochs - 1:
             self.warmed_up = True
@@ -90,7 +89,8 @@ class FrameFieldOnlyCrossfieldWarmupCallback(pl.callbacks.Callback):
         self.warmup_epochs = warmup_epochs
         self.warmed_up = False
 
-    def on_init_end(self, trainer):
+    def on_fit_start(self, trainer, pl_module):
+        """Called when fit begins - replaces on_init_end"""
         print(
             f"\nFrameFieldWarmupCallback initialization at epoch {trainer.current_epoch}.\n"
         )
@@ -130,7 +130,7 @@ class FrameFieldComputeWeightNormLossesCallback(pl.callbacks.Callback):
     def on_train_epoch_start(self, trainer, pl_module) -> None:
         if self.loss_norm_is_initializated or trainer.current_epoch > 1:
             return
-        pl_module.model.train()  # Important for batchnorm and dropout, even in computing loss norms
+        pl_module.model.train()
         init_dl = pl_module.train_dataloader()
         with torch.no_grad():
             loss_norm_batches_min = (
@@ -151,11 +151,12 @@ class FrameFieldComputeWeightNormLossesCallback(pl.callbacks.Callback):
 
 
 class FrameFieldPolygonizerCallback(pl.callbacks.BasePredictionWriter):
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, write_interval="batch") -> None:
+        # Add write_interval for Lightning 2.0+ compatibility
+        super().__init__(write_interval=write_interval)
 
     def on_predict_batch_end(
-        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
         parent_dir_name_list = [Path(path).stem for path in batch["path"]]
         seg_batch, crossfield_batch = outputs
@@ -193,11 +194,12 @@ class FrameFieldPolygonizerCallback(pl.callbacks.BasePredictionWriter):
 
 
 class ActiveSkeletonsPolygonizerCallback(pl.callbacks.BasePredictionWriter):
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, write_interval="batch") -> None:
+        # Add write_interval for Lightning 2.0+ compatibility
+        super().__init__(write_interval=write_interval)
 
     def on_predict_batch_end(
-        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
         parent_dir_name_list = [Path(path).stem for path in batch["path"]]
         seg_batch, crossfield_batch = outputs
@@ -254,17 +256,17 @@ class ActiveSkeletonsPolygonizerCallback(pl.callbacks.BasePredictionWriter):
             polys, probs = active_skeletons.polygonize(
                 seg_batch, crossfield_batch, pl_module.cfg.polygonizer.config
             )
-
         return polys
 
 
 class ModPolymapperPolygonizerCallback(pl.callbacks.BasePredictionWriter):
-    def __init__(self, convert_output_to_world_coords=True) -> None:
-        super().__init__()
+    def __init__(self, convert_output_to_world_coords=True, write_interval="batch") -> None:
+        # Add write_interval for Lightning 2.0+ compatibility
+        super().__init__(write_interval=write_interval)
         self.convert_output_to_world_coords = convert_output_to_world_coords
 
     def on_predict_batch_end(
-        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
         def process_polygonizer(detection, parent_dir_name, profile=None):
             polygonizer = instantiate_polygonizer(pl_module.cfg)
@@ -308,15 +310,3 @@ class ModPolymapperPolygonizerCallback(pl.callbacks.BasePredictionWriter):
             with rasterio.open(path) as raster_ds:
                 profile_list.append(raster_ds.profile.copy())
         return profile_list
-
-        # polygonizer = instantiate_polygonizer(pl_module.cfg)
-        # for detection, parent_dir_name in itertools.zip_longest(
-        #     outputs, parent_dir_name_list
-        # ):
-        #     detection["output_batch_polygons"] = detection["polygonrnn_output"]
-        #     polygonizer.process(
-        #         tensor_dict_to_device(detection, "cpu"),
-        #         profile=None,
-        #         parent_dir_name=parent_dir_name,
-        #         convert_output_to_world_coords=False,
-        #     )

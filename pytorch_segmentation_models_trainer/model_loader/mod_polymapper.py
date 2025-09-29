@@ -22,7 +22,6 @@
 import itertools
 from pathlib import Path
 from typing import Dict, List, Union
-from cv2 import threshold
 
 import concurrent.futures
 import pytorch_lightning as pl
@@ -78,6 +77,9 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             self.cfg.val_dataset.polygon_rnn, _recursive_=False
         )
         self.val_mAP = MeanAveragePrecision()
+        
+        # Save hyperparameters
+        self.save_hyperparameters(ignore=['model'])
 
     def get_model(self):
         model = instantiate(self.cfg.model, _recursive_=False)
@@ -89,7 +91,6 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         )
 
     def configure_optimizers(self):
-        # REQUIRED
         optimizer = self.get_optimizer()
         scheduler_list = []
         if "scheduler_list" not in self.cfg:
@@ -170,45 +171,6 @@ class GenericPolyMapperPLModel(pl.LightningModule):
     def get_loss_function(self):
         return nn.CrossEntropyLoss()
 
-    def _build_tensorboard_logs(self, outputs, step_type="train"):
-        avg_loss = torch.stack([x["loss"] for x in outputs]).mean()
-        tensorboard_logs = {"avg_loss": {step_type: avg_loss}}
-        if len(outputs) == 0:
-            return tensorboard_logs
-        for key in outputs[0]["log"].keys():
-            if key in ["intersection", "union"]:
-                continue
-            tensorboard_logs.update(
-                {
-                    f"avg_{key}": {
-                        step_type: torch.cat(
-                            [
-                                x["log"][key].unsqueeze(0).float()
-                                if x["log"][key].shape == torch.Size([])
-                                else x["log"][key].float()
-                                for x in outputs
-                            ]
-                        ).mean()
-                    }
-                }
-            )
-        if "intersection" not in outputs[0]["log"] or "union" not in outputs[0]["log"]:
-            return tensorboard_logs
-        intersection = sum(sum([x["log"]["intersection"] for x in outputs])).unsqueeze(
-            0
-        )
-        union = sum(sum([x["log"]["intersection"] for x in outputs])).unsqueeze(0)
-        tensorboard_logs.update(
-            {
-                "polygon_iou": {
-                    step_type: torch.tensor(intersection / union)
-                    if all(union != 0)
-                    else torch.zeros_like(intersection)
-                }
-            }
-        )
-        return tensorboard_logs
-
     def _get_batch_images(self, batch):
         obj_det_images, obj_det_targets, _ = (
             batch["object_detection"]
@@ -221,7 +183,6 @@ class GenericPolyMapperPLModel(pl.LightningModule):
     def _compute_acc_loss(self, obj_det_images, obj_det_targets, polygon_rnn_batch):
         loss_dict, acc = self.model(obj_det_images, obj_det_targets, polygon_rnn_batch)
         detached_loss_dict = {key: loss.detach() for key, loss in loss_dict.items()}
-        detached_loss_dict.update({"acc": acc.detach()})
         loss = sum(loss for loss in loss_dict.values())
         return acc, detached_loss_dict, loss
 
@@ -232,13 +193,17 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         acc, detached_loss_dict, loss = self._compute_acc_loss(
             obj_det_images, obj_det_targets, polygon_rnn_batch
         )
-        self.log(
-            "train_loss", loss, on_step=True, prog_bar=True, logger=True, sync_dist=True
-        )
-        self.log(
-            "train_acc", acc, on_step=True, prog_bar=True, logger=True, sync_dist=False
-        )
-        return {"loss": loss, "log": detached_loss_dict}
+        
+        # Log total loss and accuracy
+        self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("metrics/train_acc", acc, on_step=True, on_epoch=True, prog_bar=True)
+        
+        # Log individual losses
+        for loss_name, loss_value in detached_loss_dict.items():
+            if loss_name != "acc":
+                self.log(f"losses/train_{loss_name}", loss_value, on_step=True, on_epoch=True)
+        
+        return loss
 
     def validation_step(self, batch, batch_idx):
         obj_det_images, obj_det_targets, polygon_rnn_batch = self._get_batch_images(
@@ -249,30 +214,36 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             acc, detached_loss_dict, loss = self._compute_acc_loss(
                 obj_det_images, obj_det_targets, polygon_rnn_batch
             )
-        self.log(
-            "validation_loss",
-            loss,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-            logger=True,
-            sync_dist=True,
-        )
-        self.log(
-            "val_acc",
-            acc,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-            logger=True,
-            sync_dist=True,
-        )
-        return_dict = {"loss": loss, "log": detached_loss_dict}
+        
+        # Log loss and accuracy
+        self.log("loss/val", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("metrics/val_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
+        
+        # Log individual losses
+        for loss_name, loss_value in detached_loss_dict.items():
+            if loss_name != "acc":
+                self.log(f"losses/val_{loss_name}", loss_value, on_step=False, on_epoch=True)
+        
+        # Perform evaluation if enabled
+        return_dict = {"loss": loss, "acc": acc}
         if self.perform_evaluation:
             self.model.eval()
             outputs = self.model(obj_det_images)
             metrics_dict_item = self.evaluate_output(batch, outputs)
-            return_dict["log"].update(metrics_dict_item)
+            
+            # Log evaluation metrics
+            for metric_name, metric_value in metrics_dict_item.items():
+                if metric_name not in ["intersection", "union"]:
+                    if torch.is_tensor(metric_value):
+                        self.log(
+                            f"metrics/val_{metric_name}", 
+                            metric_value.mean() if metric_value.numel() > 1 else metric_value,
+                            on_step=False, 
+                            on_epoch=True
+                        )
+            
+            return_dict.update(metrics_dict_item)
+        
         return return_dict
 
     def evaluate_output(
@@ -280,7 +251,6 @@ class GenericPolyMapperPLModel(pl.LightningModule):
     ) -> Dict[str, Union[float, torch.Tensor]]:
         return_dict = dict()
         box_iou, mAP = self._evaluate_obj_det(outputs, batch)
-        # return_dict.update(mAP)
         batch_polis, intersection, union = self._compute_polygonrnn_metrics(
             outputs, batch["polygon_rnn"]
         )
@@ -304,7 +274,6 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             ]
         )
         mAP = self.val_mAP.update(outputs, obj_det_targets)
-
         return box_iou, mAP
 
     def _compute_polygonrnn_metrics(self, outputs, polygon_rnn_batch):
@@ -344,13 +313,8 @@ class GenericPolyMapperPLModel(pl.LightningModule):
 
         return batch_polis, intersection, union
 
-    def training_epoch_end(self, outputs):
-        tensorboard_logs = self._build_tensorboard_logs(outputs)
-        self.log_dict(tensorboard_logs, logger=True)
-
-    def validation_epoch_end(self, outputs):
-        tensorboard_logs = self._build_tensorboard_logs(outputs, step_type="val")
-        self.log_dict(tensorboard_logs, logger=True)
+    # Removed training_epoch_end and validation_epoch_end
+    # Lightning 2.0+ handles aggregation automatically
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         with torch.no_grad():

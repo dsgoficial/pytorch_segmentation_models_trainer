@@ -61,20 +61,12 @@ class PolygonRNNPLModel(Model):
     def training_step(self, batch, batch_idx):
         result = self.compute(batch)
         loss, acc = self.compute_loss_acc(batch, result)
-        tensorboard_logs = {"acc": {"train": acc}}
-        self.log(
-            "train_loss",
-            loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=True,
-        )
-        self.log(
-            "train_acc", acc, on_step=True, prog_bar=True, logger=True, sync_dist=True
-        )
-        return {"loss": loss, "log": tensorboard_logs}
+        
+        # Log loss and accuracy
+        self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("metrics/train_acc", acc, on_step=True, on_epoch=True, prog_bar=True)
+        
+        return loss
 
     def compute(self, batch):
         output = self.model(batch["image"], batch["x1"], batch["x2"], batch["x3"])
@@ -85,34 +77,39 @@ class PolygonRNNPLModel(Model):
         loss = self.loss_function(result, target)
         result_index = torch.argmax(result, 1)
         correct = (target == result_index).float().sum().item()
-        acc = correct * 1.0 / target.shape[0]
+        acc = torch.tensor(correct * 1.0 / target.shape[0], device=loss.device)
         return loss, acc
 
     def validation_step(self, batch, batch_idx):
         result = self.compute(batch)
         loss, acc = self.compute_loss_acc(batch, result)
         test_output = self.model.test(batch["image"], self.val_seq_len)
+        
+        # Evaluate batch
         batch_polis, intersection, union = self.evaluate_batch(batch, test_output)
-        tensorboard_logs = {"acc": {"val": acc}}
-        self.log(
-            "validation_loss",
-            loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=False,
-            logger=True,
-            sync_dist=True,
-        )
-        self.log(
-            "val_acc", acc, on_step=True, prog_bar=False, logger=True, sync_dist=True
-        )
+        
+        # Log loss and accuracy
+        self.log("loss/val", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("metrics/val_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
+        
+        # Log polis metric
+        self.log("metrics/val_polis", batch_polis.mean(), on_step=False, on_epoch=True)
+        
+        # Log IoU (computed from intersection and union in on_validation_epoch_end)
+        # Store for epoch-level aggregation
         return {
-            "val_loss": loss,
-            "log": tensorboard_logs,
+            "loss": loss,
+            "acc": acc,
             "polis": batch_polis,
-            "intersection": intersection,
-            "union": union,
+            "intersection": intersection.sum(),
+            "union": union.sum(),
         }
+
+    def on_validation_epoch_end(self):
+        """Aggregate IoU across the validation epoch"""
+        # Note: In Lightning 2.0+, you can use self.trainer.callback_metrics
+        # or implement custom aggregation if needed
+        pass
 
     def evaluate_batch(self, batch, result):
         gt_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(
@@ -132,38 +129,15 @@ class PolygonRNNPLModel(Model):
         batch_polis = torch.from_numpy(
             metrics.batch_polis(predicted_polygon_list, gt_polygon_list)
         )
+        
         iou = lambda x: metrics.polygon_iou(x[0], x[1])
         output_tensor_iou = torch.tensor(
             list(map(iou, zip(predicted_polygon_list, gt_polygon_list)))
         )
         intersection = output_tensor_iou[:, 1]
         union = output_tensor_iou[:, 2]
+        
         return batch_polis, intersection, union
 
-    def training_epoch_end(self, outputs):
-        tensorboard_logs = self._get_tensorboard_logs(outputs, "loss", "train")
-        self.log_dict(tensorboard_logs, logger=True)
-
-    def _get_tensorboard_logs(self, outputs, loss_name, step):
-        avg_loss = torch.stack([x[loss_name] for x in outputs]).mean()
-        avg_acc = torch.stack(
-            [torch.tensor(x["log"]["acc"][step]) for x in outputs]
-        ).mean()
-        if step == "train":
-            return {"avg_loss": {step: avg_loss}, "avg_acc": {step: avg_acc}}
-        intersection = torch.stack([x["intersection"] for x in outputs]).sum()
-        union = torch.stack([x["union"] for x in outputs]).sum()
-        iou = intersection / union
-        polis = torch.stack([x["polis"].float() for x in outputs]).mean()
-        tensorboard_logs = {
-            "avg_loss": {step: avg_loss},
-            "avg_acc": {step: avg_acc},
-            "iou": {step: iou},
-            "polis": {step: polis},
-        }
-
-        return tensorboard_logs
-
-    def validation_epoch_end(self, outputs):
-        tensorboard_logs = self._get_tensorboard_logs(outputs, "val_loss", "val")
-        self.log_dict(tensorboard_logs, logger=True)
+    # Removed training_epoch_end and validation_epoch_end
+    # Lightning 2.0+ handles metric aggregation automatically

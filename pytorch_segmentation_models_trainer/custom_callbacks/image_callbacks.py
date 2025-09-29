@@ -2,36 +2,36 @@
 """
 /***************************************************************************
  pytorch_segmentation_models_trainer
-                              -------------------
-        begin                : 2021-03-10
-        git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba - Cartographic Engineer
-                                                            @ Brazilian Army
-        email                : philipeborba at gmail dot com
+                                     -------------------
+        begin                          : 2021-03-10
+        git sha                        : $Format:%H$
+        copyright                      : (C) 2021 by Philipe Borba - Cartographic Engineer
+                                                                     @ Brazilian Army
+        email                          : philipeborba at gmail dot com
  ***************************************************************************/
 /***************************************************************************
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- ****
+ * *
+ * This program is free software; you can redistribute it and/or modify  *
+ * it under the terms of the GNU General Public License as published by   *
+ * the Free Software Foundation; either version 2 of the License, or      *
+ * (at your option) any later version.                                    *
+ * *
+ * ****
 """
 import datetime
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Union, Tuple
 
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
-from pytorch_toolbelt.utils import image_to_tensor, rgb_image_from_tensor
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import numpy as np
 import pytorch_lightning as pl
 import torch
 from PIL import Image
-from pytorch_lightning.utilities import rank_zero_only
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from pytorch_segmentation_models_trainer.custom_models.mod_polymapper.modpolymapper import (
     GenericModPolyMapper,
 )
@@ -100,14 +100,14 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
         plot.savefig(report_path, format="png", bbox_inches="tight")
         return report_path
 
-    def on_sanity_check_end(self, trainer, pl_module):
+    def on_sanity_check_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         self.save_outputs = True
         self.output_path = os.path.join(trainer.log_dir, "image_logs")
         if not os.path.exists(self.output_path):
             Path(self.output_path).mkdir(parents=True, exist_ok=True)
 
     @rank_zero_only
-    def on_validation_end(self, trainer, pl_module):
+    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         if not self.save_outputs:
             return
         val_ds = pl_module.val_dataloader().dataset
@@ -145,7 +145,7 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
 
 class FrameFieldResultCallback(ImageSegmentationResultCallback):
     @rank_zero_only
-    def on_validation_end(self, trainer, pl_module):
+    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         if not self.save_outputs:
             return
         val_ds = pl_module.val_dataloader()
@@ -197,7 +197,7 @@ class FrameFieldResultCallback(ImageSegmentationResultCallback):
 
 class FrameFieldOverlayedResultCallback(ImageSegmentationResultCallback):
     @rank_zero_only
-    def on_validation_end(self, trainer, pl_module):
+    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         if not self.save_outputs:
             return
         val_ds = pl_module.val_dataloader()
@@ -255,7 +255,7 @@ class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
         self.threshold = threshold
 
     @rank_zero_only
-    def on_validation_end(self, trainer, pl_module):
+    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         if not self.save_outputs:
             return
         val_ds = pl_module.val_dataloader()
@@ -328,7 +328,7 @@ class PolygonRNNResultCallback(ImageSegmentationResultCallback):
         return saved_image
 
     @rank_zero_only
-    def on_validation_end(self, trainer, pl_module):
+    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         if not self.save_outputs:
             return
         val_ds = pl_module.val_dataloader()
@@ -387,7 +387,7 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
         self.n_samples = 16 if n_samples is None else n_samples
 
     @rank_zero_only
-    def on_validation_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         val_ds = pl_module.val_dataloader().loaders  # type: ignore
         current_item = 0
         prepared_input = val_ds[
@@ -484,3 +484,429 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
             )
         plt.close(fig)
         return saved_image
+
+class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
+    def __init__(
+        self,
+        n_samples: int = None,
+        output_path: str = None,
+        normalized_input: bool = True,
+        norm_params: Optional[Dict] = None,
+        log_every_k_epochs: int = 1,
+        class_colors: Optional[List[str]] = None,
+        colormap: str = 'tab10',
+        num_classes: Optional[int] = None,
+        band_indices: Optional[List[int]] = None,
+        alpha_mask: float = 0.7,
+        show_class_legend: bool = True,
+        class_names: Optional[List[str]] = None,
+        show_overlay: bool = False,
+    ) -> None:
+        """
+        Enhanced callback for image segmentation visualization.
+        
+        Args:
+            n_samples: Number of samples to visualize
+            output_path: Path to save outputs
+            normalized_input: Whether input images are normalized
+            norm_params: Normalization parameters
+            log_every_k_epochs: Frequency of logging
+            class_colors: Custom colors for each class (hex codes or color names)
+            colormap: Matplotlib colormap name for automatic color generation
+            num_classes: Number of segmentation classes
+            band_indices: Indices of bands to use for RGB visualization (default: [0,1,2])
+            alpha_mask: Transparency level for mask overlay (0-1)
+            show_class_legend: Whether to show class legend in plots
+            class_names: Names for each class (for legend)
+            show_overlay: Whether to show overlay of mask on original image (default: False)
+        """
+        super().__init__()
+        self.n_samples = n_samples
+        self.normalized_input = normalized_input
+        self.output_path = None if output_path is None else output_path
+        self.norm_params = norm_params if norm_params is not None else {}
+        self.save_outputs = False
+        self.log_every_k_epochs = log_every_k_epochs
+        
+        # Color and class configuration
+        self.colormap = colormap
+        self.num_classes = num_classes
+        self.alpha_mask = alpha_mask
+        self.show_class_legend = show_class_legend
+        self.class_names = class_names
+        self.show_overlay = show_overlay
+        
+        # Band selection for RGB visualization
+        self.band_indices = band_indices if band_indices is not None else [0, 1, 2]
+        
+        # Setup class colors
+        self.class_colors = self._setup_class_colors(class_colors, num_classes)
+
+    def _setup_class_colors(self, class_colors: Optional[List[str]], num_classes: Optional[int]) -> List[str]:
+        """Setup colors for each class."""
+        if class_colors is not None:
+            return class_colors
+        
+        if num_classes is None:
+            num_classes = 10  # Default assumption
+            
+        # Generate colors using matplotlib colormap
+        cmap = plt.get_cmap(self.colormap)
+        colors = []
+        for i in range(num_classes):
+            if num_classes == 1:
+                color_val = 0.5
+            else:
+                color_val = i / (num_classes - 1)
+            rgba_color = cmap(color_val)
+            # Convert to hex
+            hex_color = mcolors.rgb2hex(rgba_color[:3])
+            colors.append(hex_color)
+        
+        return colors
+
+    def prepare_image_to_plot(self, image: np.ndarray) -> np.ndarray:
+        """
+        Prepare image for plotting, ensuring RGB format.
+        
+        Args:
+            image: Input image array
+            
+        Returns:
+            RGB image array ready for plotting
+        """
+        # Remove batch dimension if present
+        image = image.squeeze(0) if image.shape[0] == 1 else image
+        
+        # Denormalize if needed
+        if self.normalized_input:
+            image = denormalize_np_array(image, **self.norm_params)
+        
+        # Handle channel dimension
+        if min(image.shape) == image.shape[0]:  # Channels first
+            image = np.moveaxis(image, 0, -1)
+        
+        # Ensure we have at least 3 bands for RGB
+        if image.shape[-1] < 3:
+            # If grayscale or single band, replicate to 3 channels
+            if image.shape[-1] == 1:
+                image = np.repeat(image, 3, axis=-1)
+            elif image.shape[-1] == 2:
+                # Add a third channel as zeros or repeat one channel
+                third_channel = np.zeros_like(image[:, :, 0:1])
+                image = np.concatenate([image, third_channel], axis=-1)
+        
+        # Select specific bands for RGB if more than 3 bands
+        elif image.shape[-1] > 3:
+            # Use specified band indices, ensuring they're within bounds
+            valid_indices = [idx for idx in self.band_indices if idx < image.shape[-1]]
+            if len(valid_indices) >= 3:
+                image = image[:, :, valid_indices[:3]]
+            else:
+                # Fallback to first 3 bands
+                image = image[:, :, :3]
+        
+        # Ensure values are in [0, 1] range for matplotlib
+        if image.max() > 1.0:
+            image = image / 255.0
+        
+        return np.clip(image, 0, 1)
+
+    def prepare_mask_to_plot(self, mask: np.ndarray, apply_colors: bool = True) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+        """
+        Prepare segmentation mask for plotting with colors.
+        
+        Args:
+            mask: Input mask array
+            apply_colors: Whether to apply class colors
+            
+        Returns:
+            Colored mask array or tuple of (mask, colored_mask)
+        """
+        mask = np.squeeze(mask)
+        
+        # Handle multi-class masks
+        if len(mask.shape) > 2:
+            # If mask has channel dimension, convert to class indices
+            if mask.shape[0] < mask.shape[-1]:  # Channels first
+                mask = np.argmax(mask, axis=0)
+            else:  # Channels last
+                mask = np.argmax(mask, axis=-1)
+        
+        if not apply_colors:
+            return mask.astype(np.float64)
+        
+        # Create colored mask
+        colored_mask = self._apply_class_colors(mask)
+        
+        return mask.astype(np.float64), colored_mask
+
+    def _apply_class_colors(self, mask: np.ndarray) -> np.ndarray:
+        """Apply class-specific colors to mask."""
+        h, w = mask.shape
+        colored_mask = np.zeros((h, w, 3), dtype=np.float32)
+        
+        unique_classes = np.unique(mask)
+        for class_id in unique_classes:
+            if class_id == 0:  # Skip background
+                continue
+            
+            class_mask = mask == class_id
+            color_idx = min(int(class_id) - 1, len(self.class_colors) - 1)
+            color = mcolors.hex2color(self.class_colors[color_idx])
+            
+            colored_mask[class_mask] = color
+        
+        return colored_mask
+
+    def create_mask_visualization(
+        self, 
+        image: np.ndarray, 
+        mask: np.ndarray, 
+        colored_mask: np.ndarray,
+        title: str = "",
+        show_overlay: bool = False
+    ) -> plt.Figure:
+        """Create visualization with original image and colored mask (without overlay by default)."""
+        if show_overlay:
+            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+            
+            # Original image
+            axes[0].imshow(image)
+            axes[0].set_title('Original Image')
+            axes[0].axis('off')
+            
+            # Mask only
+            axes[1].imshow(colored_mask)
+            axes[1].set_title('Segmentation Mask')
+            axes[1].axis('off')
+            
+            # Overlay
+            axes[2].imshow(image)
+            axes[2].imshow(colored_mask, alpha=self.alpha_mask)
+            axes[2].set_title('Overlay')
+            axes[2].axis('off')
+        else:
+            fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+            
+            # Original image
+            axes[0].imshow(image)
+            axes[0].set_title('Original Image')
+            axes[0].axis('off')
+            
+            # Mask only (no overlay)
+            axes[1].imshow(colored_mask)
+            axes[1].set_title('Segmentation Mask')
+            axes[1].axis('off')
+        
+        # Add class legend if requested
+        if self.show_class_legend and self.class_names is not None:
+            self._add_class_legend(fig, mask)
+        
+        fig.suptitle(title, fontsize=14)
+        plt.tight_layout()
+        
+        return fig
+
+    def create_comparison_visualization(
+        self, 
+        image: np.ndarray, 
+        gt_mask: np.ndarray,
+        gt_colored: np.ndarray,
+        pred_mask: np.ndarray,
+        pred_colored: np.ndarray,
+        title: str = "",
+        show_overlay: bool = False
+    ) -> plt.Figure:
+        """Create comparison visualization between ground truth and prediction."""
+        if show_overlay:
+            # Show with overlays: 2 rows x 3 columns
+            fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+            
+            # Ground truth row
+            axes[0, 0].imshow(image)
+            axes[0, 0].set_title('Original Image')
+            axes[0, 0].axis('off')
+            
+            axes[0, 1].imshow(gt_colored)
+            axes[0, 1].set_title('Ground Truth Mask')
+            axes[0, 1].axis('off')
+            
+            axes[0, 2].imshow(image)
+            axes[0, 2].imshow(gt_colored, alpha=self.alpha_mask)
+            axes[0, 2].set_title('GT Overlay')
+            axes[0, 2].axis('off')
+            
+            # Prediction row
+            axes[1, 0].imshow(image)
+            axes[1, 0].set_title('Original Image')
+            axes[1, 0].axis('off')
+            
+            axes[1, 1].imshow(pred_colored)
+            axes[1, 1].set_title('Predicted Mask')
+            axes[1, 1].axis('off')
+            
+            axes[1, 2].imshow(image)
+            axes[1, 2].imshow(pred_colored, alpha=self.alpha_mask)
+            axes[1, 2].set_title('Prediction Overlay')
+            axes[1, 2].axis('off')
+            
+        else:
+            # Show without overlays: 2 rows x 2 columns
+            fig, axes = plt.subplots(2, 2, figsize=(12, 12))
+            
+            # Ground truth row
+            axes[0, 0].imshow(image)
+            axes[0, 0].set_title('Original Image')
+            axes[0, 0].axis('off')
+            
+            axes[0, 1].imshow(gt_colored)
+            axes[0, 1].set_title('Ground Truth Mask')
+            axes[0, 1].axis('off')
+            
+            # Prediction row
+            axes[1, 0].imshow(image)
+            axes[1, 0].set_title('Original Image')
+            axes[1, 0].axis('off')
+            
+            axes[1, 1].imshow(pred_colored)
+            axes[1, 1].set_title('Predicted Mask')
+            axes[1, 1].axis('off')
+        
+        # Add class legend if requested
+        if self.show_class_legend and self.class_names is not None:
+            self._add_class_legend(fig, pred_mask)
+        
+        fig.suptitle(title, fontsize=16)
+        plt.tight_layout()
+        
+        return fig
+
+    def _add_class_legend(self, fig: plt.Figure, mask: np.ndarray) -> None:
+        """Add class legend to the figure."""
+        unique_classes = np.unique(mask)
+        legend_elements = []
+        
+        for class_id in unique_classes:
+            if class_id == 0:  # Skip background
+                continue
+                
+            color_idx = min(int(class_id) - 1, len(self.class_colors) - 1)
+            color = self.class_colors[color_idx]
+            
+            class_name = (
+                self.class_names[color_idx] 
+                if self.class_names and color_idx < len(self.class_names)
+                else f'Class {class_id}'
+            )
+            
+            legend_elements.append(
+                plt.Rectangle((0, 0), 1, 1, facecolor=color, label=class_name)
+            )
+        
+        if legend_elements:
+            fig.legend(handles=legend_elements, loc='center right', bbox_to_anchor=(1.15, 0.5))
+
+    def log_data_to_tensorboard(self, saved_image: str, image_path: str, logger, current_epoch: int):
+        """Log visualization to tensorboard."""
+        image = Image.open(saved_image)
+        data = np.array(image)
+        data = np.moveaxis(data, -1, 0)
+        data = torch.from_numpy(data)
+        logger.experiment.add_image(image_path, data, current_epoch)
+
+    def save_plot_to_disk(self, plot, image_name: str, current_epoch: int) -> str:
+        """Save plot to disk."""
+        image_name = Path(image_name).name.split(".")[0]
+        report_path = os.path.join(
+            self.output_path,
+            "report_image_{name}_epoch_{epoch}_{date}.png".format(
+                name=image_name,
+                date=datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
+                epoch=current_epoch,
+            ),
+        )
+        plot.savefig(report_path, format="png", bbox_inches="tight", dpi=150)
+        return report_path
+
+    def on_sanity_check_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+        """Setup output directory after sanity check."""
+        self.save_outputs = True
+        self.output_path = os.path.join(trainer.log_dir, "image_logs")
+        if not os.path.exists(self.output_path):
+            Path(self.output_path).mkdir(parents=True, exist_ok=True)
+
+    @rank_zero_only
+    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+        """Generate and save visualizations at validation end."""
+        if not self.save_outputs or trainer.current_epoch % self.log_every_k_epochs != 0:
+            return
+            
+        val_ds = pl_module.val_dataloader().dataset
+        device = pl_module.device
+        logger = trainer.logger
+        
+        n_samples = (
+            pl_module.val_dataloader().batch_size
+            if self.n_samples is None
+            else self.n_samples
+        )
+        
+        pl_module.eval()
+        with torch.no_grad():
+            for i in range(min(n_samples, len(val_ds))):
+                # Get data
+                sample = val_ds[i]
+                if isinstance(sample, dict):
+                    image = sample['image']
+                    mask = sample.get('mask', sample.get('target', None))
+                    path = sample.get('path', f'sample_{i}')
+                else:
+                    image, mask = sample.values() if hasattr(sample, 'values') else sample
+                    path = val_ds.get_path(i) if hasattr(val_ds, 'get_path') else f'sample_{i}'
+                
+                # Prepare tensors
+                image_tensor = image.unsqueeze(0).to(device)
+                
+                # Get prediction
+                prediction = pl_module(image_tensor)
+                
+                # Move to CPU for visualization
+                image_np = image.cpu().numpy()
+                mask_np = mask.cpu().numpy() if mask is not None else None
+                pred_np = prediction.cpu().numpy()
+                
+                # Prepare images for plotting
+                image_rgb = self.prepare_image_to_plot(image_np)
+                
+                # Create comparison visualization
+                if mask_np is not None:
+                    # Ground truth mask
+                    gt_mask, gt_colored = self.prepare_mask_to_plot(mask_np, apply_colors=True)
+                    
+                    # Predicted mask
+                    pred_mask, pred_colored = self.prepare_mask_to_plot(pred_np, apply_colors=True)
+                    
+                    # Create comparison visualization using new method
+                    fig = self.create_comparison_visualization(
+                        image_rgb, gt_mask, gt_colored, pred_mask, pred_colored,
+                        f'Segmentation Results - {path}', show_overlay=self.show_overlay
+                    )
+                    
+                else:
+                    # Only prediction available
+                    pred_mask, pred_colored = self.prepare_mask_to_plot(pred_np, apply_colors=True)
+                    fig = self.create_mask_visualization(
+                        image_rgb, pred_mask, pred_colored, f'Prediction - {path}', show_overlay=self.show_overlay
+                    )
+                
+                # Add legend is handled within visualization methods
+                
+                # Save and log
+                if self.save_outputs:
+                    saved_image = self.save_plot_to_disk(fig, path, trainer.current_epoch)
+                    self.log_data_to_tensorboard(saved_image, path, logger, trainer.current_epoch)
+                
+                plt.close(fig)
+        
+        pl_module.train()  # Return to training mode

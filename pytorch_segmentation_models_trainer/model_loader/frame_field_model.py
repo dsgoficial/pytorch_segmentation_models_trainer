@@ -61,22 +61,7 @@ class FrameFieldModel(nn.Module):
         module_activation: str = None,
         frame_field_activation: str = None,
     ):
-        """[summary]
-
-        Args:
-            segmentation_model (pytorch model): Chosen segmentation module
-            use_batchnorm (bool, optional): Enables the use of batchnorm.
-             Defaults to True.
-            replace_seg_head (bool, optional): Enables computing the segmentation.
-             Defaults to True.
-            compute_crossfield (bool, optional): Enables computing the crossfield.
-             Defaults to True.
-            seg_params (dict, optional): Additional segmentation parameters.
-             Defaults to None.
-
-        Raises:
-            ValueError: [description]
-        """
+        """FrameField Model - same as before, no changes needed"""
         super().__init__()
         self.crossfield_channels = 4
         self.seg_params = {
@@ -117,11 +102,6 @@ class FrameFieldModel(nn.Module):
         self.initialize()
 
     def get_seg_module(self) -> torch.nn.Sequential:
-        """Prepares the seg module
-
-        Returns:
-            torch.nn.Sequential: Sequential module that computes the seg.
-        """
         if not self.replace_seg_head:
             return self.segmentation_model.segmentation_head
         return torch.nn.Sequential(
@@ -141,11 +121,6 @@ class FrameFieldModel(nn.Module):
         )
 
     def get_crossfield_module(self) -> torch.nn.Sequential:
-        """Prepares the crossfield module
-
-        Returns:
-            torch.nn.Sequential: Sequential module that computes the crossfield.
-        """
         if not self.compute_crossfield:
             return None
         return torch.nn.Sequential(
@@ -214,15 +189,6 @@ class FrameFieldModel(nn.Module):
 
     @staticmethod
     def get_out_channels(module):
-        """Method reused from
-        https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning/blob/master/frame_field_learning/model.py
-
-        Args:
-            module ([type]): [description]
-
-        Returns:
-            [type]: [description]
-        """
         if hasattr(module, "out_channels"):
             return module.out_channels
         children = list(module.children())
@@ -232,8 +198,6 @@ class FrameFieldModel(nn.Module):
             last_child = children[-i]
             out_channels = FrameFieldModel.get_out_channels(last_child)
             i += 1
-        # If we get out of the loop but out_channels is None,
-        # then the prev child of the parent module will be checked, etc.
         return out_channels
 
 
@@ -268,10 +232,6 @@ class FrameFieldSegmentationPLModel(Model):
         self.test_dataset = dataset
 
     def get_loss_function(self) -> MultiLoss:
-        """Multi-loss model defined in frame field article
-        Returns:
-            MultiLoss: Multi loss object
-        """
         return build_combined_loss(self.cfg)
 
     def set_encoder_trainable(self, trainable=False):
@@ -314,7 +274,8 @@ class FrameFieldSegmentationPLModel(Model):
         self.set_decoder_trainable(trainable=trainable)
         self.set_seg_module_trainable(trainable=trainable)
 
-    def compute_iou_metrics(self, y_pred, y_true, individual_metrics_dict):
+    def compute_iou_metrics(self, y_pred, y_true, step_prefix="train"):
+        """Compute IoU metrics at different thresholds"""
         iou_thresholds = [0.1, 0.25, 0.5, 0.75, 0.9]
         for iou_threshold in iou_thresholds:
             iou = metrics.iou(
@@ -323,21 +284,23 @@ class FrameFieldSegmentationPLModel(Model):
                 threshold=iou_threshold,
             )
             mean_iou = torch.mean(iou)
-            individual_metrics_dict[f"IoU_{iou_threshold}"] = mean_iou
+            # Log with step prefix for proper grouping
+            self.log(
+                f"iou/{step_prefix}_IoU_{iou_threshold}", 
+                mean_iou,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False
+            )
 
     def compute_loss_norms(self, dl, total_batches):
         self.loss_function.reset_norm()
-
         t = None
         if self.local_rank == 0:
-            t = tqdm(
-                total=total_batches, desc="Init loss norms", leave=False
-            )  # Initialise
-
+            t = tqdm(total=total_batches, desc="Init loss norms", leave=False)
         batch_i = 0
         while batch_i < total_batches:
             batch = next(iter(dl))
-            # Update loss norms
             batch = (
                 tensor_utils.batch_to_cuda(batch)
                 if self.cfg.device == "cuda"
@@ -348,21 +311,19 @@ class FrameFieldSegmentationPLModel(Model):
             if t is not None:
                 t.update(1)
             batch_i += 1
-
-        # Now sync loss norms across GPUs:
         world_size = self.get_world_size()
         if world_size > 1:
             self.loss_function.sync(world_size)
 
     def get_world_size(self):
-        if self.cfg.device == "cpu" or self.cfg.pl_trainer.gpus == 0:
+        if self.cfg.device == "cpu" or self.cfg.pl_trainer.devices == 0:
             return 1
-        elif isinstance(self.cfg.pl_trainer.gpus, list):
-            return len(self.cfg.pl_trainer.gpus)
-        elif self.cfg.pl_trainer.gpus == -1:
+        elif isinstance(self.cfg.pl_trainer.devices, list):
+            return len(self.cfg.pl_trainer.devices)
+        elif self.cfg.pl_trainer.devices == -1:
             return torch.cuda.device_count()
         else:
-            return self.cfg.pl_trainer.gpus
+            return self.cfg.pl_trainer.devices
 
     def training_step(self, batch, batch_idx):
         batch["image"] = (
@@ -371,6 +332,7 @@ class FrameFieldSegmentationPLModel(Model):
             else self.gpu_train_transform(batch["image"])
         )
         pred = self.model(batch["image"])
+        
         if self.use_mixup:
             (
                 batch["mixup_image"],
@@ -384,48 +346,30 @@ class FrameFieldSegmentationPLModel(Model):
                 use_cuda=False if self.cfg.device == "cpu" else True,
             )
             batch["mixup_pred"] = self.model(batch["mixup_image"])
+        
         loss, individual_metrics_dict, extra_dict = self.loss_function(
             pred, batch, epoch=self.current_epoch
         )
-        y_pred = pred["seg"][:, 0, ...]
-        y_true = batch["gt_polygons_image"][:, 0, ...]
+        
+        # Log main loss
+        self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True)
+        
+        # Log individual losses with proper prefixing
+        for key, value in individual_metrics_dict.items():
+            self.log(f"losses/train_{key}", value, on_step=True, on_epoch=True)
+        
+        # Compute and log IoU metrics
         if "seg" in pred:
-            self.compute_iou_metrics(y_pred, y_true, individual_metrics_dict)
-            self.log_dict(
-                individual_metrics_dict,
-                prog_bar=True,
-                on_step=True,
-                on_epoch=True,
-                logger=True,
-                sync_dist=True,
-            )
-        # evaluated_metrics = self.evaluate_metrics(
-        #     y_pred, y_true.long(), step_type='train'
-        # )
-        evaluated_metrics = self.train_metrics(y_pred, y_true.long())
-        tensorboard_logs = {k: {"train": v} for k, v in evaluated_metrics.items()}
-        tensorboard_logs.update(
-            {k: {"train": v} for k, v in individual_metrics_dict.items()}
-        )
-        # use log_dict instead of log
-        self.log_dict(
-            evaluated_metrics,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=False,
-            logger=True,
-            sync_dist=True,
-        )
-        self.log(
-            "train_loss",
-            loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=True,
-        )
-        return {"loss": loss, "log": tensorboard_logs}
+            y_pred = pred["seg"][:, 0, ...]
+            y_true = batch["gt_polygons_image"][:, 0, ...]
+            self.compute_iou_metrics(y_pred, y_true, step_prefix="train")
+            
+            # Log torchmetrics if available
+            if hasattr(self, 'train_metrics'):
+                metrics_output = self.train_metrics(y_pred, y_true.long())
+                self.log_dict(metrics_output, on_step=True, on_epoch=True)
+        
+        return loss
 
     def validation_step(self, batch, batch_idx):
         image = (
@@ -437,80 +381,29 @@ class FrameFieldSegmentationPLModel(Model):
         loss, individual_metrics_dict, extra_dict = self.loss_function(
             pred, batch, epoch=self.current_epoch
         )
-        y_pred = pred["seg"][:, 0, ...]
-        y_true = batch["gt_polygons_image"][:, 0, ...]
+        
+        # Log main loss
+        self.log("loss/val", loss, on_step=False, on_epoch=True, prog_bar=True)
+        
+        # Log individual losses with proper prefixing
+        for key, value in individual_metrics_dict.items():
+            self.log(f"losses/val_{key}", value, on_step=False, on_epoch=True)
+        
+        # Compute and log IoU metrics
         if "seg" in pred:
-            self.compute_iou_metrics(y_pred, y_true, individual_metrics_dict)
-            self.log_dict(
-                individual_metrics_dict,
-                prog_bar=True,
-                on_step=False,
-                on_epoch=True,
-                logger=True,
-                sync_dist=True,
-            )
-        # evaluated_metrics = self.evaluate_metrics(
-        #     y_pred, y_true.long(), step_type='val'
-        # )
-        evaluated_metrics = self.val_metrics(y_pred, y_true.long())
-        tensorboard_logs = {k: {"val": v} for k, v in evaluated_metrics.items()}
-        tensorboard_logs.update(
-            {k: {"val": v} for k, v in individual_metrics_dict.items()}
-        )
-        # use log_dict instead of log
-        self.log_dict(
-            evaluated_metrics,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-            sync_dist=True,
-            logger=False,
-        )
-        self.log("validation_loss", loss, on_step=True, on_epoch=True, sync_dist=True)
-        return {"val_loss": loss, "log": tensorboard_logs}
+            y_pred = pred["seg"][:, 0, ...]
+            y_true = batch["gt_polygons_image"][:, 0, ...]
+            self.compute_iou_metrics(y_pred, y_true, step_prefix="val")
+            
+            # Log torchmetrics if available
+            if hasattr(self, 'val_metrics'):
+                metrics_output = self.val_metrics(y_pred, y_true.long())
+                self.log_dict(metrics_output, on_step=False, on_epoch=True)
+        
+        return loss
 
-    def training_epoch_end(self, outputs):
-        avg_loss = torch.stack([x["loss"] for x in outputs]).mean()
-        tensorboard_logs = {"avg_loss": {"train": avg_loss}}
-        tensorboard_logs.update(
-            self.compute_average_metrics(outputs, self.train_metrics)
-        )
-        tensorboard_logs.update(
-            {
-                "avg_"
-                + name: {
-                    "train": torch.stack([x["log"][name]["train"] for x in outputs])
-                    .mean()
-                    .detach()
-                }
-                for name in outputs[0]["log"].keys()
-                if name not in list(map("train_{0}".format, self.train_metrics.keys()))
-            }
-        )
-        self.log_dict(tensorboard_logs, logger=True)
-        self.log("avg_train_loss", avg_loss, logger=True)
-
-    def validation_epoch_end(self, outputs):
-        # OPTIONAL
-        avg_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
-        tensorboard_logs = {"avg_loss": {"val": avg_loss}}
-        tensorboard_logs.update(
-            self.compute_average_metrics(outputs, self.val_metrics, step_type="val")
-        )
-        tensorboard_logs.update(
-            {
-                "avg_"
-                + name: {
-                    "val": torch.stack([x["log"][name]["val"] for x in outputs])
-                    .mean()
-                    .detach()
-                }
-                for name in outputs[0]["log"].keys()
-                if name not in self.train_metrics.keys()
-            }
-        )
-        self.log_dict(tensorboard_logs, logger=True)
-        self.log("avg_train_loss", avg_loss, logger=True)
+    # Removed training_epoch_end and validation_epoch_end
+    # Lightning 2.0+ handles aggregation automatically
 
     def _process_test(self, batch):
         with torch.no_grad():
@@ -519,11 +412,8 @@ class FrameFieldSegmentationPLModel(Model):
         return seg_batch, crossfield_batch
 
     def _process_test_like_inference_processor(self, batch):
-        ids = torch.unique_consecutive(
-            batch["tile_image_idx"]
-        )  # we use unique_consecutive instead of unique because we want to preserve the order of ids
+        ids = torch.unique_consecutive(batch["tile_image_idx"])
         with torch.no_grad():
-            # tiles = batch.pop("tiles")
             batch_predictions = self.model(batch["tiles"])
         seg_batch, crossfield_batch = batch_predictions.values()
         seg_batch = torch.cat(
@@ -550,13 +440,11 @@ class FrameFieldSegmentationPLModel(Model):
             ],
             dim=0,
         )
-
         return seg_batch, crossfield_batch
 
     def _integrate_tiles(
         self, tensor_tiles: torch.Tensor, tiler, original_shape, pad_if_needed=True
     ):
-        """tiles: B x C x H x W"""
         merger = TileMerger(
             tiler.target_shape,
             tensor_tiles.shape[1],
@@ -578,5 +466,4 @@ class FrameFieldSegmentationPLModel(Model):
             )
             else self._process_test(batch)
         )
-
         return seg_batch, crossfield_batch
