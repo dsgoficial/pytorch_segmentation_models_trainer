@@ -16,7 +16,7 @@ pytorch_toolbelt==0.4.3
 descartes==1.1.0
 fiona>=1.8.20
 psycopg2-binary
-shapely>=1.8.0
+shapely>=2.0.0
 geopandas==0.9.0
 geoalchemy2==0.9.0
 rasterio
