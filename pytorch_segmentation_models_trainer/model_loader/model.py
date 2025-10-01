@@ -158,12 +158,12 @@ class Model(pl.LightningModule):
         loss = self.loss_function(predicted_masks, masks)
         
         # Log loss with forward slash for grouping
-        self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         
         # Compute and log metrics - automatically prefixed with train/
         if hasattr(self, 'train_metrics'):
             metrics = self.train_metrics(predicted_masks, masks)
-            self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=False)
+            self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
         
         return loss
 
@@ -174,12 +174,12 @@ class Model(pl.LightningModule):
         loss = self.loss_function(predicted_masks, masks)
         
         # Log loss with forward slash for grouping
-        self.log("loss/val", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("loss/val", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         
         # Compute and log metrics - automatically prefixed with val/
         if hasattr(self, 'val_metrics'):
             metrics = self.val_metrics(predicted_masks, masks)
-            self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False)
+            self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
         
         return loss
 

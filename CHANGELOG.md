@@ -1,3 +1,9 @@
+# Version 1.0.0
+
+- Updated to newest pytorch lightning;
+- Semantic Segmentation model updated for multi class;
+- New image callback for multi class semantic segmentation;
+
 # Version 0.17.0
 
 - New evaluation metrics;
