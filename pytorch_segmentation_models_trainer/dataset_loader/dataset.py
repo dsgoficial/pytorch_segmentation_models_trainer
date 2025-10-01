@@ -136,14 +136,14 @@ class AbstractDataset(Dataset):
             image_path if not image_path.startswith(os.path.sep) else image_path[1::],
         )
 
-    def load_image(self, idx, key=None, is_mask=False, force_rgb=False):
+    def load_image(self, idx, key=None, is_mask=False, force_rgb=False, is_binary_mask=True):
         key = self.image_key if key is None else key
         image_path = self.get_path(idx, key=key)
         return self.load_image_from_path(
-            image_path, is_mask=is_mask, force_rgb=force_rgb
+            image_path, is_mask=is_mask, force_rgb=force_rgb, is_binary_mask=is_binary_mask
         )
 
-    def load_image_from_path(self, image_path, is_mask=False, force_rgb=False):
+    def load_image_from_path(self, image_path, is_mask=False, force_rgb=False, is_binary_mask=True):
         image = (
             Image.open(image_path)
             if not is_mask
@@ -152,7 +152,11 @@ class AbstractDataset(Dataset):
         if force_rgb:
             image = image.convert("RGB")
         image = np.array(image)
-        return (image > 0).astype(np.uint8) if is_mask else image
+        if not is_mask:
+            return image
+        if is_binary_mask:
+            return (image > 0).astype(np.uint8)
+        return image.astype(np.uint8)
 
     def to_tensor(self, x):
         return x if isinstance(x, torch.Tensor) else torch.from_numpy(x)
@@ -313,6 +317,7 @@ class SegmentationDataset(AbstractDataset):
         image_key=None,
         mask_key=None,
         n_first_rows_to_read=None,
+        n_classes=2,
     ) -> None:
         super(SegmentationDataset, self).__init__(
             input_csv_path=input_csv_path,
@@ -323,12 +328,13 @@ class SegmentationDataset(AbstractDataset):
             mask_key=mask_key,
             n_first_rows_to_read=n_first_rows_to_read,
         )
+        self.n_classes = n_classes
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         idx = idx % self.len
 
         image = self.load_image(idx, key=self.image_key)
-        mask = self.load_image(idx, key=self.mask_key, is_mask=True)
+        mask = self.load_image(idx, key=self.mask_key, is_mask=True, is_binary_mask=(self.n_classes == 2))
         result = (
             {"image": image, "mask": mask}
             if self.transform is None
