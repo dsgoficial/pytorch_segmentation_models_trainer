@@ -29,7 +29,6 @@ import pytorch_lightning as pl
 import seaborn as sns
 import torch
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
-from sklearn.metrics import confusion_matrix
 import torchmetrics
 
 
@@ -63,9 +62,8 @@ class ConfusionMatrixCallback(pl.callbacks.Callback):
         self.output_path = output_path
         self.save_outputs = False
         
-        # Inicializar as listas para coletar predições e targets
-        self.val_predictions = []
-        self.val_targets = []
+        # Use TorchMetrics for efficient memory usage
+        self.confmat = None
 
     def on_sanity_check_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         """Configurar o path de saída após sanity check."""
@@ -74,6 +72,13 @@ class ConfusionMatrixCallback(pl.callbacks.Callback):
             self.output_path = os.path.join(trainer.log_dir, "confusion_matrices")
         if not os.path.exists(self.output_path):
             Path(self.output_path).mkdir(parents=True, exist_ok=True)
+
+    def on_validation_epoch_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+        """Inicializar/resetar a matriz de confusão no início da validação."""
+        self.confmat = torchmetrics.ConfusionMatrix(
+            task="multiclass",
+            num_classes=self.num_classes
+        ).to(pl_module.device)
 
     def on_validation_batch_end(
         self, 
@@ -84,7 +89,10 @@ class ConfusionMatrixCallback(pl.callbacks.Callback):
         batch_idx: int, 
         dataloader_idx: int = 0
     ):
-        """Coletar predições e targets durante validação."""
+        """Atualizar matriz de confusão durante validação."""
+        if self.confmat is None:
+            return
+            
         if hasattr(batch, 'keys'):
             # Para dataset que retorna dict
             images, targets = batch['image'], batch['mask']
@@ -107,53 +115,28 @@ class ConfusionMatrixCallback(pl.callbacks.Callback):
         elif targets.dim() == 3:  # Already [B, H, W]
             pass
         
-        # Flatten tensors e mover para CPU
-        predictions_flat = predictions.flatten().cpu().numpy()
-        targets_flat = targets.flatten().cpu().numpy()
+        # Flatten tensors - permanece na GPU para eficiência
+        predictions_flat = predictions.flatten()
+        targets_flat = targets.flatten()
         
-        assert predictions_flat.shape == targets_flat.shape, \
-            f"Shape mismatch: predictions {predictions_flat.shape} vs targets {targets_flat.shape}"
-        
-        # Armazenar para uso posterior
-        self.val_predictions.extend(predictions_flat)
-        self.val_targets.extend(targets_flat)
+        # Atualizar matriz de confusão (operação eficiente na GPU)
+        self.confmat.update(predictions_flat, targets_flat)
 
     @rank_zero_only
     def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         """Plotar matriz de confusão no final da época de validação."""
-        if not self.save_outputs:
-            return
-        
-        if len(self.val_predictions) != len(self.val_targets):
-            print(f"WARNING: Prediction count ({len(self.val_predictions)}) != "
-                f"Target count ({len(self.val_targets)}). Skipping confusion matrix.")
-            self.val_predictions = []
-            self.val_targets = []
+        if not self.save_outputs or self.confmat is None:
             return
         
         current_epoch = trainer.current_epoch
         
         # Verificar se deve plotar nesta época
         if current_epoch % self.log_every_n_epochs != 0:
-            # Limpar listas para próxima época
-            self.val_predictions = []
-            self.val_targets = []
-            return
-        
-        if len(self.val_predictions) == 0 or len(self.val_targets) == 0:
             return
         
         try:
-            # Converter para numpy arrays
-            predictions = np.array(self.val_predictions)
-            targets = np.array(self.val_targets)
-            
-            # Calcular matriz de confusão
-            cm = confusion_matrix(
-                targets, 
-                predictions, 
-                labels=list(range(self.num_classes))
-            )
+            # Computar matriz de confusão final e mover para CPU
+            cm = self.confmat.compute().cpu().numpy()
             
             # Normalizar se solicitado
             if self.normalize == 'true':
@@ -220,33 +203,35 @@ class ConfusionMatrixCallback(pl.callbacks.Callback):
             plt.close()
             
             # Calcular métricas adicionais por classe
-            if self.normalize != 'true':  # Só calcular se não normalizado
-                class_accuracy = cm.diagonal() / cm.sum(axis=1)
-                class_precision = cm.diagonal() / cm.sum(axis=0)
-                
-                # Log métricas por classe
-                for i, class_name in enumerate(self.class_names):
-                    if trainer.logger and not np.isnan(class_accuracy[i]):
-                        trainer.logger.experiment.add_scalar(
-                            f"metrics_by_class/accuracy_{class_name}",
-                            class_accuracy[i],
-                            current_epoch
-                        )
-                    if trainer.logger and not np.isnan(class_precision[i]):
-                        trainer.logger.experiment.add_scalar(
-                            f"metrics_by_class/precision_{class_name}",
-                            class_precision[i],
-                            current_epoch
-                        )
+            # Usar a matriz não-normalizada para cálculos
+            if self.normalize is None:
+                cm_raw = cm
+            else:
+                # Recomputar matriz sem normalização para métricas
+                cm_raw = self.confmat.compute().cpu().numpy()
+            
+            class_accuracy = cm_raw.diagonal() / cm_raw.sum(axis=1)
+            class_precision = cm_raw.diagonal() / cm_raw.sum(axis=0)
+            
+            # Log métricas por classe
+            for i, class_name in enumerate(self.class_names):
+                if trainer.logger and not np.isnan(class_accuracy[i]):
+                    trainer.logger.experiment.add_scalar(
+                        f"metrics_by_class/accuracy_{class_name}",
+                        class_accuracy[i],
+                        current_epoch
+                    )
+                if trainer.logger and not np.isnan(class_precision[i]):
+                    trainer.logger.experiment.add_scalar(
+                        f"metrics_by_class/precision_{class_name}",
+                        class_precision[i],
+                        current_epoch
+                    )
         
         except Exception as e:
             print(f"Erro ao plotar matriz de confusão: {e}")
-        
-        finally:
-            # Limpar listas para próxima época
-            self.val_predictions = []
-            self.val_targets = []
-
+            import traceback
+            traceback.print_exc()
 
 class ClassificationReportCallback(pl.callbacks.Callback):
     """
