@@ -9,7 +9,7 @@ albumentations==1.0.0
 pandas
 tensorboardX
 pillow
-matplotlib>=3.8.0
+matplotlib
 scipy
 numpy
 pytorch_toolbelt==0.4.3
