@@ -1,5 +1,5 @@
-torch==2.4.1
-torchvision==0.23.0
+torch
+torchvision
 torchmetrics==1.8.2
 pytorch_lightning==2.5.5
 torch_scatter
