@@ -4,6 +4,7 @@
 - Semantic Segmentation model updated for multi class;
 - New image callback for multi class semantic segmentation;
 - Added improvements for OneCycleLR scheduler (automatic calculation of steps_per_epoch);
+- Added band selection on SemanticSegmentation dataset;
 
 # Version 0.17.0
 
