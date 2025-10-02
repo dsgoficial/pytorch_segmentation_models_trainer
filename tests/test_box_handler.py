@@ -199,7 +199,7 @@ class Test_BoxHandler(unittest.TestCase):
                 "labels": torch.tensor(1),
             },
         ]
-        self.assertEquals(len(merged_dict_list), len(expected_output))
+        self.assertEqual(len(merged_dict_list), len(expected_output))
         for expected, actual in zip(expected_output, merged_dict_list):
             for key, value in expected.items():
                 torch.testing.assert_close(value, actual[key])
