@@ -70,48 +70,90 @@ class Model(pl.LightningModule):
     def setup(self, stage=None):
         """Extract dataset info when dataloaders are ready"""
         if stage == 'fit' or stage is None:
-            self._compute_steps_per_epoch_from_trainer()
+            self._compute_steps_from_config()
     
-    def _compute_steps_per_epoch_from_trainer(self):
-        """Compute steps_per_epoch from trainer's dataloader"""
+    def _compute_steps_from_config(self):
+        """
+        Compute steps_per_epoch by reading the CSV file from config.
+        This is called during configure_optimizers before trainer is available.
+        """
         try:
-            train_dataloader = None
+            # Get train_dataset config
+            if 'train_dataset' not in self.cfg:
+                print("⚠️  'train_dataset' not found in config")
+                return None
             
-            if hasattr(self.trainer, 'train_dataloader') and self.trainer.train_dataloader is not None:
-                train_dataloader = self.trainer.train_dataloader
-            elif hasattr(self.trainer, 'datamodule') and self.trainer.datamodule is not None:
-                if hasattr(self.trainer.datamodule, 'train_dataloader'):
-                    train_dataloader = self.trainer.datamodule.train_dataloader()
+            dataset_cfg = self.cfg.train_dataset
             
-            if train_dataloader is None:
-                print("⚠️  Warning: Could not access training dataloader yet")
-                return
+            # Get CSV path
+            if 'input_csv_path' not in dataset_cfg:
+                print("⚠️  'input_csv_path' not found in train_dataset config")
+                return None
             
-            if hasattr(train_dataloader, 'dataset'):
-                dataset_size = len(train_dataloader.dataset)
-            elif hasattr(train_dataloader, '__len__'):
-                dataset_size = len(train_dataloader) * getattr(train_dataloader, 'batch_size', 1)
-            else:
-                print("⚠️  Warning: Cannot determine dataset size")
-                return
+            csv_path = dataset_cfg.input_csv_path
             
-            batch_size = getattr(train_dataloader, 'batch_size', 1)
-            accumulate_grad_batches = getattr(self.trainer, 'accumulate_grad_batches', 1)
+            # Read CSV to get dataset size
+            import pandas as pd
+            import os
             
-            self.steps_per_epoch = dataset_size // (batch_size * accumulate_grad_batches)
+            if not os.path.exists(csv_path):
+                print(f"⚠️  CSV file not found: {csv_path}")
+                return None
             
+            df = pd.read_csv(csv_path)
+            dataset_size = len(df)
+            
+            # Get batch size from config
+            batch_size = None
+            
+            # Try data_loader.batch_size first
+            if 'data_loader' in dataset_cfg:
+                if 'batch_size' in dataset_cfg.data_loader:
+                    batch_size = dataset_cfg.data_loader.batch_size
+            
+            # Fallback to hyperparameters.batch_size
+            if batch_size is None and 'hyperparameters' in self.cfg:
+                if 'batch_size' in self.cfg.hyperparameters:
+                    batch_size = self.cfg.hyperparameters.batch_size
+            
+            # Fallback to top-level batch_size
+            if batch_size is None and 'batch_size' in self.cfg:
+                batch_size = self.cfg.batch_size
+            
+            if batch_size is None:
+                print("⚠️  Could not find batch_size in config")
+                return None
+            
+            # Get gradient accumulation steps
+            accumulate_grad_batches = 1
+            
+            # Try from pl_trainer config
+            if 'pl_trainer' in self.cfg:
+                if 'accumulate_grad_batches' in self.cfg.pl_trainer:
+                    accumulate_grad_batches = self.cfg.pl_trainer.accumulate_grad_batches
+            
+            # Calculate steps per epoch
+            steps_per_epoch = dataset_size // (batch_size * accumulate_grad_batches)
+            
+            # Print summary
             print(f"\n{'='*60}")
-            print(f"✅ AUTOMATIC TRAINING CONFIGURATION")
+            print(f"✅ AUTO-COMPUTED STEPS_PER_EPOCH FROM CONFIG")
             print(f"{'='*60}")
-            print(f"Dataset size:           {dataset_size:>10,}")
+            print(f"CSV path:               {csv_path}")
+            print(f"Dataset size:           {dataset_size:>10,} samples")
             print(f"Batch size:             {batch_size:>10}")
             print(f"Gradient accumulation:  {accumulate_grad_batches:>10}")
-            print(f"Steps per epoch:        {self.steps_per_epoch:>10,}")
+            print(f"Effective batch size:   {batch_size * accumulate_grad_batches:>10}")
+            print(f"Steps per epoch:        {steps_per_epoch:>10,}")
             print(f"{'='*60}\n")
             
+            return steps_per_epoch
+            
         except Exception as e:
-            print(f"⚠️  Could not compute steps_per_epoch: {e}")
-            self.steps_per_epoch = None
+            print(f"⚠️  Error computing steps_per_epoch from config: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def get_model(self):
         model = instantiate(self.cfg.model, _recursive_=False)
@@ -150,47 +192,67 @@ class Model(pl.LightningModule):
         return self.model(x)
 
     def configure_optimizers(self):
+        """Configure optimizer and schedulers with automatic OneCycleLR setup"""
         optimizer = self.get_optimizer()
         scheduler_list = []
         
         if "scheduler_list" not in self.cfg:
             return [optimizer], scheduler_list
         
-        if self.steps_per_epoch is None:
-            self._compute_steps_per_epoch_from_trainer()
-        
         for item in self.cfg.scheduler_list:
             dict_item = dict(item)
             
+            # Check if this is OneCycleLR scheduler
             scheduler_target = item.scheduler.get('_target_', '')
             is_one_cycle = 'OneCycleLR' in scheduler_target
             
-            if not ('OneCycleLR' in scheduler_target):
+            if is_one_cycle:
+                scheduler_config = dict(item.scheduler)
+                
+                # Check if steps_per_epoch needs to be set automatically
+                needs_auto_steps = (
+                    'steps_per_epoch' not in scheduler_config or 
+                    scheduler_config.get('steps_per_epoch') in [None, 'auto', -1]
+                )
+                
+                if needs_auto_steps:
+                    # Compute steps_per_epoch from config
+                    steps_per_epoch = self._compute_steps_from_config()
+                    
+                    if steps_per_epoch is not None:
+                        scheduler_config['steps_per_epoch'] = steps_per_epoch
+                        print(f"✅ OneCycleLR: Using steps_per_epoch = {steps_per_epoch:,}")
+                    else:
+                        raise ValueError(
+                            "\n" + "="*60 + "\n"
+                            "ERROR: Cannot determine steps_per_epoch for OneCycleLR!\n"
+                            "="*60 + "\n"
+                            "Could not automatically detect dataset size.\n"
+                            "Please manually specify in your config:\n\n"
+                            "scheduler_list:\n"
+                            "  - scheduler:\n"
+                            "      _target_: torch.optim.lr_scheduler.OneCycleLR\n"
+                            "      steps_per_epoch: 4092  # dataset_size / batch_size\n"
+                            "      max_lr: 0.001\n"
+                            "      epochs: 200\n"
+                            "\n"
+                            "To calculate: dataset_size / batch_size\n"
+                            "Example: 98201 / 24 = 4092\n"
+                            "="*60
+                        )
+                else:
+                    provided_steps = scheduler_config['steps_per_epoch']
+                    print(f"ℹ️  OneCycleLR: Using provided steps_per_epoch = {provided_steps:,}")
+                
+                dict_item["scheduler"] = instantiate(
+                    scheduler_config, optimizer=optimizer, _recursive_=False
+                )
+            else:
+                # Other schedulers - instantiate normally
                 dict_item["scheduler"] = instantiate(
                     item.scheduler, optimizer=optimizer, _recursive_=False
                 )
-                scheduler_list.append(dict_item)
-                continue
-            scheduler_config = dict(item.scheduler)
             
-            needs_auto_steps = (
-                'steps_per_epoch' not in scheduler_config or 
-                scheduler_config.get('steps_per_epoch') in [None, 'auto', -1]
-            )
-            
-            if needs_auto_steps:
-                if self.steps_per_epoch is not None:
-                    scheduler_config['steps_per_epoch'] = self.steps_per_epoch
-                    print(f"✅ OneCycleLR: steps_per_epoch = {self.steps_per_epoch:,}")
-                else:
-                    raise ValueError("Cannot determine steps_per_epoch for OneCycleLR!")
-            else:
-                provided_steps = scheduler_config['steps_per_epoch']
-                print(f"ℹ️  OneCycleLR: Using provided steps_per_epoch = {provided_steps:,}")
-            
-            dict_item["scheduler"] = instantiate(
-                scheduler_config, optimizer=optimizer, _recursive_=False
-            )
             scheduler_list.append(dict_item)
         
         return [optimizer], scheduler_list

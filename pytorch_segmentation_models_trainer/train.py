@@ -80,6 +80,7 @@ def train(cfg: DictConfig):
                 break
         if not is_norm_loss_added:
             callback_list.append(FrameFieldComputeWeightNormLossesCallback())
+    model.setup('fit')
     trainer = Trainer(**cfg.pl_trainer, logger=trainer_logger, callbacks=callback_list)
     trainer.fit(model)
     return trainer
