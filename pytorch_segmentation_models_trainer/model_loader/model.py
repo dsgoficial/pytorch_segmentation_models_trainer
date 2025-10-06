@@ -72,6 +72,54 @@ class Model(pl.LightningModule):
         if stage == 'fit' or stage is None:
             self._compute_steps_from_config()
     
+    def _compute_device_count(self):
+        """
+        Compute the number of devices that will be used for training.
+        Handles various PyTorch Lightning device specifications.
+        """
+        device_count = 1  # Default to single device
+        accelerator = "auto"  # Default accelerator
+        
+        # Get accelerator and devices from config
+        if 'hyperparameters' in self.cfg:
+            accelerator = self.cfg.hyperparameters.get('accelerator', 'auto')
+            devices = self.cfg.hyperparameters.get('devices', 'auto')
+        elif 'pl_trainer' in self.cfg:
+            accelerator = self.cfg.pl_trainer.get('accelerator', 'auto')
+            devices = self.cfg.pl_trainer.get('devices', 'auto')
+        else:
+            devices = 'auto'
+        
+        # Handle different device specifications
+        if devices in ['auto', -1, '-1']:
+            # Use all available devices for the accelerator
+            if accelerator in ['gpu', 'cuda', 'auto']:
+                device_count = torch.cuda.device_count() if torch.cuda.is_available() else 1
+            else:
+                device_count = 1  # CPU, MPS, etc.
+        
+        elif isinstance(devices, int):
+            # Specific number of devices
+            device_count = max(1, devices)
+        
+        elif isinstance(devices, (list, tuple)):
+            # List of device IDs
+            device_count = len(devices)
+        
+        elif isinstance(devices, str):
+            # Handle string specifications like "0,1" or "2"
+            if ',' in devices:
+                device_count = len(devices.split(','))
+            else:
+                try:
+                    device_count = int(devices)
+                except ValueError:
+                    # Fallback for unexpected string formats
+                    device_count = 1
+        
+        return max(1, device_count)  # Ensure at least 1
+
+
     def _compute_steps_from_config(self):
         """
         Compute steps_per_epoch by reading the CSV file from config.
@@ -103,37 +151,44 @@ class Model(pl.LightningModule):
             df = pd.read_csv(csv_path)
             dataset_size = len(df)
             
-            # Get batch size from config
+            # Get batch size from config (check multiple locations)
             batch_size = None
             
             # Try data_loader.batch_size first
-            if 'data_loader' in dataset_cfg:
-                if 'batch_size' in dataset_cfg.data_loader:
-                    batch_size = dataset_cfg.data_loader.batch_size
+            if 'data_loader' in dataset_cfg and 'batch_size' in dataset_cfg.data_loader:
+                batch_size = dataset_cfg.data_loader.batch_size
             
             # Fallback to hyperparameters.batch_size
             if batch_size is None and 'hyperparameters' in self.cfg:
-                if 'batch_size' in self.cfg.hyperparameters:
-                    batch_size = self.cfg.hyperparameters.batch_size
+                batch_size = self.cfg.hyperparameters.get('batch_size')
             
             # Fallback to top-level batch_size
-            if batch_size is None and 'batch_size' in self.cfg:
-                batch_size = self.cfg.batch_size
+            if batch_size is None:
+                batch_size = self.cfg.get('batch_size')
             
             if batch_size is None:
                 print("⚠️  Could not find batch_size in config")
                 return None
             
+            # Compute device count using improved method
+            device_count = self._compute_device_count()
+            
             # Get gradient accumulation steps
             accumulate_grad_batches = 1
             
-            # Try from pl_trainer config
-            if 'pl_trainer' in self.cfg:
-                if 'accumulate_grad_batches' in self.cfg.pl_trainer:
-                    accumulate_grad_batches = self.cfg.pl_trainer.accumulate_grad_batches
+            # Check both hyperparameters and pl_trainer config
+            if 'hyperparameters' in self.cfg:
+                accumulate_grad_batches = self.cfg.hyperparameters.get(
+                    'accumulate_grad_batches', 1
+                )
+            elif 'pl_trainer' in self.cfg:
+                accumulate_grad_batches = self.cfg.pl_trainer.get(
+                    'accumulate_grad_batches', 1
+                )
             
             # Calculate steps per epoch
-            steps_per_epoch = dataset_size // (batch_size * accumulate_grad_batches)
+            effective_batch_size = batch_size * accumulate_grad_batches * device_count
+            steps_per_epoch = dataset_size // effective_batch_size
             
             # Print summary
             print(f"\n{'='*60}")
@@ -142,8 +197,9 @@ class Model(pl.LightningModule):
             print(f"CSV path:               {csv_path}")
             print(f"Dataset size:           {dataset_size:>10,} samples")
             print(f"Batch size:             {batch_size:>10}")
+            print(f"Devices:                {device_count:>10}")
             print(f"Gradient accumulation:  {accumulate_grad_batches:>10}")
-            print(f"Effective batch size:   {batch_size * accumulate_grad_batches:>10}")
+            print(f"Effective batch size:   {effective_batch_size:>10}")
             print(f"Steps per epoch:        {steps_per_epoch:>10,}")
             print(f"{'='*60}\n")
             
