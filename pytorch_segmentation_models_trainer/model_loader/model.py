@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+import logging
 import albumentations as A
 import pytorch_lightning as pl
 import torchmetrics
@@ -27,8 +28,11 @@ from hydra.utils import instantiate
 
 from torch.utils.data import DataLoader
 
-from typing import List, Any
+from typing import List, Any, Union, Dict, Tuple
 from pytorch_segmentation_models_trainer.utils.model_utils import replace_activation
+from pytorch_segmentation_models_trainer.custom_losses.base_loss import MultiLoss
+
+logger = logging.getLogger(__name__)
 
 
 class Model(pl.LightningModule):
@@ -41,6 +45,9 @@ class Model(pl.LightningModule):
         self.train_ds = instantiate(self.cfg.train_dataset, _recursive_=False)
         self.val_ds = instantiate(self.cfg.val_dataset, _recursive_=False)
         self.loss_function = self.get_loss_function()
+        
+        # NEW: Determine if using compound loss (MultiLoss)
+        self.use_compound_loss = isinstance(self.loss_function, MultiLoss)
         
         # Save hyperparameters for better checkpointing
         self.save_hyperparameters(ignore=['model', 'loss_function', 'train_ds', 'val_ds'])
@@ -66,6 +73,11 @@ class Model(pl.LightningModule):
             else self.get_gpu_augmentations(self.cfg.val_dataset.gpu_augmentation_list)
         )
         self.steps_per_epoch = None
+        
+        # NEW: Log loss configuration
+        logger.info(f"Initialized Model with loss function: {self.loss_function}")
+        if self.use_compound_loss:
+            logger.info(f"Using compound loss with {len(self.loss_function.loss_funcs)} components")
     
     def setup(self, stage=None):
         """Extract dataset info when dataloaders are ready"""
@@ -118,7 +130,6 @@ class Model(pl.LightningModule):
                     device_count = 1
         
         return max(1, device_count)  # Ensure at least 1
-
 
     def _compute_steps_from_config(self):
         """
@@ -228,8 +239,47 @@ class Model(pl.LightningModule):
             *[instantiate(aug, _recursive_=False) for aug in augmentation_list]
         )
 
-    def get_loss_function(self):
-        return instantiate(self.cfg.loss, _recursive_=False)
+    def get_loss_function(self) -> Union[nn.Module, MultiLoss]:
+        """
+        Get the loss function from configuration.
+        
+        Supports three modes:
+        1. NEW: Compound loss via loss_params.compound_loss (recommended)
+        2. LEGACY: Multi loss via loss_params.multi_loss (backward compatible)
+        3. SIMPLE: Direct loss specification via cfg.loss
+        
+        Returns:
+            Loss function (can be MultiLoss or simple nn.Module)
+        """
+        # Check for compound loss configuration (NEW)
+        if hasattr(self.cfg, 'loss_params') and hasattr(self.cfg.loss_params, 'compound_loss'):
+            if self.cfg.loss_params.compound_loss is not None:
+                logger.info("Building compound loss from loss_params.compound_loss")
+                from pytorch_segmentation_models_trainer.custom_losses.loss_builder import (
+                    build_compound_loss_from_config
+                )
+                return build_compound_loss_from_config(self.cfg.loss_params.compound_loss)
+        
+        # Check for legacy multi_loss configuration
+        if hasattr(self.cfg, 'loss_params') and hasattr(self.cfg.loss_params, 'multi_loss'):
+            logger.info("Building loss from legacy multi_loss configuration")
+            from pytorch_segmentation_models_trainer.custom_losses.loss_builder import (
+                build_loss_from_config
+            )
+            return build_loss_from_config(self.cfg)
+        
+        # Fall back to simple loss specification
+        if "loss" in self.cfg:
+            logger.info("Building simple loss from cfg.loss")
+            return instantiate(self.cfg.loss, _recursive_=False)
+        
+        # If nothing is specified, raise an error
+        raise ValueError(
+            "No loss configuration found. Please specify one of:\n"
+            "  - cfg.loss_params.compound_loss (recommended)\n"
+            "  - cfg.loss_params.multi_loss (legacy)\n"
+            "  - cfg.loss (simple)"
+        )
 
     def get_optimizer(self):
         return instantiate(
@@ -349,14 +399,79 @@ class Model(pl.LightningModule):
             else 2,
         )
 
+    def _compute_loss(
+        self, 
+        predicted_masks: torch.Tensor, 
+        masks: torch.Tensor
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], Dict[str, Any]]:
+        """
+        Compute loss handling both simple and compound loss functions.
+        
+        Args:
+            predicted_masks: Model predictions
+            masks: Ground truth masks
+            
+        Returns:
+            Tuple of (total_loss, individual_losses_dict, extra_info_dict)
+            For simple losses, individual_losses_dict will be empty
+        """
+        if self.use_compound_loss:
+            # Compound loss returns (total_loss, individual_losses, extra_info)
+            # Need to handle different batch formats
+            if isinstance(masks, dict):
+                # FrameField-style batch with gt_polygons_image
+                pred_batch = {"seg": predicted_masks}
+                gt_batch = masks
+            else:
+                # Simple segmentation batch
+                pred_batch = predicted_masks
+                gt_batch = masks
+            
+            return self.loss_function(
+                pred_batch, 
+                gt_batch, 
+                normalize=True,
+                epoch=self.current_epoch
+            )
+        else:
+            # Simple loss just returns scalar
+            loss = self.loss_function(predicted_masks, masks)
+            return loss, {}, {}
+
     def training_step(self, batch, batch_idx):
+        """Training step - now supports both simple and compound losses."""
         images, masks = batch.values()
         masks = masks.long()
         predicted_masks = self(images)
-        loss = self.loss_function(predicted_masks, masks)
         
-        # Log loss with forward slash for grouping
+        # Compute loss (handles both simple and compound)
+        loss, individual_losses, extra_info = self._compute_loss(predicted_masks, masks)
+        
+        # Log total loss
         self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        
+        # NEW: Log individual losses if using compound loss
+        if individual_losses:
+            for loss_name, loss_value in individual_losses.items():
+                self.log(
+                    f"losses/train_{loss_name}", 
+                    loss_value, 
+                    on_step=True, 
+                    on_epoch=True,
+                    sync_dist=True
+                )
+        
+        # NEW: Log extra info if available
+        if extra_info:
+            for loss_name, extra_dict in extra_info.items():
+                for key, value in extra_dict.items():
+                    self.log(
+                        f"extra/train_{loss_name}_{key}",
+                        value,
+                        on_step=True,
+                        on_epoch=True,
+                        sync_dist=True
+                    )
         
         # Compute and log metrics - automatically prefixed with train/
         if hasattr(self, 'train_metrics'):
@@ -366,13 +481,39 @@ class Model(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """Validation step - now supports both simple and compound losses."""
         images, masks = batch.values()
         masks = masks.long()
         predicted_masks = self(images)
-        loss = self.loss_function(predicted_masks, masks)
         
-        # Log loss with forward slash for grouping
+        # Compute loss (handles both simple and compound)
+        loss, individual_losses, extra_info = self._compute_loss(predicted_masks, masks)
+        
+        # Log total loss
         self.log("loss/val", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        
+        # NEW: Log individual losses if using compound loss
+        if individual_losses:
+            for loss_name, loss_value in individual_losses.items():
+                self.log(
+                    f"losses/val_{loss_name}",
+                    loss_value,
+                    on_step=False,
+                    on_epoch=True,
+                    sync_dist=True
+                )
+        
+        # NEW: Log extra info if available
+        if extra_info:
+            for loss_name, extra_dict in extra_info.items():
+                for key, value in extra_dict.items():
+                    self.log(
+                        f"extra/val_{loss_name}_{key}",
+                        value,
+                        on_step=False,
+                        on_epoch=True,
+                        sync_dist=True
+                    )
         
         # Compute and log metrics - automatically prefixed with val/
         if hasattr(self, 'val_metrics'):
@@ -380,6 +521,77 @@ class Model(pl.LightningModule):
             self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
         
         return loss
+
+    def on_train_start(self):
+        """
+        Called at the start of training.
+        NEW: Compute loss normalization if using compound loss.
+        """
+        if self.use_compound_loss and hasattr(self.loss_function, 'reset_norm'):
+            logger.info("Computing loss normalization for compound loss...")
+            self._compute_loss_normalization()
+
+    def _compute_loss_normalization(self):
+        """
+        NEW: Compute normalization values for compound loss.
+        Only called if using MultiLoss.
+        """
+        from tqdm import tqdm
+        
+        # Get dataloader
+        dl = self.train_dataloader()
+        
+        # Number of batches for normalization
+        if hasattr(self.cfg, 'loss_params') and hasattr(self.cfg.loss_params, 'normalization_params'):
+            max_samples = self.cfg.loss_params.normalization_params.get('max_samples', 1000)
+            max_batches = max_samples // self.cfg.hyperparameters.batch_size
+        else:
+            max_batches = min(100, len(dl))
+        
+        # Reset norms
+        self.loss_function.reset_norm()
+        
+        # Compute norms
+        self.model.eval()
+        with torch.no_grad():
+            for batch_idx, batch in enumerate(tqdm(dl, total=max_batches, desc="Computing loss norms")):
+                if batch_idx >= max_batches:
+                    break
+                
+                # Unpack batch
+                images, masks = batch.values()
+                
+                # Move to device if needed
+                device = next(self.model.parameters()).device
+                images = images.to(device)
+                if isinstance(masks, dict):
+                    masks = {k: v.to(device) if isinstance(v, torch.Tensor) else v 
+                            for k, v in masks.items()}
+                else:
+                    masks = masks.to(device)
+                
+                # Forward pass
+                pred = self.model(images)
+                
+                # Prepare batch format for MultiLoss
+                if isinstance(masks, dict):
+                    pred_batch = {"seg": pred}
+                    gt_batch = masks
+                else:
+                    pred_batch = pred
+                    gt_batch = masks
+                
+                # Update norms
+                batch_size = images.shape[0]
+                self.loss_function.update_norm(pred_batch, gt_batch, batch_size)
+        
+        # Sync across GPUs if distributed
+        if self.trainer.world_size > 1:
+            self.loss_function.sync(self.trainer.world_size)
+        
+        self.model.train()
+        logger.info("Loss normalization computed")
+        logger.info(f"Loss function: {self.loss_function}")
 
     # Removed training_epoch_end and validation_epoch_end
     # Lightning 2.0+ automatically aggregates metrics

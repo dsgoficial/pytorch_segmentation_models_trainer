@@ -808,6 +808,10 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         device = pl_module.device
         logger = trainer.logger
         
+        # Get dataset for path retrieval
+        dataset = val_dataloader.dataset
+        has_get_path = hasattr(dataset, 'get_path')
+        
         # Set model to eval mode
         pl_module.eval()
         
@@ -836,20 +840,14 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
                 if isinstance(batch, dict):
                     images = batch['image']
                     masks = batch.get('mask', batch.get('target'))
-                    paths = batch.get('path', [f'sample_{samples_processed + i}' for i in range(len(images))])
+                    # Try to get paths from batch, but prefer dataset.get_path()
+                    batch_paths = batch.get('path', None)
                 else:
                     try:
                         batch_dict = dict(batch) if hasattr(batch, 'items') else {'image': batch[0], 'mask': batch[1]}
                         images = batch_dict.get('image', batch[0] if isinstance(batch, (tuple, list)) else batch)
                         masks = batch_dict.get('mask', batch[1] if isinstance(batch, (tuple, list)) and len(batch) > 1 else None)
-                        
-                        # Try to get paths from dataset
-                        dataset = val_dataloader.dataset
-                        if hasattr(dataset, 'get_path'):
-                            start_idx = batch_idx * val_dataloader.batch_size
-                            paths = [dataset.get_path(start_idx + i) for i in range(len(images))]
-                        else:
-                            paths = [f'sample_{samples_processed + i}' for i in range(len(images))]
+                        batch_paths = None
                     except Exception as e:
                         self._log(f"Warning: Error parsing batch format: {e}", prefix="⚠️")
                         continue
@@ -866,16 +864,30 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
                 batch_size = min(len(images), n_samples - samples_processed)
                 for i in range(batch_size):
                     try:
+                        # Get the full path - prioritize dataset.get_path() for consistency
+                        global_idx = batch_idx * val_dataloader.batch_size + i
+                        
+                        if has_get_path:
+                            # Use dataset's get_path method to get full path
+                            plot_title = dataset.get_path(global_idx)
+                        elif batch_paths is not None:
+                            # Fall back to batch paths if available
+                            if isinstance(batch_paths, (list, tuple)):
+                                plot_title = batch_paths[i]
+                            else:
+                                plot_title = batch_paths
+                        else:
+                            # Last resort: generic name
+                            plot_title = f'sample_{global_idx}'
+                        
                         # Prepare data for visualization
                         image_rgb = self.prepare_image_to_plot(images_cpu[i])
                         gt_mask_indices = self.prepare_mask_to_plot(masks[i])
                         pred_mask_indices = self.prepare_mask_to_plot(predicted_masks_cpu[i])
                         
-                        plot_title = paths[i] if isinstance(paths, (list, tuple)) else paths
-                        
-                        # Create visualization
+                        # Create visualization with full path as title
                         axarr, fig = generate_visualization(
-                            fig_title=plot_title,
+                            fig_title=plot_title,  # Full path used here
                             image=image_rgb,
                             ground_truth_mask=gt_mask_indices,
                             predicted_mask=pred_mask_indices,
@@ -911,6 +923,8 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
                         
                     except Exception as e:
                         self._log(f"Error processing sample {i} in batch {batch_idx}: {e}", prefix="❌")
+                        import traceback
+                        self._log(f"Traceback: {traceback.format_exc()}", prefix="❌")
                         continue
                     
                     if samples_processed >= n_samples:
