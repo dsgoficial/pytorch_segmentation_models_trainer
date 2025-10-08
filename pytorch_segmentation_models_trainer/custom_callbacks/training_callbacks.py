@@ -172,33 +172,18 @@ class ComputeWeightNormLossesCallback(pl.callbacks.Callback):
             )
             return
         
+        if pl_module.loss_function.norm_updated:
+            logger.warning(
+                f"Model {type(pl_module).__name__} norm was already updated."
+                "Skipping loss normalization."
+            )
+            return
+        
         # Only compute on rank 0 to avoid redundant computation
         if trainer.global_rank == 0:
             logger.info("Computing loss normalization weights...")
-            
-            pl_module.model.train()
-            init_dl = pl_module.train_dataloader()
-            
-            with torch.no_grad():
-                # Calculate number of batches needed for normalization
-                loss_norm_batches_min = (
-                    pl_module.cfg.loss_params.compound_loss.normalization_params.min_samples
-                    // (2 * pl_module.cfg.hyperparameters.batch_size)
-                    + 1
-                )
-                loss_norm_batches_max = (
-                    pl_module.cfg.loss_params.compound_loss.normalization_params.max_samples
-                    // (2 * pl_module.cfg.hyperparameters.batch_size)
-                    + 1
-                )
-                loss_norm_batches = max(
-                    loss_norm_batches_min, min(loss_norm_batches_max, len(init_dl))
-                )
-                
-                logger.info(f"Using {loss_norm_batches} batches for loss normalization")
-                
-                # Compute the loss norms
-                pl_module._compute_loss_normalization(init_dl, loss_norm_batches)
+            # Compute the loss norms
+            pl_module._compute_loss_normalization()
                 
             logger.info("Loss normalization weights computed successfully")
         

@@ -551,6 +551,9 @@ class Model(pl.LightningModule):
         
         self.check_if_should_normalize()
         
+        if hasattr(self.loss_function, "norm_updated") and self.loss_function.norm_updated:
+            return
+        
         if self.should_normalize and hasattr(self.loss_function, 'reset_norm'):
             logger.info("Computing loss normalization for compound loss...")
             self._compute_loss_normalization()
@@ -617,6 +620,7 @@ class Model(pl.LightningModule):
         if self.trainer.world_size > 1:
             self.loss_function.sync(self.trainer.world_size)
         
+        self.loss_function.set_norm_updated(True)
         self.model.train()
         logger.info("Loss normalization computed")
         logger.info(f"Loss function: {self.loss_function}")

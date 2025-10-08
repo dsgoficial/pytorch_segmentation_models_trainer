@@ -117,6 +117,7 @@ class MultiLoss(torch.nn.Module):
         self.loss_funcs = torch.nn.ModuleList(loss_funcs)
         self.weights = self._build_weights(weights, epoch_thresholds)
         self.pre_processes = pre_processes
+        self.norm_updated = False
         for loss_func, weight in zip(self.loss_funcs, self.weights):
             if weight == 0:
                 logger.info(
@@ -190,6 +191,9 @@ class MultiLoss(torch.nn.Module):
     def __repr__(self):
         ret = "\n\t".join([str(loss_func) for loss_func in self.loss_funcs])
         return "{}:\n\t{}".format(self.__class__.__name__, ret)
+    
+    def set_norm_updated(self, updated):
+        self.norm_updated = updated
 
 
 # --- Specific losses --- #

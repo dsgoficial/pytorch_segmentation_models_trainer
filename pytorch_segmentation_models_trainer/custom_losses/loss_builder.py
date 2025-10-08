@@ -49,6 +49,7 @@ class LossWrapper(nn.Module):
         
         self.is_custom_loss = isinstance(loss_func, Loss)
         self.loss_func = loss_func
+        self.set_norm_updated(False)
         
         # Set name
         if name:
@@ -67,6 +68,9 @@ class LossWrapper(nn.Module):
         """Reset normalization (only for custom losses)"""
         if self.is_custom_loss:
             self.loss_func.reset_norm()
+    
+    def set_norm_updated(self, updated):
+        self.norm_updated = updated
     
     def update_norm(self, pred_batch, gt_batch, nums):
         """Update normalization (only for custom losses)"""
