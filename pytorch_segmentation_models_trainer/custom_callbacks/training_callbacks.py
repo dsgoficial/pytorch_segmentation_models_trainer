@@ -178,7 +178,6 @@ class ComputeWeightNormLossesCallback(pl.callbacks.Callback):
                 "Skipping loss normalization."
             )
             return
-        
         # Only compute on rank 0 to avoid redundant computation
         if trainer.global_rank == 0:
             logger.info("Computing loss normalization weights...")

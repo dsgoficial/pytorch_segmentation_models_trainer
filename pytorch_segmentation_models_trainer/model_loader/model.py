@@ -546,6 +546,8 @@ class Model(pl.LightningModule):
         Called at the start of training.
         NEW: Compute loss normalization if using compound loss (unless disabled).
         """
+        if not self.trainer.global_rank == 0:
+            return
         if not self.use_compound_loss:
             return
         
