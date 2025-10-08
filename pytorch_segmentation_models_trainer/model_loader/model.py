@@ -541,19 +541,22 @@ class Model(pl.LightningModule):
             )
         return self.should_normalize
 
-    def on_train_start(self):
+    def on_fit_start(self):
         """
         Called at the start of training.
         NEW: Compute loss normalization if using compound loss (unless disabled).
         """
         if not self.trainer.global_rank == 0:
+            super().on_fit_start()
             return
         if not self.use_compound_loss:
+            super().on_fit_start()
             return
         
         self.check_if_should_normalize()
         
         if hasattr(self.loss_function, "norm_updated") and self.loss_function.norm_updated:
+            super().on_fit_start()
             return
         
         if self.should_normalize and hasattr(self.loss_function, 'reset_norm'):
@@ -563,6 +566,7 @@ class Model(pl.LightningModule):
             logger.info("Skipping loss normalization (normalize_losses=false in config)")
         else:
             logger.info("Loss normalization not available for this loss function")
+        super().on_fit_start()
 
     def _compute_loss_normalization(self):
         """
@@ -572,11 +576,18 @@ class Model(pl.LightningModule):
         from tqdm import tqdm
         
         # Get dataloader
-        dl = self.train_dataloader()
+        dl = DataLoader(
+            self.train_ds,
+            batch_size=self.cfg.hyperparameters.batch_size,
+            shuffle=False,
+            num_workers=0,  # MUST be 0 to avoid CUDA init errors in DDP
+            drop_last=False,
+            pin_memory=False  # Also disable pin_memory for safety
+        )
         
         # Number of batches for normalization
-        if hasattr(self.cfg, 'loss_params') and hasattr(self.cfg.loss_params, 'normalization_params'):
-            max_samples = self.cfg.loss_params.normalization_params.get('max_samples', 1000)
+        if hasattr(self.cfg, 'loss_params') and hasattr(self.cfg.loss_params, 'compound_loss') and hasattr(self.cfg.loss_params.compound_loss, 'normalization_params'):
+            max_samples = self.cfg.loss_params.compound_loss.normalization_params.get('max_samples', 1000)
             max_batches = max_samples // self.cfg.hyperparameters.batch_size
         else:
             max_batches = min(100, len(dl))
@@ -619,7 +630,7 @@ class Model(pl.LightningModule):
                 self.loss_function.update_norm(pred_batch, gt_batch, batch_size)
         
         # Sync across GPUs if distributed
-        if self.trainer.world_size > 1:
+        if self.trainer.world_size > 1 and torch.distributed.is_initialized():
             self.loss_function.sync(self.trainer.world_size)
         
         self.loss_function.set_norm_updated(True)

@@ -75,10 +75,13 @@ class Loss(torch.nn.Module):
     def sync(self, world_size):
         """
         This method should be used to synchronize loss norms across GPUs when using distributed training
-        :return:
         """
-        torch.distributed.all_reduce(self.norm)
-        self.norm /= world_size
+        if world_size > 1 and torch.distributed.is_available() and torch.distributed.is_initialized():
+            try:
+                torch.distributed.all_reduce(self.norm)
+                self.norm /= world_size
+            except RuntimeError as e:
+                logger.warning(f"Failed to synchronize loss norms: {e}")
 
     def compute(self, pred_batch, gt_batch):
         raise NotImplementedError
