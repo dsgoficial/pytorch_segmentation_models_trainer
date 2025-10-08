@@ -20,7 +20,7 @@
 """
 import logging
 from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
-    FrameFieldComputeWeightNormLossesCallback,
+    FrameFieldComputeWeightNormLossesCallback, ComputeWeightNormLossesCallback,
 )
 from pytorch_segmentation_models_trainer.model_loader.model import Model
 from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
@@ -72,14 +72,17 @@ def train(cfg: DictConfig):
         if "callbacks" in cfg
         else []
     )
-    if isinstance(model, FrameFieldSegmentationPLModel):
+    if isinstance(model, FrameFieldSegmentationPLModel) or ("loss_params" in cfg and "compound_loss" in cfg.loss_params):
         is_norm_loss_added = False
         for callback in callback_list:
-            if isinstance(callback, FrameFieldComputeWeightNormLossesCallback):
+            if isinstance(callback, FrameFieldComputeWeightNormLossesCallback) or isinstance(callback, ComputeWeightNormLossesCallback):
                 is_norm_loss_added = True
                 break
         if not is_norm_loss_added:
-            callback_list.append(FrameFieldComputeWeightNormLossesCallback())
+            if isinstance(model, FrameFieldSegmentationPLModel):
+                callback_list.append(FrameFieldComputeWeightNormLossesCallback())
+            else:
+                callback_list.append(ComputeWeightNormLossesCallback())
     model.setup('fit')
     trainer = Trainer(**cfg.pl_trainer, logger=trainer_logger, callbacks=callback_list)
     trainer.fit(model)

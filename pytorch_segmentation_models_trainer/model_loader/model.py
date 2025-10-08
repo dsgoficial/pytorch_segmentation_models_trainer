@@ -78,6 +78,7 @@ class Model(pl.LightningModule):
         logger.info(f"Initialized Model with loss function: {self.loss_function}")
         if self.use_compound_loss:
             logger.info(f"Using compound loss with {len(self.loss_function.loss_funcs)} components")
+        self.check_if_should_normalize()
     
     def setup(self, stage=None):
         """Extract dataset info when dataloaders are ready"""
@@ -530,6 +531,15 @@ class Model(pl.LightningModule):
             self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
         
         return loss
+    
+    def check_if_should_normalize(self):
+        self.should_normalize = False
+        if hasattr(self.cfg, 'loss_params') and hasattr(self.cfg.loss_params, 'compound_loss'):
+            self.should_normalize = self.cfg.loss_params.compound_loss.get(
+                'normalize_losses', 
+                True  # Default to True
+            )
+        return self.should_normalize
 
     def on_train_start(self):
         """
@@ -539,19 +549,12 @@ class Model(pl.LightningModule):
         if not self.use_compound_loss:
             return
         
-        # Check if normalization is enabled in config
-        should_normalize = True
-        if hasattr(self.cfg, 'loss_params'):
-            if hasattr(self.cfg.loss_params, 'compound_loss'):
-                should_normalize = self.cfg.loss_params.compound_loss.get(
-                    'normalize_losses', 
-                    True  # Default to True
-                )
+        self.check_if_should_normalize()
         
-        if should_normalize and hasattr(self.loss_function, 'reset_norm'):
+        if self.should_normalize and hasattr(self.loss_function, 'reset_norm'):
             logger.info("Computing loss normalization for compound loss...")
             self._compute_loss_normalization()
-        elif not should_normalize:
+        elif not self.should_normalize:
             logger.info("Skipping loss normalization (normalize_losses=false in config)")
         else:
             logger.info("Loss normalization not available for this loss function")

@@ -122,31 +122,154 @@ class FrameFieldOnlyCrossfieldWarmupCallback(pl.callbacks.Callback):
         pl_module.set_all_but_crossfield_trainable(trainable=trainable)
 
 
-class FrameFieldComputeWeightNormLossesCallback(pl.callbacks.Callback):
+class ComputeWeightNormLossesCallback(pl.callbacks.Callback):
+    """
+    General callback to compute loss normalization weights before training starts.
+    Works with ANY model that uses MultiLoss (compound loss) and has a compute_loss_norms method.
+    
+    This callback runs during on_fit_start to avoid CUDA initialization issues
+    in multiprocessing contexts (DDP). It ensures CUDA operations happen after
+    DataLoader worker processes are properly initialized.
+    """
     def __init__(self) -> None:
         super().__init__()
         self.loss_norm_is_initializated = False
 
-    def on_train_epoch_start(self, trainer, pl_module) -> None:
-        if self.loss_norm_is_initializated or trainer.current_epoch > 1:
+    def on_fit_start(self, trainer, pl_module) -> None:
+        """
+        Called when fit begins, after DDP processes are spawned.
+        This is the correct hook to use for loss normalization to avoid
+        CUDA initialization errors in multiprocessing contexts.
+        """
+        # Skip if already initialized
+        if self.loss_norm_is_initializated:
             return
-        pl_module.model.train()
-        init_dl = pl_module.train_dataloader()
-        with torch.no_grad():
-            loss_norm_batches_min = (
-                pl_module.cfg.loss_params.multiloss.normalization_params.min_samples
-                // (2 * pl_module.cfg.hyperparameters.batch_size)
-                + 1
+        
+        # Skip if model doesn't have _compute_loss_normalization method
+        if not hasattr(pl_module, '_compute_loss_normalization'):
+            logger.warning(
+                f"Model {type(pl_module).__name__} does not have _compute_loss_normalization method. "
+                "Skipping loss normalization."
             )
-            loss_norm_batches_max = (
-                pl_module.cfg.loss_params.multiloss.normalization_params.max_samples
-                // (2 * pl_module.cfg.hyperparameters.batch_size)
-                + 1
+            return
+        if (hasattr(pl_module, 'check_if_should_normalize') and not pl_module.check_if_should_normalize()):
+            logger.warning(
+                f"Model {type(pl_module).__name__} has normalization loss but the training config tells not to normalize."
+                "Skipping loss normalization."
             )
-            loss_norm_batches = max(
-                loss_norm_batches_min, min(loss_norm_batches_max, len(init_dl))
+            return
+        if not hasattr(pl_module.cfg, "loss_params"):
+            logger.warning(
+                f"Model {type(pl_module).__name__} has single loss and do not need normalization."
+                "Skipping loss normalization."
             )
-            pl_module.compute_loss_norms(init_dl, loss_norm_batches)
+            return
+        
+        if hasattr(pl_module.cfg.loss_params, "compound_loss") and not hasattr(pl_module.cfg.loss_params.compound_loss, "normalization_params"):
+            logger.warning(
+                f"Model {type(pl_module).__name__} does not have the appropriate normalization parameter tags."
+                "Skipping loss normalization."
+            )
+            return
+        
+        # Only compute on rank 0 to avoid redundant computation
+        if trainer.global_rank == 0:
+            logger.info("Computing loss normalization weights...")
+            
+            pl_module.model.train()
+            init_dl = pl_module.train_dataloader()
+            
+            with torch.no_grad():
+                # Calculate number of batches needed for normalization
+                loss_norm_batches_min = (
+                    pl_module.cfg.loss_params.compound_loss.normalization_params.min_samples
+                    // (2 * pl_module.cfg.hyperparameters.batch_size)
+                    + 1
+                )
+                loss_norm_batches_max = (
+                    pl_module.cfg.loss_params.compound_loss.normalization_params.max_samples
+                    // (2 * pl_module.cfg.hyperparameters.batch_size)
+                    + 1
+                )
+                loss_norm_batches = max(
+                    loss_norm_batches_min, min(loss_norm_batches_max, len(init_dl))
+                )
+                
+                logger.info(f"Using {loss_norm_batches} batches for loss normalization")
+                
+                # Compute the loss norms
+                pl_module._compute_loss_normalization(init_dl, loss_norm_batches)
+                
+            logger.info("Loss normalization weights computed successfully")
+        
+        # Synchronize across all ranks in distributed training
+        if trainer.world_size > 1:
+            logger.info("Synchronizing loss normalization across all ranks...")
+            torch.distributed.barrier()
+            logger.info("Synchronization complete")
+        
+        self.loss_norm_is_initializated = True
+
+
+# Also update the FrameField-specific callback to use the same fix
+class FrameFieldComputeWeightNormLossesCallback(pl.callbacks.Callback):
+    """
+    Callback to compute loss normalization weights for FrameField models before training starts.
+    
+    This callback runs during on_fit_start to avoid CUDA initialization issues
+    in multiprocessing contexts (DDP). It ensures CUDA operations happen after
+    DataLoader worker processes are properly initialized.
+    """
+    def __init__(self) -> None:
+        super().__init__()
+        self.loss_norm_is_initializated = False
+
+    def on_fit_start(self, trainer, pl_module) -> None:
+        """
+        Called when fit begins, after DDP processes are spawned.
+        This is the correct hook to use for loss normalization to avoid
+        CUDA initialization errors in multiprocessing contexts.
+        """
+        # Skip if already initialized
+        if self.loss_norm_is_initializated:
+            return
+        
+        # Only compute on rank 0 to avoid redundant computation
+        if trainer.global_rank == 0:
+            logger.info("Computing loss normalization weights...")
+            
+            pl_module.model.train()
+            init_dl = pl_module.train_dataloader()
+            
+            with torch.no_grad():
+                # Calculate number of batches needed for normalization
+                loss_norm_batches_min = (
+                    pl_module.cfg.loss_params.multiloss.normalization_params.min_samples
+                    // (2 * pl_module.cfg.hyperparameters.batch_size)
+                    + 1
+                )
+                loss_norm_batches_max = (
+                    pl_module.cfg.loss_params.multiloss.normalization_params.max_samples
+                    // (2 * pl_module.cfg.hyperparameters.batch_size)
+                    + 1
+                )
+                loss_norm_batches = max(
+                    loss_norm_batches_min, min(loss_norm_batches_max, len(init_dl))
+                )
+                
+                logger.info(f"Using {loss_norm_batches} batches for loss normalization")
+                
+                # Compute the loss norms
+                pl_module.compute_loss_norms(init_dl, loss_norm_batches)
+                
+            logger.info("Loss normalization weights computed successfully")
+        
+        # Synchronize across all ranks in distributed training
+        if trainer.world_size > 1:
+            logger.info("Synchronizing loss normalization across all ranks...")
+            torch.distributed.barrier()
+            logger.info("Synchronization complete")
+        
         self.loss_norm_is_initializated = True
 
 

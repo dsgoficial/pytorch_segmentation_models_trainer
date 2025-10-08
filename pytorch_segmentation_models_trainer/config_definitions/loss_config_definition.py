@@ -138,6 +138,7 @@ class CompoundLossConfig:
     losses: List[LossWeightConfig] = field(default_factory=list)
     epoch_thresholds: Optional[List[float]] = field(default_factory=lambda: [0, 5, 10])
     pre_processes: Optional[List[Any]] = None
+    normalization_params: NormalizationParams = field(default_factory=NormalizationParams)
 
 
 # ============================================================================
@@ -211,8 +212,6 @@ cs.store(group="loss", name="crossfield_smooth_loss", node=CrossfieldSmoothLossC
 cs.store(group="loss", name="seg_crossfield_loss", node=SegCrossfieldLossConfig)
 cs.store(group="loss", name="seg_edge_interior_loss", node=SegEdgeInteriorLossConfig)
 
-# Register compound loss config
-cs.store(name="compound_loss_config", node=CompoundLossConfig)
 
 # Register legacy configs for backward compatibility
 cs.store(name="seg_loss_config", node=SegLossConfig)
@@ -221,6 +220,8 @@ cs.store(group="coefs", name="coefs", node=CoefsConfig)
 cs.store(group="seg_loss_params", name="seg_loss_params", node=SegLossParamsConfig)
 cs.store(name="multi_loss", node=MultiLossConfig)
 
+# Register compound loss config
+cs.store(name="compound_loss", node=CompoundLossConfig)
 
 @hydra.main(config_name="compound_loss_config")
 def build_config(cfg: DictConfig) -> None:
