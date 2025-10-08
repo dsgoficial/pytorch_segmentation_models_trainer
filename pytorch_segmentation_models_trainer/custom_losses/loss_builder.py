@@ -19,13 +19,103 @@
  ****
 """
 import logging
-from typing import List, Optional, Union
+import torch
+import torch.nn as nn
+from typing import List, Optional, Union, Any, Dict, Tuple
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import instantiate
 
-from pytorch_segmentation_models_trainer.custom_losses.base_loss import MultiLoss
+from pytorch_segmentation_models_trainer.custom_losses.base_loss import MultiLoss, Loss
 
 logger = logging.getLogger(__name__)
+
+
+class LossWrapper(nn.Module):
+    """
+    Wrapper to make any loss function compatible with MultiLoss.
+    
+    This wrapper ensures that any loss (PyTorch standard, third-party, etc.)
+    can work with the compound loss system by providing a consistent interface.
+    
+    Inherits from nn.Module so it can be added to nn.ModuleList in MultiLoss.
+    """
+    def __init__(self, loss_func: nn.Module, name: str = None):
+        """
+        Args:
+            loss_func: The loss function to wrap
+            name: Optional name for the loss (auto-generated if not provided)
+        """
+        super(LossWrapper, self).__init__()
+        
+        self.is_custom_loss = isinstance(loss_func, Loss)
+        self.loss_func = loss_func
+        
+        # Set name
+        if name:
+            self.name = name
+        elif hasattr(loss_func, 'name'):
+            self.name = loss_func.name
+        else:
+            self.name = loss_func.__class__.__name__
+        
+        # For compatibility with MultiLoss
+        if not self.is_custom_loss:
+            # Create dummy norm for non-custom losses
+            self.norm = nn.Parameter(torch.Tensor([1.0]), requires_grad=False)
+    
+    def reset_norm(self):
+        """Reset normalization (only for custom losses)"""
+        if self.is_custom_loss:
+            self.loss_func.reset_norm()
+    
+    def update_norm(self, pred_batch, gt_batch, nums):
+        """Update normalization (only for custom losses)"""
+        if self.is_custom_loss:
+            self.loss_func.update_norm(pred_batch, gt_batch, nums)
+    
+    def sync(self, world_size):
+        """Sync across GPUs (only for custom losses)"""
+        if self.is_custom_loss:
+            self.loss_func.sync(world_size)
+    
+    def forward(self, pred_batch, gt_batch, normalize=True) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        """
+        Call the loss function with appropriate arguments.
+        
+        Args:
+            pred_batch: Predictions
+            gt_batch: Ground truth
+            normalize: Whether to normalize (only used for custom losses)
+            
+        Returns:
+            Tuple of (loss_value, extra_info_dict)
+        """
+        if self.is_custom_loss:
+            # Custom loss - supports normalize parameter
+            return self.loss_func(pred_batch, gt_batch, normalize=normalize)
+        else:
+            # Standard PyTorch or third-party loss - doesn't support normalize
+            try:
+                # Try calling with both arguments
+                loss_value = self.loss_func(pred_batch, gt_batch)
+            except TypeError as e:
+                # If that fails, try with just prediction (some losses work this way)
+                try:
+                    loss_value = self.loss_func(pred_batch)
+                except Exception as e2:
+                    logger.error(f"Error calling loss {self.name}: {e}")
+                    logger.error(f"Secondary error: {e2}")
+                    raise
+            
+            # Return in the format expected by MultiLoss
+            return loss_value, {}
+    
+    def __call__(self, pred_batch, gt_batch, normalize=True) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        """Alias for forward() to maintain compatibility"""
+        return self.forward(pred_batch, gt_batch, normalize=normalize)
+    
+    def __repr__(self):
+        return f"LossWrapper({self.name}, custom={self.is_custom_loss})"
 
 
 def build_compound_loss_from_config(
@@ -58,8 +148,8 @@ def build_compound_loss_from_config(
               weight: 10.0
             
             - loss:
-                _target_: pytorch_segmentation_models_trainer.custom_losses.base_loss.CrossfieldAlignLoss
-                name: crossfield_align
+                _target_: segmentation_models_pytorch.losses.DiceLoss
+                mode: binary
               weight: 1.0
     """
     if not compound_loss_cfg or 'losses' not in compound_loss_cfg:
@@ -78,6 +168,17 @@ def build_compound_loss_from_config(
         # Instantiate the loss function
         loss_cfg = loss_weight_cfg.loss
         loss_func = instantiate(loss_cfg, _recursive_=False)
+        
+        # Get the name for logging
+        loss_name = loss_cfg.get('name', None)
+        
+        # Wrap non-custom losses to make them compatible
+        if not isinstance(loss_func, Loss):
+            if loss_name is None:
+                loss_name = loss_func.__class__.__name__
+            logger.info(f"  Wrapping non-custom loss: {loss_name}")
+            loss_func = LossWrapper(loss_func, name=loss_name)
+        
         loss_funcs.append(loss_func)
         
         # Extract weight (can be from loss_weight_cfg.weight or loss_cfg.weight)
@@ -86,7 +187,14 @@ def build_compound_loss_from_config(
         
         # Log the configuration
         weight_str = f"{weight}" if isinstance(weight, (int, float)) else f"dynamic{weight}"
-        logger.info(f"  [{idx}] {loss_func.name} (weight={weight_str})")
+        
+        # Safely get the loss name for logging
+        if hasattr(loss_func, 'name'):
+            display_name = loss_func.name
+        else:
+            display_name = loss_func.__class__.__name__
+        
+        logger.info(f"  [{idx}] {display_name} (weight={weight_str})")
     
     # Get epoch thresholds and pre-processes
     epoch_thresholds = compound_loss_cfg.get('epoch_thresholds', None)
@@ -170,14 +278,15 @@ def validate_loss_config(compound_loss_cfg: DictConfig) -> bool:
         if '_target_' not in loss_cfg:
             raise ValueError(f"Loss at index {idx} missing '_target_' field")
         
-        if 'name' not in loss_cfg:
-            raise ValueError(f"Loss at index {idx} missing 'name' field")
+        # Check that name is unique (if provided)
+        names = []
+        for lw in compound_loss_cfg.losses:
+            if 'name' in lw.loss:
+                names.append(lw.loss.name)
         
-        # Check that name is unique
-        names = [lw.loss.name for lw in compound_loss_cfg.losses]
         if len(names) != len(set(names)):
             duplicates = [name for name in names if names.count(name) > 1]
-            raise ValueError(f"Duplicate loss names found: {duplicates}")
+            raise ValueError(f"Duplicate loss names found: {set(duplicates)}")
     
     logger.info("Loss configuration validation passed")
     return True

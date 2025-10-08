@@ -416,6 +416,15 @@ class Model(pl.LightningModule):
             For simple losses, individual_losses_dict will be empty
         """
         if self.use_compound_loss:
+            # Check config for normalization flag
+            should_normalize = True
+            if hasattr(self.cfg, 'loss_params'):
+                if hasattr(self.cfg.loss_params, 'compound_loss'):
+                    should_normalize = self.cfg.loss_params.compound_loss.get(
+                        'normalize_losses', 
+                        True  # Default to True
+                    )
+            
             # Compound loss returns (total_loss, individual_losses, extra_info)
             # Need to handle different batch formats
             if isinstance(masks, dict):
@@ -430,7 +439,7 @@ class Model(pl.LightningModule):
             return self.loss_function(
                 pred_batch, 
                 gt_batch, 
-                normalize=True,
+                normalize=should_normalize,  # Use config flag
                 epoch=self.current_epoch
             )
         else:
@@ -525,11 +534,27 @@ class Model(pl.LightningModule):
     def on_train_start(self):
         """
         Called at the start of training.
-        NEW: Compute loss normalization if using compound loss.
+        NEW: Compute loss normalization if using compound loss (unless disabled).
         """
-        if self.use_compound_loss and hasattr(self.loss_function, 'reset_norm'):
+        if not self.use_compound_loss:
+            return
+        
+        # Check if normalization is enabled in config
+        should_normalize = True
+        if hasattr(self.cfg, 'loss_params'):
+            if hasattr(self.cfg.loss_params, 'compound_loss'):
+                should_normalize = self.cfg.loss_params.compound_loss.get(
+                    'normalize_losses', 
+                    True  # Default to True
+                )
+        
+        if should_normalize and hasattr(self.loss_function, 'reset_norm'):
             logger.info("Computing loss normalization for compound loss...")
             self._compute_loss_normalization()
+        elif not should_normalize:
+            logger.info("Skipping loss normalization (normalize_losses=false in config)")
+        else:
+            logger.info("Loss normalization not available for this loss function")
 
     def _compute_loss_normalization(self):
         """
