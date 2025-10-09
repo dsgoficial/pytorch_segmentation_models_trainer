@@ -468,7 +468,7 @@ class Model(pl.LightningModule):
                     loss_value, 
                     on_step=True, 
                     on_epoch=True,
-                    sync_dist=True
+                    sync_dist=False
                 )
         
         # NEW: Log extra info if available
@@ -480,7 +480,7 @@ class Model(pl.LightningModule):
                         value,
                         on_step=True,
                         on_epoch=True,
-                        sync_dist=True
+                        sync_dist=False
                     )
         
         # Compute and log metrics - automatically prefixed with train/
@@ -510,7 +510,7 @@ class Model(pl.LightningModule):
                     loss_value,
                     on_step=False,
                     on_epoch=True,
-                    sync_dist=True
+                    sync_dist=False
                 )
         
         # NEW: Log extra info if available
@@ -522,7 +522,7 @@ class Model(pl.LightningModule):
                         value,
                         on_step=False,
                         on_epoch=True,
-                        sync_dist=True
+                        sync_dist=False
                     )
         
         # Compute and log metrics - automatically prefixed with val/

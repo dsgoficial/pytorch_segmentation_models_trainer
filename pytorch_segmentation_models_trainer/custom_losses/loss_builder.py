@@ -62,7 +62,10 @@ class LossWrapper(nn.Module):
         # For compatibility with MultiLoss
         if not self.is_custom_loss:
             # Create dummy norm for non-custom losses
-            self.norm = nn.Parameter(torch.Tensor([1.0]), requires_grad=False)
+            self.norm = nn.Parameter(
+                torch.Tensor([1.0], device='cpu'),
+                requires_grad=False,
+            )
     
     def reset_norm(self):
         """Reset normalization (only for custom losses)"""
@@ -240,7 +243,7 @@ def build_loss_from_config(cfg: DictConfig, pre_processes: Optional[List] = None
         )
     
     # Check for legacy configuration
-    elif 'multi_loss' in cfg.loss_params:
+    elif 'multi_loss' in cfg.loss_params or "multiloss" in cfg.loss_params:
         logger.info("Using legacy multi_loss configuration")
         # Import here to avoid circular dependency
         from pytorch_segmentation_models_trainer.custom_losses.base_loss import build_combined_loss

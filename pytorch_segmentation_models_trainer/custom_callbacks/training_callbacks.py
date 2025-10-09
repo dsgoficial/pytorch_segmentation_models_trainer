@@ -137,7 +137,7 @@ class ComputeWeightNormLossesCallback(pl.callbacks.Callback):
         self.loss_norm_is_initializated = False
 
     @rank_zero_only
-    def on_sanity_check_end(self, trainer, pl_module) -> None:
+    def on_train_start(self, trainer, pl_module) -> None:
         """
         Called when fit begins, after DDP processes are spawned.
         This is the correct hook to use for loss normalization to avoid
