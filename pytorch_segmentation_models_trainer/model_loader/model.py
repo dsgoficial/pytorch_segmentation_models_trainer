@@ -541,102 +541,102 @@ class Model(pl.LightningModule):
             )
         return self.should_normalize
 
-    def on_fit_start(self):
-        """
-        Called at the start of training.
-        NEW: Compute loss normalization if using compound loss (unless disabled).
-        """
-        if not self.trainer.global_rank == 0:
-            super().on_fit_start()
-            return
-        if not self.use_compound_loss:
-            super().on_fit_start()
-            return
+    # def on_fit_start(self):
+    #     """
+    #     Called at the start of training.
+    #     NEW: Compute loss normalization if using compound loss (unless disabled).
+    #     """
+    #     if not self.trainer.global_rank == 0:
+    #         super().on_fit_start()
+    #         return
+    #     if not self.use_compound_loss:
+    #         super().on_fit_start()
+    #         return
         
-        self.check_if_should_normalize()
+    #     self.check_if_should_normalize()
         
-        if hasattr(self.loss_function, "norm_updated") and self.loss_function.norm_updated:
-            super().on_fit_start()
-            return
+    #     if hasattr(self.loss_function, "norm_updated") and self.loss_function.norm_updated:
+    #         super().on_fit_start()
+    #         return
         
-        if self.should_normalize and hasattr(self.loss_function, 'reset_norm'):
-            logger.info("Computing loss normalization for compound loss...")
-            self._compute_loss_normalization()
-        elif not self.should_normalize:
-            logger.info("Skipping loss normalization (normalize_losses=false in config)")
-        else:
-            logger.info("Loss normalization not available for this loss function")
-        super().on_fit_start()
+    #     if self.should_normalize and hasattr(self.loss_function, 'reset_norm'):
+    #         logger.info("Computing loss normalization for compound loss...")
+    #         self._compute_loss_normalization()
+    #     elif not self.should_normalize:
+    #         logger.info("Skipping loss normalization (normalize_losses=false in config)")
+    #     else:
+    #         logger.info("Loss normalization not available for this loss function")
+    #     super().on_fit_start()
 
-    def _compute_loss_normalization(self):
-        """
-        NEW: Compute normalization values for compound loss.
-        Only called if using MultiLoss.
-        """
-        from tqdm import tqdm
+    # def _compute_loss_normalization(self):
+    #     """
+    #     NEW: Compute normalization values for compound loss.
+    #     Only called if using MultiLoss.
+    #     """
+    #     from tqdm import tqdm
         
-        # Get dataloader
-        dl = DataLoader(
-            self.train_ds,
-            batch_size=self.cfg.hyperparameters.batch_size,
-            shuffle=False,
-            num_workers=0,  # MUST be 0 to avoid CUDA init errors in DDP
-            drop_last=False,
-            pin_memory=False  # Also disable pin_memory for safety
-        )
+    #     # Get dataloader
+    #     dl = DataLoader(
+    #         self.train_ds,
+    #         batch_size=self.cfg.hyperparameters.batch_size,
+    #         shuffle=False,
+    #         num_workers=0,  # MUST be 0 to avoid CUDA init errors in DDP
+    #         drop_last=False,
+    #         pin_memory=False  # Also disable pin_memory for safety
+    #     )
         
-        # Number of batches for normalization
-        if hasattr(self.cfg, 'loss_params') and hasattr(self.cfg.loss_params, 'compound_loss') and hasattr(self.cfg.loss_params.compound_loss, 'normalization_params'):
-            max_samples = self.cfg.loss_params.compound_loss.normalization_params.get('max_samples', 1000)
-            max_batches = max_samples // self.cfg.hyperparameters.batch_size
-        else:
-            max_batches = min(100, len(dl))
+    #     # Number of batches for normalization
+    #     if hasattr(self.cfg, 'loss_params') and hasattr(self.cfg.loss_params, 'compound_loss') and hasattr(self.cfg.loss_params.compound_loss, 'normalization_params'):
+    #         max_samples = self.cfg.loss_params.compound_loss.normalization_params.get('max_samples', 1000)
+    #         max_batches = max_samples // self.cfg.hyperparameters.batch_size
+    #     else:
+    #         max_batches = min(100, len(dl))
         
-        # Reset norms
-        self.loss_function.reset_norm()
+    #     # Reset norms
+    #     self.loss_function.reset_norm()
         
-        # Compute norms
-        self.model.eval()
-        with torch.no_grad():
-            for batch_idx, batch in enumerate(tqdm(dl, total=max_batches, desc="Computing loss norms")):
-                if batch_idx >= max_batches:
-                    break
+    #     # Compute norms
+    #     self.model.eval()
+    #     with torch.no_grad():
+    #         for batch_idx, batch in enumerate(tqdm(dl, total=max_batches, desc="Computing loss norms")):
+    #             if batch_idx >= max_batches:
+    #                 break
                 
-                # Unpack batch
-                images, masks = batch.values()
+    #             # Unpack batch
+    #             images, masks = batch.values()
                 
-                # Move to device if needed
-                device = next(self.model.parameters()).device
-                images = images.to(device)
-                if isinstance(masks, dict):
-                    masks = {k: v.to(device) if isinstance(v, torch.Tensor) else v 
-                            for k, v in masks.items()}
-                else:
-                    masks = masks.to(device)
+    #             # Move to device if needed
+    #             device = next(self.model.parameters()).device
+    #             images = images.to(device)
+    #             if isinstance(masks, dict):
+    #                 masks = {k: v.to(device) if isinstance(v, torch.Tensor) else v 
+    #                         for k, v in masks.items()}
+    #             else:
+    #                 masks = masks.to(device)
                 
-                # Forward pass
-                pred = self.model(images)
+    #             # Forward pass
+    #             pred = self.model(images)
                 
-                # Prepare batch format for MultiLoss
-                if isinstance(masks, dict):
-                    pred_batch = {"seg": pred}
-                    gt_batch = masks
-                else:
-                    pred_batch = pred
-                    gt_batch = masks
+    #             # Prepare batch format for MultiLoss
+    #             if isinstance(masks, dict):
+    #                 pred_batch = {"seg": pred}
+    #                 gt_batch = masks
+    #             else:
+    #                 pred_batch = pred
+    #                 gt_batch = masks
                 
-                # Update norms
-                batch_size = images.shape[0]
-                self.loss_function.update_norm(pred_batch, gt_batch, batch_size)
+    #             # Update norms
+    #             batch_size = images.shape[0]
+    #             self.loss_function.update_norm(pred_batch, gt_batch, batch_size)
         
-        # Sync across GPUs if distributed
-        if self.trainer.world_size > 1 and torch.distributed.is_initialized():
-            self.loss_function.sync(self.trainer.world_size)
+    #     # Sync across GPUs if distributed
+    #     if self.trainer.world_size > 1 and torch.distributed.is_initialized():
+    #         self.loss_function.sync(self.trainer.world_size)
         
-        self.loss_function.set_norm_updated(True)
-        self.model.train()
-        logger.info("Loss normalization computed")
-        logger.info(f"Loss function: {self.loss_function}")
+    #     self.loss_function.set_norm_updated(True)
+    #     self.model.train()
+    #     logger.info("Loss normalization computed")
+    #     logger.info(f"Loss function: {self.loss_function}")
 
     # Removed training_epoch_end and validation_epoch_end
     # Lightning 2.0+ automatically aggregates metrics

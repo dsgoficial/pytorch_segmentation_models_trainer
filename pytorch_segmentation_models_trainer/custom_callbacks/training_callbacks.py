@@ -27,6 +27,7 @@ import torch
 from hydra.utils import instantiate
 
 from torch.utils.data import DataLoader
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from typing import List, Any
 
@@ -135,7 +136,8 @@ class ComputeWeightNormLossesCallback(pl.callbacks.Callback):
         super().__init__()
         self.loss_norm_is_initializated = False
 
-    def on_fit_start(self, trainer, pl_module) -> None:
+    @rank_zero_only
+    def on_sanity_check_end(self, trainer, pl_module) -> None:
         """
         Called when fit begins, after DDP processes are spawned.
         This is the correct hook to use for loss normalization to avoid
@@ -146,12 +148,6 @@ class ComputeWeightNormLossesCallback(pl.callbacks.Callback):
             return
         
         # Skip if model doesn't have _compute_loss_normalization method
-        if not hasattr(pl_module, '_compute_loss_normalization'):
-            logger.warning(
-                f"Model {type(pl_module).__name__} does not have _compute_loss_normalization method. "
-                "Skipping loss normalization."
-            )
-            return
         if (hasattr(pl_module, 'check_if_should_normalize') and not pl_module.check_if_should_normalize()):
             logger.warning(
                 f"Model {type(pl_module).__name__} has normalization loss but the training config tells not to normalize."
@@ -182,17 +178,91 @@ class ComputeWeightNormLossesCallback(pl.callbacks.Callback):
         if trainer.global_rank == 0:
             logger.info("Computing loss normalization weights...")
             # Compute the loss norms
-            pl_module._compute_loss_normalization()
+            self.compute_loss_normalization(pl_module)
                 
             logger.info("Loss normalization weights computed successfully")
         
         # Synchronize across all ranks in distributed training
-        if trainer.world_size > 1:
-            logger.info("Synchronizing loss normalization across all ranks...")
-            torch.distributed.barrier()
-            logger.info("Synchronization complete")
+        # if trainer.world_size > 1:
+        #     logger.info("Synchronizing loss normalization across all ranks...")
+        #     torch.distributed.barrier()
+        logger.info("Synchronization complete")
         
         self.loss_norm_is_initializated = True
+
+    def compute_loss_normalization(self, pl_module):
+        """
+        NEW: Compute normalization values for compound loss.
+        Only called if using MultiLoss.
+        """
+        from tqdm import tqdm
+        
+        # Get dataloader
+        dl = DataLoader(
+            pl_module.train_ds,
+            batch_size=pl_module.cfg.hyperparameters.batch_size,
+            shuffle=True,
+            num_workers=4,  # MUST be 0 to avoid CUDA init errors in DDP
+            drop_last=False,
+            pin_memory=False  # Also disable pin_memory for safety
+        )
+        
+        # Number of batches for normalization
+        if hasattr(pl_module.cfg, 'loss_params') and hasattr(pl_module.cfg.loss_params, 'compound_loss') and hasattr(pl_module.cfg.loss_params.compound_loss, 'normalization_params'):
+            max_samples = pl_module.cfg.loss_params.compound_loss.normalization_params.get('max_samples', 1000)
+            max_batches = max_samples // pl_module.cfg.hyperparameters.batch_size
+        else:
+            max_batches = min(100, len(dl))
+        
+        # Reset norms
+        pl_module.loss_function.reset_norm()
+        
+        # Compute norms
+        pl_module.model.eval()
+        logger.info("Evaluating loss norms")
+        with torch.no_grad():
+            for batch_idx, batch in enumerate(tqdm(dl, total=max_batches, desc="Computing loss norms")):
+                if batch_idx >= max_batches:
+                    break
+                
+                # Unpack batch
+                images, masks = batch.values()
+                
+                # Move to device if needed
+                device = pl_module.device
+                images = images.to(device)
+                if isinstance(masks, dict):
+                    masks = {k: v.to(device) if isinstance(v, torch.Tensor) else v 
+                            for k, v in masks.items()}
+                else:
+                    masks = masks.to(device)
+                
+                # Forward pass
+                pred = pl_module.model(images)
+                
+                # Prepare batch format for MultiLoss
+                if isinstance(masks, dict):
+                    pred_batch = {"seg": pred}
+                    gt_batch = masks
+                else:
+                    pred_batch = pred
+                    gt_batch = masks
+                
+                # Update norms
+                batch_size = images.shape[0]
+                pl_module.loss_function.update_norm(pred_batch, gt_batch, batch_size)
+        
+        # Sync across GPUs if distributed
+        if pl_module.trainer.world_size > 1 and torch.distributed.is_initialized():
+            logger.info("Performing loss sync acorss devices")
+            pl_module.loss_function.sync(pl_module.trainer.world_size)
+        
+        pl_module.loss_function.set_norm_updated(True)
+        pl_module.model.train()
+        logger.info("Loss normalization computed")
+        logger.info(f"Loss function: {pl_module.loss_function}")
+        for loss in pl_module.loss_function.loss_funcs:
+            logger.info(f"Computed nomalization factor for {loss}: {loss.norm}")
 
 
 # Also update the FrameField-specific callback to use the same fix
