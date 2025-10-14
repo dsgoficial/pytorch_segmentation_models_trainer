@@ -23,6 +23,7 @@ import json
 import math
 import os
 import rasterio
+from copy import deepcopy
 from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -385,26 +386,23 @@ class SegmentationDataset(AbstractDataset):
             return self.load_image_from_path(image_path, is_mask=False, force_rgb=force_rgb)
 
     def _load_image_with_rasterio(self, image_path: str) -> np.ndarray:
-        """Carrega imagem usando rasterio com seleção de bandas.
-        
-        Args:
-            image_path: Caminho para a imagem
-            
-        Returns:
-            np.ndarray: Imagem com shape (H, W, C) onde C são as bandas selecionadas
-        """
-        with rasterio.open(image_path) as src:
-            # Se não há bandas selecionadas, carrega todas
+        """Carrega imagem FORÇANDO liberação de buffers."""
+        with rasterio.open(image_path, 'r') as src:
             if self.selected_bands is None:
-                image = src.read()  # Shape: (C, H, W)
+                # Lê todas as bandas
+                data = src.read()
             else:
-                # Carrega apenas as bandas selecionadas (rasterio usa base 1 para bandas)
-                image = src.read(self.selected_bands)  # Shape: (len(selected_bands), H, W)
+                # Lê bandas selecionadas
+                data = src.read(self.selected_bands)
             
-            # Converte de (C, H, W) para (H, W, C)
-            image = np.moveaxis(image, 0, -1)
+            # ✅ CRÍTICO: transpõe E copia em uma operação
+            image = np.transpose(data, (1, 2, 0)).copy()
             
-        return image
+            # ✅ Delete referência explicitamente
+            del data
+        
+        # ✅ Força array contíguo (sem views)
+        return np.array(image, dtype=np.uint8)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """Retorna item do dataset com suporte a bandas personalizadas."""
@@ -417,14 +415,26 @@ class SegmentationDataset(AbstractDataset):
             is_mask=True, 
             is_binary_mask=(self.n_classes == 2)
         )
+        if self.transform is None:
+            image = torch.from_numpy(image).float()
+            image = image.permute(2, 0, 1)  # (H,W,C) → (C,H,W) para PyTorch
+            image = image / 255.0
+            mask = torch.from_numpy(mask).long()
+            return {
+                "image": image,
+                "mask": mask
+            }
+        transform_func = deepcopy(self.transform)
+        output = transform_func(image=image, mask=mask)
+        # output = self.transform(image=image, mask=mask)
+        output_dict = {
+            "image": output["image"].clone().detach() if torch.is_tensor(output["image"]) else output["image"].copy(),
+            "mask": output["mask"].clone().detach() if torch.is_tensor(output["mask"]) else output["mask"].copy(),
+        }
+        del output
+        del transform_func
         
-        result = (
-            {"image": image, "mask": mask}
-            if self.transform is None
-            else self.transform(image=image, mask=mask)
-        )
-        
-        return result
+        return output_dict
 
 
 class FrameFieldSegmentationDataset(SegmentationDataset):

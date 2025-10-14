@@ -72,7 +72,7 @@ class Loss(torch.nn.Module):
 
     def update_norm(self, pred_batch, gt_batch, nums):
         loss = self.compute(pred_batch, gt_batch)
-        self.norm_meter.update(loss, nums)
+        self.norm_meter.update(loss.detach().item(), nums)
         self.norm[0] = self.norm_meter.val
 
     def sync(self, world_size):
@@ -187,8 +187,8 @@ class MultiLoss(torch.nn.Module):
                 pred_batch, gt_batch, normalize=normalize
             )
             if isinstance(weight_i, scipy.interpolate.interpolate.interp1d) and epoch is not None:
-                weight_value = float(weight_i(epoch))  # ← Force to Python float
-                current_weight = torch.tensor(weight_value, device=loss_i.device, dtype=loss_i.dtype)
+                weight_scalar = float(weight_i(epoch))
+                current_weight = weight_scalar
             else:
                 current_weight = weight_i
             total_loss += current_weight * loss_i
