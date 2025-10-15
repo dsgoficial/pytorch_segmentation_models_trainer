@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import albumentations as A
 import cv2
+from torch.cuda.amp import autocast
 import numpy as np
 import rasterio
 import torch
@@ -197,6 +198,8 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
             * self.model_input_shape[0],
             math.ceil(image.shape[1] / self.model_input_shape[1])
             * self.model_input_shape[1],
+            border_mode=cv2.BORDER_REFLECT_101,
+            value=None,
         )
         center_crop_func = A.CenterCrop(*image.shape[0:2])
         normalized_image = pad_func(image=normalized_image)["image"]
@@ -232,9 +235,13 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
                 list(zip(tiles, tiler.crops)),
                 batch_size=self.batch_size,
                 pin_memory=True,
+                num_workers=4,
+                persistent_workers=True,
+                prefetch_factor=2,
             ):
                 tiles_batch = tiles_batch.float().to(self.device)
-                pred_batch = self.model(tiles_batch)
+                with autocast():
+                    pred_batch = self.model(tiles_batch)
                 self.integrate_batch(pred_batch, coords_batch, merger_dict)
 
     def integrate_batch(self, pred_batch, coords_batch, merger_dict):
@@ -243,6 +250,73 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
     def merge_masks(self, tiler: ImageSlicer, merger_dict: Dict[str, TileMerger]):
         merged_mask = np.moveaxis(to_numpy(merger_dict["seg"].merge()), 0, -1)
         return {"seg": tiler.crop_to_orignal_size(merged_mask)}
+
+class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
+    """
+    Inference processor para segmentação multi-class.
+    Modelo deve retornar logits/probabilidades: [B, num_classes, H, W]
+    Resultado final será uma imagem de 1 banda com índices de classe: [H, W]
+    """
+    
+    def __init__(
+        self,
+        model,
+        device,
+        batch_size,
+        export_strategy,
+        polygonizer=None,
+        model_input_shape=None,
+        step_shape=None,
+        num_classes=2,  # ✅ Novo parâmetro!
+        config=None,
+        group_output_by_image_basename=False,
+    ):
+        # ✅ Passa num_classes como mask_bands para TileMerger
+        super().__init__(
+            model=model,
+            device=device,
+            batch_size=batch_size,
+            export_strategy=export_strategy,
+            polygonizer=polygonizer,
+            model_input_shape=model_input_shape,
+            step_shape=step_shape,
+            mask_bands=num_classes,  # ✅ TileMerger precisa de todos os canais
+            config=config,
+            group_output_by_image_basename=group_output_by_image_basename,
+        )
+        self.num_classes = num_classes
+    
+    def merge_masks(self, tiler: ImageSlicer, merger_dict: Dict[str, TileMerger]):
+        """
+        ✅ Sobrescreve para fazer argmax após merge!
+        """
+        # Merge ponderado das probabilidades (mantém todas as classes)
+        merged_probs = to_numpy(merger_dict["seg"].merge())  # [num_classes, H, W]
+        
+        # ✅ ARGMAX: converte para índices de classe
+        class_indices = np.argmax(merged_probs, axis=0)  # [H, W]
+        
+        # Crop para tamanho original
+        class_indices = tiler.crop_to_orignal_size(class_indices)
+        
+        # ✅ Retorna 1 banda com índices (0, 1, 2, ..., num_classes-1)
+        return {"seg": class_indices}
+    
+    def save_inference(self, image_path, threshold, profile, inference, output_dict):
+        """
+        ✅ Salva imagem de 1 banda com índices de classe (sem threshold!)
+        """
+        # inference["seg"] já é [H, W] com valores 0, 1, 2, ..., num_classes-1
+        
+        # ✅ Atualiza profile para 1 banda, dtype uint8
+        profile["count"] = 1
+        profile["dtype"] = 'uint8'
+        profile["input_name"] = Path(image_path).stem
+        
+        if self.export_strategy is not None:
+            output_dict["inference"].append(
+                self.export_strategy.save_inference(inference, profile)
+            )
 
 
 class SingleImageFromFrameFieldProcessor(SingleImageInfereceProcessor):
