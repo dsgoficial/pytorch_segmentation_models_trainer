@@ -386,22 +386,11 @@ class SegmentationDataset(AbstractDataset):
             return self.load_image_from_path(image_path, is_mask=False, force_rgb=force_rgb)
 
     def _load_image_with_rasterio(self, image_path: str) -> np.ndarray:
-        """Carrega imagem FORÇANDO liberação de buffers."""
         with rasterio.open(image_path, 'r') as src:
-            if self.selected_bands is None:
-                # Lê todas as bandas
-                data = src.read()
-            else:
-                # Lê bandas selecionadas
-                data = src.read(self.selected_bands)
-            
-            # ✅ CRÍTICO: transpõe E copia em uma operação
+            data = src.read() if self.selected_bands is None \
+                else src.read(self.selected_bands)
             image = np.transpose(data, (1, 2, 0)).copy()
-            
-            # ✅ Delete referência explicitamente
             del data
-        
-        # ✅ Força array contíguo (sem views)
         return np.array(image, dtype=np.uint8)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
