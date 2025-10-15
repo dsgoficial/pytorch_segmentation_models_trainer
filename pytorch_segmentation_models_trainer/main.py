@@ -61,6 +61,9 @@ def main(cfg: DictConfig):
     elif cfg.mode == "convert-dataset":
         from pytorch_segmentation_models_trainer.convert_ds import convert_dataset
         return convert_dataset(cfg)
+    elif cfg.mode == "evaluate-experiments":
+        from pytorch_segmentation_models_trainer.evaluate_experiments import evaluate
+        return evaluate(cfg)
     else:
         raise NotImplementedError
 
