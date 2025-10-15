@@ -425,9 +425,10 @@ class SegmentationDataset(AbstractDataset):
                 "mask": mask
             }
         # This copy is to avoid data leaks from albumentations.
-        # Albumentations stores caches and sometimes do not purge them from the memory, inducing crashes on the server while training.
-        # We added a deepcopy to copy the function, perform the transformation, copy the result and delete any albumentations related object
-        # before returning the evaluated data.
+        # Albumentations stores caches and sometimes do not purge them from the memory, 
+        # inducing crashes on the server while training, due to lack of available memory.
+        # We added a deepcopy to copy the function, perform the transformation, copy the 
+        # result and delete any albumentations related object before returning the evaluated data.
         transform_func = deepcopy(self.transform)
         output = transform_func(image=image, mask=mask)
         output_dict = {
