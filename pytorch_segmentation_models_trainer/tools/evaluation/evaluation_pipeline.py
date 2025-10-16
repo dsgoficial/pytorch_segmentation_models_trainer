@@ -41,6 +41,15 @@ from pytorch_segmentation_models_trainer.tools.evaluation.gpu_distributor import
 from pytorch_segmentation_models_trainer.tools.evaluation.metrics_calculator import (
     MetricsCalculator
 )
+from pytorch_segmentation_models_trainer.tools.visualization.confusion_matrix_plots import (
+    ConfusionMatrixPlotter
+)
+from pytorch_segmentation_models_trainer.tools.visualization.comparison_plots import (
+    ComparisonPlotter
+)
+from pytorch_segmentation_models_trainer.tools.evaluation.results_aggregator import (
+    ResultsAggregator
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +84,26 @@ class EvaluationPipeline:
         if config.pipeline_options.parallel_inference.enabled:
             self.gpu_distributor = GPUDistributor(config)
         
+        # Results Aggregator
+        self.results_aggregator = ResultsAggregator(config)
+        
+        # Visualization (Fase 3)
+        self.confusion_matrix_plotter = None
+        self.comparison_plotter = None
+        
+        if config.visualization.comparison_plots.enabled:
+            self.confusion_matrix_plotter = ConfusionMatrixPlotter(config)
+            self.comparison_plotter = ComparisonPlotter(config)
+        
         logger.info("EvaluationPipeline initialized")
         logger.info(f"Number of experiments: {len(self.experiments)}")
         logger.info(
             f"Parallel inference: "
             f"{'enabled' if config.pipeline_options.parallel_inference.enabled else 'disabled'}"
+        )
+        logger.info(
+            f"Visualizations: "
+            f"{'enabled' if config.visualization.comparison_plots.enabled else 'disabled'}"
         )
     
     def run(self) -> Dict:
@@ -106,11 +130,11 @@ class EvaluationPipeline:
             all_results = self._evaluate_all_experiments(predictions, dataset_csv)
             
             # 4. Agregar resultados
-            # TODO: Fase 3 - ResultsAggregator
-            aggregated = self._simple_aggregate(all_results)
+            aggregated = self.results_aggregator.aggregate(all_results)
             
-            # 5. Gerar visualizações
-            # TODO: Fase 3 - ComparisonPlotter
+            # 5. Gerar visualizações (Fase 3)
+            if self.config.visualization.comparison_plots.enabled:
+                self._generate_visualizations(aggregated)
             
             # 6. Salvar relatório final
             self._save_summary_report(aggregated, time.time() - start_time)
@@ -638,7 +662,7 @@ class EvaluationPipeline:
     
     def _simple_aggregate(self, all_results: Dict) -> Dict:
         """
-        Agregação simples dos resultados (placeholder para Fase 3).
+        Agregação simples dos resultados (DEPRECATED - usar results_aggregator).
         
         Args:
             all_results: resultados de todos experimentos
@@ -662,6 +686,122 @@ class EvaluationPipeline:
         self._create_aggregated_csv(all_results)
         
         return aggregated
+    
+    def _generate_visualizations(self, aggregated: Dict):
+        """
+        Gera todas as visualizações (Fase 3).
+        
+        Args:
+            aggregated: Resultados agregados
+        """
+        logger.info("\n" + "="*60)
+        logger.info("STEP 5: GENERATING VISUALIZATIONS")
+        logger.info("="*60)
+        
+        all_results = aggregated['experiments']
+        
+        # Diretório de saída para visualizações
+        output_dir = os.path.join(
+            self.config.output.base_dir,
+            self.config.output.structure.comparison_folder
+        )
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        
+        # 1. Confusion Matrices
+        if self.config.visualization.confusion_matrix.save_individual:
+            logger.info("Plotting individual confusion matrices...")
+            for exp_name, results in all_results.items():
+                self.confusion_matrix_plotter.plot_single_experiment(
+                    confusion_matrix=results['confusion_matrix'],
+                    class_names=results['class_names'],
+                    experiment_name=exp_name,
+                    output_dir=os.path.join(output_dir, "confusion_matrices")
+                )
+        
+        if self.config.visualization.confusion_matrix.save_comparison:
+            logger.info("Plotting confusion matrices comparison...")
+            self.confusion_matrix_plotter.plot_comparison_grid(
+                experiments_data=all_results,
+                output_dir=output_dir
+            )
+        
+        # 2. Per-class accuracy
+        if self.config.visualization.per_class_analysis.enabled:
+            logger.info("Plotting per-class accuracy...")
+            self.confusion_matrix_plotter.plot_per_class_accuracy(
+                experiments_data=all_results,
+                output_dir=output_dir
+            )
+        
+        # 3. Comparison plots
+        if "bar_chart" in self.config.visualization.comparison_plots.plot_types:
+            logger.info("Plotting metrics bar chart...")
+            self.comparison_plotter.plot_metrics_bar_chart(
+                experiments_data=all_results,
+                output_dir=output_dir
+            )
+        
+        if "box_plot" in self.config.visualization.comparison_plots.plot_types:
+            logger.info("Plotting box plots...")
+            # Box plot para cada métrica configurada
+            for metric in self.config.visualization.comparison_plots.metrics_to_compare:
+                try:
+                    self.comparison_plotter.plot_per_image_boxplot(
+                        experiments_data=all_results,
+                        output_dir=output_dir,
+                        metric=metric
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not plot box plot for {metric}: {e}")
+        
+        if "radar_chart" in self.config.visualization.comparison_plots.plot_types:
+            logger.info("Plotting radar chart...")
+            self.comparison_plotter.plot_radar_chart(
+                experiments_data=all_results,
+                output_dir=output_dir
+            )
+        
+        # 4. Per-class comparison
+        if self.config.visualization.per_class_analysis.enabled:
+            for plot_type in self.config.visualization.per_class_analysis.plot_types:
+                if plot_type == "iou_per_class":
+                    logger.info("Plotting IoU per class...")
+                    self.comparison_plotter.plot_per_class_comparison(
+                        experiments_data=all_results,
+                        output_dir=output_dir,
+                        metric_prefix="JaccardIndex"
+                    )
+                elif plot_type == "accuracy_per_class":
+                    logger.info("Plotting accuracy per class...")
+                    self.comparison_plotter.plot_per_class_comparison(
+                        experiments_data=all_results,
+                        output_dir=output_dir,
+                        metric_prefix="Accuracy"
+                    )
+        
+        # 5. Best/Worst images analysis
+        if self.config.visualization.per_image_analysis.enabled:
+            logger.info("Analyzing best/worst images...")
+            self.comparison_plotter.plot_best_worst_images(
+                experiments_data=all_results,
+                output_dir=output_dir,
+                metric=self.config.visualization.per_image_analysis.criteria,
+                n_images=self.config.visualization.per_image_analysis.save_worst_n
+            )
+        
+        # 6. Distribution plots
+        logger.info("Plotting metric distributions...")
+        for metric in self.config.visualization.comparison_plots.metrics_to_compare:
+            try:
+                self.comparison_plotter.plot_metrics_distribution(
+                    experiments_data=all_results,
+                    output_dir=output_dir,
+                    metric=metric
+                )
+            except Exception as e:
+                logger.warning(f"Could not plot distribution for {metric}: {e}")
+        
+        logger.info(f"All visualizations saved to: {output_dir}")
     
     def _create_aggregated_csv(self, all_results: Dict):
         """
