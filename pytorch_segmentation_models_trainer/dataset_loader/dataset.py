@@ -333,6 +333,7 @@ class SegmentationDataset(AbstractDataset):
         n_classes=2,
         selected_bands: Optional[List[int]] = None,
         use_rasterio: bool = False,
+        reset_augmentation_function: bool = False,
     ) -> None:
         super(SegmentationDataset, self).__init__(
             input_csv_path=input_csv_path,
@@ -346,6 +347,7 @@ class SegmentationDataset(AbstractDataset):
         self.n_classes = n_classes
         self.selected_bands = selected_bands
         self.use_rasterio = use_rasterio
+        self.reset_augmentation_function = reset_augmentation_function
         
         # Validação das bandas selecionadas
         if self.selected_bands is not None:
@@ -391,6 +393,7 @@ class SegmentationDataset(AbstractDataset):
                 else src.read(self.selected_bands)
             image = np.transpose(data, (1, 2, 0)).copy()
             del data
+            src.close()
         return np.array(image, dtype=np.uint8)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
@@ -418,6 +421,8 @@ class SegmentationDataset(AbstractDataset):
         # inducing crashes on the server while training, due to lack of available memory.
         # We added a deepcopy to copy the function, perform the transformation, copy the 
         # result and delete any albumentations related object before returning the evaluated data.
+        if not self.reset_augmentation_function:
+            return self.transform(image=image, mask=mask)
         transform_func = deepcopy(self.transform)
         output = transform_func(image=image, mask=mask)
         output_dict = {
