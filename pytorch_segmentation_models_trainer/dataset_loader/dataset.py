@@ -54,6 +54,7 @@ from pytorch_toolbelt.utils.torch_utils import (
     to_numpy,
 )
 import kornia as K
+import gc
 
 
 def load_augmentation_object(input_list, bbox_params=None):
@@ -431,7 +432,8 @@ class SegmentationDataset(AbstractDataset):
         }
         del output
         del transform_func
-        
+        if idx % 100 == 0:
+            gc.collect()
         return output_dict
 
 
