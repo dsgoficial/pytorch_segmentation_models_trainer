@@ -29,7 +29,8 @@ import torch
 import rasterio
 from tqdm import tqdm
 
-from pytorch_segmentation_models_trainer.tools.logging_config import logger
+import logging
+logger = logging.getLogger(__name__)
 
 
 class DirectFolderEvaluator:
