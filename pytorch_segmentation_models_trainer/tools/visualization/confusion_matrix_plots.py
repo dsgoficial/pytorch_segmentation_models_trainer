@@ -52,19 +52,33 @@ class ConfusionMatrixPlotter:
         """
         self.config = config
         self.viz_config = config.visualization.confusion_matrix
-        self.metrics_config = config.metrics.confusion_matrix
         
-        # Configurações de plot
-        self.figsize = tuple(self.metrics_config.plot_config.figsize)
-        self.cmap = self.metrics_config.plot_config.cmap
-        self.dpi = self.metrics_config.plot_config.dpi
-        self.save_format = self.metrics_config.plot_config.save_format
-        self.annot_fontsize = self.metrics_config.plot_config.annot_fontsize
+        # Tentar obter metrics_config, ou usar viz_config como fallback
+        if hasattr(config.metrics, 'confusion_matrix'):
+            self.metrics_config = config.metrics.confusion_matrix
+        else:
+            # Usar visualization config como fallback
+            self.metrics_config = self.viz_config
+        
+        # Configurações de plot com valores padrão
+        if hasattr(self.metrics_config, 'plot_config'):
+            self.figsize = tuple(self.metrics_config.plot_config.figsize)
+            self.cmap = self.metrics_config.plot_config.cmap
+            self.dpi = self.metrics_config.plot_config.dpi
+            self.save_format = self.metrics_config.plot_config.save_format
+            self.annot_fontsize = self.metrics_config.plot_config.annot_fontsize
+        else:
+            # Valores padrão
+            self.figsize = (10, 8)
+            self.cmap = 'Blues'
+            self.dpi = 300
+            self.save_format = 'png'
+            self.annot_fontsize = 10
         
         # Configurar estilo matplotlib
         plt.style.use('seaborn-v0_8-darkgrid')
-        
-        logger.info("ConfusionMatrixPlotter initialized")
+    
+    logger.info("ConfusionMatrixPlotter initialized")
     
     def plot_single_experiment(
         self,

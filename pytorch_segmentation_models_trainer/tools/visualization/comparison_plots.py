@@ -54,9 +54,19 @@ class ComparisonPlotter:
         self.config = config
         self.viz_config = config.visualization.comparison_plots
         
-        # Configurações
-        self.dpi = self.viz_config.dpi
-        self.save_format = self.viz_config.save_format
+        # Configurações com valores padrão
+        self.dpi = getattr(self.viz_config, 'dpi', 300)
+        self.save_format = getattr(self.viz_config, 'save_format', 'png')
+        
+        # Métricas a comparar
+        if hasattr(self.viz_config, 'metrics_to_compare'):
+            self.metrics_to_compare = self.viz_config.metrics_to_compare
+        elif hasattr(self.viz_config, 'metrics_to_plot'):
+            # Fallback para metrics_to_plot
+            self.metrics_to_compare = self.viz_config.metrics_to_plot
+        else:
+            # Default para as métricas mais comuns
+            self.metrics_to_compare = ['Accuracy', 'JaccardIndex', 'Dice', 'F1Score']
         
         # Estilo
         if hasattr(self.viz_config, 'style'):
@@ -84,7 +94,7 @@ class ComparisonPlotter:
         logger.info(f"Plotting metrics bar chart for {len(experiments_data)} experiments")
         
         # Extrair métricas a comparar
-        metrics_to_compare = self.viz_config.metrics_to_compare
+        metrics_to_compare = self.metrics_to_compare
         
         # Preparar dados
         exp_names = []

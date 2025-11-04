@@ -44,7 +44,19 @@ def setup_logging(config: DictConfig):
     Args:
         config: DictConfig com configurações de logging
     """
-    log_level = getattr(logging, config.logging.level.upper())
+    # Valores padrão
+    log_level = logging.INFO
+    save_to_file = False
+    log_file = "evaluation.log"
+    
+    # Tentar obter configurações customizadas
+    if hasattr(config, 'logging'):
+        if hasattr(config.logging, 'level'):
+            log_level = getattr(logging, config.logging.level.upper())
+        if hasattr(config.logging, 'save_to_file'):
+            save_to_file = config.logging.save_to_file
+        if hasattr(config.logging, 'log_file'):
+            log_file = config.logging.log_file
     
     # Configurar logger raiz
     logging.basicConfig(
@@ -54,13 +66,16 @@ def setup_logging(config: DictConfig):
     )
     
     # Se salvar em arquivo
-    if config.logging.save_to_file:
-        log_dir = Path(config.output.base_dir)
+    if save_to_file:
+        if hasattr(config, 'output') and hasattr(config.output, 'base_dir'):
+            log_dir = Path(config.output.base_dir)
+        else:
+            log_dir = Path("./evaluation_outputs")
+        
         log_dir.mkdir(parents=True, exist_ok=True)
+        log_file_path = log_dir / log_file
         
-        log_file = log_dir / config.logging.log_file
-        
-        file_handler = logging.FileHandler(log_file, mode='w')
+        file_handler = logging.FileHandler(log_file_path, mode='w')
         file_handler.setLevel(log_level)
         file_handler.setFormatter(
             logging.Formatter(
@@ -70,7 +85,7 @@ def setup_logging(config: DictConfig):
         )
         
         logging.getLogger().addHandler(file_handler)
-        logger.info(f"Logging to file: {log_file}")
+        logger.info(f"Logging to file: {log_file_path}")
 
 
 @hydra.main(
