@@ -1,179 +1,63 @@
-# -*- coding: utf-8 -*-
-"""
-/***************************************************************************
- pytorch_segmentation_models_trainer
-                              -------------------
-        begin                : 2025-10-15
-        git sha              : $Format:%H$
-        copyright            : (C) 2025 by Philipe Borba - Cartographic Engineer
-                                                            @ Brazilian Army
-        email                : philipeborba at gmail dot com
- ***************************************************************************/
-/***************************************************************************
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- ****
-"""
-
-import json
-import logging
 import os
-from datetime import datetime
+import json
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
-import rasterio
 import torch
-import torchmetrics
-from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
-from omegaconf import DictConfig, OmegaConf
+import rasterio
 from tqdm import tqdm
+from omegaconf import DictConfig, OmegaConf
+from hydra.utils import instantiate
 
-logger = logging.getLogger(__name__)
+from pytorch_segmentation_models_trainer.tools.logging_config import logger
 
 
 class MetricsCalculator:
     """
-    Calcula métricas de segmentação usando torchmetrics.
+    Calcula métricas de segmentação comparando predições com ground truth.
     
-    Features:
-    - Extrai automaticamente num_classes e class_names do training config
-    - Suporta métricas customizadas via DictConfig
-    - Calcula métricas por imagem e agregadas
-    - Sempre calcula matriz de confusão
-    - Lida com métricas que retornam arrays (average='none')
-    - Salva resultados em múltiplos formatos (CSV, JSON, NPY)
+    Suporta matching flexível de arquivos por nome.
     """
     
-    def __init__(self, config: DictConfig, experiment_config: DictConfig):
+    def __init__(self, pipeline_config: DictConfig, experiment_config: DictConfig):
         """
         Args:
-            config: Config geral do pipeline
-            experiment_config: Config específico do experimento
+            pipeline_config: Config do pipeline (métricas, output, etc.)
+            experiment_config: Config do experimento específico
         """
-        self.config = config
+        self.config = pipeline_config
         self.experiment_config = experiment_config
         
-        # Extrair informações de classes do training config
-        self.num_classes, self.class_names = self._extract_class_info()
+        # Extrair configurações de métricas
+        self.num_classes = self.config.metrics.num_classes
+        self.class_names = self.config.metrics.class_names
         
         # Instanciar métricas
         self.metrics = self._instantiate_metrics()
         
-        # Matriz de confusão (sempre calculada)
-        self.confusion_matrix = torchmetrics.ConfusionMatrix(
-            task="multiclass",
-            num_classes=self.num_classes
-        )
+        # Confusion Matrix
+        self.confusion_matrix = self._instantiate_confusion_matrix()
         
-        logger.info(f"MetricsCalculator initialized for {experiment_config.name}")
+        logger.info(f"MetricsCalculator initialized")
         logger.info(f"  Num classes: {self.num_classes}")
         logger.info(f"  Class names: {self.class_names}")
         logger.info(f"  Num metrics: {len(self.metrics)}")
     
-    def _extract_class_info(self) -> Tuple[int, List[str]]:
-        """
-        Extrai num_classes e class_names do training config.
+    def _instantiate_confusion_matrix(self):
+        """Instancia ConfusionMatrix do torchmetrics."""
+        from torchmetrics import ConfusionMatrix
         
-        Procura em:
-        1. experiment_config.model.classes (via training config)
-        2. experiment_config.class_definitions.names (via training config)
-        
-        Returns:
-            Tupla (num_classes, class_names)
-        """
-        logger.info("Extracting class information from training config...")
-        
-        # Carregar training config referenciado no predict_config
-        train_cfg = self._load_training_config()
-        
-        # Extrair num_classes
-        num_classes = OmegaConf.select(train_cfg, "model.classes")
-        if num_classes is None:
-            raise ValueError(
-                f"Could not find 'model.classes' in training config for experiment "
-                f"'{self.experiment_config.name}'. "
-                f"Make sure the predict config inherits from the training config using 'defaults'."
-            )
-        
-        # Extrair class_names
-        class_names = OmegaConf.select(train_cfg, "class_definitions.names")
-        if class_names is None:
-            logger.warning(
-                f"Could not find 'class_definitions.names' in training config. "
-                f"Using generic names: ['class_0', 'class_1', ...]"
-            )
-            class_names = [f"class_{i}" for i in range(num_classes)]
-        else:
-            # Converter para lista se for ListConfig
-            class_names = list(class_names)
-        
-        # Validar consistência
-        if len(class_names) != num_classes:
-            logger.warning(
-                f"Mismatch: model.classes={num_classes} but "
-                f"class_definitions.names has {len(class_names)} names. "
-                f"Will use first {num_classes} names or pad with generic names."
-            )
-            if len(class_names) < num_classes:
-                # Pad com nomes genéricos
-                class_names.extend([
-                    f"class_{i}" for i in range(len(class_names), num_classes)
-                ])
-            else:
-                # Truncar
-                class_names = class_names[:num_classes]
-        
-        logger.info(f"Extracted: num_classes={num_classes}, class_names={class_names}")
-        return num_classes, class_names
+        return ConfusionMatrix(
+            task='multiclass',
+            num_classes=self.num_classes
+        )
     
-    def _load_training_config(self) -> DictConfig:
+    def _instantiate_metrics(self) -> List:
         """
-        Carrega o training config referenciado no predict_config.
-        
-        O predict_config tem 'defaults' que inclui o training config:
-        defaults:
-          - train_resnet34_unet_6classes
-        
-        Returns:
-            DictConfig com configuração completa
-        """
-        predict_cfg_path = self.experiment_config.predict_config
-        
-        if not os.path.exists(predict_cfg_path):
-            raise FileNotFoundError(
-                f"Predict config not found: {predict_cfg_path}"
-            )
-        
-        predict_cfg_path = Path(predict_cfg_path).resolve()
-        config_dir = str(predict_cfg_path.parent)
-        config_name = predict_cfg_path.stem
-        
-        logger.debug(f"Loading config from: {config_dir}/{config_name}")
-        
-        # Usar Hydra para carregar com resolução de defaults
-        with initialize_config_dir(
-            config_dir=config_dir,
-            version_base=None
-        ):
-            cfg = compose(
-                config_name=config_name,
-                overrides=[],
-                return_hydra_config=False
-            )
-        
-        return cfg
-    
-    def _instantiate_metrics(self) -> List[torchmetrics.Metric]:
-        """
-        Instancia métricas substituindo ${num_classes} por valor real.
+        Instancia todas as métricas da config.
         
         Returns:
             Lista de métricas torchmetrics instanciadas
@@ -189,7 +73,6 @@ class MetricsCalculator:
                 metric_cfg_copy = OmegaConf.create(metric_cfg_yaml)
                 
                 # Substituir ${num_classes} por valor real
-                # Primeiro criar um DictConfig com a variável
                 resolver_cfg = OmegaConf.create({
                     "num_classes": self.num_classes
                 })
@@ -252,7 +135,11 @@ class MetricsCalculator:
         gt_df = pd.read_csv(ground_truth_csv)
         logger.info(f"Loaded {len(gt_df)} images from ground truth CSV")
         
-        # 2. Inicializar estruturas
+        # 2. Construir mapeamento de predições disponíveis
+        prediction_map = self._build_prediction_map(predictions_folder)
+        logger.info(f"Found {len(prediction_map)} prediction files")
+        
+        # 3. Inicializar estruturas
         per_image_results = []
         
         # Reset metrics
@@ -260,9 +147,10 @@ class MetricsCalculator:
             metric.reset()
         self.confusion_matrix.reset()
         
-        # 3. Iterar sobre imagens
+        # 4. Iterar sobre imagens
         successful = 0
         failed = 0
+        not_found = 0
         
         for idx, row in tqdm(
             gt_df.iterrows(), 
@@ -272,7 +160,20 @@ class MetricsCalculator:
         ):
             try:
                 # Carregar predição e ground truth
-                pred_mask = self._load_prediction(predictions_folder, row)
+                pred_mask, pred_path = self._load_prediction_flexible(
+                    predictions_folder, 
+                    row,
+                    prediction_map
+                )
+                
+                if pred_mask is None:
+                    logger.warning(
+                        f"Prediction not found for {row['image']}. "
+                        f"Tried multiple patterns. Skipping."
+                    )
+                    not_found += 1
+                    continue
+                
                 gt_mask = self._load_ground_truth(row)
                 
                 # Validar shapes
@@ -292,6 +193,7 @@ class MetricsCalculator:
                 image_metrics = self._calculate_per_image_metrics(
                     pred_tensor, gt_tensor, row['image']
                 )
+                image_metrics['prediction_file'] = pred_path  # Adicionar info do arquivo usado
                 per_image_results.append(image_metrics)
                 
                 # Atualizar métricas agregadas
@@ -312,24 +214,27 @@ class MetricsCalculator:
                 failed += 1
                 continue
         
-        logger.info(f"Processing completed: {successful} successful, {failed} failed")
+        logger.info(
+            f"Processing completed: {successful} successful, "
+            f"{failed} failed, {not_found} not found"
+        )
         
         if successful == 0:
             raise ValueError(
                 "No images were successfully processed! Check logs for errors."
             )
         
-        # 4. Computar métricas finais
+        # 5. Computar métricas finais
         logger.info("Computing aggregated metrics...")
         aggregated_metrics = self._compute_aggregated_metrics()
         
         logger.info("Computing confusion matrix...")
         confusion_mat = self.confusion_matrix.compute().cpu().numpy()
         
-        # 5. Preparar diretório de saída
+        # 6. Preparar diretório de saída
         output_dir = self._get_output_dir(experiment_name)
         
-        # 6. Salvar resultados
+        # 7. Salvar resultados
         logger.info("Saving results...")
         self._save_results(
             per_image_results,
@@ -351,36 +256,172 @@ class MetricsCalculator:
             'output_dir': output_dir
         }
     
-    def _load_prediction(
+    def _build_prediction_map(self, predictions_folder: str) -> Dict[str, str]:
+        """
+        Constrói mapeamento de stems de arquivo para paths completos.
+        
+        Isso permite matching flexível de arquivos de predição.
+        
+        Args:
+            predictions_folder: pasta com predições
+            
+        Returns:
+            Dict mapeando stem -> full_path
+        """
+        prediction_map = {}
+        
+        # Buscar todos arquivos TIF
+        pred_folder_path = Path(predictions_folder)
+        
+        if not pred_folder_path.exists():
+            logger.warning(f"Predictions folder does not exist: {predictions_folder}")
+            return prediction_map
+        
+        # Padrões de busca (em ordem de prioridade)
+        patterns = [
+            "*.tif",
+            "*.tiff",
+            "*.TIF",
+            "*.TIFF"
+        ]
+        
+        all_files = []
+        for pattern in patterns:
+            all_files.extend(pred_folder_path.glob(pattern))
+        
+        logger.debug(f"Found {len(all_files)} TIF files in predictions folder")
+        
+        # Construir mapeamento
+        for file_path in all_files:
+            # Obter stem (nome sem extensão)
+            stem = file_path.stem
+            
+            # Tentar remover prefixos/sufixos comuns
+            clean_stems = self._generate_stem_variants(stem)
+            
+            for clean_stem in clean_stems:
+                if clean_stem not in prediction_map:
+                    prediction_map[clean_stem] = str(file_path)
+        
+        logger.debug(f"Built prediction map with {len(prediction_map)} entries")
+        
+        return prediction_map
+    
+    def _generate_stem_variants(self, stem: str) -> List[str]:
+        """
+        Gera variantes do stem removendo prefixos/sufixos comuns.
+        
+        Exemplos:
+            "seg_image001_output" -> ["seg_image001_output", "image001", "seg_image001"]
+            "image001_pred" -> ["image001_pred", "image001"]
+            "mi_001" -> ["mi_001"]
+        
+        Args:
+            stem: nome do arquivo sem extensão
+            
+        Returns:
+            Lista de variantes do stem
+        """
+        variants = [stem]  # Sempre incluir o original
+        
+        # Remover prefixos comuns
+        prefixes_to_remove = ['seg_', 'pred_', 'output_', 'mask_']
+        temp_stem = stem
+        
+        for prefix in prefixes_to_remove:
+            if temp_stem.startswith(prefix):
+                temp_stem = temp_stem[len(prefix):]
+                variants.append(temp_stem)
+                break
+        
+        # Remover sufixos comuns
+        suffixes_to_remove = ['_output', '_pred', '_prediction', '_seg', '_mask']
+        temp_stem = stem
+        
+        for suffix in suffixes_to_remove:
+            if temp_stem.endswith(suffix):
+                temp_stem = temp_stem[:-len(suffix)]
+                if temp_stem not in variants:
+                    variants.append(temp_stem)
+                break
+        
+        # Tentar remover prefixo E sufixo
+        temp_stem = stem
+        for prefix in prefixes_to_remove:
+            if temp_stem.startswith(prefix):
+                temp_stem = temp_stem[len(prefix):]
+                break
+        
+        for suffix in suffixes_to_remove:
+            if temp_stem.endswith(suffix):
+                temp_stem = temp_stem[:-len(suffix)]
+                break
+        
+        if temp_stem not in variants:
+            variants.append(temp_stem)
+        
+        return variants
+    
+    def _load_prediction_flexible(
         self, 
         predictions_folder: str, 
-        row: pd.Series
-    ) -> np.ndarray:
+        row: pd.Series,
+        prediction_map: Dict[str, str]
+    ) -> tuple:
         """
-        Carrega predição de uma imagem.
+        Carrega predição com matching flexível por nome.
         
-        Predições são TIF com 1 banda, valores uint8 = índices de classe.
-        Pattern esperado: seg_{image_stem}_output.tif
+        Tenta múltiplas estratégias para encontrar o arquivo:
+        1. Match exato do stem
+        2. Match após remover prefixos/sufixos comuns
+        3. Match com variantes do ground truth
         
         Args:
             predictions_folder: pasta com predições
             row: linha do DataFrame com coluna 'image'
+            prediction_map: mapeamento de stems para paths
             
         Returns:
-            np.ndarray [H, W] com índices de classe
+            Tupla (mask_array, file_path) ou (None, None) se não encontrado
         """
-        image_stem = Path(row['image']).stem
-        pred_filename = f"seg_{image_stem}_output.tif"
-        pred_path = os.path.join(predictions_folder, pred_filename)
+        # Obter stem do ground truth
+        gt_path = Path(row['image'])
+        gt_stem = gt_path.stem
         
-        if not os.path.exists(pred_path):
-            raise FileNotFoundError(f"Prediction not found: {pred_path}")
+        # Gerar variantes do stem do ground truth
+        gt_variants = self._generate_stem_variants(gt_stem)
         
-        # Carregar com rasterio
-        with rasterio.open(pred_path) as src:
-            pred_mask = src.read(1)  # Ler primeira (única) banda
+        # Tentar encontrar match
+        matched_path = None
         
-        return pred_mask
+        for variant in gt_variants:
+            if variant in prediction_map:
+                matched_path = prediction_map[variant]
+                logger.debug(f"Matched {gt_stem} -> {Path(matched_path).name} (variant: {variant})")
+                break
+        
+        if matched_path is None:
+            # Fallback: tentar match direto por nome de arquivo
+            pred_filename = gt_path.name
+            direct_path = os.path.join(predictions_folder, pred_filename)
+            
+            if os.path.exists(direct_path):
+                matched_path = direct_path
+                logger.debug(f"Matched {gt_stem} -> {pred_filename} (direct match)")
+        
+        if matched_path is None:
+            return None, None
+        
+        # Carregar arquivo
+        try:
+            with rasterio.open(matched_path) as src:
+                pred_mask = src.read(1)  # Ler primeira banda
+            
+            return pred_mask, matched_path
+            
+        except Exception as e:
+            logger.error(f"Failed to load prediction from {matched_path}: {e}")
+            return None, None
     
     def _load_ground_truth(self, row: pd.Series) -> np.ndarray:
         """
@@ -518,16 +559,25 @@ class MetricsCalculator:
         base_dir = self.config.output.base_dir
         
         # Adicionar timestamp se configurado
-        if self.config.output.timestamp_folders:
+        if hasattr(self.config.output, 'timestamp_folders') and self.config.output.timestamp_folders:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             base_dir = os.path.join(base_dir, timestamp)
         
-        output_dir = os.path.join(
-            base_dir,
-            self.config.output.structure.experiments_folder,
-            experiment_name,
-            "metrics"
-        )
+        # Estrutura de pastas
+        if hasattr(self.config.output, 'structure'):
+            output_dir = os.path.join(
+                base_dir,
+                self.config.output.structure.experiments_folder,
+                experiment_name,
+                "metrics"
+            )
+        else:
+            # Fallback para estrutura simples
+            output_dir = os.path.join(
+                base_dir,
+                experiment_name,
+                "metrics"
+            )
         
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         return output_dir
@@ -552,12 +602,16 @@ class MetricsCalculator:
         """
         # 1. Per-image metrics CSV
         per_image_df = pd.DataFrame(per_image_results)
-        per_image_csv = os.path.join(
-            output_dir,
-            self.config.output.files.per_image_metrics_pattern.format(
+        
+        # Nome do arquivo
+        if hasattr(self.config.output, 'files') and hasattr(self.config.output.files, 'per_image_metrics_pattern'):
+            csv_filename = self.config.output.files.per_image_metrics_pattern.format(
                 experiment_name=experiment_name
             )
-        )
+        else:
+            csv_filename = f"{experiment_name}_per_image_metrics.csv"
+        
+        per_image_csv = os.path.join(output_dir, csv_filename)
         per_image_df.to_csv(per_image_csv, index=False)
         logger.info(f"  Saved per-image metrics: {per_image_csv}")
         
@@ -568,12 +622,14 @@ class MetricsCalculator:
         logger.info(f"  Saved aggregated metrics: {aggregated_json}")
         
         # 3. Confusion matrix NPY
-        confusion_npy = os.path.join(
-            output_dir,
-            self.config.output.files.confusion_matrix_data_pattern.format(
+        if hasattr(self.config.output, 'files') and hasattr(self.config.output.files, 'confusion_matrix_data_pattern'):
+            cm_filename = self.config.output.files.confusion_matrix_data_pattern.format(
                 experiment_name=experiment_name
             )
-        )
+        else:
+            cm_filename = f"{experiment_name}_confusion_matrix.npy"
+        
+        confusion_npy = os.path.join(output_dir, cm_filename)
         np.save(confusion_npy, confusion_mat)
         logger.info(f"  Saved confusion matrix: {confusion_npy}")
         

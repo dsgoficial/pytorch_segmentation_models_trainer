@@ -156,8 +156,10 @@ class EvaluationPipeline:
         """
         Prepara CSV do dataset.
         
-        Se build_csv_from_folders.enabled=True, constrói CSV automaticamente.
-        Caso contrário, usa input_csv_path existente.
+        Suporta 3 modos:
+        1. CSV existente (input_csv_path)
+        2. Construir de pastas com imagens+máscaras (build_csv_from_folders)
+        3. NOVO: Avaliação direta de pastas (direct_folder_evaluation)
         
         Returns:
             Path do CSV do dataset
@@ -166,8 +168,50 @@ class EvaluationPipeline:
         logger.info("STEP 1: PREPARING DATASET")
         logger.info("="*60)
         
+        # MODO 3: Direct folder evaluation (NOVO)
+        if (hasattr(self.config.evaluation_dataset, 'direct_folder_evaluation') and
+            self.config.evaluation_dataset.direct_folder_evaluation.enabled):
+            
+            logger.info("Using DIRECT FOLDER EVALUATION mode (no CSV needed)")
+            
+            from pytorch_segmentation_models_trainer.tools.evaluation.direct_folder_evaluator import (
+                prepare_evaluation_csv_from_folders
+            )
+            
+            config = self.config.evaluation_dataset.direct_folder_evaluation
+            
+            csv_path = os.path.join(
+                self.config.output.base_dir,
+                "direct_evaluation_dataset.csv"
+            )
+            
+            # Criar pasta se não existe
+            Path(csv_path).parent.mkdir(parents=True, exist_ok=True)
+            
+            # Verificar se deve regenerar
+            if os.path.exists(csv_path) and not config.get('force_rebuild', False):
+                logger.info(f"Using existing CSV: {csv_path}")
+                return csv_path
+            
+            # Criar CSV diretamente das pastas
+            prepare_evaluation_csv_from_folders(
+                ground_truth_folder=config.ground_truth_folder,
+                predictions_folder=config.predictions_folder if hasattr(config, 'predictions_folder') else None,
+                output_csv_path=csv_path,
+                gt_pattern=config.get('gt_pattern', '*.tif'),
+                pred_pattern=config.get('pred_pattern', '*.tif')
+            )
+            
+            logger.info(f"Dataset CSV built (direct mode): {csv_path}")
+            return csv_path
+        
+        # MODO 2: Build from folders (ORIGINAL)
         if self.config.evaluation_dataset.build_csv_from_folders.enabled:
             logger.info("Building CSV from folders...")
+            
+            from pytorch_segmentation_models_trainer.tools.evaluation.csv_builder import (
+                DatasetCSVBuilder
+            )
             
             builder = DatasetCSVBuilder(
                 self.config.evaluation_dataset.build_csv_from_folders
@@ -185,15 +229,16 @@ class EvaluationPipeline:
             logger.info(f"Dataset CSV built: {csv_path}")
             
             return csv_path
-            
+        
+        # MODO 1: CSV existente (ORIGINAL)
         else:
             csv_path = self.config.evaluation_dataset.input_csv_path
             
             if not os.path.exists(csv_path):
                 raise FileNotFoundError(
                     f"Dataset CSV not found: {csv_path}. "
-                    f"Either provide a valid input_csv_path or enable "
-                    f"build_csv_from_folders."
+                    f"Either provide a valid input_csv_path, enable "
+                    f"build_csv_from_folders, or use direct_folder_evaluation."
                 )
             
             logger.info(f"Using existing dataset CSV: {csv_path}")
@@ -319,6 +364,8 @@ class EvaluationPipeline:
         """
         Valida se uma pasta contém predições válidas.
         
+        ATUALIZADO: Aceita qualquer arquivo TIF, sem depender de padrões específicos.
+        
         Args:
             folder: Pasta a validar
             experiment_name: Nome do experimento
@@ -346,30 +393,42 @@ class EvaluationPipeline:
                 'error': f"Path is not a directory: {folder}"
             }
         
-        # Buscar arquivos de predição (padrão seg_*_output.tif)
-        prediction_files = list(Path(folder).glob("seg_*_output.tif"))
+        # Buscar TODOS os arquivos TIF (sem padrão específico)
+        prediction_files = []
+        
+        # Padrões de extensão a buscar
+        patterns = ["*.tif", "*.tiff", "*.TIF", "*.TIFF"]
+        
+        for pattern in patterns:
+            prediction_files.extend(list(Path(folder).glob(pattern)))
         
         if len(prediction_files) == 0:
-            # Tentar padrão alternativo
-            prediction_files = list(Path(folder).glob("*_output.tif"))
-            
-            if len(prediction_files) == 0:
-                return {
-                    'valid': False,
-                    'num_files': 0,
-                    'error': "No prediction files found (expected pattern: seg_*_output.tif or *_output.tif)"
-                }
+            return {
+                'valid': False,
+                'num_files': 0,
+                'error': "No TIF files found in folder"
+            }
         
-        logger.debug(f"Found {len(prediction_files)} prediction files in {folder}")
+        logger.debug(f"Found {len(prediction_files)} TIF files in {folder}")
         
         # Validação adicional: verificar se arquivos têm tamanho > 0
         empty_files = [f for f in prediction_files if os.path.getsize(f) == 0]
         if empty_files:
-            logger.warning(f"Found {len(empty_files)} empty prediction files")
+            logger.warning(f"Found {len(empty_files)} empty files in {folder}")
+        
+        # Contabilizar apenas arquivos não vazios
+        valid_files = [f for f in prediction_files if os.path.getsize(f) > 0]
+        
+        if len(valid_files) == 0:
+            return {
+                'valid': False,
+                'num_files': 0,
+                'error': "All TIF files are empty (0 bytes)"
+            }
         
         return {
             'valid': True,
-            'num_files': len(prediction_files),
+            'num_files': len(valid_files),
             'error': None
         }
     
