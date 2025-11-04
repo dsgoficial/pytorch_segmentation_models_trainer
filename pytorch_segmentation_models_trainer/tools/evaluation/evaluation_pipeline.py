@@ -60,7 +60,7 @@ class EvaluationPipeline:
     
     Fluxo:
     1. Preparar dataset (construir CSV se necessário)
-    2. Executar predições para cada experimento
+    2. Executar/Carregar predições para cada experimento
     3. Calcular métricas para cada experimento
     4. Agregar resultados
     5. Gerar visualizações (Fase 3)
@@ -68,6 +68,7 @@ class EvaluationPipeline:
     Suporta:
     - Múltiplos experimentos
     - Skip de predições/avaliações existentes
+    - Carregamento de predições pré-computadas
     - Execução sequencial ou paralela (Fase 2)
     """
     
@@ -123,7 +124,7 @@ class EvaluationPipeline:
             # 1. Preparar dataset
             dataset_csv = self._prepare_dataset()
             
-            # 2. Executar predições para cada experimento
+            # 2. Executar/Carregar predições para cada experimento
             predictions = self._run_predictions(dataset_csv)
             
             # 3. Calcular métricas para cada experimento
@@ -200,10 +201,11 @@ class EvaluationPipeline:
     
     def _run_predictions(self, dataset_csv: str) -> Dict:
         """
-        Executa predições para todos experimentos.
+        Executa ou carrega predições para todos experimentos.
         
-        Se paralelização estiver habilitada, distribui entre GPUs e executa em paralelo.
-        Caso contrário, executa sequencialmente.
+        Se load_predictions_from_folder.enabled=True, carrega predições existentes.
+        Se skip_existing_predictions=True, pula predições que já existem.
+        Caso contrário, executa predições.
         
         Args:
             dataset_csv: path do CSV com dataset
@@ -212,14 +214,164 @@ class EvaluationPipeline:
             Dict mapeando experiment_name -> info sobre predições
         """
         logger.info("\n" + "="*60)
-        logger.info("STEP 2: RUNNING PREDICTIONS")
+        logger.info("STEP 2: RUNNING/LOADING PREDICTIONS")
         logger.info("="*60)
         
+        # NOVO: Verificar se deve carregar predições de pasta
+        if (hasattr(self.config.pipeline_options, 'load_predictions_from_folder') and 
+            self.config.pipeline_options.load_predictions_from_folder.enabled):
+            return self._load_existing_predictions()
+        
+        # Comportamento original: executar predições
         if (self.config.pipeline_options.parallel_inference.enabled and 
             self.gpu_distributor is not None):
             return self._run_predictions_parallel(dataset_csv)
         else:
             return self._run_predictions_sequential(dataset_csv)
+    
+    def _load_existing_predictions(self) -> Dict:
+        """
+        Carrega predições já existentes de pastas especificadas.
+        
+        Suporta dois modos:
+        1. Base folder centralizada (pipeline_options.load_predictions_from_folder.base_folder)
+        2. Por experimento (experiment.precomputed_predictions_folder)
+        
+        Returns:
+            Dict com info de predições carregadas
+        """
+        logger.info("Loading existing predictions from folders")
+        
+        predictions_info = {}
+        base_folder = None
+        
+        # Verificar se há base_folder centralizada
+        if (hasattr(self.config.pipeline_options.load_predictions_from_folder, 'base_folder') and
+            self.config.pipeline_options.load_predictions_from_folder.base_folder):
+            base_folder = self.config.pipeline_options.load_predictions_from_folder.base_folder
+            logger.info(f"Using centralized base folder: {base_folder}")
+        
+        for exp in self.experiments:
+            logger.info(f"\n--- Experiment: {exp.name} ---")
+            
+            # Determinar pasta de predições
+            predictions_folder = None
+            
+            # 1. Verificar se experimento tem pasta específica
+            if hasattr(exp, 'precomputed_predictions_folder') and exp.precomputed_predictions_folder:
+                predictions_folder = exp.precomputed_predictions_folder
+                logger.info(f"Using experiment-specific folder: {predictions_folder}")
+            
+            # 2. Usar base_folder + nome do experimento
+            elif base_folder:
+                predictions_folder = os.path.join(base_folder, exp.name)
+                logger.info(f"Using base folder structure: {predictions_folder}")
+            
+            # 3. Usar output_folder padrão
+            else:
+                predictions_folder = exp.output_folder
+                logger.info(f"Using default output folder: {predictions_folder}")
+            
+            # Validar pasta
+            validation_result = self._validate_predictions_folder(
+                predictions_folder, 
+                exp.name
+            )
+            
+            if validation_result['valid']:
+                predictions_info[exp.name] = {
+                    'output_folder': predictions_folder,
+                    'skipped': False,
+                    'loaded': True,
+                    'gpu_id': -1,
+                    'num_predictions': validation_result['num_files']
+                }
+                logger.info(
+                    f"✓ Loaded {validation_result['num_files']} predictions "
+                    f"for {exp.name}"
+                )
+            else:
+                error_msg = (
+                    f"✗ Invalid predictions folder for {exp.name}: "
+                    f"{validation_result['error']}"
+                )
+                logger.error(error_msg)
+                predictions_info[exp.name] = {
+                    'output_folder': predictions_folder,
+                    'skipped': False,
+                    'loaded': False,
+                    'gpu_id': -1,
+                    'error': validation_result['error']
+                }
+        
+        # Resumo
+        loaded_count = sum(1 for p in predictions_info.values() if p.get('loaded', False))
+        failed_count = sum(1 for p in predictions_info.values() if 'error' in p)
+        logger.info(f"\nSummary: {loaded_count} experiments loaded, {failed_count} failed")
+        
+        return predictions_info
+    
+    def _validate_predictions_folder(
+        self, 
+        folder: str, 
+        experiment_name: str
+    ) -> Dict:
+        """
+        Valida se uma pasta contém predições válidas.
+        
+        Args:
+            folder: Pasta a validar
+            experiment_name: Nome do experimento
+            
+        Returns:
+            Dict com resultado da validação:
+            {
+                'valid': bool,
+                'num_files': int,
+                'error': str (se invalid)
+            }
+        """
+        # Verificar se pasta existe
+        if not os.path.exists(folder):
+            return {
+                'valid': False,
+                'num_files': 0,
+                'error': f"Folder does not exist: {folder}"
+            }
+        
+        if not os.path.isdir(folder):
+            return {
+                'valid': False,
+                'num_files': 0,
+                'error': f"Path is not a directory: {folder}"
+            }
+        
+        # Buscar arquivos de predição (padrão seg_*_output.tif)
+        prediction_files = list(Path(folder).glob("seg_*_output.tif"))
+        
+        if len(prediction_files) == 0:
+            # Tentar padrão alternativo
+            prediction_files = list(Path(folder).glob("*_output.tif"))
+            
+            if len(prediction_files) == 0:
+                return {
+                    'valid': False,
+                    'num_files': 0,
+                    'error': "No prediction files found (expected pattern: seg_*_output.tif or *_output.tif)"
+                }
+        
+        logger.debug(f"Found {len(prediction_files)} prediction files in {folder}")
+        
+        # Validação adicional: verificar se arquivos têm tamanho > 0
+        empty_files = [f for f in prediction_files if os.path.getsize(f) == 0]
+        if empty_files:
+            logger.warning(f"Found {len(empty_files)} empty prediction files")
+        
+        return {
+            'valid': True,
+            'num_files': len(prediction_files),
+            'error': None
+        }
     
     def _run_predictions_sequential(self, dataset_csv: str) -> Dict:
         """
@@ -280,56 +432,58 @@ class EvaluationPipeline:
         logger.info("Running predictions IN PARALLEL")
         
         # Distribuir experimentos entre GPUs
-        assignments = self.gpu_distributor.assign_experiments(self.experiments)
+        gpu_assignments = self.gpu_distributor.distribute_experiments(self.experiments)
         
-        # Filtrar experimentos que precisam de predição
-        experiments_to_run = []
-        skipped_info = {}
+        logger.info(f"GPU assignments: {gpu_assignments}")
         
-        for gpu_id, exps in assignments.items():
-            for exp in exps:
-                if self._should_skip_prediction(exp):
-                    logger.info(f"Skipping {exp.name} (already exists)")
-                    skipped_info[exp.name] = {
-                        'output_folder': exp.output_folder,
-                        'skipped': True,
-                        'gpu_id': gpu_id
-                    }
-                else:
-                    experiments_to_run.append((exp, gpu_id, dataset_csv))
+        # Preparar lista de tarefas
+        tasks = []
         
-        if len(experiments_to_run) == 0:
-            logger.info("No predictions to run (all skipped)")
-            return skipped_info
+        for exp in self.experiments:
+            # Verificar se deve skip
+            if self._should_skip_prediction(exp):
+                logger.info(f"Skipping {exp.name} (already exists)")
+                continue
+            
+            gpu_id = gpu_assignments.get(exp.name, -1)
+            tasks.append((exp, gpu_id, dataset_csv, self.config))
         
-        logger.info(
-            f"Running {len(experiments_to_run)} predictions in parallel "
-            f"across {len(assignments)} device(s)"
-        )
+        if len(tasks) == 0:
+            logger.warning("No experiments to run (all skipped)")
+            return {
+                exp.name: {
+                    'output_folder': exp.output_folder,
+                    'skipped': True,
+                    'gpu_id': -1
+                }
+                for exp in self.experiments
+            }
+        
+        logger.info(f"Running {len(tasks)} predictions in parallel")
         
         # Executar em paralelo
-        predictions_info = skipped_info.copy()
+        predictions_info = {}
         
-        # Usar ProcessPoolExecutor para paralelização
-        max_workers = len(assignments)
+        # Adicionar experimentos que foram skipados
+        for exp in self.experiments:
+            if exp.name not in [t[0].name for t in tasks]:
+                predictions_info[exp.name] = {
+                    'output_folder': exp.output_folder,
+                    'skipped': True,
+                    'gpu_id': -1
+                }
         
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            # Submeter todas as tarefas
+        with ProcessPoolExecutor(max_workers=len(tasks)) as executor:
+            # Submeter tarefas
             future_to_exp = {
-                executor.submit(
-                    _run_prediction_worker,
-                    exp,
-                    gpu_id,
-                    dataset_csv,
-                    self.config
-                ): exp.name
-                for exp, gpu_id, dataset_csv in experiments_to_run
+                executor.submit(_run_prediction_worker, *task): task[0].name
+                for task in tasks
             }
             
-            # Coletar resultados com barra de progresso
+            # Coletar resultados com progress bar
             with tqdm(
                 total=len(future_to_exp),
-                desc="Parallel predictions",
+                desc="Parallel prediction",
                 unit="exp"
             ) as pbar:
                 for future in as_completed(future_to_exp):
@@ -510,12 +664,22 @@ class EvaluationPipeline:
             logger.info(f"Evaluating experiment: {exp_name}")
             logger.info(f"{'='*60}")
             
-            # Verificar se houve erro na predição
+            # Verificar se houve erro na predição/carregamento
             if 'error' in pred_info:
-                logger.error(f"Skipping evaluation (prediction failed): {pred_info['error']}")
+                logger.error(
+                    f"Skipping evaluation (prediction/loading failed): "
+                    f"{pred_info['error']}"
+                )
                 continue
             
-            # Verificar se deve skip
+            # NOVO: Log se predições foram carregadas
+            if pred_info.get('loaded', False):
+                logger.info(
+                    f"Using precomputed predictions "
+                    f"({pred_info['num_predictions']} files)"
+                )
+            
+            # Verificar se deve skip avaliação
             if self._should_skip_evaluation(exp_name):
                 logger.info(f"Skipping evaluation (already exists)")
                 # TODO: carregar resultados existentes
@@ -660,33 +824,6 @@ class EvaluationPipeline:
         # Por enquanto, sempre avalia
         return False
     
-    def _simple_aggregate(self, all_results: Dict) -> Dict:
-        """
-        Agregação simples dos resultados (DEPRECATED - usar results_aggregator).
-        
-        Args:
-            all_results: resultados de todos experimentos
-            
-        Returns:
-            Dict com resultados agregados
-        """
-        logger.info("\n" + "="*60)
-        logger.info("STEP 4: AGGREGATING RESULTS")
-        logger.info("="*60)
-        
-        # Por enquanto, apenas retorna os resultados
-        # Fase 3 terá ResultsAggregator com funcionalidades avançadas
-        
-        aggregated = {
-            'experiments': all_results,
-            'num_experiments': len(all_results)
-        }
-        
-        # Criar CSV agregado simples
-        self._create_aggregated_csv(all_results)
-        
-        return aggregated
-    
     def _generate_visualizations(self, aggregated: Dict):
         """
         Gera todas as visualizações (Fase 3).
@@ -695,7 +832,7 @@ class EvaluationPipeline:
             aggregated: Resultados agregados
         """
         logger.info("\n" + "="*60)
-        logger.info("STEP 5: GENERATING VISUALIZATIONS")
+        logger.info("STEP 4: GENERATING VISUALIZATIONS")
         logger.info("="*60)
         
         all_results = aggregated['experiments']
@@ -725,120 +862,19 @@ class EvaluationPipeline:
                 output_dir=output_dir
             )
         
-        # 2. Per-class accuracy
-        if self.config.visualization.per_class_analysis.enabled:
-            logger.info("Plotting per-class accuracy...")
-            self.confusion_matrix_plotter.plot_per_class_accuracy(
+        # 2. Comparison Plots
+        if self.config.visualization.comparison_plots.enabled:
+            logger.info("Generating comparison plots...")
+            self.comparison_plotter.plot_all(
                 experiments_data=all_results,
                 output_dir=output_dir
             )
         
-        # 3. Comparison plots
-        if "bar_chart" in self.config.visualization.comparison_plots.plot_types:
-            logger.info("Plotting metrics bar chart...")
-            self.comparison_plotter.plot_metrics_bar_chart(
-                experiments_data=all_results,
-                output_dir=output_dir
-            )
-        
-        if "box_plot" in self.config.visualization.comparison_plots.plot_types:
-            logger.info("Plotting box plots...")
-            # Box plot para cada métrica configurada
-            for metric in self.config.visualization.comparison_plots.metrics_to_compare:
-                try:
-                    self.comparison_plotter.plot_per_image_boxplot(
-                        experiments_data=all_results,
-                        output_dir=output_dir,
-                        metric=metric
-                    )
-                except Exception as e:
-                    logger.warning(f"Could not plot box plot for {metric}: {e}")
-        
-        if "radar_chart" in self.config.visualization.comparison_plots.plot_types:
-            logger.info("Plotting radar chart...")
-            self.comparison_plotter.plot_radar_chart(
-                experiments_data=all_results,
-                output_dir=output_dir
-            )
-        
-        # 4. Per-class comparison
-        if self.config.visualization.per_class_analysis.enabled:
-            for plot_type in self.config.visualization.per_class_analysis.plot_types:
-                if plot_type == "iou_per_class":
-                    logger.info("Plotting IoU per class...")
-                    self.comparison_plotter.plot_per_class_comparison(
-                        experiments_data=all_results,
-                        output_dir=output_dir,
-                        metric_prefix="JaccardIndex"
-                    )
-                elif plot_type == "accuracy_per_class":
-                    logger.info("Plotting accuracy per class...")
-                    self.comparison_plotter.plot_per_class_comparison(
-                        experiments_data=all_results,
-                        output_dir=output_dir,
-                        metric_prefix="Accuracy"
-                    )
-        
-        # 5. Best/Worst images analysis
-        if self.config.visualization.per_image_analysis.enabled:
-            logger.info("Analyzing best/worst images...")
-            self.comparison_plotter.plot_best_worst_images(
-                experiments_data=all_results,
-                output_dir=output_dir,
-                metric=self.config.visualization.per_image_analysis.criteria,
-                n_images=self.config.visualization.per_image_analysis.save_worst_n
-            )
-        
-        # 6. Distribution plots
-        logger.info("Plotting metric distributions...")
-        for metric in self.config.visualization.comparison_plots.metrics_to_compare:
-            try:
-                self.comparison_plotter.plot_metrics_distribution(
-                    experiments_data=all_results,
-                    output_dir=output_dir,
-                    metric=metric
-                )
-            except Exception as e:
-                logger.warning(f"Could not plot distribution for {metric}: {e}")
-        
-        logger.info(f"All visualizations saved to: {output_dir}")
-    
-    def _create_aggregated_csv(self, all_results: Dict):
-        """
-        Cria CSV agregado com métricas de todos experimentos.
-        
-        Args:
-            all_results: resultados de todos experimentos
-        """
-        import pandas as pd
-        
-        rows = []
-        
-        for exp_name, results in all_results.items():
-            row = {
-                'experiment': exp_name,
-                'num_classes': results['num_classes'],
-            }
-            row.update(results['aggregated'])
-            rows.append(row)
-        
-        df = pd.DataFrame(rows)
-        
-        # Salvar
-        output_dir = self.config.output.base_dir
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        
-        csv_path = os.path.join(
-            output_dir,
-            self.config.output.files.aggregated_metrics
-        )
-        
-        df.to_csv(csv_path, index=False)
-        logger.info(f"Aggregated metrics saved: {csv_path}")
+        logger.info("Visualizations completed")
     
     def _save_summary_report(self, aggregated: Dict, elapsed_time: float):
         """
-        Salva relatório resumido do pipeline.
+        Salva relatório resumo em JSON.
         
         Args:
             aggregated: resultados agregados
