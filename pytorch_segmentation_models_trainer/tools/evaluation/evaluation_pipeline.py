@@ -903,12 +903,12 @@ class EvaluationPipeline:
             )
         
         # 2. Comparison Plots
-        if self.config.visualization.comparison_plots.enabled:
-            logger.info("Generating comparison plots...")
-            self.comparison_plotter.plot_all(
-                experiments_data=all_results,
-                output_dir=output_dir
-            )
+        # if self.config.visualization.comparison_plots.enabled:
+        #     logger.info("Generating comparison plots...")
+        #     self.comparison_plotter.plot_all(
+        #         experiments_data=all_results,
+        #         output_dir=output_dir
+        #     )
         
         logger.info("Visualizations completed")
     

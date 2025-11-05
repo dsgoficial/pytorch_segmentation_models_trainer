@@ -29,6 +29,7 @@ import numpy as np
 import seaborn as sns
 from matplotlib.gridspec import GridSpec
 from omegaconf import DictConfig
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -282,7 +283,7 @@ class ConfusionMatrixPlotter:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         output_path = os.path.join(
             output_dir,
-            f"confusion_matrices_comparison.{self.save_format}"
+            f'confusion_matrices_comparison_{datetime.now().strftime("%Y%m%d_%H%M%S")}.{self.save_format}'
         )
         plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
         plt.close()
