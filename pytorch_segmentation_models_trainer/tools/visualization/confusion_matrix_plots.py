@@ -119,9 +119,9 @@ class ConfusionMatrixPlotter:
             fmt = '.2f'
             title_suffix = ' (Normalized by Predictions)'
         elif normalize == 'all':
-            cm = cm.astype('float') / cm.sum()
+            cm = cm.astype('float') / cm.sum() * 100
             fmt = '.2f'
-            title_suffix = ' (Normalized by All)'
+            title_suffix = ' (Normalized by All - Percentage)'
         else:
             fmt = 'd'
             title_suffix = ''

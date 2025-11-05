@@ -892,7 +892,8 @@ class EvaluationPipeline:
                     confusion_matrix=results['confusion_matrix'],
                     class_names=results['class_names'],
                     experiment_name=exp_name,
-                    output_dir=os.path.join(output_dir, "confusion_matrices")
+                    output_dir=os.path.join(output_dir, "confusion_matrices"),
+                    normalize='all'
                 )
         
         if self.config.visualization.confusion_matrix.save_comparison:
