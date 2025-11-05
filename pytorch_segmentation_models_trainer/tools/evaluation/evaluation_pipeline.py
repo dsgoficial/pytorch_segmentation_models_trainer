@@ -673,31 +673,90 @@ class EvaluationPipeline:
         
         logger.info(f"Prediction completed successfully for {experiment.name}")
     
-    def _evaluate_all_experiments(
-        self, 
-        predictions: Dict, 
-        dataset_csv: str
-    ) -> Dict:
+    def _evaluate_all_experiments_sequential(self, predictions: Dict, dataset_csv: str) -> Dict:
+        """
+        Calcula métricas sequencialmente (um experimento por vez).
+        Mas cada experimento processa imagens em paralelo.
+        """
+        logger.info("Evaluating experiments SEQUENTIALLY (images in parallel)")
+        
+        all_results = {}
+        
+        # Obter configuração de paralelização por imagem
+        parallel_config = self.config.pipeline_options.get('parallel_image_processing', {})
+        use_parallel = parallel_config.get('enabled', True)
+        num_workers = parallel_config.get('num_workers', None)
+        
+        for exp_name, pred_info in predictions.items():
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Evaluating experiment: {exp_name}")
+            logger.info(f"{'='*60}")
+            
+            # Verificar se houve erro na predição/carregamento
+            if 'error' in pred_info:
+                logger.error(
+                    f"Skipping evaluation (prediction/loading failed): "
+                    f"{pred_info['error']}"
+                )
+                continue
+            
+            # Log se predições foram carregadas
+            if pred_info.get('loaded', False):
+                logger.info(
+                    f"Using precomputed predictions "
+                    f"({pred_info['num_predictions']} files)"
+                )
+            
+            # Verificar se deve skip avaliação
+            if self._should_skip_evaluation(exp_name):
+                logger.info(f"Skipping evaluation (already exists)")
+                continue
+            
+            # Encontrar config do experimento
+            exp_config = next(
+                (exp for exp in self.experiments if exp.name == exp_name),
+                None
+            )
+            
+            if exp_config is None:
+                logger.error(f"Config not found for experiment: {exp_name}")
+                continue
+            
+            try:
+                # Criar MetricsCalculator
+                metrics_calculator = MetricsCalculator(self.config, exp_config)
+                
+                # Calcular métricas (com paralelização por imagem)
+                results = metrics_calculator.calculate_metrics(
+                    predictions_folder=pred_info['output_folder'],
+                    ground_truth_csv=dataset_csv,
+                    experiment_name=exp_name,
+                    parallel=use_parallel,
+                    num_workers=num_workers
+                )
+                
+                all_results[exp_name] = results
+                
+            except Exception as e:
+                logger.error(
+                    f"Failed to calculate metrics for {exp_name}: {e}",
+                    exc_info=True
+                )
+                continue
+        
+        return all_results
+    
+    def _evaluate_all_experiments(self, predictions: Dict, dataset_csv: str) -> Dict:
         """
         Calcula métricas para todos experimentos.
-        
-        Se paralelização estiver habilitada, executa em paralelo.
-        
-        Args:
-            predictions: info sobre predições
-            dataset_csv: path do CSV com dataset
-            
-        Returns:
-            Dict mapeando experiment_name -> resultados
+        Sempre sequencial por experimento, paralelo por imagem.
         """
         logger.info("\n" + "="*60)
         logger.info("STEP 3: CALCULATING METRICS")
         logger.info("="*60)
         
-        if self.config.pipeline_options.parallel_evaluation.enabled:
-            return self._evaluate_all_experiments_parallel(predictions, dataset_csv)
-        else:
-            return self._evaluate_all_experiments_sequential(predictions, dataset_csv)
+        # Sempre usar sequential (que processa imagens em paralelo)
+        return self._evaluate_all_experiments_sequential(predictions, dataset_csv)
     
     def _evaluate_all_experiments_sequential(
         self, 
@@ -777,98 +836,6 @@ class EvaluationPipeline:
         
         return all_results
     
-    def _evaluate_all_experiments_parallel(
-        self, 
-        predictions: Dict, 
-        dataset_csv: str
-    ) -> Dict:
-        """
-        Calcula métricas em paralelo usando multiprocessing.
-        
-        Args:
-            predictions: info sobre predições
-            dataset_csv: path do CSV
-            
-        Returns:
-            Dict com resultados
-        """
-        logger.info("Evaluating experiments IN PARALLEL")
-        
-        # Preparar lista de tarefas
-        tasks = []
-        
-        for exp_name, pred_info in predictions.items():
-            # Verificar se houve erro na predição
-            if 'error' in pred_info:
-                logger.error(f"Skipping {exp_name} (prediction failed)")
-                continue
-            
-            # Verificar se deve skip
-            if self._should_skip_evaluation(exp_name):
-                logger.info(f"Skipping {exp_name} (already exists)")
-                continue
-            
-            # Encontrar config
-            exp_config = next(
-                (exp for exp in self.experiments if exp.name == exp_name),
-                None
-            )
-            
-            if exp_config is None:
-                logger.error(f"Config not found for {exp_name}")
-                continue
-            
-            tasks.append((
-                exp_config,
-                pred_info['output_folder'],
-                dataset_csv,
-                self.config
-            ))
-        
-        if len(tasks) == 0:
-            logger.warning("No experiments to evaluate")
-            return {}
-        
-        logger.info(f"Evaluating {len(tasks)} experiments in parallel")
-        
-        # Executar em paralelo
-        all_results = {}
-        num_workers = min(
-            len(tasks),
-            self.config.pipeline_options.parallel_evaluation.num_workers
-        )
-        
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            # Submeter tarefas
-            future_to_exp = {
-                executor.submit(_evaluate_experiment_worker, *task): task[0].name
-                for task in tasks
-            }
-            
-            # Coletar resultados
-            with tqdm(
-                total=len(future_to_exp),
-                desc="Parallel evaluation",
-                unit="exp"
-            ) as pbar:
-                for future in as_completed(future_to_exp):
-                    exp_name = future_to_exp[future]
-                    
-                    try:
-                        name, results = future.result()
-                        if results is not None:
-                            all_results[name] = results
-                            logger.info(f"✓ {name} evaluation completed")
-                        else:
-                            logger.error(f"✗ {exp_name} returned None results")
-                        
-                    except Exception as e:
-                        logger.error(f"✗ {exp_name} evaluation failed: {e}")
-                    
-                    pbar.update(1)
-        logger.info(f"Completed evaluation: {len(all_results)} successful out of {len(tasks)} total")
-        return all_results
-    
     def _should_skip_evaluation(self, experiment_name: str) -> bool:
         """
         Verifica se deve pular avaliação de um experimento.
@@ -898,11 +865,22 @@ class EvaluationPipeline:
         logger.info("="*60)
         
         all_results = aggregated['experiments']
+        if len(all_results) == 0:
+            logger.warning("No results to visualize")
+            return
         
+        # Diretório de saída para visualizações
+        # Usar valor padrão se comparison_folder não existir
+        comparison_folder = getattr(
+            self.config.output.structure, 
+            'comparison_folder', 
+            'comparisons'  # Valor padrão
+        )
+            
         # Diretório de saída para visualizações
         output_dir = os.path.join(
             self.config.output.base_dir,
-            self.config.output.structure.comparison_folder
+            comparison_folder,
         )
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         

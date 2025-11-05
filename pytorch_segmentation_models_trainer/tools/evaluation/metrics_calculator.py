@@ -1,7 +1,8 @@
 import os
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 from datetime import datetime
 
 import numpy as np
@@ -13,6 +14,9 @@ from rasterio.coords import BoundingBox
 from tqdm import tqdm
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import instantiate
+from pytorch_segmentation_models_trainer.tools.evaluation.image_processing_worker import (
+    process_single_image_worker
+)
 
 import logging
 logger = logging.getLogger(__name__)
@@ -38,25 +42,9 @@ class MetricsCalculator:
         self.num_classes = self.config.metrics.num_classes
         self.class_names = self.config.metrics.class_names
         
-        # Instanciar métricas
-        self.metrics = self._instantiate_metrics()
-        
-        # Confusion Matrix
-        self.confusion_matrix = self._instantiate_confusion_matrix()
-        
         logger.info(f"MetricsCalculator initialized")
         logger.info(f"  Num classes: {self.num_classes}")
         logger.info(f"  Class names: {self.class_names}")
-        logger.info(f"  Num metrics: {len(self.metrics)}")
-    
-    def _instantiate_confusion_matrix(self):
-        """Instancia ConfusionMatrix do torchmetrics."""
-        from torchmetrics import ConfusionMatrix
-        
-        return ConfusionMatrix(
-            task='multiclass',
-            num_classes=self.num_classes
-        )
     
     def _instantiate_metrics(self) -> List:
         """
@@ -194,82 +182,13 @@ class MetricsCalculator:
             
             return pred_window, gt_window, matched_shape
     
-    def _read_aligned_rasters(self, pred_path: str, gt_path: str) -> tuple:
-        """
-        Lê dois rasters garantindo que as áreas lidas correspondem espacialmente.
-        
-        Args:
-            pred_path: Caminho da predição
-            gt_path: Caminho do ground truth
-            
-        Returns:
-            (pred_array, gt_array) com mesma shape, ou (None, None) se falhar
-        """
-        try:
-            # Calcular overlap espacial
-            overlap_result = self._get_spatial_overlap(pred_path, gt_path)
-            
-            if overlap_result is None:
-                return None, None
-            
-            pred_window, gt_window, expected_shape = overlap_result
-            
-            # Ler apenas a área de overlap de cada raster
-            with rasterio.open(pred_path) as pred_src:
-                pred_array = pred_src.read(1, window=pred_window)
-            
-            with rasterio.open(gt_path) as gt_src:
-                gt_array = gt_src.read(1, window=gt_window)
-            
-            # Verificação final de shapes
-            if pred_array.shape != gt_array.shape:
-                logger.warning(
-                    f"Shape mismatch after spatial alignment: "
-                    f"pred={pred_array.shape}, gt={gt_array.shape}. "
-                    f"Cropping to common size."
-                )
-                # Fallback: crop para o menor tamanho
-                min_h = min(pred_array.shape[0], gt_array.shape[0])
-                min_w = min(pred_array.shape[1], gt_array.shape[1])
-                pred_array = pred_array[:min_h, :min_w]
-                gt_array = gt_array[:min_h, :min_w]
-            
-            logger.debug(
-                f"Aligned rasters: shape={pred_array.shape}, "
-                f"pred_window={pred_window}, gt_window={gt_window}"
-            )
-            
-            # Clipar valores para o range válido
-            pred_array = np.clip(pred_array, 0, self.num_classes - 1)
-            gt_array = np.clip(gt_array, 0, self.num_classes - 1)
-            
-            # Verificar se há NaN ou valores inválidos
-            if np.isnan(pred_array).any():
-                logger.warning(f"NaN values found in prediction {pred_path}, replacing with 0")
-                pred_array = np.nan_to_num(pred_array, nan=0.0).astype(np.int32)
-            
-            if np.isnan(gt_array).any():
-                logger.warning(f"NaN values found in ground truth {gt_path}, replacing with 0")
-                gt_array = np.nan_to_num(gt_array, nan=0.0).astype(np.int32)
-            
-            # Log de estatísticas para debug
-            logger.debug(
-                f"Aligned rasters: shape={pred_array.shape}, "
-                f"pred_range=[{pred_array.min()}, {pred_array.max()}], "
-                f"gt_range=[{gt_array.min()}, {gt_array.max()}]"
-            )
-            
-            return pred_array, gt_array
-            
-        except Exception as e:
-            logger.error(f"Error aligning rasters: {e}", exc_info=True)
-            return None, None
-    
     def calculate_metrics(
         self,
         predictions_folder: str,
         ground_truth_csv: str,
-        experiment_name: str
+        experiment_name: str,
+        parallel: bool = True,
+        num_workers: int = None
     ) -> Dict:
         """
         Calcula todas as métricas para um experimento.
@@ -278,6 +197,8 @@ class MetricsCalculator:
             predictions_folder: pasta com predições (TIF com índices de classe)
             ground_truth_csv: CSV com colunas 'image' e 'mask'
             experiment_name: nome do experimento
+            parallel: Se True, processa imagens em paralelo
+            num_workers: Número de workers (None = usar CPU count)
             
         Returns:
             Dict com:
@@ -292,119 +213,463 @@ class MetricsCalculator:
         logger.info(f"Calculating metrics for: {experiment_name}")
         logger.info("="*60)
         
-        # 1. Carregar ground truth CSV
+        # 1. Carregar CSV e encontrar predições
         gt_df = pd.read_csv(ground_truth_csv)
         logger.info(f"Loaded {len(gt_df)} images from ground truth CSV")
         
-        # 2. Construir mapeamento de predições disponíveis
-        prediction_map = self._build_prediction_map(predictions_folder)
-        logger.info(f"Found {len(prediction_map)} prediction files")
+        # 2. Encontrar arquivos de predição
+        pred_files = self._find_prediction_files(predictions_folder)
+        logger.info(f"Found {len(pred_files)} prediction files")
         
-        # 3. Inicializar estruturas
-        per_image_results = []
+        # 3. Criar lista de tarefas (pares de pred/gt)
+        tasks = self._create_tasks(gt_df, pred_files)
+        logger.info(f"Created {len(tasks)} prediction-groundtruth pairs")
         
-        # Reset metrics
-        for metric in self.metrics:
-            metric.reset()
-        self.confusion_matrix.reset()
+        if len(tasks) == 0:
+            raise ValueError("No prediction-groundtruth pairs found!")
         
-        # 4. Iterar sobre imagens
-        successful = 0
-        failed = 0
-        not_found = 0
+        # 4. Processar imagens (paralelo ou sequencial)
+        if parallel and len(tasks) > 1:
+            image_results = self._process_images_parallel(tasks, num_workers)
+        else:
+            image_results = self._process_images_sequential(tasks)
         
-        for idx, row in tqdm(
-            gt_df.iterrows(), 
-            total=len(gt_df),
-            desc=f"Evaluating {experiment_name}",
+        # 5. Calcular métricas a partir dos resultados
+        results_dict = self._compute_metrics_from_results(image_results, experiment_name)
+        
+        return results_dict
+    
+    def _find_prediction_files(self, predictions_folder: str) -> Dict[str, str]:
+        """
+        Encontra todos os arquivos de predição.
+        
+        Returns:
+            Dict mapeando basename -> full_path
+        """
+        pred_folder = Path(predictions_folder)
+        pred_files = {}
+        
+        # Buscar arquivos .tif, .tiff, .png
+        for ext in ['*.tif', '*.tiff', '*.TIF', '*.TIFF']:
+            for pred_path in pred_folder.glob(ext):
+                basename = pred_path.stem
+                pred_files[basename] = str(pred_path)
+        
+        return pred_files
+    
+    def _create_tasks(self, gt_df: pd.DataFrame, pred_files: Dict[str, str]) -> list:
+        """
+        Cria lista de tarefas (pares pred/gt) para processar.
+        
+        Returns:
+            Lista de dicts com pred_path, gt_path, image_name, index
+        """
+        tasks = []
+        
+        for idx, row in gt_df.iterrows():
+            gt_path = row['mask']
+            image_name = Path(gt_path).stem
+            
+            # Encontrar predição correspondente
+            pred_path = self._find_matching_prediction(image_name, pred_files)
+            
+            if pred_path:
+                tasks.append({
+                    'image_name': image_name,
+                    'pred_path': pred_path,
+                    'gt_path': gt_path,
+                    'index': idx
+                })
+            else:
+                logger.warning(f"No prediction found for {image_name}")
+        
+        return tasks
+    
+    def _find_matching_prediction(self, image_name: str, pred_files: Dict[str, str]) -> Optional[str]:
+        """
+        Encontra o arquivo de predição correspondente.
+        
+        Tenta diferentes estratégias de matching.
+        """
+        # Estratégia 1: Match exato
+        if image_name in pred_files:
+            return pred_files[image_name]
+        
+        # Estratégia 2: Remover prefixos comuns (mask_, gt_, etc.)
+        clean_name = image_name.replace('mask_', '').replace('gt_', '')
+        if clean_name in pred_files:
+            return pred_files[clean_name]
+        
+        # Estratégia 3: Buscar por substring
+        for pred_name, pred_path in pred_files.items():
+            if clean_name in pred_name or pred_name in clean_name:
+                return pred_path
+        
+        return None
+    
+    def _process_images_parallel(
+        self, 
+        tasks: list, 
+        num_workers: int = None
+    ) -> list:
+        """
+        Processa imagens em paralelo usando ThreadPoolExecutor.
+        
+        Args:
+            tasks: Lista de tarefas (dicts com pred_path, gt_path, etc.)
+            num_workers: Número de workers
+            
+        Returns:
+            Lista de resultados (um dict por imagem processada)
+        """
+        if num_workers is None:
+            num_workers = min(32, len(tasks), os.cpu_count() or 1)
+        
+        logger.info(f"Processing {len(tasks)} images with {num_workers} workers")
+        
+        results = []
+        
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Submeter todas as tarefas
+            future_to_task = {
+                executor.submit(
+                    process_single_image_worker,
+                    task,
+                    self.num_classes,
+                    list(self.class_names)  # Converter para lista Python
+                ): task
+                for task in tasks
+            }
+            
+            # Coletar resultados
+            with tqdm(
+                total=len(tasks), 
+                desc=f"Evaluating {self.experiment_config.name}", 
+                unit="img"
+            ) as pbar:
+                for future in as_completed(future_to_task):
+                    task = future_to_task[future]
+                    
+                    try:
+                        result = future.result()
+                        if result is not None:
+                            results.append(result)
+                    except Exception as e:
+                        logger.error(f"Failed to process {task['image_name']}: {e}")
+                    
+                    pbar.update(1)
+        
+        logger.info(
+            f"Processing completed: {len(results)} successful, "
+            f"{len(tasks) - len(results)} failed"
+        )
+        
+        return results
+    
+    def _process_images_sequential(self, tasks: list) -> list:
+        """
+        Processa imagens sequencialmente (fallback).
+        
+        Args:
+            tasks: Lista de tarefas
+            
+        Returns:
+            Lista de resultados
+        """
+        logger.info(f"Processing {len(tasks)} images sequentially")
+        
+        results = []
+        
+        for task in tqdm(
+            tasks, 
+            desc=f"Evaluating {self.experiment_config.name}", 
             unit="img"
         ):
             try:
-                # Carregar predição e ground truth
-                pred_mask, pred_path = self._load_prediction_flexible(
-                    predictions_folder, 
-                    row,
-                    prediction_map
+                # Importar função worker e executar localmente
+                from pytorch_segmentation_models_trainer.tools.evaluation.image_processing_worker import (
+                    process_single_image_worker
                 )
-                gt_path = row["mask"]
-                pred_mask, gt_mask = self._read_aligned_rasters(pred_path, gt_path)
                 
-                # Validar shapes
-                if pred_mask is None or gt_mask is None:
-                    logger.error(f"Failed to align rasters for {gt_path}. Skipping.")
-                    failed_count += 1
-                    continue
-                                
-                # Converter para tensors
-                pred_tensor = torch.from_numpy(pred_mask).long()
-                gt_tensor = torch.from_numpy(gt_mask).long()
-                
-                # Calcular métricas por imagem
-                image_metrics = self._calculate_per_image_metrics(
-                    pred_tensor, gt_tensor
+                result = process_single_image_worker(
+                    task,
+                    self.num_classes,
+                    list(self.class_names)
                 )
-                image_metrics['prediction_file'] = pred_path  # Adicionar info do arquivo usado
-                per_image_results.append(image_metrics)
                 
-                # Atualizar métricas agregadas
-                self._update_aggregated_metrics(pred_tensor, gt_tensor)
-                
-                successful += 1
-                
-            except FileNotFoundError as e:
-                logger.error(f"File not found: {e}")
-                failed += 1
-                continue
-                
+                if result is not None:
+                    results.append(result)
+                    
             except Exception as e:
-                logger.error(
-                    f"Error processing image {row['image']}: {e}",
-                    exc_info=True
-                )
-                failed += 1
-                continue
+                logger.error(f"Failed to process {task['image_name']}: {e}")
         
         logger.info(
-            f"Processing completed: {successful} successful, "
-            f"{failed} failed, {not_found} not found"
+            f"Processing completed: {len(results)} successful, "
+            f"{len(tasks) - len(results)} failed"
         )
         
-        if successful == 0:
-            raise ValueError(
-                "No images were successfully processed! Check logs for errors."
-            )
+        return results
+    
+    def _compute_metrics_from_results(
+        self, 
+        image_results: list, 
+        experiment_name: str
+    ) -> Dict:
+        """
+        Calcula métricas agregadas e por imagem a partir dos resultados.
+        OTIMIZADO: Usa apenas confusion matrices, sem torchmetrics no loop.
+        """
+        logger.info("Computing metrics from results...")
         
-        # 5. Computar métricas finais
-        logger.info("Computing aggregated metrics...")
-        aggregated_metrics = self._compute_aggregated_metrics()
+        if len(image_results) == 0:
+            raise ValueError("No images were successfully processed! Check logs for errors.")
         
-        logger.info("Computing confusion matrix...")
-        confusion_mat = self.confusion_matrix.compute().cpu().numpy()
+        # Inicializar confusion matrix global acumuladora
+        cm_global = np.zeros((self.num_classes, self.num_classes), dtype=np.int64)
         
-        # 6. Preparar diretório de saída
-        output_dir = self._get_output_dir(experiment_name)
+        # Processar cada imagem
+        per_image_metrics = []
         
-        # 7. Salvar resultados
+        logger.info(f"Computing per-image metrics for {len(image_results)} images...")
+        
+        for result in tqdm(image_results, desc="Computing metrics", unit="img"):
+            image_name = result['image_name']
+            
+            # Converter de volta para tensors
+            pred_flat = torch.from_numpy(result['pred_flat']).long()
+            gt_flat = torch.from_numpy(result['gt_flat']).long()
+            
+            # Calcular confusion matrix por imagem
+            cm_per_image = self._compute_confusion_matrix_fast(pred_flat, gt_flat)
+            
+            # Derivar métricas da confusion matrix
+            image_metrics = self._metrics_from_confusion_matrix(cm_per_image, image_name)
+            per_image_metrics.append(image_metrics)
+            
+            # ACUMULAR confusion matrix global (soma simples!)
+            cm_global += cm_per_image
+        
+        # Calcular métricas agregadas da confusion matrix global
+        logger.info("Computing global metrics from accumulated confusion matrix...")
+        
+        # Derivar métricas agregadas da CM global
+        aggregated_metrics = self._metrics_from_confusion_matrix_aggregated(cm_global)
+        
+        # Converter CM global para formato esperado
+        confusion_matrix_np = cm_global
+        
+        # Criar DataFrame
+        per_image_df = pd.DataFrame(per_image_metrics)
+        
+        # Preparar e salvar resultados
+        output_dir = self._prepare_output_directory(experiment_name)
+        
         logger.info("Saving results...")
         self._save_results(
-            per_image_results,
+            per_image_df,
             aggregated_metrics,
-            confusion_mat,
-            experiment_name,
-            output_dir
+            confusion_matrix_np,
+            output_dir,
+            experiment_name
         )
         
-        logger.info(f"Metrics calculation completed for {experiment_name}")
-        logger.info(f"Results saved to: {output_dir}")
-        
+        # Retornar estrutura completa
         return {
-            'per_image': pd.DataFrame(per_image_results),
+            'per_image': per_image_df,
             'aggregated': aggregated_metrics,
-            'confusion_matrix': confusion_mat,
-            'num_classes': self.num_classes,
-            'class_names': self.class_names,
-            'output_dir': output_dir
+            'confusion_matrix': confusion_matrix_np,
+            'num_classes': int(self.num_classes),
+            'class_names': list(self.class_names),
+            'output_dir': str(output_dir),
+            'experiment_name': experiment_name
         }
+    
+    def _metrics_from_confusion_matrix_aggregated(self, cm: np.ndarray) -> Dict[str, float]:
+        """
+        Calcula métricas agregadas (sem nome de imagem) a partir da confusion matrix.
+        
+        Args:
+            cm: Confusion matrix global [num_classes, num_classes]
+            
+        Returns:
+            Dict com métricas agregadas (sem 'image_name' e sem métricas por classe)
+        """
+        # Calcular somas
+        tp = np.diag(cm)  # True positives por classe
+        fp = cm.sum(axis=0) - tp  # False positives por classe
+        fn = cm.sum(axis=1) - tp  # False negatives por classe
+        tn = cm.sum() - (tp + fp + fn)  # True negatives por classe
+        
+        # Evitar divisão por zero
+        epsilon = 1e-10
+        
+        metrics = {}
+        
+        # 1. Accuracy (macro average)
+        accuracy_per_class = (tp + tn) / (tp + tn + fp + fn + epsilon)
+        metrics['Accuracy'] = float(np.mean(accuracy_per_class))
+        
+        # 2. IoU / Jaccard (macro average)
+        iou_per_class = tp / (tp + fp + fn + epsilon)
+        metrics['JaccardIndex'] = float(np.mean(iou_per_class))
+        
+        # 3. Dice (macro average)
+        f1score_per_class = (2 * tp) / (2 * tp + fp + fn + epsilon)
+        
+        # 4. F1-Score (macro average)
+        metrics['F1Score'] = float(np.mean(f1score_per_class))
+        
+        # 5. Precision (macro average)
+        precision_per_class = tp / (tp + fp + epsilon)
+        metrics['Precision'] = float(np.mean(precision_per_class))
+        
+        # 6. Recall (macro average)
+        recall_per_class = tp / (tp + fn + epsilon)
+        metrics['Recall'] = float(np.mean(recall_per_class))
+        
+        # Adicionar métricas por classe
+        for i, class_name in enumerate(self.class_names):
+            metrics[f'IoU_{class_name}'] = float(iou_per_class[i])
+            metrics[f'F1_{class_name}'] = float(f1score_per_class[i])
+            metrics[f'Precision_{class_name}'] = float(precision_per_class[i])
+            metrics[f'Recall_{class_name}'] = float(recall_per_class[i])
+            metrics[f'Accuracy_{class_name}'] = float(accuracy_per_class[i])
+        
+        return metrics
+    
+    def _compute_confusion_matrix_fast(
+        self, 
+        pred: torch.Tensor, 
+        gt: torch.Tensor
+    ) -> np.ndarray:
+        """
+        Calcula confusion matrix de forma rápida usando bincount.
+        Muito mais rápido que torchmetrics para uma única imagem.
+        
+        Args:
+            pred: Tensor 1D com predições [N]
+            gt: Tensor 1D com ground truth [N]
+            
+        Returns:
+            Confusion matrix [num_classes, num_classes]
+        """
+        # Validar entrada
+        assert pred.dim() == 1 and gt.dim() == 1
+        assert pred.shape == gt.shape
+        
+        # Criar índices combinados: gt * num_classes + pred
+        indices = gt * self.num_classes + pred
+        
+        # Usar bincount para contar (muito rápido!)
+        cm_flat = torch.bincount(
+            indices, 
+            minlength=self.num_classes ** 2
+        )
+        
+        # Reshape para matriz
+        cm = cm_flat.reshape(self.num_classes, self.num_classes)
+        
+        return cm.cpu().numpy()
+
+
+    def _metrics_from_confusion_matrix(
+        self, 
+        cm: np.ndarray, 
+        image_name: str
+    ) -> Dict[str, float]:
+        """
+        Calcula todas as métricas a partir da confusion matrix.
+        Muito mais rápido que usar torchmetrics.
+        
+        Args:
+            cm: Confusion matrix [num_classes, num_classes]
+            image_name: Nome da imagem
+            
+        Returns:
+            Dict com todas as métricas
+        """
+        metrics = {'image_name': image_name}
+        
+        # Calcular somas
+        tp = np.diag(cm)  # True positives por classe
+        fp = cm.sum(axis=0) - tp  # False positives por classe
+        fn = cm.sum(axis=1) - tp  # False negatives por classe
+        tn = cm.sum() - (tp + fp + fn)  # True negatives por classe
+        
+        # Evitar divisão por zero
+        epsilon = 1e-10
+        
+        # 1. Accuracy (macro)
+        accuracy_per_class = (tp + tn) / (tp + tn + fp + fn + epsilon)
+        metrics['Accuracy'] = float(np.mean(accuracy_per_class))
+        
+        # 2. IoU / Jaccard (macro)
+        iou_per_class = tp / (tp + fp + fn + epsilon)
+        metrics['JaccardIndex'] = float(np.mean(iou_per_class))
+        
+        # 3. Dice (macro)
+        f1score_per_class = (2 * tp) / (2 * tp + fp + fn + epsilon)
+        
+        # 4. F1-Score (macro)
+        metrics['F1Score'] = float(np.mean(f1score_per_class))
+        
+        # 5. Precision (macro)
+        precision_per_class = tp / (tp + fp + epsilon)
+        metrics['Precision'] = float(np.mean(precision_per_class))
+        
+        # 6. Recall (macro)
+        recall_per_class = tp / (tp + fn + epsilon)
+        metrics['Recall'] = float(np.mean(recall_per_class))
+        
+        # Adicionar métricas por classe (opcional, mas útil)
+        for i, class_name in enumerate(self.class_names):
+            metrics[f'IoU_{class_name}'] = float(iou_per_class[i])
+            metrics[f'F1_{class_name}'] = float(f1score_per_class[i])
+            metrics[f'Precision_{class_name}'] = float(precision_per_class[i])
+            metrics[f'Recall_{class_name}'] = float(recall_per_class[i])
+        
+        return metrics
+    
+    def _prepare_output_directory(self, experiment_name: str) -> Path:
+        """Cria estrutura de diretórios para salvar resultados."""
+        # Base output directory
+        base_dir = Path(self.config.output.base_dir)
+        
+        # Experiment-specific directory
+        exp_dir = base_dir / self.config.output.structure.experiments_folder / experiment_name / "metrics"
+        exp_dir.mkdir(parents=True, exist_ok=True)
+        
+        return exp_dir
+    
+    def _save_results(
+        self,
+        per_image_df: pd.DataFrame,
+        aggregated_metrics: Dict,
+        confusion_matrix_np: np.ndarray,
+        output_dir: Path,
+        experiment_name: str
+    ):
+        """Salva todos os resultados em arquivos."""
+        
+        # 1. Salvar métricas por imagem (CSV)
+        per_image_file = output_dir / self.config.output.files.per_image_metrics_pattern.format(
+            experiment_name=experiment_name
+        )
+        per_image_df.to_csv(per_image_file, index=False)
+        logger.info(f"  Saved per-image metrics: {per_image_file}")
+        
+        # 2. Salvar métricas agregadas (JSON)
+        aggregated_file = output_dir / "aggregated_metrics.json"
+        with open(aggregated_file, 'w') as f:
+            json.dump(aggregated_metrics, f, indent=2)
+        logger.info(f"  Saved aggregated metrics: {aggregated_file}")
+        
+        # 3. Salvar confusion matrix (NumPy)
+        cm_file = output_dir / self.config.output.files.confusion_matrix_data_pattern.format(
+            experiment_name=experiment_name
+        )
+        np.save(cm_file, confusion_matrix_np)
+        logger.info(f"  Saved confusion matrix: {cm_file}")
     
     def _build_prediction_map(self, predictions_folder: str) -> Dict[str, str]:
         """
@@ -637,82 +902,6 @@ class MetricsCalculator:
         
         # Calcular métricas
         metrics_dict = {}
-        
-        for metric in self.metrics:
-            try:
-                # Copiar a métrica para não acumular estado entre imagens
-                if hasattr(metric, 'reset'):
-                    metric.reset()
-                
-                # Calcular métrica
-                metric.update(pred_flat, gt_flat)
-                value = metric.compute()
-                
-                # Converter para float Python
-                if isinstance(value, torch.Tensor):
-                    value = value.item()
-                
-                # Nome da métrica
-                metric_name = metric.__class__.__name__
-                metrics_dict[metric_name] = float(value)
-                
-            except Exception as e:
-                logger.warning(
-                    f"Failed to compute {metric.__class__.__name__}: {e}"
-                )
-                metrics_dict[metric.__class__.__name__] = None
-        
-        return metrics_dict
-    
-    def _update_aggregated_metrics(
-        self, 
-        pred: torch.Tensor, 
-        gt: torch.Tensor
-    ):
-        """
-        Atualiza métricas agregadas com dados de uma imagem.
-        
-        Args:
-            pred: Tensor [H, W] com predições
-            gt: Tensor [H, W] com ground truth
-        """
-        pred_flat = pred.flatten()
-        gt_flat = gt.flatten()
-        
-        for metric in self.metrics:
-            metric.update(pred_flat, gt_flat)
-        
-        self.confusion_matrix.update(pred_flat, gt_flat)
-    
-    def _compute_aggregated_metrics(self) -> Dict:
-        """
-        Computa métricas finais agregadas.
-        
-        Returns:
-            Dict com métricas agregadas
-        """
-        results = {}
-        
-        for metric in self.metrics:
-            value = metric.compute()
-            metric_name = metric.__class__.__name__
-            
-            if isinstance(value, torch.Tensor) and value.numel() > 1:
-                # Métrica por classe
-                for i, v in enumerate(value):
-                    class_name = (
-                        self.class_names[i] 
-                        if i < len(self.class_names) 
-                        else f"class_{i}"
-                    )
-                    results[f'{metric_name}_{class_name}'] = v.item()
-            else:
-                # Métrica global
-                results[metric_name] = (
-                    value.item() if isinstance(value, torch.Tensor) else value
-                )
-        
-        return results
     
     def _get_output_dir(self, experiment_name: str) -> str:
         """
@@ -749,67 +938,132 @@ class MetricsCalculator:
         
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         return output_dir
+
+def _process_single_image_worker(
+    task: Dict,
+    num_classes: int,
+    class_names: List[str]
+) -> Dict:
+    """
+    Worker function para processar uma imagem.
+    Executado em processo separado.
     
-    def _save_results(
-        self,
-        per_image_results: List[Dict],
-        aggregated_metrics: Dict,
-        confusion_mat: np.ndarray,
-        experiment_name: str,
-        output_dir: str
-    ):
-        """
-        Salva resultados em arquivos.
+    Args:
+        task: Dict com pred_path, gt_path, image_name
+        num_classes: Número de classes
+        class_names: Lista de nomes das classes
         
-        Args:
-            per_image_results: lista de dicts com métricas por imagem
-            aggregated_metrics: dict com métricas agregadas
-            confusion_mat: matriz de confusão
-            experiment_name: nome do experimento
-            output_dir: diretório de saída
-        """
-        # 1. Per-image metrics CSV
-        per_image_df = pd.DataFrame(per_image_results)
+    Returns:
+        Dict com resultados ou None se falhar
+    """
+    import numpy as np
+    import torch
+    import rasterio
+    from rasterio.windows import Window, from_bounds
+    from rasterio.coords import BoundingBox
+    
+    try:
+        pred_path = task['pred_path']
+        gt_path = task['gt_path']
+        image_name = task['image_name']
         
-        # Nome do arquivo
-        if hasattr(self.config.output, 'files') and hasattr(self.config.output.files, 'per_image_metrics_pattern'):
-            csv_filename = self.config.output.files.per_image_metrics_pattern.format(
-                experiment_name=experiment_name
-            )
-        else:
-            csv_filename = f"{experiment_name}_per_image_metrics.csv"
+        # 1. Ler e alinhar rasters (copiar código de _read_aligned_rasters)
+        pred_mask, gt_mask = _read_aligned_rasters_worker(
+            pred_path, gt_path, num_classes
+        )
         
-        per_image_csv = os.path.join(output_dir, csv_filename)
-        per_image_df.to_csv(per_image_csv, index=False)
-        logger.info(f"  Saved per-image metrics: {per_image_csv}")
+        if pred_mask is None or gt_mask is None:
+            return None
         
-        # 2. Aggregated metrics JSON
-        aggregated_json = os.path.join(output_dir, "aggregated_metrics.json")
-        with open(aggregated_json, 'w') as f:
-            json.dump(aggregated_metrics, f, indent=2)
-        logger.info(f"  Saved aggregated metrics: {aggregated_json}")
+        # 2. Calcular métricas (versão simplificada sem torchmetrics)
+        # Apenas retornar os dados para cálculo posterior
+        pred_tensor = torch.from_numpy(pred_mask).long().flatten()
+        gt_tensor = torch.from_numpy(gt_mask).long().flatten()
         
-        # 3. Confusion matrix NPY
-        if hasattr(self.config.output, 'files') and hasattr(self.config.output.files, 'confusion_matrix_data_pattern'):
-            cm_filename = self.config.output.files.confusion_matrix_data_pattern.format(
-                experiment_name=experiment_name
-            )
-        else:
-            cm_filename = f"{experiment_name}_confusion_matrix.npy"
-        
-        confusion_npy = os.path.join(output_dir, cm_filename)
-        np.save(confusion_npy, confusion_mat)
-        logger.info(f"  Saved confusion matrix: {confusion_npy}")
-        
-        # 4. Metadata JSON
-        metadata = {
-            'experiment_name': experiment_name,
-            'num_classes': self.num_classes,
-            'class_names': self.class_names,
-            'num_images_evaluated': len(per_image_results),
-            'timestamp': datetime.now().isoformat()
+        return {
+            'image_name': image_name,
+            'pred_flat': pred_tensor.numpy(),
+            'gt_flat': gt_tensor.numpy()
         }
-        metadata_json = os.path.join(output_dir, "metadata.json")
-        with open(metadata_json, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        logger.info(f"  Saved metadata: {metadata_json}")
+        
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Worker error for {task.get('image_name', 'unknown')}: {e}")
+        return None
+
+
+def _read_aligned_rasters_worker(
+    pred_path: str,
+    gt_path: str,
+    num_classes: int
+) -> tuple:
+    """
+    Lê dois rasters garantindo que as áreas lidas correspondem espacialmente.
+    
+    Args:
+        pred_path: Caminho da predição
+        gt_path: Caminho do ground truth
+        
+    Returns:
+        (pred_array, gt_array) com mesma shape, ou (None, None) se falhar
+    """
+    try:
+        # Calcular overlap espacial
+        overlap_result = self._get_spatial_overlap(pred_path, gt_path)
+        
+        if overlap_result is None:
+            return None, None
+        
+        pred_window, gt_window, expected_shape = overlap_result
+        
+        # Ler apenas a área de overlap de cada raster
+        with rasterio.open(pred_path) as pred_src:
+            pred_array = pred_src.read(1, window=pred_window)
+        
+        with rasterio.open(gt_path) as gt_src:
+            gt_array = gt_src.read(1, window=gt_window)
+        
+        # Verificação final de shapes
+        if pred_array.shape != gt_array.shape:
+            logger.warning(
+                f"Shape mismatch after spatial alignment: "
+                f"pred={pred_array.shape}, gt={gt_array.shape}. "
+                f"Cropping to common size."
+            )
+            # Fallback: crop para o menor tamanho
+            min_h = min(pred_array.shape[0], gt_array.shape[0])
+            min_w = min(pred_array.shape[1], gt_array.shape[1])
+            pred_array = pred_array[:min_h, :min_w]
+            gt_array = gt_array[:min_h, :min_w]
+        
+        logger.debug(
+            f"Aligned rasters: shape={pred_array.shape}, "
+            f"pred_window={pred_window}, gt_window={gt_window}"
+        )
+        
+        # Clipar valores para o range válido
+        pred_array = np.clip(pred_array, 0, self.num_classes - 1)
+        gt_array = np.clip(gt_array, 0, self.num_classes - 1)
+        
+        # Verificar se há NaN ou valores inválidos
+        if np.isnan(pred_array).any():
+            logger.warning(f"NaN values found in prediction {pred_path}, replacing with 0")
+            pred_array = np.nan_to_num(pred_array, nan=0.0).astype(np.int32)
+        
+        if np.isnan(gt_array).any():
+            logger.warning(f"NaN values found in ground truth {gt_path}, replacing with 0")
+            gt_array = np.nan_to_num(gt_array, nan=0.0).astype(np.int32)
+        
+        # Log de estatísticas para debug
+        logger.debug(
+            f"Aligned rasters: shape={pred_array.shape}, "
+            f"pred_range=[{pred_array.min()}, {pred_array.max()}], "
+            f"gt_range=[{gt_array.min()}, {gt_array.max()}]"
+        )
+        
+        return pred_array, gt_array
+        
+    except Exception as e:
+        logger.error(f"Error aligning rasters: {e}", exc_info=True)
+        return None, None
