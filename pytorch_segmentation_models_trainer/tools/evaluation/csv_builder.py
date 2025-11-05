@@ -57,19 +57,32 @@ class DatasetCSVBuilder:
                 - masks_folder: pasta com máscaras
                 - image_pattern: padrão glob para imagens (ex: "*.tif")
                 - mask_pattern: padrão glob para máscaras
-                - matching_strategy: "same_basename", "prefix_suffix", ou "custom_regex"
+                - matching_strategy: "same_basename", "prefix_suffix", ou "custom_regex" (opcional)
                 - image_prefix: prefixo das imagens (opcional)
                 - mask_prefix: prefixo das máscaras (opcional)
                 - image_suffix: sufixo das imagens (opcional)
                 - mask_suffix: sufixo das máscaras (opcional)
                 - regex_pattern: padrão regex (opcional)
+                - recursive: buscar recursivamente (opcional)
         """
         self.config = config
         self.images_folder = Path(config.images_folder)
         self.masks_folder = Path(config.masks_folder)
-        self.image_pattern = config.image_pattern
-        self.mask_pattern = config.mask_pattern
-        self.matching_strategy = config.matching_strategy
+        self.image_pattern = getattr(config, 'image_pattern', '*.tif')
+        self.mask_pattern = getattr(config, 'mask_pattern', '*.tif')
+        
+        # Matching strategy com valor padrão
+        self.matching_strategy = getattr(config, 'matching_strategy', 'same_basename')
+        
+        # Recursive search (padrão: False)
+        self.recursive = getattr(config, 'recursive', False)
+        
+        # Parâmetros opcionais para matching
+        self.image_prefix = getattr(config, 'image_prefix', '')
+        self.mask_prefix = getattr(config, 'mask_prefix', '')
+        self.image_suffix = getattr(config, 'image_suffix', '')
+        self.mask_suffix = getattr(config, 'mask_suffix', '')
+        self.regex_pattern = getattr(config, 'regex_pattern', None)
         
         # Validar pastas
         if not self.images_folder.exists():
@@ -81,6 +94,7 @@ class DatasetCSVBuilder:
         logger.info(f"  Images folder: {self.images_folder}")
         logger.info(f"  Masks folder: {self.masks_folder}")
         logger.info(f"  Matching strategy: {self.matching_strategy}")
+        logger.info(f"  Recursive: {self.recursive}")
     
     def build_csv(self, output_path: str) -> pd.DataFrame:
         """
@@ -266,17 +280,19 @@ class DatasetCSVBuilder:
     
     def _find_files(self, folder: Path, pattern: str) -> List[Path]:
         """
-        Encontra todos os arquivos em uma pasta com padrão glob.
+        Busca arquivos em uma pasta.
         
         Args:
-            folder: pasta para buscar
+            folder: pasta onde buscar
             pattern: padrão glob (ex: "*.tif")
             
         Returns:
             Lista de Paths encontrados
         """
-        files = sorted(folder.glob(pattern))
-        return files
+        if self.recursive:
+            return sorted(folder.rglob(pattern))
+        else:
+            return sorted(folder.glob(pattern))
     
     def _get_image_dimensions(self, image_path: Path) -> Tuple[int, int]:
         """

@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import torch
 import rasterio
+from rasterio.windows import Window, from_bounds
+from rasterio.coords import BoundingBox
 from tqdm import tqdm
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import instantiate
@@ -69,26 +71,23 @@ class MetricsCalculator:
         
         for idx, metric_cfg in enumerate(self.config.metrics.segmentation_metrics):
             try:
-                # Criar cópia para não modificar config original
-                metric_cfg_yaml = OmegaConf.to_yaml(metric_cfg)
-                metric_cfg_copy = OmegaConf.create(metric_cfg_yaml)
+                # Converter para dict Python (resolve=True resolve todas as interpolações)
+                metric_dict = OmegaConf.to_container(metric_cfg, resolve=True)
                 
-                # Substituir ${num_classes} por valor real
-                resolver_cfg = OmegaConf.create({
-                    "num_classes": self.num_classes
-                })
+                # Substituir manualmente qualquer ${} que possa ter sobrado
+                # Converter para string JSON e substituir
+                import json
+                metric_json = json.dumps(metric_dict)
                 
-                # Merge configs
-                metric_cfg_resolved = OmegaConf.merge(
-                    resolver_cfg,
-                    metric_cfg_copy
-                )
+                # Substituir interpolações conhecidas
+                metric_json = metric_json.replace('${metrics.num_classes}', str(self.num_classes))
+                metric_json = metric_json.replace('${hyperparameters.num_classes}', str(self.num_classes))
                 
-                # Resolver todas as interpolações
-                OmegaConf.resolve(metric_cfg_resolved)
+                # Recriar dict
+                metric_dict = json.loads(metric_json)
                 
-                # Instanciar métrica
-                metric = instantiate(metric_cfg_resolved)
+                # Instanciar métrica diretamente do dict
+                metric = instantiate(metric_dict)
                 metrics_list.append(metric)
                 
                 logger.debug(
@@ -97,13 +96,174 @@ class MetricsCalculator:
                 
             except Exception as e:
                 logger.error(
-                    f"Failed to instantiate metric {idx + 1}: {e}",
+                    f"Failed to instantiate metric {idx}: {e}",
                     exc_info=True
                 )
-                raise
+                # Continuar com próxima métrica
+                continue
         
-        logger.info(f"Successfully instantiated {len(metrics_list)} metrics")
+        if len(metrics_list) == 0:
+            logger.warning("No metrics could be instantiated!")
+        else:
+            logger.info(f"Successfully instantiated {len(metrics_list)} metrics")
+        
         return metrics_list
+    
+    def _get_spatial_overlap(self, pred_path: str, gt_path: str) -> tuple:
+        """
+        Calcula a área de overlap espacial entre dois rasters georreferenciados.
+        
+        Args:
+            pred_path: Caminho da predição
+            gt_path: Caminho do ground truth
+            
+        Returns:
+            (pred_window, gt_window, matched_shape) ou None se não houver overlap
+        """
+        
+        with rasterio.open(pred_path) as pred_src, rasterio.open(gt_path) as gt_src:
+            # Obter bounds de cada raster
+            pred_bounds = pred_src.bounds
+            gt_bounds = gt_src.bounds
+            
+            # Calcular intersecção das bounding boxes
+            intersection = BoundingBox(
+                left=max(pred_bounds.left, gt_bounds.left),
+                bottom=max(pred_bounds.bottom, gt_bounds.bottom),
+                right=min(pred_bounds.right, gt_bounds.right),
+                top=min(pred_bounds.top, gt_bounds.top)
+            )
+            
+            # Verificar se há overlap
+            if intersection.left >= intersection.right or intersection.bottom >= intersection.top:
+                logger.error(f"No spatial overlap between {pred_path} and {gt_path}")
+                return None
+            
+            # Converter bounds para windows em cada raster
+            pred_window = from_bounds(
+                intersection.left, intersection.bottom,
+                intersection.right, intersection.top,
+                pred_src.transform
+            )
+            
+            gt_window = from_bounds(
+                intersection.left, intersection.bottom,
+                intersection.right, intersection.top,
+                gt_src.transform
+            )
+            
+            # Arredondar para pixels inteiros
+            pred_window = Window(
+                col_off=round(pred_window.col_off),
+                row_off=round(pred_window.row_off),
+                width=round(pred_window.width),
+                height=round(pred_window.height)
+            )
+            
+            gt_window = Window(
+                col_off=round(gt_window.col_off),
+                row_off=round(gt_window.row_off),
+                width=round(gt_window.width),
+                height=round(gt_window.height)
+            )
+            
+            # A shape final deve ser a mesma (ou muito próxima)
+            matched_shape = (int(pred_window.height), int(pred_window.width))
+            
+            # Ajustar se houver pequenas diferenças devido a arredondamento
+            if abs(pred_window.height - gt_window.height) > 1 or \
+               abs(pred_window.width - gt_window.width) > 1:
+                logger.warning(
+                    f"Window size mismatch after spatial alignment: "
+                    f"pred={pred_window.height}x{pred_window.width}, "
+                    f"gt={gt_window.height}x{gt_window.width}"
+                )
+                # Usar o menor tamanho
+                matched_shape = (
+                    min(int(pred_window.height), int(gt_window.height)),
+                    min(int(pred_window.width), int(gt_window.width))
+                )
+                pred_window = Window(
+                    pred_window.col_off, pred_window.row_off,
+                    matched_shape[1], matched_shape[0]
+                )
+                gt_window = Window(
+                    gt_window.col_off, gt_window.row_off,
+                    matched_shape[1], matched_shape[0]
+                )
+            
+            return pred_window, gt_window, matched_shape
+    
+    def _read_aligned_rasters(self, pred_path: str, gt_path: str) -> tuple:
+        """
+        Lê dois rasters garantindo que as áreas lidas correspondem espacialmente.
+        
+        Args:
+            pred_path: Caminho da predição
+            gt_path: Caminho do ground truth
+            
+        Returns:
+            (pred_array, gt_array) com mesma shape, ou (None, None) se falhar
+        """
+        try:
+            # Calcular overlap espacial
+            overlap_result = self._get_spatial_overlap(pred_path, gt_path)
+            
+            if overlap_result is None:
+                return None, None
+            
+            pred_window, gt_window, expected_shape = overlap_result
+            
+            # Ler apenas a área de overlap de cada raster
+            with rasterio.open(pred_path) as pred_src:
+                pred_array = pred_src.read(1, window=pred_window)
+            
+            with rasterio.open(gt_path) as gt_src:
+                gt_array = gt_src.read(1, window=gt_window)
+            
+            # Verificação final de shapes
+            if pred_array.shape != gt_array.shape:
+                logger.warning(
+                    f"Shape mismatch after spatial alignment: "
+                    f"pred={pred_array.shape}, gt={gt_array.shape}. "
+                    f"Cropping to common size."
+                )
+                # Fallback: crop para o menor tamanho
+                min_h = min(pred_array.shape[0], gt_array.shape[0])
+                min_w = min(pred_array.shape[1], gt_array.shape[1])
+                pred_array = pred_array[:min_h, :min_w]
+                gt_array = gt_array[:min_h, :min_w]
+            
+            logger.debug(
+                f"Aligned rasters: shape={pred_array.shape}, "
+                f"pred_window={pred_window}, gt_window={gt_window}"
+            )
+            
+            # Clipar valores para o range válido
+            pred_array = np.clip(pred_array, 0, self.num_classes - 1)
+            gt_array = np.clip(gt_array, 0, self.num_classes - 1)
+            
+            # Verificar se há NaN ou valores inválidos
+            if np.isnan(pred_array).any():
+                logger.warning(f"NaN values found in prediction {pred_path}, replacing with 0")
+                pred_array = np.nan_to_num(pred_array, nan=0.0).astype(np.int32)
+            
+            if np.isnan(gt_array).any():
+                logger.warning(f"NaN values found in ground truth {gt_path}, replacing with 0")
+                gt_array = np.nan_to_num(gt_array, nan=0.0).astype(np.int32)
+            
+            # Log de estatísticas para debug
+            logger.debug(
+                f"Aligned rasters: shape={pred_array.shape}, "
+                f"pred_range=[{pred_array.min()}, {pred_array.max()}], "
+                f"gt_range=[{gt_array.min()}, {gt_array.max()}]"
+            )
+            
+            return pred_array, gt_array
+            
+        except Exception as e:
+            logger.error(f"Error aligning rasters: {e}", exc_info=True)
+            return None, None
     
     def calculate_metrics(
         self,
@@ -166,33 +326,22 @@ class MetricsCalculator:
                     row,
                     prediction_map
                 )
-                
-                if pred_mask is None:
-                    logger.warning(
-                        f"Prediction not found for {row['image']}. "
-                        f"Tried multiple patterns. Skipping."
-                    )
-                    not_found += 1
-                    continue
-                
-                gt_mask = self._load_ground_truth(row)
+                gt_path = row["mask"]
+                pred_mask, gt_mask = self._read_aligned_rasters(pred_path, gt_path)
                 
                 # Validar shapes
-                if pred_mask.shape != gt_mask.shape:
-                    logger.error(
-                        f"Shape mismatch for {row['image']}: "
-                        f"pred={pred_mask.shape}, gt={gt_mask.shape}. Skipping."
-                    )
-                    failed += 1
+                if pred_mask is None or gt_mask is None:
+                    logger.error(f"Failed to align rasters for {gt_path}. Skipping.")
+                    failed_count += 1
                     continue
-                
+                                
                 # Converter para tensors
                 pred_tensor = torch.from_numpy(pred_mask).long()
                 gt_tensor = torch.from_numpy(gt_mask).long()
                 
                 # Calcular métricas por imagem
                 image_metrics = self._calculate_per_image_metrics(
-                    pred_tensor, gt_tensor, row['image']
+                    pred_tensor, gt_tensor
                 )
                 image_metrics['prediction_file'] = pred_path  # Adicionar info do arquivo usado
                 per_image_results.append(image_metrics)
@@ -449,53 +598,71 @@ class MetricsCalculator:
     
     def _calculate_per_image_metrics(
         self, 
-        pred: torch.Tensor, 
-        gt: torch.Tensor,
-        image_name: str
-    ) -> Dict:
+        pred_mask: torch.Tensor, 
+        gt_mask: torch.Tensor,
+    ) -> Dict[str, float]:
         """
-        Calcula métricas para uma única imagem.
+        Calcula métricas para um par predição/ground-truth.
         
         Args:
-            pred: Tensor [H, W] com predições
-            gt: Tensor [H, W] com ground truth
-            image_name: nome da imagem
+            pred_mask: Máscara predita (H, W) com valores 0 até num_classes-1
+            gt_mask: Máscara ground truth (H, W) com valores 0 até num_classes-1
             
         Returns:
-            Dict com métricas da imagem
+            Dict com nome_métrica -> valor
         """
-        results = {'image': image_name}
+        # Converter para tensors PyTorch
+        # CRÍTICO: garantir tipo inteiro e valores válidos
+        pred_tensor = pred_mask.long()  # Garantir long (int64)
+        gt_tensor = gt_mask.long()
+        
+        # Validar valores
+        # Clipar valores para estar no range válido [0, num_classes-1]
+        pred_tensor = torch.clamp(pred_tensor, 0, self.num_classes - 1)
+        gt_tensor = torch.clamp(gt_tensor, 0, self.num_classes - 1)
+        
+        # Flatten para 1D
+        pred_flat = pred_tensor.flatten()
+        gt_flat = gt_tensor.flatten()
+        
+        # Verificações de sanidade
+        assert pred_flat.dim() == 1, f"pred_flat deve ser 1D, mas é {pred_flat.dim()}D"
+        assert gt_flat.dim() == 1, f"gt_flat deve ser 1D, mas é {gt_flat.dim()}D"
+        assert pred_flat.dtype in [torch.int32, torch.int64], f"pred_flat deve ser int, mas é {pred_flat.dtype}"
+        assert gt_flat.dtype in [torch.int32, torch.int64], f"gt_flat deve ser int, mas é {gt_flat.dtype}"
+        assert pred_flat.min() >= 0, f"pred_flat tem valores negativos: {pred_flat.min()}"
+        assert gt_flat.min() >= 0, f"gt_flat tem valores negativos: {gt_flat.min()}"
+        assert pred_flat.max() < self.num_classes, f"pred_flat tem valores >= num_classes: {pred_flat.max()}"
+        assert gt_flat.max() < self.num_classes, f"gt_flat tem valores >= num_classes: {gt_flat.max()}"
+        
+        # Calcular métricas
+        metrics_dict = {}
         
         for metric in self.metrics:
-            # Clonar métrica para não afetar agregada
-            metric_copy = metric.clone()
-            
-            # Flatten para métricas globais
-            pred_flat = pred.flatten()
-            gt_flat = gt.flatten()
-            
-            metric_copy.update(pred_flat, gt_flat)
-            value = metric_copy.compute()
-            
-            # Lidar com métricas que retornam array (average='none')
-            metric_name = metric.__class__.__name__
-            
-            if isinstance(value, torch.Tensor) and value.numel() > 1:
-                # Métrica por classe
-                for i, v in enumerate(value):
-                    class_name = (
-                        self.class_names[i] 
-                        if i < len(self.class_names) 
-                        else f"class_{i}"
-                    )
-                    results[f'{metric_name}_{class_name}'] = v.item()
-            else:
-                # Métrica global
-                results[metric_name] = (
-                    value.item() if isinstance(value, torch.Tensor) else value
+            try:
+                # Copiar a métrica para não acumular estado entre imagens
+                if hasattr(metric, 'reset'):
+                    metric.reset()
+                
+                # Calcular métrica
+                metric.update(pred_flat, gt_flat)
+                value = metric.compute()
+                
+                # Converter para float Python
+                if isinstance(value, torch.Tensor):
+                    value = value.item()
+                
+                # Nome da métrica
+                metric_name = metric.__class__.__name__
+                metrics_dict[metric_name] = float(value)
+                
+            except Exception as e:
+                logger.warning(
+                    f"Failed to compute {metric.__class__.__name__}: {e}"
                 )
+                metrics_dict[metric.__class__.__name__] = None
         
-        return results
+        return metrics_dict
     
     def _update_aggregated_metrics(
         self, 

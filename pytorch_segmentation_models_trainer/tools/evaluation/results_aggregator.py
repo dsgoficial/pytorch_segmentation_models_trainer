@@ -52,31 +52,45 @@ class ResultsAggregator:
         self.config = config
         logger.info("ResultsAggregator initialized")
     
-    def aggregate(self, all_results: Dict[str, Dict]) -> Dict:
+    def aggregate(self, all_results: Dict) -> Dict:
         """
-        Agrega resultados de todos os experimentos.
-        
-        Args:
-            all_results: Dict {exp_name: results}
-            
-        Returns:
-            Dict com resultados agregados
+        Agrega resultados de múltiplos experimentos.
         """
         logger.info(f"Aggregating results from {len(all_results)} experiments")
         
+        # DEBUG: Mostrar o que chegou
+        if len(all_results) == 0:
+            logger.warning("Received empty all_results dict!")
+        else:
+            logger.info(f"Experiments received: {list(all_results.keys())}")
+            for exp_name, results in all_results.items():
+                if results is None:
+                    logger.warning(f"  {exp_name}: results is None")
+                else:
+                    logger.info(f"  {exp_name}: keys={list(results.keys())}")
+        
+        # Verificar se há resultados válidos
+        valid_results = {k: v for k, v in all_results.items() if v is not None}
+        
+        if len(valid_results) == 0:
+            logger.warning("No valid results to aggregate")
+            return {
+                'experiments': {},
+                'rankings': {},
+                'statistics': {},
+                'num_experiments': 0
+            }
+        
+        # Criar estrutura agregada
         aggregated = {
-            'experiments': all_results,
-            'summary': self._create_summary(all_results),
-            'rankings': self._create_rankings(all_results),
-            'statistics': self._calculate_statistics(all_results),
-            'best_experiment': self._find_best_experiment(all_results),
-            'worst_experiment': self._find_worst_experiment(all_results)
+            'experiments': valid_results,
+            'rankings': self._create_rankings(valid_results),
+            'statistics': self._calculate_statistics(valid_results),
+            'num_experiments': len(valid_results)
         }
         
-        # Salvar agregações
-        self._save_aggregated_csv(all_results)
-        self._save_rankings_csv(aggregated['rankings'])
-        self._save_statistics_json(aggregated['statistics'])
+        # Salvar CSV agregado
+        self._save_aggregated_csv(valid_results)
         
         return aggregated
     
@@ -113,62 +127,43 @@ class ResultsAggregator:
         
         return summary
     
-    def _create_rankings(
-        self, 
-        all_results: Dict,
-        metrics_to_rank: Optional[List[str]] = None
-    ) -> Dict:
+    def _create_rankings(self, all_results: Dict) -> Dict:
         """
-        Cria rankings de experimentos para diferentes métricas.
+        Cria rankings de experimentos por métrica.
+        """
+        if len(all_results) == 0:
+            logger.warning("No results to create rankings from")
+            return {}
         
-        Args:
-            all_results: Resultados de todos experimentos
-            metrics_to_rank: Lista de métricas para ranquear (None = todas)
-            
-        Returns:
-            Dict com rankings
-        """
         logger.info("Creating rankings")
+        
+        # Obter lista de métricas do primeiro experimento
+        first_exp = next(iter(all_results.values()))
+        
+        if first_exp is None or 'aggregated' not in first_exp:
+            logger.warning("First experiment has no aggregated metrics")
+            return {}
+        
+        metric_names = list(first_exp['aggregated'].keys())
         
         rankings = {}
         
-        # Obter métricas globais
-        first_exp = next(iter(all_results.values()))
-        aggregated = first_exp['aggregated']
-        
-        # Filtrar métricas globais (sem "_class_")
-        global_metrics = [
-            k for k in aggregated.keys()
-            if '_class_' not in k.lower() or k.endswith('_class_0')  # Evitar métricas por classe
-        ]
-        
-        # Limpar nomes de métricas
-        global_metrics = [k for k in global_metrics if not any(
-            k.endswith(f'_class_{i}') for i in range(20)
-        )]
-        
-        if metrics_to_rank:
-            global_metrics = [m for m in global_metrics if m in metrics_to_rank]
-        
-        # Ranquear para cada métrica
-        for metric in global_metrics:
-            ranking = []
-            
+        for metric_name in metric_names:
+            # Coletar valores de todos os experimentos
+            values = []
             for exp_name, results in all_results.items():
-                value = results['aggregated'].get(metric, 0.0)
-                ranking.append({
-                    'experiment': exp_name,
-                    'score': value
-                })
+                if results and 'aggregated' in results and metric_name in results['aggregated']:
+                    value = results['aggregated'][metric_name]
+                    if value is not None:  # Ignorar valores None
+                        values.append((exp_name, value))
             
-            # Ordenar (maior é melhor)
-            ranking = sorted(ranking, key=lambda x: x['score'], reverse=True)
+            # Ordenar (maior valor = melhor)
+            values.sort(key=lambda x: x[1], reverse=True)
             
-            # Adicionar posição
-            for i, item in enumerate(ranking, 1):
-                item['rank'] = i
-            
-            rankings[metric] = ranking
+            rankings[metric_name] = [
+                {'rank': i+1, 'experiment': name, 'value': value}
+                for i, (name, value) in enumerate(values)
+            ]
         
         return rankings
     
@@ -288,42 +283,78 @@ class ResultsAggregator:
     
     def _save_aggregated_csv(self, all_results: Dict):
         """
-        Salva CSV com métricas agregadas de todos experimentos.
-        
-        Args:
-            all_results: Resultados de todos experimentos
+        Salva CSV com métricas agregadas de todos os experimentos.
         """
         logger.info("Saving aggregated metrics CSV")
         
+        # Verificar se há resultados
+        if len(all_results) == 0:
+            logger.warning("No results to save to CSV")
+            # Criar CSV vazio com colunas padrão
+            empty_df = pd.DataFrame(columns=['experiment', 'num_classes', 'num_images'])
+            output_path = os.path.join(
+                self.config.output.base_dir,
+                "aggregated_metrics.csv"
+            )
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            empty_df.to_csv(output_path, index=False)
+            logger.info(f"Empty CSV saved: {output_path}")
+            return
+        
+        # Construir lista de linhas
         rows = []
-        
         for exp_name, results in all_results.items():
-            row = {
-                'experiment': exp_name,
-                'num_classes': results['num_classes'],
-                'num_images': len(results['per_image'])
-            }
-            row.update(results['aggregated'])
-            rows.append(row)
+            try:
+                row = {
+                    'experiment': exp_name,
+                    'num_classes': results.get('num_classes', 0),
+                    'num_images': len(results.get('per_image', []))
+                }
+                # Adicionar métricas agregadas
+                if 'aggregated' in results and results['aggregated']:
+                    row.update(results['aggregated'])
+                rows.append(row)
+            except Exception as e:
+                logger.error(f"Error processing results for {exp_name}: {e}")
+                continue
         
+        # Verificar se há linhas
+        if len(rows) == 0:
+            logger.warning("No valid rows to save to CSV")
+            empty_df = pd.DataFrame(columns=['experiment', 'num_classes', 'num_images'])
+            output_path = os.path.join(
+                self.config.output.base_dir,
+                "aggregated_metrics.csv"
+            )
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            empty_df.to_csv(output_path, index=False)
+            logger.info(f"Empty CSV saved: {output_path}")
+            return
+        
+        # Criar DataFrame
         df = pd.DataFrame(rows)
         
-        # Reordenar colunas
+        # Reorganizar colunas
         cols = ['experiment', 'num_classes', 'num_images']
+        # Filtrar apenas colunas que existem
+        cols = [c for c in cols if c in df.columns]
         other_cols = [c for c in df.columns if c not in cols]
-        df = df[cols + other_cols]
+        
+        if len(cols) > 0:
+            df = df[cols + other_cols]
         
         # Salvar
-        output_dir = self.config.output.base_dir
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        
-        csv_path = os.path.join(
-            output_dir,
-            self.config.output.files.aggregated_metrics
+        output_path = os.path.join(
+            self.config.output.base_dir,
+            "aggregated_metrics.csv"
         )
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(output_path, index=False)
         
-        df.to_csv(csv_path, index=False)
-        logger.info(f"Saved aggregated metrics: {csv_path}")
+        logger.info(f"Aggregated metrics CSV saved: {output_path}")
+        logger.info(f"  Experiments: {len(df)}")
+        if len(other_cols) > 0:
+            logger.info(f"  Metrics: {len(other_cols)}")
     
     def _save_rankings_csv(self, rankings: Dict):
         """

@@ -856,14 +856,17 @@ class EvaluationPipeline:
                     
                     try:
                         name, results = future.result()
-                        all_results[name] = results
-                        logger.info(f"✓ {name} evaluation completed")
+                        if results is not None:
+                            all_results[name] = results
+                            logger.info(f"✓ {name} evaluation completed")
+                        else:
+                            logger.error(f"✗ {exp_name} returned None results")
                         
                     except Exception as e:
                         logger.error(f"✗ {exp_name} evaluation failed: {e}")
                     
                     pbar.update(1)
-        
+        logger.info(f"Completed evaluation: {len(all_results)} successful out of {len(tasks)} total")
         return all_results
     
     def _should_skip_evaluation(self, experiment_name: str) -> bool:
