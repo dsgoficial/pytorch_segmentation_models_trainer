@@ -71,7 +71,7 @@ def instantiate_inference_processor(cfg: DictConfig) -> AbstractInferenceProcess
     )
     obj_params["device"] = cfg.device
     obj_params["batch_size"] = cfg.hyperparameters.batch_size
-    obj_params["mask_bands"] = sum(cfg.seg_params.values())
+    obj_params["mask_bands"] = sum(cfg.seg_params.values()) if "seg_params" in cfg else 1
     obj_params.pop("_target_")
     for key, value in obj_params.items():
         if isinstance(value, omegaconf.listconfig.ListConfig):

@@ -25,7 +25,7 @@ import os
 import subprocess
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -491,7 +491,7 @@ class EvaluationPipeline:
         logger.info("Running predictions IN PARALLEL")
         
         # Distribuir experimentos entre GPUs
-        gpu_assignments = self.gpu_distributor.distribute_experiments(self.experiments)
+        gpu_assignments = self.gpu_distributor.assign_experiments(self.experiments)
         
         logger.info(f"GPU assignments: {gpu_assignments}")
         
@@ -532,7 +532,7 @@ class EvaluationPipeline:
                     'gpu_id': -1
                 }
         
-        with ProcessPoolExecutor(max_workers=len(tasks)) as executor:
+        with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
             # Submeter tarefas
             future_to_exp = {
                 executor.submit(_run_prediction_worker, *task): task[0].name

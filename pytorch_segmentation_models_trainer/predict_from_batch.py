@@ -297,10 +297,12 @@ def predict_from_batch(cfg: DictConfig):
     
     # Criar dataloaders
     dataloader_list = instantiate_dataloaders(cfg)
+    callback_list = [] if not isinstance(model, FrameFieldSegmentationPLModel) \
+        else [ActiveSkeletonsPolygonizerCallback()]
     
     # Criar trainer
     trainer = Trainer(
-        **cfg.pl_trainer, callbacks=[ActiveSkeletonsPolygonizerCallback()]
+        **cfg.pl_trainer, callbacks=callback_list
     )
     
     # Executar predições

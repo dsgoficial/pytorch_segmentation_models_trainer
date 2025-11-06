@@ -131,8 +131,9 @@ class AbstractInferenceProcessor(ABC):
             parent_dir_name=image_name,
         )
 
-    def save_inference(self, image_path, threshold, profile, inference, output_dict):
-        inference["seg"] = (inference["seg"] > threshold).astype(np.uint8)
+    def save_inference(self, image_path, threshold, profile, inference, output_dict, apply_threshold=True):
+        inference["seg"] = (inference["seg"] > threshold).astype(np.uint8) if apply_threshold \
+            else inference["seg"].astype(np.uint8)
         profile["input_name"] = Path(image_path).stem
         if self.export_strategy is not None:
             output_dict["inference"].append(
@@ -302,7 +303,7 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         # ✅ Retorna 1 banda com índices (0, 1, 2, ..., num_classes-1)
         return {"seg": class_indices}
     
-    def save_inference(self, image_path, threshold, profile, inference, output_dict):
+    def save_inference(self, image_path, threshold, profile, inference, output_dict, apply_threshold=True):
         """
         ✅ Salva imagem de 1 banda com índices de classe (sem threshold!)
         """
@@ -457,7 +458,7 @@ class ObjectDetectionInferenceProcessor(AbstractInferenceProcessor):
                 pred_batch = self.model(tiles_batch)
                 merger.integrate_boxes(pred_batch, crop_coords_batch)
 
-    def save_inference(self, image_path, threshold, profile, inference, output_dict):
+    def save_inference(self, image_path, threshold, profile, inference, output_dict, apply_threshold=True):
         inference = [
             {k: v.cpu().tolist() for k, v in item.items()} for item in inference
         ]
