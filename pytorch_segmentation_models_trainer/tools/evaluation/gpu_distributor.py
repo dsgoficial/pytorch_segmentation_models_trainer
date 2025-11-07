@@ -192,7 +192,7 @@ class GPUDistributor:
             gpu_id = self.available_gpus[idx % len(self.available_gpus)]
             assignments[gpu_id].append(exp)
             
-            logger.debug(
+            logger.info(
                 f"Assigned experiment '{exp.name}' to GPU {gpu_id}"
             )
         

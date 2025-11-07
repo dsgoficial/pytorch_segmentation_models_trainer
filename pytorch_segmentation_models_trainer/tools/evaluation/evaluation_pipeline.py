@@ -498,14 +498,13 @@ class EvaluationPipeline:
         # Preparar lista de tarefas
         tasks = []
         
-        for exp in self.experiments:
-            # Verificar se deve skip
-            if self._should_skip_prediction(exp):
-                logger.info(f"Skipping {exp.name} (already exists)")
-                continue
-            
-            gpu_id = gpu_assignments.get(exp.name, -1)
-            tasks.append((exp, gpu_id, dataset_csv, self.config))
+        for gpu_id, experimentList in gpu_assignments.items():
+            for exp in self.experiments:
+                # Verificar se deve skip
+                if self._should_skip_prediction(exp):
+                    logger.info(f"Skipping {exp.name} (already exists)")
+                    continue
+                tasks.append((exp, gpu_id, dataset_csv, self.config))
         
         if len(tasks) == 0:
             logger.warning("No experiments to run (all skipped)")
@@ -617,7 +616,7 @@ class EvaluationPipeline:
         # Preparar overrides para Hydra
         overrides = [
             f"checkpoint_path={experiment.checkpoint_path}",
-            f"inference_dataset.input_csv_path={dataset_csv}",
+            # f"inference_dataset.input_csv_path={dataset_csv}",
         ]
         
         # Adicionar device override
@@ -1010,7 +1009,7 @@ def _run_prediction_worker(
     # Preparar overrides
     overrides = [
         f"checkpoint_path={experiment.checkpoint_path}",
-        f"inference_dataset.input_csv_path={dataset_csv}",
+        # f"inference_dataset.input_csv_path={dataset_csv}",
     ]
     
     # Device override

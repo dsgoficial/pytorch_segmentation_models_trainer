@@ -38,12 +38,14 @@ logger = logging.getLogger(__name__)
 class Model(pl.LightningModule):
     """Base Model class compatible with PyTorch Lightning 2.0+"""
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, inference_mode=False):
         super(Model, self).__init__()
         self.cfg = cfg
         self.model = self.get_model()
-        self.train_ds = instantiate(self.cfg.train_dataset, _recursive_=False)
-        self.val_ds = instantiate(self.cfg.val_dataset, _recursive_=False)
+        self.train_ds = instantiate(self.cfg.train_dataset, _recursive_=False) if "train_dataset" in self.cfg else None
+        self.val_ds = instantiate(self.cfg.val_dataset, _recursive_=False) if "val_dataset" in self.cfg else None
+        if inference_mode:
+            return
         self.loss_function = self.get_loss_function()
         
         # NEW: Determine if using compound loss (MultiLoss)
@@ -543,3 +545,6 @@ class Model(pl.LightningModule):
 
     # Removed training_epoch_end and validation_epoch_end
     # Lightning 2.0+ automatically aggregates metrics
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        return self(batch) 
+    

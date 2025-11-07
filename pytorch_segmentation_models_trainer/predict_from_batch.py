@@ -292,8 +292,9 @@ def predict_from_batch(cfg: DictConfig):
     
     # Carregar modelo
     model = import_module_from_cfg(cfg.pl_model).load_from_checkpoint(
-        cfg.checkpoint_path, cfg=cfg
+        cfg.checkpoint_path, cfg=cfg, inference_mode=True
     )
+    model.eval()
     
     # Criar dataloaders
     dataloader_list = instantiate_dataloaders(cfg)
