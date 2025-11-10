@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
     pl_model = import_module_from_cfg(cfg.pl_model).load_from_checkpoint(
-        cfg.checkpoint_path, cfg=cfg
+        cfg.checkpoint_path, cfg=cfg, inference_mode=True
     )
     model = pl_model.model
     model.to(cfg.device)
@@ -56,7 +56,7 @@ def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
 
 
 def instantiate_polygonizer(cfg: DictConfig) -> TemplatePolygonizerProcessor:
-    polygonizer = instantiate(cfg.polygonizer)
+    polygonizer = instantiate(cfg.polygonizer) if "polygonizer" in cfg else None
     return polygonizer
 
 
@@ -71,7 +71,10 @@ def instantiate_inference_processor(cfg: DictConfig) -> AbstractInferenceProcess
     )
     obj_params["device"] = cfg.device
     obj_params["batch_size"] = cfg.hyperparameters.batch_size
-    obj_params["mask_bands"] = sum(cfg.seg_params.values()) if "seg_params" in cfg else 1
+    if "MultiClassInferenceProcessor" not in cfg.inference_processor._target_:
+        obj_params["mask_bands"] = sum(cfg.seg_params.values()) if "seg_params" in cfg else 1
+    else:
+        obj_params["num_classes"] = cfg.inference_processor.num_classes
     obj_params.pop("_target_")
     for key, value in obj_params.items():
         if isinstance(value, omegaconf.listconfig.ListConfig):
@@ -93,10 +96,14 @@ def predict(cfg: DictConfig):
     )
     inference_processor = instantiate_inference_processor(cfg)
     images = get_images(cfg)
+    params = {
+        "save_inference_output": cfg.save_inference if "save_inference" in cfg else True
+    }
+    if "inference_threshold" in cfg:
+        params["inference_threshold"] = cfg.inference_threshold
     compute_func = lambda image: inference_processor.process(
         image,
-        threshold=cfg.inference_threshold,
-        save_inference_output=cfg.save_inference if "save_inference" in cfg else True,
+        **params,
     )
     for image in tqdm(images):
         compute_func(image)

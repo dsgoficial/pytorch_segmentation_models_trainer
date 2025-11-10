@@ -444,6 +444,13 @@ class EvaluationPipeline:
         """
         logger.info("Running predictions SEQUENTIALLY")
         
+        device_id = -1  # Default: CPU
+        if self.gpu_distributor and len(self.gpu_distributor.available_gpus) > 0:
+            device_id = self.gpu_distributor.available_gpus[0]
+            logger.info(f"Using GPU {device_id} for sequential execution")
+        else:
+            logger.info("Using CPU for sequential execution")
+        
         predictions_info = {}
         
         for exp in self.experiments:
@@ -455,7 +462,7 @@ class EvaluationPipeline:
                 predictions_info[exp.name] = {
                     'output_folder': exp.output_folder,
                     'skipped': True,
-                    'gpu_id': -1
+                    'gpu_id': device_id,
                 }
                 continue
             
@@ -465,7 +472,7 @@ class EvaluationPipeline:
                 predictions_info[exp.name] = {
                     'output_folder': exp.output_folder,
                     'skipped': False,
-                    'gpu_id': -1
+                    'gpu_id': device_id
                 }
                 logger.info(f"Prediction completed for {exp.name}")
                 
@@ -604,7 +611,7 @@ class EvaluationPipeline:
         """
         Executa predição para um único experimento.
         
-        Chama o script predict_from_batch.py como subprocesso.
+        Chama o script predict.py como subprocesso.
         
         Args:
             experiment: config do experimento
@@ -626,6 +633,7 @@ class EvaluationPipeline:
         else:
             overrides.append("device=cpu")
             overrides.append("pl_trainer.accelerator=cpu")
+            overrides.append("pl_trainer.devices=1")
         
         # Adicionar overrides específicos do experimento
         if "overrides" in experiment and experiment.overrides:
@@ -637,12 +645,12 @@ class EvaluationPipeline:
             os.path.dirname(__file__),
             "..",
             "..",
-            "predict_from_batch.py"
+            "predict.py"
         )
         
         if not os.path.exists(script_path):
             raise FileNotFoundError(
-                f"predict_from_batch.py not found at {script_path}"
+                f"predict.py not found at {script_path}"
             )
         
         cmd = [
@@ -1021,6 +1029,7 @@ def _run_prediction_worker(
     else:
         overrides.append("device=cpu")
         overrides.append("pl_trainer.accelerator=cpu")
+        overrides.append("pl_trainer.devices=1")
     
     # Overrides do experimento
     if "overrides" in experiment and experiment.overrides:
@@ -1032,7 +1041,7 @@ def _run_prediction_worker(
         os.path.dirname(__file__),
         "..",
         "..",
-        "predict_from_batch.py"
+        "predict.py"
     )
     
     # Comando

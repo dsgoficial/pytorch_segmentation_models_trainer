@@ -26,6 +26,7 @@ from concurrent.futures.thread import ThreadPoolExecutor
 from pathlib import Path
 
 from pytorch_lightning.trainer.trainer import Trainer
+from pytorch_segmentation_models_trainer.model_loader.frame_field_model import FrameFieldSegmentationPLModel
 from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
     ActiveSkeletonsPolygonizerCallback,
 )

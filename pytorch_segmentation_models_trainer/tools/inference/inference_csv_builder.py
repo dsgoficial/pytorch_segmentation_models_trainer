@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Optional, List, Tuple
 
 import pandas as pd
-from PIL import Image
+import rasterio
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ class InferenceCSVBuilder:
         recursive: bool = False,
         masks_folder: Optional[str] = None,
         mask_pattern: Optional[str] = None,
-        mask_suffix: Optional[str] = "_mask",
+        mask_suffix: Optional[str] = "",
         root_dir: Optional[str] = None
     ):
         """
@@ -150,8 +150,9 @@ class InferenceCSVBuilder:
             Tupla (width, height)
         """
         try:
-            with Image.open(image_path) as img:
-                width, height = img.size
+            with rasterio.open(image_path) as src:
+                width = src.width
+                height = src.height
             return width, height
         except Exception as e:
             logger.warning(f"Could not read dimensions of {image_path}: {e}")
@@ -218,16 +219,12 @@ class InferenceCSVBuilder:
                 mask_str = ""
             
             # Dimensões
-            if validate_images:
-                width, height = self.get_image_dimensions(image_path)
-                
-                if width == 0 or height == 0:
-                    logger.warning(f"Skipping invalid image: {image_path}")
-                    continue
-            else:
-                # Se não validar, usar valores placeholder
-                width, height = 0, 0
+            width, height = self.get_image_dimensions(image_path)
             
+            if width == 0 or height == 0:
+                logger.warning(f"Skipping invalid image: {image_path}")
+                continue
+        
             data.append({
                 'id': idx,
                 'image': image_str,
@@ -252,7 +249,7 @@ class InferenceCSVBuilder:
             masks_found = df['mask'].astype(bool).sum()
             logger.info(f"  Masks found: {masks_found} ({masks_found/len(df)*100:.1f}%)")
         
-        if validate_images:
+        if 'width' in df.columns and 'height' in df.columns:
             unique_dims = df.groupby(['width', 'height']).size()
             logger.info(f"  Unique dimensions: {len(unique_dims)}")
             for (w, h), count in unique_dims.items():
@@ -303,7 +300,7 @@ def build_inference_csv_from_config(config) -> str:
         recursive=config.get('recursive', False),
         masks_folder=config.get('masks_folder'),
         mask_pattern=config.get('mask_pattern'),
-        mask_suffix=config.get('mask_suffix', '_mask'),
+        mask_suffix=config.get('mask_suffix', ''),
         root_dir=config.get('root_dir')
     )
     
@@ -311,10 +308,21 @@ def build_inference_csv_from_config(config) -> str:
     if 'output_csv_path' in config and config.output_csv_path:
         output_csv_path = config.output_csv_path
     else:
-        # Gerar path automático
+        # MUDANÇA: Adicionar hash único para evitar conflitos em paralelo
+        import hashlib
+        import time
+        
+        # Criar identificador único baseado na pasta e timestamp
+        folder_hash = hashlib.md5(
+            config.images_folder.encode()
+        ).hexdigest()[:8]
+        
+        timestamp = str(int(time.time() * 1000))  # milliseconds
+        
+        # Gerar path com identificador único
         output_csv_path = os.path.join(
             config.images_folder,
-            "inference_dataset.csv"
+            f"inference_dataset_{folder_hash}_{timestamp}.csv"
         )
     
     # Construir ou carregar

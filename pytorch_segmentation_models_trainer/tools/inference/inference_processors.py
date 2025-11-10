@@ -65,6 +65,8 @@ class AbstractInferenceProcessor(ABC):
         model_input_shape=None,
         step_shape=None,
         mask_bands=1,
+        normalize_mean=None,
+        normalize_std=None,
         config=None,
         group_output_by_image_basename=False,
     ):
@@ -80,15 +82,25 @@ class AbstractInferenceProcessor(ABC):
         )
         self.step_shape = (224, 224) if step_shape is None else step_shape
         self.mask_bands = mask_bands
-        self.normalize = A.Normalize()
         self.group_output_by_image_basename = group_output_by_image_basename
+        self.normalize_mean = normalize_mean
+        self.normalize_std = normalize_std
 
-    def get_profile(self, image_path, restore_geo_transform=True):
+    def read_image_and_profile(self, image_path, restore_geo_transform=True):
         with rasterio.open(image_path, "r") as raster_ds:
+            image = raster_ds.read()
             profile = raster_ds.profile
         if not restore_geo_transform:
             profile["crs"] = None
-        return profile
+        return image, profile
+    
+    def get_normalization_function(self):
+        if normalize_mean is not None and normalize_std is not None:
+            func = A.Normalize(mean=self.normalize_mean, std=self.normalize_std, p=1.0)
+        else:
+            # Padrão ImageNet RGB
+            func = A.Normalize()
+        return func
 
     def process(
         self,
@@ -99,8 +111,7 @@ class AbstractInferenceProcessor(ABC):
         restore_geo_transform: bool = True,
         **kwargs: Optional[Any],
     ) -> Dict[str, Any]:
-        image = cv2.imread(image_path)
-        profile = self.get_profile(
+        image, profile = self.read_image_and_profile(
             image_path, restore_geo_transform=restore_geo_transform
         )
         inference = self.make_inference(image, **kwargs)
@@ -166,6 +177,8 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
         model_input_shape=None,
         step_shape=None,
         mask_bands=1,
+        normalize_mean=None,
+        normalize_std=None,
         config=None,
         group_output_by_image_basename=False,
     ):
@@ -193,7 +206,8 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
         Returns:
             Union[np.array, dict]: model inference
         """
-        normalized_image = self.normalize(image=image)["image"]
+        norm_func = self.get_normalization_function()
+        normalized_image = norm_func(image=image)["image"]
         pad_func = A.PadIfNeeded(
             math.ceil(image.shape[0] / self.model_input_shape[0])
             * self.model_input_shape[0],
@@ -269,6 +283,8 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         model_input_shape=None,
         step_shape=None,
         num_classes=2,  # ✅ Novo parâmetro!
+        normalize_mean=None,
+        normalize_std=None,
         config=None,
         group_output_by_image_basename=False,
     ):
@@ -331,6 +347,8 @@ class SingleImageFromFrameFieldProcessor(SingleImageInfereceProcessor):
         model_input_shape=None,
         step_shape=None,
         mask_bands=1,
+        normalize_mean=None,
+        normalize_std=None,
         config=None,
         group_output_by_image_basename=False,
     ):
@@ -380,6 +398,8 @@ class ObjectDetectionInferenceProcessor(AbstractInferenceProcessor):
         mask_bands=1,
         post_process_method=None,
         min_visibility=0.3,
+        normalize_mean=None,
+        normalize_std=None,
         config=None,
         group_output_by_image_basename=False,
     ):
@@ -422,7 +442,8 @@ class ObjectDetectionInferenceProcessor(AbstractInferenceProcessor):
     def make_inference(
         self, image: np.ndarray, **kwargs: Optional[Any]
     ) -> List[Dict[str, torch.Tensor]]:
-        normalized_image = self.normalize(image=image)["image"]
+        norm_func = self.get_normalization_function()
+        normalized_image = norm_func(image=image)["image"]
         pad_func = A.PadIfNeeded(
             math.ceil(image.shape[0] / self.model_input_shape[0])
             * self.model_input_shape[0],
@@ -474,6 +495,8 @@ class PolygonRNNInferenceProcessor(AbstractInferenceProcessor):
         device,
         batch_size,
         polygonizer=None,
+        normalize_mean=None,
+        normalize_std=None,
         config=None,
         sequence_length=60,
         group_output_by_image_basename=False,
@@ -538,6 +561,7 @@ class PolygonRNNInferenceProcessor(AbstractInferenceProcessor):
         self, image: Image, bboxes: List[np.ndarray]
     ) -> List[Dict[str, torch.Tensor]]:
         output_list = []
+        norm_func = self.get_normalization_function()
         for box in bboxes:
             croped_image = image.crop(box=box)
             image_tile = croped_image.resize(
@@ -547,7 +571,7 @@ class PolygonRNNInferenceProcessor(AbstractInferenceProcessor):
             output_list.append(
                 {
                     "croped_images": torch.from_numpy(
-                        self.normalize(image=np.array(image_tile))["image"]
+                        norm_func(image=np.array(image_tile))["image"]
                     ),
                     "scale_h": torch.tensor(scale_h),
                     "scale_w": torch.tensor(scale_w),
