@@ -67,6 +67,9 @@ class RasterDataWriter(AbstractDataWriter):
             if output_profile["count"] != input_data.shape[-1]
             else output_profile["count"]
         )
+        p = Path(self.output_file_path)
+        if not p.parent.exists():
+            p.parent.mkdir(parents=True, exist_ok=True)
         with rasterio.open(self.output_file_path, "w", **output_profile) as out:
             out.write(reshape_as_raster(input_data))
 

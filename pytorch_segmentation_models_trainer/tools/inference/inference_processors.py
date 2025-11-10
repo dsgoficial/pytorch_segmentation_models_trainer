@@ -89,13 +89,14 @@ class AbstractInferenceProcessor(ABC):
     def read_image_and_profile(self, image_path, restore_geo_transform=True):
         with rasterio.open(image_path, "r") as raster_ds:
             image = raster_ds.read()
+            image = np.moveaxis(image, 0, -1)
             profile = raster_ds.profile
         if not restore_geo_transform:
             profile["crs"] = None
         return image, profile
     
     def get_normalization_function(self):
-        if normalize_mean is not None and normalize_std is not None:
+        if self.normalize_mean is not None and self.normalize_std is not None:
             func = A.Normalize(mean=self.normalize_mean, std=self.normalize_std, p=1.0)
         else:
             # Padrão ImageNet RGB
@@ -191,6 +192,8 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
             model_input_shape=model_input_shape,
             step_shape=step_shape,
             mask_bands=mask_bands,
+            normalize_mean=normalize_mean,
+            normalize_std=normalize_std,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
         )
@@ -298,6 +301,8 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
             model_input_shape=model_input_shape,
             step_shape=step_shape,
             mask_bands=num_classes,  # ✅ TileMerger precisa de todos os canais
+            normalize_mean=normalize_mean,
+            normalize_std=normalize_std,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
         )
@@ -361,6 +366,8 @@ class SingleImageFromFrameFieldProcessor(SingleImageInfereceProcessor):
             model_input_shape=model_input_shape,
             step_shape=step_shape,
             mask_bands=mask_bands,
+            normalize_mean=normalize_mean,
+            normalize_std=normalize_std,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
         )
@@ -412,6 +419,8 @@ class ObjectDetectionInferenceProcessor(AbstractInferenceProcessor):
             model_input_shape=model_input_shape,
             step_shape=step_shape,
             mask_bands=mask_bands,
+            normalize_mean=normalize_mean,
+            normalize_std=normalize_std,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
         )
@@ -508,6 +517,8 @@ class PolygonRNNInferenceProcessor(AbstractInferenceProcessor):
             export_strategy=None,
             polygonizer=polygonizer,
             model_input_shape=(224, 224),
+            normalize_mean=normalize_mean,
+            normalize_std=normalize_std,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
         )
