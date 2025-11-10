@@ -75,6 +75,10 @@ def instantiate_inference_processor(cfg: DictConfig) -> AbstractInferenceProcess
         obj_params["mask_bands"] = sum(cfg.seg_params.values()) if "seg_params" in cfg else 1
     else:
         obj_params["num_classes"] = cfg.inference_processor.num_classes
+    if "normalize_mean" in cfg.inference_processor:
+        obj_params["normalize_mean"] = cfg.inference_processor.normalize_mean
+    if "normalize_std" in cfg.inference_processor:
+        obj_params["normalize_std"] = cfg.inference_processor.normalize_std
     obj_params.pop("_target_")
     for key, value in obj_params.items():
         if isinstance(value, omegaconf.listconfig.ListConfig):
