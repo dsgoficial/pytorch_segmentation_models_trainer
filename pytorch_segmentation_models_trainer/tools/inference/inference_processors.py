@@ -320,6 +320,8 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         
         # Crop para tamanho original
         class_indices = tiler.crop_to_orignal_size(class_indices)
+        if class_indices.ndim == 2:
+            class_indices = class_indices[..., np.newaxis]
         
         # ✅ Retorna 1 banda com índices (0, 1, 2, ..., num_classes-1)
         return {"seg": class_indices}
