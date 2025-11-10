@@ -549,7 +549,10 @@ class EvaluationPipeline:
             with tqdm(
                 total=len(future_to_exp),
                 desc="Parallel prediction",
-                unit="exp"
+                unit="exp",
+                position=0,
+                leave=True,
+                dynamic_ncols=True,
             ) as pbar:
                 for future in as_completed(future_to_exp):
                     exp_name = future_to_exp[future]
@@ -592,7 +595,7 @@ class EvaluationPipeline:
             return False
         
         # Verificar se há pelo menos um arquivo de predição
-        prediction_files = list(Path(output_folder).glob("seg_*_output.tif"))
+        prediction_files = list(Path(output_folder).glob("*.tif"))
         
         if len(prediction_files) > 0:
             logger.info(
@@ -663,11 +666,7 @@ class EvaluationPipeline:
         logger.debug(f"Command: {' '.join(cmd)}")
         
         # Executar
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True
-        )
+        result = subprocess.run(cmd)
         
         if result.returncode != 0:
             logger.error(f"Prediction failed with return code {result.returncode}")
