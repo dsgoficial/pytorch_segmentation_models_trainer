@@ -147,6 +147,7 @@ class AbstractInferenceProcessor(ABC):
         inference["seg"] = (inference["seg"] > threshold).astype(np.uint8) if apply_threshold \
             else inference["seg"].astype(np.uint8)
         profile["input_name"] = Path(image_path).stem
+        profile["suffix"] = Path(image_path).suffix
         if self.export_strategy is not None:
             output_dict["inference"].append(
                 self.export_strategy.save_inference(inference, profile)
@@ -336,6 +337,7 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         profile["count"] = 1
         profile["dtype"] = 'uint8'
         profile["input_name"] = Path(image_path).stem
+        profile["suffix"] = Path(image_path).suffix
         
         if self.export_strategy is not None:
             output_dict["inference"].append(
@@ -494,6 +496,8 @@ class ObjectDetectionInferenceProcessor(AbstractInferenceProcessor):
         inference = [
             {k: v.cpu().tolist() for k, v in item.items()} for item in inference
         ]
+        profile["input_name"] = Path(image_path).stem
+        profile["suffix"] = Path(image_path).suffix
         output_dict["inference"].append(
             self.export_strategy.save_inference(inference, profile)
         )
