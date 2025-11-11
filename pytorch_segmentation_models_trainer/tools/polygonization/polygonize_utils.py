@@ -20,7 +20,7 @@
  *   https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning/     *
  ****
 """
-from collections import Iterable
+from collections.abc import Iterable
 from functools import partial
 
 import cv2

@@ -46,7 +46,7 @@ class ObjectDetectionPLModel(Model):
             else True,
             prefetch_factor=self.cfg.train_dataset.data_loader.prefetch_factor
             if "prefetch_factor" in self.cfg.train_dataset.data_loader
-            else 4 * self.hyperparameters.batch_size,
+            else 2,
             collate_fn=self.train_ds.collate_fn
             if hasattr(self.train_ds, "collate_fn")
             else self.train_ds.train_dataset.collate_fn,
@@ -68,7 +68,7 @@ class ObjectDetectionPLModel(Model):
             else True,
             prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor
             if "prefetch_factor" in self.cfg.val_dataset.data_loader
-            else 4 * self.hyperparameters.batch_size,
+            else 2,
             collate_fn=self.val_ds.collate_fn
             if hasattr(self.val_ds, "collate_fn")
             else self.val_ds.val_dataset.collate_fn,
@@ -77,16 +77,28 @@ class ObjectDetectionPLModel(Model):
     def training_step(self, batch, batch_idx):
         images, targets, _ = batch
         loss_dict = self.model(images, targets)
-        return {
-            "loss": sum(loss for loss in loss_dict.values()),
-            "log": loss_dict,
-            "progress_bar": loss_dict,
-        }
+        
+        # Calculate total loss
+        total_loss = sum(loss for loss in loss_dict.values())
+        
+        # Log total loss
+        self.log("loss/train", total_loss, on_step=True, on_epoch=True, prog_bar=True)
+        
+        # Log individual losses
+        for loss_name, loss_value in loss_dict.items():
+            self.log(f"losses/train_{loss_name}", loss_value, on_step=True, on_epoch=True)
+        
+        return total_loss
 
     def validation_step(self, batch, batch_idx):
         images, targets, _ = batch
+        
+        # Training mode for loss calculation
         self.model.train()
         loss_dict = self.model(images, targets)
+        total_loss = sum(loss for loss in loss_dict.values())
+        
+        # Evaluation mode for IoU calculation
         self.model.eval()
         outs = self.model(images)
         iou = torch.stack(
@@ -95,39 +107,21 @@ class ObjectDetectionPLModel(Model):
                 for t, o in zip(targets, outs)
             ]
         ).mean()
-        return {
-            "val_iou": iou,
-            "loss": sum(loss for loss in loss_dict.values()),
-            "log": loss_dict,
-        }
+        
+        # Log total loss
+        self.log("loss/val", total_loss, on_step=False, on_epoch=True, prog_bar=True)
+        
+        # Log IoU
+        self.log("metrics/val_iou", iou, on_step=False, on_epoch=True, prog_bar=True)
+        
+        # Log individual losses
+        for loss_name, loss_value in loss_dict.items():
+            self.log(f"losses/val_{loss_name}", loss_value, on_step=False, on_epoch=True)
+        
+        return total_loss
 
-    def training_epoch_end(self, outputs):
-        tensorboard_logs = self._build_tensorboard_logs(outputs)
-        self.log_dict(tensorboard_logs, logger=True)
-
-    def _build_tensorboard_logs(self, outputs, step_type="train"):
-        avg_loss = torch.stack([x["loss"] for x in outputs]).mean()
-        tensorboard_logs = {"avg_loss": {step_type: avg_loss}}
-        if len(outputs) == 0:
-            return tensorboard_logs
-        for loss_key in outputs[0]["log"].keys():
-            tensorboard_logs.update(
-                {
-                    f"avg_{loss_key}": {
-                        step_type: torch.stack(
-                            [x["log"][loss_key] for x in outputs]
-                        ).mean()
-                    }
-                }
-            )
-        return tensorboard_logs
-
-    def validation_epoch_end(self, outputs):
-        avg_iou = torch.stack([o["val_iou"] for o in outputs]).mean()
-        logs = {"val_iou": avg_iou}
-        tensorboard_logs = self._build_tensorboard_logs(outputs, step_type="val")
-        self.log_dict(tensorboard_logs, logger=True)
-        return {"avg_val_iou": avg_iou, "log": logs}
+    # Removed training_epoch_end and validation_epoch_end
+    # Lightning 2.0+ handles aggregation automatically
 
 
 class InstanceSegmentationPLModel(ObjectDetectionPLModel):

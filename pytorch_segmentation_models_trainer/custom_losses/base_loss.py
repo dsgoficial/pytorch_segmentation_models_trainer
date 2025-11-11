@@ -57,7 +57,10 @@ class Loss(torch.nn.Module):
         super(Loss, self).__init__()
         self.name = name
         self.norm_meter = None
-        self.norm = torch.nn.parameter.Parameter(torch.Tensor(1), requires_grad=False)
+        self.norm = torch.nn.parameter.Parameter(
+            torch.tensor([1.0], dtype=torch.float32, device='cpu'),
+            requires_grad=False,
+        )
         self.reset_norm()
         self.extra_info = {}  #
 
@@ -69,16 +72,19 @@ class Loss(torch.nn.Module):
 
     def update_norm(self, pred_batch, gt_batch, nums):
         loss = self.compute(pred_batch, gt_batch)
-        self.norm_meter.update(loss, nums)
+        self.norm_meter.update(loss.detach().item(), nums)
         self.norm[0] = self.norm_meter.val
 
     def sync(self, world_size):
         """
         This method should be used to synchronize loss norms across GPUs when using distributed training
-        :return:
         """
-        torch.distributed.all_reduce(self.norm)
-        self.norm /= world_size
+        if world_size > 1 and torch.distributed.is_available() and torch.distributed.is_initialized():
+            try:
+                torch.distributed.all_reduce(self.norm)
+                self.norm /= world_size
+            except RuntimeError as e:
+                logger.warning(f"Failed to synchronize loss norms: {e}")
 
     def compute(self, pred_batch, gt_batch):
         raise NotImplementedError
@@ -90,7 +96,10 @@ class Loss(torch.nn.Module):
                 1e-9 < self.norm[0]
             ), "self.norm[0] <= 1e-9 -> this might lead to numerical instabilities."
             loss = loss / self.norm[0]
-        extra_info = self.extra_info
+        extra_info = {
+            key: value.detach() if isinstance(value, torch.Tensor) else value
+            for key, value in self.extra_info.items()
+        }
         self.extra_info = {}  # Re-init extra_info
         return loss, extra_info
 
@@ -117,6 +126,7 @@ class MultiLoss(torch.nn.Module):
         self.loss_funcs = torch.nn.ModuleList(loss_funcs)
         self.weights = self._build_weights(weights, epoch_thresholds)
         self.pre_processes = pre_processes
+        self.norm_updated = False
         for loss_func, weight in zip(self.loss_funcs, self.weights):
             if weight == 0:
                 logger.info(
@@ -176,20 +186,22 @@ class MultiLoss(torch.nn.Module):
             loss_i, extra_dict_i = loss_func_i(
                 pred_batch, gt_batch, normalize=normalize
             )
-            current_weight = (
-                torch.from_numpy(weight_i(epoch)).to(loss_i.device)
-                if isinstance(weight_i, scipy.interpolate.interpolate.interp1d)
-                and epoch is not None
-                else weight_i
-            )
+            if isinstance(weight_i, scipy.interpolate.interpolate.interp1d) and epoch is not None:
+                weight_scalar = float(weight_i(epoch))
+                current_weight = weight_scalar
+            else:
+                current_weight = weight_i
             total_loss += current_weight * loss_i
-            individual_losses_dict[loss_func_i.name] = loss_i
+            individual_losses_dict[loss_func_i.name] = loss_i.detach()
             extra_dict[loss_func_i.name] = extra_dict_i
         return total_loss, individual_losses_dict, extra_dict
 
     def __repr__(self):
         ret = "\n\t".join([str(loss_func) for loss_func in self.loss_funcs])
         return "{}:\n\t{}".format(self.__class__.__name__, ret)
+    
+    def set_norm_updated(self, updated):
+        self.norm_updated = updated
 
 
 # --- Specific losses --- #
@@ -198,6 +210,7 @@ class SegLoss(Loss):
         self,
         name: str,
         gt_channel_selector: int,
+        n_classes: int = 2,
         bce_coef: float = 0.5,
         dice_coef: float = 0.5,
         tversky_focal_coef: float = 0,
@@ -205,7 +218,7 @@ class SegLoss(Loss):
         use_mixup: bool = False,
         mixup_alpha: float = 0.5,
         use_label_smooth: bool = False,
-        smooth_factor: float = 0.1,
+        smooth_factor: float = 0.0,
     ):
         """
         :param name:
@@ -221,11 +234,14 @@ class SegLoss(Loss):
         self.use_mixup = use_mixup
         self.use_label_smooth = use_label_smooth
         self.smooth_factor = smooth_factor
-        self.cross_entropy_func = (
-            F.binary_cross_entropy
-            if not self.use_mixed_precision
-            else F.binary_cross_entropy_with_logits
-        )
+        if n_classes == 2:
+            self.cross_entropy_func = (
+                F.binary_cross_entropy
+                if not self.use_mixed_precision
+                else F.binary_cross_entropy_with_logits
+            )
+        else: 
+            self.cross_entropy_func = torch.nn.CrossEntropyLoss(label_smoothing=smooth_factor)
         if use_label_smooth:
             self.cross_entropy_func = loss.smooth_cross_entropy_loss
         if use_mixup:
@@ -244,11 +260,16 @@ class SegLoss(Loss):
         @param gt_batch: key "gt_polygons_image" is shape (N, C_gt, H, W)
         @return:
         """
-        pred_seg = pred_batch["seg"]
-        gt_seg = gt_batch["gt_polygons_image"][:, self.gt_channel_selector, ...]
-        weights = gt_batch["seg_loss_weights"][:, self.gt_channel_selector, ...]
+        pred_seg = pred_batch["seg"] if isinstance(pred_batch, dict) and "seg" in pred_batch else pred_batch
+        gt_seg = gt_batch["gt_polygons_image"][:, self.gt_channel_selector, ...] if isinstance(gt_batch, dict) and "gt_polygons_image" in gt_batch else gt_batch[:, self.gt_channel_selector, ...]
+        params = {
+            "reduction": "mean"
+        }
+        if isinstance(gt_batch, dict) and "seg_loss_weights" in gt_batch:
+            weights = gt_batch["seg_loss_weights"][:, self.gt_channel_selector, ...]
+            params["weights"] = weights
         mean_cross_entropy = (
-            self.cross_entropy_func(pred_seg, gt_seg, weight=weights, reduction="mean")
+            self.cross_entropy_func(pred_seg, gt_seg, **params)
             if not self.use_mixup
             else self.mixup_func(
                 input=gt_batch["mixup_pred"],
@@ -257,8 +278,7 @@ class SegLoss(Loss):
                     gt_batch["mixup_y_b"],
                     gt_batch["mixup_lam"],
                 ),
-                weight=weights,
-                reduction="mean",
+                **params
             )
         )
 

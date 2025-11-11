@@ -52,11 +52,15 @@ class BackboneConfig:
 @dataclass
 class PLTrainerConfig:
     max_epochs: str = "${hyperparameters.epochs}"
-    gpus: int = -1
-    precision: int = 32
+    devices: int = -1  # Changed from 'gpus'
+    accelerator: str = "auto"  # New: auto, gpu, cpu, tpu, etc.
+    precision: str = "32-true"  # Changed from int to string format: "32-true", "16-mixed", "bf16-mixed"
     default_root_dir: str = (
         "/experiment_data/${backbone.name}_${hyperparameters.model_name}"
     )
+    # Optional but recommended for mixed precision
+    # gradient_clip_val: float = 0.0
+    # gradient_clip_algorithm: str = "norm"
 
 
 @dataclass

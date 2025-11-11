@@ -22,6 +22,8 @@ import itertools
 import json
 import math
 import os
+import rasterio
+from copy import deepcopy
 from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -52,6 +54,7 @@ from pytorch_toolbelt.utils.torch_utils import (
     to_numpy,
 )
 import kornia as K
+import gc
 
 
 def load_augmentation_object(input_list, bbox_params=None):
@@ -136,14 +139,14 @@ class AbstractDataset(Dataset):
             image_path if not image_path.startswith(os.path.sep) else image_path[1::],
         )
 
-    def load_image(self, idx, key=None, is_mask=False, force_rgb=False):
+    def load_image(self, idx, key=None, is_mask=False, force_rgb=False, is_binary_mask=True):
         key = self.image_key if key is None else key
         image_path = self.get_path(idx, key=key)
         return self.load_image_from_path(
-            image_path, is_mask=is_mask, force_rgb=force_rgb
+            image_path, is_mask=is_mask, force_rgb=force_rgb, is_binary_mask=is_binary_mask
         )
 
-    def load_image_from_path(self, image_path, is_mask=False, force_rgb=False):
+    def load_image_from_path(self, image_path, is_mask=False, force_rgb=False, is_binary_mask=True):
         image = (
             Image.open(image_path)
             if not is_mask
@@ -152,7 +155,11 @@ class AbstractDataset(Dataset):
         if force_rgb:
             image = image.convert("RGB")
         image = np.array(image)
-        return (image > 0).astype(np.uint8) if is_mask else image
+        if not is_mask:
+            return image
+        if is_binary_mask:
+            return (image > 0).astype(np.uint8)
+        return image.astype(np.uint8)
 
     def to_tensor(self, x):
         return x if isinstance(x, torch.Tensor) else torch.from_numpy(x)
@@ -296,12 +303,23 @@ class TiledInferenceImageDataset(ImageDataset):
             "original_shape": original_shape_list,
         }
 
-
 class SegmentationDataset(AbstractDataset):
-    """[summary]
-
+    """Dataset para segmentação com suporte a seleção de bandas.
+    
     Args:
-        Dataset ([type]): [description]
+        input_csv_path (Path): Caminho para o arquivo CSV com os dados
+        root_dir: Diretório raiz dos dados
+        augmentation_list: Lista de augmentações do Albumentations
+        data_loader: Configuração do DataLoader
+        image_key: Nome da coluna com os caminhos das imagens
+        mask_key: Nome da coluna com os caminhos das máscaras
+        n_first_rows_to_read: Número de linhas a ler do CSV
+        n_classes: Número de classes para segmentação
+        selected_bands (Optional[List[int]]): Lista com os índices das bandas a serem 
+            carregadas (base 1). Ex: [1, 2, 3] carrega as 3 primeiras bandas.
+            Se None, carrega todas as bandas disponíveis.
+        use_rasterio (bool): Se True, usa rasterio para carregar imagens (recomendado 
+            para imagens multiespectrais). Se False, usa PIL (padrão para RGB).
     """
 
     def __init__(
@@ -313,6 +331,10 @@ class SegmentationDataset(AbstractDataset):
         image_key=None,
         mask_key=None,
         n_first_rows_to_read=None,
+        n_classes=2,
+        selected_bands: Optional[List[int]] = None,
+        use_rasterio: bool = False,
+        reset_augmentation_function: bool = False,
     ) -> None:
         super(SegmentationDataset, self).__init__(
             input_csv_path=input_csv_path,
@@ -323,18 +345,96 @@ class SegmentationDataset(AbstractDataset):
             mask_key=mask_key,
             n_first_rows_to_read=n_first_rows_to_read,
         )
+        self.n_classes = n_classes
+        self.selected_bands = selected_bands
+        self.use_rasterio = use_rasterio
+        self.reset_augmentation_function = reset_augmentation_function
+        
+        # Validação das bandas selecionadas
+        if self.selected_bands is not None:
+            if not all(isinstance(b, int) and b > 0 for b in self.selected_bands):
+                raise ValueError("selected_bands deve conter apenas inteiros positivos (base 1)")
+
+    def load_image(self, idx: int, key: str = None, is_mask: bool = False, 
+                   force_rgb: bool = False, is_binary_mask: bool = True) -> np.ndarray:
+        """Carrega imagem com suporte a seleção de bandas.
+        
+        Args:
+            idx: Índice da imagem no dataset
+            key: Chave da coluna no DataFrame
+            is_mask: Se True, carrega como máscara
+            force_rgb: Se True, força conversão para RGB
+            is_binary_mask: Se True, converte máscara para binária
+            
+        Returns:
+            np.ndarray: Imagem carregada com shape (H, W, C) ou (H, W) para máscaras
+        """
+        key = self.image_key if key is None else key
+        image_path = self.get_path(idx, key=key)
+        
+        # Máscaras sempre usam o método original
+        if is_mask:
+            return self.load_image_from_path(
+                image_path, 
+                is_mask=True, 
+                force_rgb=force_rgb,
+                is_binary_mask=is_binary_mask
+            )
+        
+        # Se usar rasterio OU se houver seleção de bandas, usa método com rasterio
+        if self.use_rasterio or self.selected_bands is not None:
+            return self._load_image_with_rasterio(image_path)
+        else:
+            # Método padrão para imagens RGB
+            return self.load_image_from_path(image_path, is_mask=False, force_rgb=force_rgb)
+
+    def _load_image_with_rasterio(self, image_path: str) -> np.ndarray:
+        with rasterio.open(image_path, 'r') as src:
+            data = src.read() if self.selected_bands is None \
+                else src.read(self.selected_bands)
+            image = np.transpose(data, (1, 2, 0)).copy()
+            del data
+            src.close()
+        return np.array(image, dtype=np.uint8)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
+        """Retorna item do dataset com suporte a bandas personalizadas."""
         idx = idx % self.len
 
         image = self.load_image(idx, key=self.image_key)
-        mask = self.load_image(idx, key=self.mask_key, is_mask=True)
-        result = (
-            {"image": image, "mask": mask}
-            if self.transform is None
-            else self.transform(image=image, mask=mask)
+        mask = self.load_image(
+            idx, 
+            key=self.mask_key, 
+            is_mask=True, 
+            is_binary_mask=(self.n_classes == 2)
         )
-        return result
+        if self.transform is None:
+            image = torch.from_numpy(image).float()
+            image = image.permute(2, 0, 1)  # (H,W,C) → (C,H,W) para PyTorch
+            image = image / 255.0
+            mask = torch.from_numpy(mask).long()
+            return {
+                "image": image,
+                "mask": mask
+            }
+        # This copy is to avoid data leaks from albumentations.
+        # Albumentations stores caches and sometimes do not purge them from the memory, 
+        # inducing crashes on the server while training, due to lack of available memory.
+        # We added a deepcopy to copy the function, perform the transformation, copy the 
+        # result and delete any albumentations related object before returning the evaluated data.
+        if not self.reset_augmentation_function:
+            return self.transform(image=image, mask=mask)
+        transform_func = deepcopy(self.transform)
+        output = transform_func(image=image, mask=mask)
+        output_dict = {
+            "image": output["image"].clone().detach() if torch.is_tensor(output["image"]) else output["image"].copy(),
+            "mask": output["mask"].clone().detach() if torch.is_tensor(output["mask"]) else output["mask"].copy(),
+        }
+        del output
+        del transform_func
+        if idx % 100 == 0:
+            gc.collect()
+        return output_dict
 
 
 class FrameFieldSegmentationDataset(SegmentationDataset):

@@ -21,6 +21,7 @@
 from copy import deepcopy
 import json
 import pathlib
+from pathlib import Path
 from typing import List, Union
 import numpy as np
 import os
@@ -67,7 +68,10 @@ class RasterDataWriter(AbstractDataWriter):
             if output_profile["count"] != input_data.shape[-1]
             else output_profile["count"]
         )
-        with rasterio.open(self.output_file_path, "w", **output_profile) as out:
+        p = Path(self.output_file_path)
+        if not p.exists():
+            p.mkdir(parents=True, exist_ok=True)
+        with rasterio.open(p / f"{profile["input_name"]}{profile["suffix"]}", "w", **output_profile) as out:
             out.write(reshape_as_raster(input_data))
 
 
