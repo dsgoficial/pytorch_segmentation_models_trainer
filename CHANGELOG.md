@@ -6,6 +6,9 @@
 - Added improvements for OneCycleLR scheduler (automatic calculation of steps_per_epoch);
 - Added band selection on SemanticSegmentation dataset;
 - Added compound_loss for Semantic Segmentation models;
+- Added experiment evaluation pipeline;
+- New multi class semantic segmentation inference pipeline (the old one worked only on binary semantic segmentation);
+- Bug fixes on inferences;
 
 # Version 0.17.0
 
