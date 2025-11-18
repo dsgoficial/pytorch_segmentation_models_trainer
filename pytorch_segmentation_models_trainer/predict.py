@@ -46,8 +46,24 @@ logger = logging.getLogger(__name__)
 
 
 def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
+    checkpoint_path = cfg.checkpoint_path
+    
+    # Determine the best map location
+    if torch.cuda.is_available():
+        if "devices" not in cfg.pl_trainer:
+            map_location = f'cuda:0'
+        elif cfg.pl_trainer.devices == -1:
+            map_location = f'cuda:0'
+        else:
+            map_location = f'cuda:{cfg.pl_trainer.devices[0]}'
+    else:
+        map_location = 'cpu'
+    
     pl_model = import_module_from_cfg(cfg.pl_model).load_from_checkpoint(
-        cfg.checkpoint_path, cfg=cfg, inference_mode=True
+        checkpoint_path,
+        cfg=cfg,
+        inference_mode=True,
+        map_location=map_location,
     )
     model = pl_model.model
     model.to(cfg.device)

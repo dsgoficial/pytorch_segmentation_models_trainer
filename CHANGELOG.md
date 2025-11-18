@@ -1,3 +1,7 @@
+# Version 1.0.1
+
+- Bug fix on prediction in a multi gpu environment;
+
 # Version 1.0.0
 
 - Updated to newest pytorch lightning;
