@@ -71,7 +71,9 @@ class RasterDataWriter(AbstractDataWriter):
         p = Path(self.output_file_path)
         if not p.exists():
             p.mkdir(parents=True, exist_ok=True)
-        with rasterio.open(p / f"{profile["input_name"]}{profile["suffix"]}", "w", **output_profile) as out:
+        input_name = output_profile.pop("input_name")
+        suffix = output_profile.pop("suffix")
+        with rasterio.open(p / f"{input_name}{suffix}", "w", **output_profile) as out:
             out.write(reshape_as_raster(input_data))
 
 

@@ -42,10 +42,10 @@ class Model(pl.LightningModule):
         super(Model, self).__init__()
         self.cfg = cfg
         self.model = self.get_model()
-        self.train_ds = instantiate(self.cfg.train_dataset, _recursive_=False) if "train_dataset" in self.cfg else None
-        self.val_ds = instantiate(self.cfg.val_dataset, _recursive_=False) if "val_dataset" in self.cfg else None
         if inference_mode:
             return
+        self.train_ds = instantiate(self.cfg.train_dataset, _recursive_=False) if "train_dataset" in self.cfg else None
+        self.val_ds = instantiate(self.cfg.val_dataset, _recursive_=False) if "val_dataset" in self.cfg else None
         self.loss_function = self.get_loss_function()
         
         # NEW: Determine if using compound loss (MultiLoss)
