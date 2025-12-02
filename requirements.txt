@@ -18,7 +18,7 @@ fiona>=1.8.20
 psycopg2-binary
 shapely>=2.0.0
 geopandas>=1.1.0
-geoalchemy2==0.9.0
+geoalchemy2==0.18.1
 rasterio
 numba
 sahi>=0.10.4
