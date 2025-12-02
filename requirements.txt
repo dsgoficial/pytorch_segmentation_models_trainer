@@ -24,7 +24,7 @@ numba
 sahi>=0.10.4
 skan==0.10.0
 tqdm
-rtree==1.0.0
+rtree==1.4.1
 bidict==0.21.2
 Cython==0.29.24
 ninja==1.10.0.post3
