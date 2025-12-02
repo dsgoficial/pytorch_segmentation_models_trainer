@@ -12,7 +12,7 @@ pillow
 matplotlib
 scipy
 numpy
-pytorch_toolbelt==0.4.3
+pytorch_toolbelt==0.8.0
 descartes==1.1.0
 fiona>=1.8.20
 psycopg2-binary
