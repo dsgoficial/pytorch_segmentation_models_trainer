@@ -25,6 +25,8 @@ from typing import Dict, List, Optional, Union, Tuple
 
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
+import matplotlib
+matplotlib.use("Agg")  # Backend nao-interativo — evita "main thread is not in main loop"
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.colors import ListedColormap

@@ -19,13 +19,26 @@
  ****
 """
 
+import os
+import sys
+
+# Fix encoding no Windows (emojis nos callbacks causam UnicodeEncodeError com cp1252)
+if sys.platform == "win32":
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import hydra
 from omegaconf import DictConfig
 
 import logging
 import warnings
-from rasterio.errors import NotGeoreferencedWarning
+# CRITICO no Windows: importar torch ANTES de rasterio/GDAL
+# para evitar conflito de DLLs (fbgemm.dll vs gdal*.dll)
 import torch.multiprocessing as mp
+from rasterio.errors import NotGeoreferencedWarning
 
 
 @hydra.main(config_path="conf", config_name="config", version_base="1.2")
