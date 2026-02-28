@@ -57,11 +57,31 @@ import kornia as K
 import gc
 
 
+def _sanitize_aug_config(cfg):
+    """Handle always_apply deprecation in albumentations >= 2.0.
+
+    Converts always_apply=True to p=1.0 and removes always_apply=False,
+    since albumentations 2.0+ no longer accepts this parameter.
+    """
+    try:
+        container = OmegaConf.to_container(cfg, resolve=True)
+    except Exception:
+        container = dict(cfg) if hasattr(cfg, "items") else cfg
+    if isinstance(container, dict) and "always_apply" in container:
+        always_apply = container.pop("always_apply")
+        if always_apply and "p" not in container:
+            container["p"] = 1.0
+    return container
+
+
 def load_augmentation_object(input_list, bbox_params=None):
     if isinstance(input_list, A.Compose):
         return input_list
     try:
-        aug_list = [instantiate(i, _recursive_=False) for i in input_list]
+        aug_list = [
+            instantiate(_sanitize_aug_config(i), _recursive_=False)
+            for i in input_list
+        ]
     except:
         aug_list = input_list
     if bbox_params is None:
