@@ -457,6 +457,234 @@ class SegmentationDataset(AbstractDataset):
         return output_dict
 
 
+class RandomCropSegmentationDataset(AbstractDataset):
+    """Dataset que faz random crops on-the-fly de imagens full-size.
+
+    Em vez de pre-gerar tiles em disco, le janelas aleatorias diretamente
+    das imagens grandes usando rasterio windowed read. Cada __getitem__
+    seleciona uma imagem aleatoria (pesada por area) e extrai um crop
+    de tamanho fixo.
+
+    Os file handles do rasterio sao mantidos em cache para evitar o
+    overhead de abrir/fechar arquivos a cada crop. O cache e criado
+    lazily em cada worker do DataLoader e limpo automaticamente.
+
+    O CSV de entrada deve listar imagens e mascaras em tamanho original
+    (nao tiles pre-cortados).
+
+    Args:
+        input_csv_path: CSV com colunas 'image' e 'mask' (paths full-size)
+        crop_size: Tamanho do crop [H, W] (default: [256, 256])
+        samples_per_epoch: Quantidade de crops aleatorios por epoca
+        n_classes: Numero de classes de segmentacao
+        selected_bands: Indices das bandas a carregar (base 1). None = todas.
+        use_rasterio: Se True, usa rasterio para imagens (recomendado para multi-banda)
+        reset_augmentation_function: Deepcopy do transform para evitar memory leak
+        min_valid_ratio: Fracao minima de pixels validos (>0) no crop
+        max_retries: Tentativas maximas para encontrar crop valido
+    """
+
+    def __init__(
+        self,
+        input_csv_path: Path,
+        crop_size: Optional[List[int]] = None,
+        samples_per_epoch: int = 10000,
+        n_classes: int = 2,
+        selected_bands: Optional[List[int]] = None,
+        use_rasterio: bool = True,
+        reset_augmentation_function: bool = False,
+        min_valid_ratio: float = 0.1,
+        max_retries: int = 10,
+        root_dir=None,
+        augmentation_list=None,
+        data_loader=None,
+        image_key=None,
+        mask_key=None,
+        n_first_rows_to_read=None,
+    ) -> None:
+        super(RandomCropSegmentationDataset, self).__init__(
+            input_csv_path=input_csv_path,
+            root_dir=root_dir,
+            augmentation_list=augmentation_list,
+            data_loader=data_loader,
+            image_key=image_key,
+            mask_key=mask_key,
+            n_first_rows_to_read=n_first_rows_to_read,
+        )
+        self.crop_size = crop_size if crop_size is not None else [256, 256]
+        self.samples_per_epoch = samples_per_epoch
+        self.n_classes = n_classes
+        self.selected_bands = selected_bands
+        self.use_rasterio = use_rasterio
+        self.reset_augmentation_function = reset_augmentation_function
+        self.min_valid_ratio = min_valid_ratio
+        self.max_retries = max_retries
+
+        if self.selected_bands is not None:
+            if not all(isinstance(b, int) and b > 0 for b in self.selected_bands):
+                raise ValueError(
+                    "selected_bands deve conter apenas inteiros positivos (base 1)"
+                )
+
+        # Cache de file handles rasterio (lazy, criado por worker)
+        # Nao pode ser inicializado aqui porque rasterio datasets nao sao
+        # picklable e o DataLoader usa spawn (Windows) ou fork para workers.
+        self._file_cache = {}
+
+        # Cache de dimensoes das imagens (so le header, rapido)
+        self.image_dims = []  # lista de (width, height)
+        self._valid_indices = []  # indices de imagens grandes o suficiente
+        crop_h, crop_w = self.crop_size
+        for i in range(len(self.df)):
+            image_path = self.get_path(i, key=self.image_key)
+            with rasterio.open(image_path) as src:
+                w, h = src.width, src.height
+            self.image_dims.append((w, h))
+            if w >= crop_w and h >= crop_h:
+                self._valid_indices.append(i)
+
+        if not self._valid_indices:
+            raise ValueError(
+                f"Nenhuma imagem grande o suficiente para crop {self.crop_size}. "
+                f"Dimensoes encontradas: {self.image_dims}"
+            )
+
+        # Pesos proporcionais ao numero de posicoes possiveis para crop
+        positions = []
+        for idx in self._valid_indices:
+            w, h = self.image_dims[idx]
+            positions.append((w - crop_w + 1) * (h - crop_h + 1))
+        total = sum(positions)
+        self.image_weights = np.array([p / total for p in positions])
+
+    def __getstate__(self):
+        """Remove file cache antes de pickle (para spawn workers no Windows)."""
+        state = self.__dict__.copy()
+        state["_file_cache"] = {}
+        return state
+
+    def __setstate__(self, state):
+        """Restaura estado com cache vazio (sera populado lazily no worker)."""
+        self.__dict__.update(state)
+
+    def __del__(self):
+        """Fecha todos os file handles cacheados."""
+        self._close_cache()
+
+    def _close_cache(self):
+        """Fecha todos os file handles do cache."""
+        if hasattr(self, "_file_cache"):
+            for src in self._file_cache.values():
+                try:
+                    src.close()
+                except Exception:
+                    pass
+            self._file_cache.clear()
+
+    def _get_src(self, path: str):
+        """Retorna dataset rasterio cacheado. Abre lazily no primeiro acesso."""
+        if path not in self._file_cache:
+            self._file_cache[path] = rasterio.open(path)
+        return self._file_cache[path]
+
+    def get_path(self, idx: int, key: str = None, add_root_dir: bool = True):
+        """Override para RandomCropSegmentationDataset.
+
+        Como os crops sao aleatorios e nao correspondem 1:1 a indices do CSV
+        (samples_per_epoch >> len(df)), faz modulo do indice para evitar
+        IndexError. O path retornado serve como referencia visual (titulo
+        no callback de visualizacao), nao como identificador exato do crop.
+        """
+        wrapped_idx = idx % len(self.df)
+        return super().get_path(wrapped_idx, key=key, add_root_dir=add_root_dir)
+
+    def __len__(self) -> int:
+        return self.samples_per_epoch
+
+    def _read_crop(self, image_path: str, x: int, y: int, is_mask: bool = False):
+        """Le um crop de tamanho fixo usando rasterio windowed read com cache."""
+        crop_h, crop_w = self.crop_size
+        window = rasterio.windows.Window(
+            col_off=x, row_off=y, width=crop_w, height=crop_h
+        )
+        src = self._get_src(image_path)
+        if is_mask:
+            data = src.read(1, window=window)  # (H, W)
+            return data.astype(np.uint8)
+        else:
+            if self.selected_bands is not None:
+                data = src.read(self.selected_bands, window=window)
+            else:
+                data = src.read(window=window)
+            # (C, H, W) -> (H, W, C)
+            image = np.transpose(data, (1, 2, 0)).copy()
+            return image.astype(np.uint8)
+
+    def _is_crop_valid(self, image_data: np.ndarray) -> bool:
+        """Verifica se o crop tem pixels validos suficientes."""
+        if image_data.size == 0:
+            return False
+        if len(image_data.shape) == 3:
+            valid_pixels = np.sum(np.any(image_data > 0, axis=2))
+        else:
+            valid_pixels = np.sum(image_data > 0)
+        total_pixels = image_data.shape[0] * image_data.shape[1]
+        return (valid_pixels / total_pixels) >= self.min_valid_ratio
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        crop_h, crop_w = self.crop_size
+
+        for _ in range(self.max_retries):
+            # Selecionar imagem aleatoria (pesada por area)
+            choice = np.random.choice(len(self._valid_indices), p=self.image_weights)
+            img_idx = self._valid_indices[choice]
+            w, h = self.image_dims[img_idx]
+
+            # Posicao aleatoria
+            x = np.random.randint(0, w - crop_w + 1)
+            y = np.random.randint(0, h - crop_h + 1)
+
+            # Ler crops
+            image_path = self.get_path(img_idx, key=self.image_key)
+            image = self._read_crop(image_path, x, y, is_mask=False)
+
+            if self._is_crop_valid(image):
+                break
+        # Se todas as tentativas falharem, usa o ultimo crop mesmo
+
+        mask_path = self.get_path(img_idx, key=self.mask_key)
+        mask = self._read_crop(mask_path, x, y, is_mask=True)
+
+        if self.n_classes == 2:
+            mask = (mask > 0).astype(np.uint8)
+
+        if self.transform is None:
+            image = torch.from_numpy(image).float()
+            image = image.permute(2, 0, 1)  # (H,W,C) -> (C,H,W)
+            image = image / 255.0
+            mask = torch.from_numpy(mask).long()
+            return {"image": image, "mask": mask}
+
+        if not self.reset_augmentation_function:
+            return self.transform(image=image, mask=mask)
+
+        transform_func = deepcopy(self.transform)
+        output = transform_func(image=image, mask=mask)
+        output_dict = {
+            "image": output["image"].clone().detach()
+            if torch.is_tensor(output["image"])
+            else output["image"].copy(),
+            "mask": output["mask"].clone().detach()
+            if torch.is_tensor(output["mask"])
+            else output["mask"].copy(),
+        }
+        del output
+        del transform_func
+        if idx % 100 == 0:
+            gc.collect()
+        return output_dict
+
+
 class FrameFieldSegmentationDataset(SegmentationDataset):
     def __init__(
         self,

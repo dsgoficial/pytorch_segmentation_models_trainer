@@ -153,17 +153,21 @@ class Model(pl.LightningModule):
                 return None
             
             csv_path = dataset_cfg.input_csv_path
-            
-            # Read CSV to get dataset size
+
             import pandas as pd
             import os
-            
+
             if not os.path.exists(csv_path):
                 print(f"WARNING: CSV file not found: {csv_path}")
                 return None
-            
-            df = pd.read_csv(csv_path)
-            dataset_size = len(df)
+
+            # Use samples_per_epoch if defined (RandomCropSegmentationDataset),
+            # otherwise fall back to CSV row count
+            if 'samples_per_epoch' in dataset_cfg:
+                dataset_size = dataset_cfg.samples_per_epoch
+            else:
+                df = pd.read_csv(csv_path)
+                dataset_size = len(df)
             
             # Get batch size from config (check multiple locations)
             batch_size = None
@@ -381,6 +385,9 @@ class Model(pl.LightningModule):
             prefetch_factor=self.cfg.train_dataset.data_loader.prefetch_factor
             if "prefetch_factor" in self.cfg.train_dataset.data_loader
             else 2,
+            persistent_workers=self.cfg.train_dataset.data_loader.persistent_workers
+            if "persistent_workers" in self.cfg.train_dataset.data_loader
+            else False,
         )
 
     def val_dataloader(self):
@@ -400,6 +407,9 @@ class Model(pl.LightningModule):
             prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor
             if "prefetch_factor" in self.cfg.val_dataset.data_loader
             else 2,
+            persistent_workers=self.cfg.val_dataset.data_loader.persistent_workers
+            if "persistent_workers" in self.cfg.val_dataset.data_loader
+            else False,
         )
 
     def _compute_loss(

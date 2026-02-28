@@ -193,27 +193,35 @@ class WeightedDiceCrossEntropyLoss(nn.Module):
         smooth_factor (float): Smoothing factor for cross entropy loss (default: 0)
     """
     def __init__(
-        self, 
+        self,
         num_classes: int,
         dice_weight: float = 0.75,
         ce_weight: float = 0.25,
-        smooth_factor: float = 0.0
+        smooth_factor: float = 0.0,
+        class_weights: list = None
     ):
         super(WeightedDiceCrossEntropyLoss, self).__init__()
-        
+
         self.num_classes = num_classes
         self.dice_weight = dice_weight
         self.ce_weight = ce_weight
         self.smooth_factor = smooth_factor
-        
+
         # Determine mode based on number of classes
         mode = "multiclass" if num_classes > 2 else "binary"
-        
+
         # Initialize Dice Loss from segmentation_models_pytorch
         self.dice_loss = smp.losses.DiceLoss(mode=mode)
-        
-        # Initialize Cross Entropy Loss
-        self.ce_loss = nn.CrossEntropyLoss(label_smoothing=smooth_factor)
+
+        # Initialize Cross Entropy Loss with optional class weights
+        ce_weight_tensor = None
+        if class_weights is not None:
+            ce_weight_tensor = torch.tensor(class_weights, dtype=torch.float32)
+        self.register_buffer("ce_class_weights", ce_weight_tensor)
+        self.ce_loss = nn.CrossEntropyLoss(
+            weight=self.ce_class_weights,
+            label_smoothing=smooth_factor,
+        )
     
     def forward(self, predictions: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
