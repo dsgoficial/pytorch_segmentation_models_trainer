@@ -40,8 +40,9 @@ jobs:
 
       - name: Install Python dependencies for schema generation
         run: |
-          # torch CPU-only para evitar download de 2GB da versão CUDA
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          # torch + torchvision do mesmo índice CPU-only — versões incompatíveis causam
+          # RuntimeError em torchvision se instaladas de fontes diferentes
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install segmentation-models-pytorch albumentations torchmetrics
 
       - name: Generate schema.json
