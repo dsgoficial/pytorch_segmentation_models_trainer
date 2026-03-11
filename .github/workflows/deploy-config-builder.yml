@@ -1,0 +1,99 @@
+name: Deploy Config Builder
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'scripts/generate_schema.py'
+      - '.github/workflows/deploy-config-builder.yml'
+  # Permite rodar manualmente pelo GitHub UI (útil para forçar update do schema)
+  workflow_dispatch:
+  # Toda segunda-feira às 6h UTC — detecta atualizações das bibliotecas
+  schedule:
+    - cron: '0 6 * * 1'
+
+# Permissão para escrever no GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Garante que apenas um deploy roda por vez
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Etapa 1: Python → gera schema.json ──────────────────────────────────
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install Python dependencies for schema generation
+        run: |
+          # torch CPU-only para evitar download de 2GB da versão CUDA
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install segmentation-models-pytorch albumentations torchmetrics
+
+      - name: Generate schema.json
+        run: python scripts/generate_schema.py
+
+      - name: Show generated schema versions
+        run: |
+          python -c "
+          import json
+          s = json.load(open('web/src/assets/schema.json'))
+          print('Library versions in schema:')
+          for k, v in s['library_versions'].items():
+              print(f'  {k}: {v}')
+          print(f'SMP encoders: {len(s[\"smp\"].get(\"encoders\", {}))}')
+          print(f'Albumentations transforms: {len(s[\"albumentations\"].get(\"transforms\", {}))}')
+          "
+
+      # ── Etapa 2: Node.js → build React ──────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Build
+        run: npm run build
+        working-directory: web
+        env:
+          # Vite usa esta variável para calcular o base path correto
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+      # ── Etapa 3: Deploy para GitHub Pages ───────────────────────────────────
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
