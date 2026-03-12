@@ -28,6 +28,24 @@ export default function App() {
             </button>
           ))}
         </nav>
+        <div style={styles.links}>
+          <a
+            href="/pytorch_segmentation_models_trainer/"
+            style={styles.link}
+            title="Documentation"
+          >
+            Docs
+          </a>
+          <a
+            href="https://github.com/phborba/pytorch_segmentation_models_trainer"
+            style={styles.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="GitHub"
+          >
+            GitHub
+          </a>
+        </div>
       </header>
 
       <div style={styles.content}>
@@ -87,5 +105,17 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     height: 'calc(100vh - 53px)',
+  },
+  links: {
+    marginLeft: 'auto',
+    display: 'flex',
+    gap: 16,
+    alignItems: 'center',
+  },
+  link: {
+    fontSize: '0.875rem',
+    color: '#555',
+    textDecoration: 'none',
+    fontWeight: 500,
   },
 }
