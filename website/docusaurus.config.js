@@ -68,7 +68,7 @@ const config = {
             label: 'Docs',
           },
           {
-            to: '/config-builder/',
+            href: '/pytorch_segmentation_models_trainer/config-builder/',
             label: 'Config Builder',
             position: 'left',
           },
@@ -95,7 +95,7 @@ const config = {
             items: [
               {
                 label: 'Config Builder',
-                to: '/config-builder/',
+                href: '/pytorch_segmentation_models_trainer/config-builder/',
               },
               {
                 label: 'PyPI',

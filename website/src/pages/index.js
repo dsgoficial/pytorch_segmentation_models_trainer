@@ -24,7 +24,7 @@ function HomepageHeader() {
           </Link>
           <Link
             className="button button--outline button--secondary button--lg"
-            to="/config-builder/"
+            href="/pytorch_segmentation_models_trainer/config-builder/"
             style={{marginLeft: '1rem'}}>
             Config Builder
           </Link>
