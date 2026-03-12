@@ -22,12 +22,12 @@ function HomepageHeader() {
             to="/docs/intro">
             Get Started
           </Link>
-          <Link
+          <a
             className="button button--outline button--secondary button--lg"
             href="/pytorch_segmentation_models_trainer/config-builder/"
             style={{marginLeft: '1rem'}}>
             Config Builder
-          </Link>
+          </a>
         </div>
       </div>
     </header>

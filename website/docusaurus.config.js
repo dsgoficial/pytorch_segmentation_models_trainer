@@ -11,10 +11,10 @@ const config = {
     v4: true,
   },
 
-  url: 'https://phborba.github.io',
+  url: 'https://dsgoficial.github.io',
   baseUrl: '/pytorch_segmentation_models_trainer/',
 
-  organizationName: 'phborba',
+  organizationName: 'dsgoficial',
   projectName: 'pytorch_segmentation_models_trainer',
   trailingSlash: true,
 
@@ -38,7 +38,7 @@ const config = {
         docs: {
           sidebarPath: './sidebars.js',
           editUrl:
-            'https://github.com/phborba/pytorch_segmentation_models_trainer/tree/main/website/',
+            'https://github.com/dsgoficial/pytorch_segmentation_models_trainer/tree/main/website/',
         },
         blog: false,
         theme: {
@@ -68,12 +68,12 @@ const config = {
             label: 'Docs',
           },
           {
-            href: '/pytorch_segmentation_models_trainer/config-builder/',
-            label: 'Config Builder',
+            type: 'html',
             position: 'left',
+            value: '<a class="navbar__link" href="/pytorch_segmentation_models_trainer/config-builder/">Config Builder</a>',
           },
           {
-            href: 'https://github.com/phborba/pytorch_segmentation_models_trainer',
+            href: 'https://github.com/dsgoficial/pytorch_segmentation_models_trainer',
             label: 'GitHub',
             position: 'right',
           },
@@ -95,7 +95,7 @@ const config = {
             items: [
               {
                 label: 'Config Builder',
-                href: '/pytorch_segmentation_models_trainer/config-builder/',
+                href: 'https://dsgoficial.github.io/pytorch_segmentation_models_trainer/config-builder/',
               },
               {
                 label: 'PyPI',
@@ -108,7 +108,7 @@ const config = {
             items: [
               {
                 label: 'GitHub',
-                href: 'https://github.com/phborba/pytorch_segmentation_models_trainer',
+                href: 'https://github.com/dsgoficial/pytorch_segmentation_models_trainer',
               },
             ],
           },

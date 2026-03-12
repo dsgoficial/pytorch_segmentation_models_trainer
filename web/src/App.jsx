@@ -37,7 +37,7 @@ export default function App() {
             Docs
           </a>
           <a
-            href="https://github.com/phborba/pytorch_segmentation_models_trainer"
+            href="https://github.com/dsgoficial/pytorch_segmentation_models_trainer"
             style={styles.link}
             target="_blank"
             rel="noopener noreferrer"

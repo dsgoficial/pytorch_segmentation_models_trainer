@@ -108,7 +108,7 @@ mode: train
 ```
 
 :::tip Config Builder
-Use the [Config Builder](/config-builder/) to generate this YAML visually — no manual editing needed!
+Use the <a href="/pytorch_segmentation_models_trainer/config-builder/">Config Builder</a> to generate this YAML visually — no manual editing needed!
 :::
 
 ### Step 3: Train Your Model
