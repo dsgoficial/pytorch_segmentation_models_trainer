@@ -21,6 +21,7 @@ A comprehensive framework for training semantic segmentation models using PyTorc
 - **Flexible Data Loading**: Support for various dataset formats and augmentation pipelines
 - **Built-in Visualization**: Tools for visualizing results and debugging
 - **Docker Ready**: Pre-built containers with all dependencies
+- **Comprehensive Evaluation**: Pipeline for comparing multiple models with IoU, Hausdorff, and Fréchet metrics
 
 ## Quick Example
 
@@ -66,6 +67,7 @@ pytorch-smt --config-dir ./configs --config-name my_config +mode=train
 | **Object Detection** | FRCNN, RetinaNet, etc. | Object localization |
 | **Instance Segmentation** | Mask R-CNN variants | Individual object instances |
 | **Polygon RNN** | Sequential polygon vertex prediction | Precise polygon extraction |
+| **evaluate-experiments** | Multi-model evaluation pipeline | Compare models with IoU, Hausdorff, and Fréchet metrics |
 
 ## Polygonization Methods
 
@@ -78,10 +80,12 @@ Transform segmentation masks into precise vector polygons:
 
 ## Getting Started
 
-1. **[Installation](getting-started/installation)** - Set up the environment
-2. **[Quick Start](getting-started/quickstart)** - Your first training job
-3. **[Configuration](getting-started/configuration)** - Understanding config files
-4. **[Examples](examples/basic-segmentation)** - Working examples
+1. **[Installation](/docs/getting-started/installation)** - Set up the environment
+2. **[Quick Start](/docs/getting-started/quickstart)** - Your first training job
+3. **[Configuration](/docs/getting-started/configuration)** - Understanding config files
+4. **[User Guide](/docs/user-guide/training-segmentation)** - In-depth guides for training and inference
+5. **[API Reference](/docs/api/main)** - Full API documentation
+6. **[Examples](/docs/examples/basic-segmentation)** - Working examples
 
 ## Citation
 

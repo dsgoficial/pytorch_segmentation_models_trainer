@@ -9,7 +9,7 @@ Get up and running with your first segmentation model in 5 minutes!
 
 ## Prerequisites
 
-- [Installation completed](installation)
+- [Installation completed](/docs/getting-started/installation)
 - Basic understanding of semantic segmentation
 - Your dataset prepared (or use our sample data)
 
@@ -208,3 +208,9 @@ model:
 loss:
   _target_: torch.nn.CrossEntropyLoss
 ```
+
+## Next Steps
+
+- [Training Guide](/docs/user-guide/training-segmentation) - Full training configuration reference
+- [Dataset Building](/docs/user-guide/dataset-segmentation) - Prepare your own dataset
+- [Examples](/docs/examples/basic-segmentation) - More worked examples

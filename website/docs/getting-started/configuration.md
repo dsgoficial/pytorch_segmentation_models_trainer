@@ -279,5 +279,5 @@ pytorch-smt --config-dir ./configs --config-name my_config +mode=validate-config
 ## Learn More
 
 - [Hydra Documentation](https://hydra.cc/docs/intro) - Official Hydra docs
-- [Examples](../examples/basic-segmentation) - Real configuration examples
-- [API Reference](../api/main) - Available configuration options
+- [Examples](/docs/examples/basic-segmentation) - Real configuration examples
+- [API Reference](/docs/api/main) - Available configuration options

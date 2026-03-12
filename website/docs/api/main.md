@@ -36,7 +36,8 @@ pytorch-smt --config-dir ./configs --config-name my_config +mode=validate-config
 | `predict-from-batch` | Batch prediction | Efficient batch processing |
 | `validate-config` | Config validation | Debug configuration files |
 | `build-mask` | Build masks | Generate training masks from vectors |
-| `convert-dataset` | Dataset conversion | Convert between dataset formats |
+| `evaluate-experiments` | Run evaluation pipeline | Compare model outputs against ground truth |
+| `convert-dataset` | Convert dataset format | Prepare data for Polygon-RNN models |
 
 ## Configuration Structure
 

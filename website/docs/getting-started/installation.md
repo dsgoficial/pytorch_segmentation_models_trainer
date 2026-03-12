@@ -195,6 +195,6 @@ pip install --upgrade hydra-core
 
 ## Next Steps
 
-- [Quick Start Guide](quickstart) - Train your first model
-- [Configuration](configuration) - Understanding config files
-- [Examples](../examples/basic-segmentation) - Working examples
+- [Quick Start Guide](/docs/getting-started/quickstart) - Train your first model
+- [Configuration](/docs/getting-started/configuration) - Understanding config files
+- [Examples](/docs/examples/basic-segmentation) - Working examples
