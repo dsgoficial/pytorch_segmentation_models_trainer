@@ -16,7 +16,7 @@ const config = {
 
   organizationName: 'phborba',
   projectName: 'pytorch_segmentation_models_trainer',
-  trailingSlash: false,
+  trailingSlash: true,
 
   onBrokenLinks: 'warn',
   markdown: {
