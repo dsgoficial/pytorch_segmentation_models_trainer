@@ -1,3 +1,8 @@
+---
+sidebar_position: 1
+title: Installation
+---
+
 # Installation
 
 ## Requirements
@@ -6,7 +11,7 @@
 - PyTorch 1.9+
 - CUDA 10.2+ (for GPU acceleration)
 
-## 🔧 Quick Install
+## Quick Install
 
 ### Option 1: PyPI (Recommended)
 
@@ -14,14 +19,15 @@
 pip install pytorch_segmentation_models_trainer
 ```
 
-!!! warning "GPU Acceleration"
-    If you want GPU acceleration and are not using Docker, install `pytorch_scatter` first:
-    
-    ```bash
-    pip install torch-scatter -f https://data.pyg.org/whl/torch-1.12.0+cu113.html
-    ```
-    
-    Replace `cu113` with your CUDA version (cu102, cu113, cu116, etc.)
+:::warning GPU Acceleration
+If you want GPU acceleration and are not using Docker, install `pytorch_scatter` first:
+
+```bash
+pip install torch-scatter -f https://data.pyg.org/whl/torch-1.12.0+cu113.html
+```
+
+Replace `cu113` with your CUDA version (cu102, cu113, cu116, etc.)
+:::
 
 ### Option 2: From Source
 
@@ -53,7 +59,7 @@ docker run --gpus all \
     pytorch-smt --config-dir /configs --config-name my_config +mode=train
 ```
 
-## 🔍 Verify Installation
+## Verify Installation
 
 Test your installation:
 
@@ -71,7 +77,7 @@ Or use the CLI:
 pytorch-smt --help
 ```
 
-## 🐳 Docker Compose Setup
+## Docker Compose Setup
 
 For development with database support:
 
@@ -86,7 +92,7 @@ services:
       POSTGRES_PASSWORD: postgres
     ports:
       - "5432:5432"
-  
+
   app:
     image: phborba/pytorch_segmentation_models_trainer:latest
     volumes:
@@ -100,7 +106,7 @@ Run with:
 docker-compose up -d
 ```
 
-## 📦 Optional Dependencies
+## Optional Dependencies
 
 ### For Advanced Features
 
@@ -127,7 +133,7 @@ pip install scikit-learn
 pip install pytest black flake8 pre-commit
 ```
 
-## 🚨 Common Issues
+## Common Issues
 
 ### CUDA/GPU Issues
 
@@ -168,7 +174,7 @@ pip install torch-scatter -f https://data.pyg.org/whl/torch-1.12.0+cu113.html
 pip install --upgrade hydra-core
 ```
 
-## 💡 Tips
+## Tips
 
 1. **Use virtual environments**:
    ```bash
@@ -187,8 +193,8 @@ pip install --upgrade hydra-core
    pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cpu
    ```
 
-## ✅ Next Steps
+## Next Steps
 
-- [Quick Start Guide](quickstart.md) - Train your first model
-- [Configuration](configuration.md) - Understanding config files  
-- [Examples](../examples/basic-segmentation.md) - Working examples
+- [Quick Start Guide](quickstart) - Train your first model
+- [Configuration](configuration) - Understanding config files
+- [Examples](../examples/basic-segmentation) - Working examples

@@ -1,3 +1,8 @@
+---
+sidebar_position: 1
+title: Main Module
+---
+
 # Main Module
 
 The main entry point for the pytorch-segmentation-models-trainer CLI and core functionality.
@@ -12,7 +17,7 @@ The main module provides the primary interface for training, prediction, and oth
 # Training
 pytorch-smt --config-dir ./configs --config-name my_config +mode=train
 
-# Prediction  
+# Prediction
 pytorch-smt --config-dir ./configs --config-name my_config +mode=predict
 
 # Mask building
@@ -26,21 +31,12 @@ pytorch-smt --config-dir ./configs --config-name my_config +mode=validate-config
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
-| `train` | Train a model | Model training with PyTorch Lightning |  
+| `train` | Train a model | Model training with PyTorch Lightning |
 | `predict` | Run inference | Batch prediction on images |
 | `predict-from-batch` | Batch prediction | Efficient batch processing |
-| `predict-mod-polymapper-from-batch` | Specialized prediction | ModPolymapper model inference |
 | `validate-config` | Config validation | Debug configuration files |
 | `build-mask` | Build masks | Generate training masks from vectors |
 | `convert-dataset` | Dataset conversion | Convert between dataset formats |
-
-## API Reference
-
-::: pytorch_segmentation_models_trainer.main
-    options:
-      show_root_heading: true
-      show_source: true
-      heading_level: 3
 
 ## Configuration Structure
 
@@ -60,11 +56,9 @@ pl_trainer:
   max_epochs: 100
   gpus: 1
 
-# Prediction configuration (for predict mode)  
+# Prediction configuration (for predict mode)
 checkpoint_path: /path/to/model.ckpt
 inference_threshold: 0.5
-
-# Other mode-specific configurations...
 ```
 
 ## Examples
@@ -105,7 +99,7 @@ from pytorch_segmentation_models_trainer.main import main
 def my_main(cfg: DictConfig):
     # Custom preprocessing
     cfg.custom_param = "my_value"
-    
+
     # Run main function
     return main(cfg)
 
@@ -113,24 +107,9 @@ if __name__ == "__main__":
     my_main()
 ```
 
-## Error Handling
-
-The main function includes error handling for common issues:
-
-- **Configuration errors**: Missing or invalid configuration parameters
-- **Model loading errors**: Issues with model instantiation or checkpoint loading  
-- **Data loading errors**: Problems with dataset access or format
-- **CUDA/GPU errors**: Device availability and memory issues
-
 ## Logging
 
-The main module sets up logging configuration:
-
-- **Hydra logs**: Configuration resolution and parameter overrides
-- **PyTorch Lightning logs**: Training progress and metrics
-- **Application logs**: Custom logging from the library components
-
-Configure logging levels in your config:
+Configure logging in your config:
 
 ```yaml
 hydra:
@@ -139,15 +118,7 @@ hydra:
   run:
     dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
-# Custom logging configuration  
 logging:
   level: INFO
   format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 ```
-
-## Related Modules
-
-- [`train`](train.md) - Training functionality
-- [`predict`](predict.md) - Prediction functionality  
-- [`config_utils`](../api/config_utils.md) - Configuration utilities
-- [`build_mask`](../api/build_mask.md) - Mask building functionality

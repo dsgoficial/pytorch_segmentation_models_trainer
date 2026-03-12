@@ -1,25 +1,23 @@
-name: Deploy Config Builder
+name: Deploy
 
 on:
   push:
     branches: [main]
     paths:
       - 'web/**'
+      - 'website/**'
       - 'scripts/generate_schema.py'
-      - '.github/workflows/deploy-config-builder.yml'
-  # Permite rodar manualmente pelo GitHub UI (útil para forçar update do schema)
+      - 'pytorch_segmentation_models_trainer/**/*.py'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
-  # Toda segunda-feira às 6h UTC — detecta atualizações das bibliotecas
   schedule:
     - cron: '0 6 * * 1'
 
-# Permissão para escrever no GitHub Pages
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Garante que apenas um deploy roda por vez
 concurrency:
   group: pages
   cancel-in-progress: true
@@ -40,27 +38,13 @@ jobs:
 
       - name: Install Python dependencies for schema generation
         run: |
-          # torch + torchvision do mesmo índice CPU-only — versões incompatíveis causam
-          # RuntimeError em torchvision se instaladas de fontes diferentes
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install segmentation-models-pytorch albumentations torchmetrics
 
       - name: Generate schema.json
         run: python scripts/generate_schema.py
 
-      - name: Show generated schema versions
-        run: |
-          python -c "
-          import json
-          s = json.load(open('web/src/assets/schema.json'))
-          print('Library versions in schema:')
-          for k, v in s['library_versions'].items():
-              print(f'  {k}: {v}')
-          print(f'SMP encoders: {len(s[\"smp\"].get(\"encoders\", {}))}')
-          print(f'Albumentations transforms: {len(s[\"albumentations\"].get(\"transforms\", {}))}')
-          "
-
-      # ── Etapa 2: Node.js → build React ──────────────────────────────────────
+      # ── Etapa 2: Node.js → build Config Builder (React/Vite) ────────────────
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -68,25 +52,39 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install Node dependencies
+      - name: Install Config Builder dependencies
         run: npm ci
         working-directory: web
 
-      - name: Build
+      - name: Build Config Builder
         run: npm run build
         working-directory: web
         env:
-          # Vite usa esta variável para calcular o base path correto
           GITHUB_REPOSITORY: ${{ github.repository }}
 
-      # ── Etapa 3: Deploy para GitHub Pages ───────────────────────────────────
+      # ── Etapa 3: Node.js → build Docusaurus ─────────────────────────────────
+      - name: Install Docusaurus dependencies
+        run: npm ci
+        working-directory: website
+
+      - name: Build Docusaurus
+        run: npm run build
+        working-directory: website
+
+      # ── Etapa 4: Combinar artefatos ──────────────────────────────────────────
+      # Docs em /  →  website/build/
+      # Config Builder em /config-builder/  →  website/build/config-builder/
+      - name: Copy Config Builder into Docusaurus build
+        run: cp -r web/dist/ website/build/config-builder/
+
+      # ── Etapa 5: Deploy para GitHub Pages ───────────────────────────────────
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: web/dist
+          path: website/build
 
   deploy:
     needs: build

@@ -1,3 +1,8 @@
+---
+sidebar_position: 1
+title: Introduction
+---
+
 # PyTorch Segmentation Models Trainer
 
 [![Torch](https://img.shields.io/badge/-PyTorch-red?logo=pytorch&labelColor=gray)](https://pytorch.org/get-started/locally/)
@@ -7,17 +12,17 @@
 
 A comprehensive framework for training semantic segmentation models using PyTorch, PyTorch Lightning, and Hydra configuration management.
 
-## ✨ Key Features
+## Key Features
 
-- **🔧 Configuration-Driven**: Use YAML files to define your entire training pipeline
-- **🚀 Multiple Model Types**: Support for semantic segmentation, object detection, instance segmentation, and specialized models
-- **📊 Advanced Polygonization**: Frame field models, active contours, and Polygon-RNN for precise boundary extraction  
-- **🎯 Easy Training & Inference**: Simple CLI commands for training and prediction
-- **🔄 Flexible Data Loading**: Support for various dataset formats and augmentation pipelines
-- **📈 Built-in Visualization**: Tools for visualizing results and debugging
-- **🐳 Docker Ready**: Pre-built containers with all dependencies
+- **Configuration-Driven**: Use YAML files to define your entire training pipeline
+- **Multiple Model Types**: Support for semantic segmentation, object detection, instance segmentation, and specialized models
+- **Advanced Polygonization**: Frame field models, active contours, and Polygon-RNN for precise boundary extraction
+- **Easy Training & Inference**: Simple CLI commands for training and prediction
+- **Flexible Data Loading**: Support for various dataset formats and augmentation pipelines
+- **Built-in Visualization**: Tools for visualizing results and debugging
+- **Docker Ready**: Pre-built containers with all dependencies
 
-## 🎯 Quick Example
+## Quick Example
 
 Train a U-Net model with just a configuration file:
 
@@ -52,7 +57,7 @@ Then train with:
 pytorch-smt --config-dir ./configs --config-name my_config +mode=train
 ```
 
-## 🏗️ Supported Model Types
+## Supported Model Types
 
 | Model Type | Description | Use Cases |
 |------------|-------------|-----------|
@@ -62,34 +67,23 @@ pytorch-smt --config-dir ./configs --config-name my_config +mode=train
 | **Instance Segmentation** | Mask R-CNN variants | Individual object instances |
 | **Polygon RNN** | Sequential polygon vertex prediction | Precise polygon extraction |
 
-## 🛠️ Polygonization Methods
+## Polygonization Methods
 
 Transform segmentation masks into precise vector polygons:
 
 - **Active Skeletons**: Skeleton-based optimization
-- **Active Contours**: Energy minimization approach  
+- **Active Contours**: Energy minimization approach
 - **Simple Polygonization**: Fast contour extraction
 - **Polygon RNN**: Neural polygon vertex prediction
 
-## 📖 Getting Started
+## Getting Started
 
-1. **[Installation](getting-started/installation.md)** - Set up the environment
-2. **[Quick Start](getting-started/quickstart.md)** - Your first training job
-3. **[Configuration](getting-started/configuration.md)** - Understanding config files
-4. **[Examples](examples/basic-segmentation.md)** - Working examples
+1. **[Installation](getting-started/installation)** - Set up the environment
+2. **[Quick Start](getting-started/quickstart)** - Your first training job
+3. **[Configuration](getting-started/configuration)** - Understanding config files
+4. **[Examples](examples/basic-segmentation)** - Working examples
 
-## 🎓 Learn More
-
-- **[User Guide](user-guide/training.md)** - Comprehensive training documentation
-- **[Advanced Features](advanced/frame-field.md)** - Specialized model types
-- **[API Reference](api/main.md)** - Detailed API documentation
-- **[Examples](examples/basic-segmentation.md)** - Real-world examples
-
-## 🤝 Contributing
-
-We welcome contributions! See our [Contributing Guide](contributing.md) for details.
-
-## 📜 Citation
+## Citation
 
 If you use this library in your research, please cite:
 

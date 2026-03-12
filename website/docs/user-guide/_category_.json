@@ -1,0 +1,11 @@
+{
+  "label": "User Guide",
+  "position": 3,
+  "link": {
+    "type": "generated-index",
+    "title": "User Guide",
+    "description": "Comprehensive guides for training, prediction, datasets, and augmentation.",
+    "keywords": ["training", "prediction", "datasets", "augmentation"]
+  },
+  "collapsed": true
+}

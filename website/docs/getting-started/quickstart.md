@@ -1,14 +1,19 @@
+---
+sidebar_position: 2
+title: Quick Start
+---
+
 # Quick Start
 
 Get up and running with your first segmentation model in 5 minutes!
 
-## 📋 Prerequisites
+## Prerequisites
 
-- [Installation completed](installation.md)
+- [Installation completed](installation)
 - Basic understanding of semantic segmentation
 - Your dataset prepared (or use our sample data)
 
-## 🎯 Your First Model
+## Your First Model
 
 ### Step 1: Prepare Your Data
 
@@ -21,10 +26,11 @@ image,mask
 /path/to/images/img3.jpg,/path/to/masks/mask3.png
 ```
 
-!!! tip "Data Format"
-    - Images: JPG, PNG, TIFF
-    - Masks: PNG with pixel values 0 (background) and 255 (foreground)
-    - For multi-class: pixel values 0, 1, 2, ... for each class
+:::tip Data Format
+- Images: JPG, PNG, TIFF
+- Masks: PNG with pixel values 0 (background) and 255 (foreground)
+- For multi-class: pixel values 0, 1, 2, ... for each class
+:::
 
 ### Step 2: Create Configuration
 
@@ -101,6 +107,10 @@ val_dataset:
 mode: train
 ```
 
+:::tip Config Builder
+Use the [Config Builder](/config-builder/) to generate this YAML visually — no manual editing needed!
+:::
+
 ### Step 3: Train Your Model
 
 ```bash
@@ -109,7 +119,7 @@ pytorch-smt --config-dir ./configs --config-name basic_unet
 
 That's it! Your model will start training and save checkpoints automatically.
 
-## 📊 Monitor Training
+## Monitor Training
 
 ### TensorBoard (Optional)
 
@@ -127,14 +137,13 @@ Then view logs:
 tensorboard --logdir ./logs
 ```
 
-## 🔮 Make Predictions
+## Make Predictions
 
 ### Step 1: Create Prediction Config
 
 Create `configs/predict.yaml`:
 
 ```yaml
-# Reuse model config
 model:
   _target_: segmentation_models_pytorch.Unet
   encoder_name: resnet34
@@ -142,18 +151,15 @@ model:
   in_channels: 3
   classes: 1
 
-# Prediction settings
 mode: predict
 checkpoint_path: /path/to/your/checkpoint.ckpt
 device: cuda  # or cpu
 
-# Input images
 inference_image_reader:
   _target_: pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader.FolderImageReaderProcessor
   folder_name: /path/to/test/images
   image_extension: jpg
 
-# Output settings
 inference_processor:
   _target_: pytorch_segmentation_models_trainer.tools.inference.inference_processors.SingleImageInfereceProcessor
   model_input_shape: [256, 256]
@@ -171,33 +177,7 @@ inference_threshold: 0.5
 pytorch-smt --config-dir ./configs --config-name predict
 ```
 
-## 🎉 Results
-
-Your model will output:
-- **Training checkpoints** in `lightning_logs/`
-- **Predictions** as specified in your export strategy
-- **Logs** for monitoring training progress
-
-## 🚀 Next Steps
-
-Now that you have a working model, explore:
-
-### Improve Your Model
-- Try different [model architectures](../user-guide/model-types.md)
-- Experiment with [data augmentation](../user-guide/augmentation.md)
-- Tune hyperparameters
-
-### Advanced Features
-- [Frame Field Models](../advanced/frame-field.md) for precise boundaries
-- [Polygonization](../advanced/polygonization.md) for vector outputs
-- [Multi-class segmentation](../examples/multi-class.md)
-
-### Real Examples
-- [Building Extraction](../examples/basic-segmentation.md)
-- [Medical Imaging](../examples/advanced-workflows.md)
-- [Custom Datasets](../examples/custom-dataset.md)
-
-## 💡 Common Adjustments
+## Common Adjustments
 
 ### Reduce Memory Usage
 ```yaml
@@ -212,7 +192,7 @@ pl_trainer:
 ```yaml
 train_dataset:
   data_loader:
-    num_workers: 8  # More workers
+    num_workers: 8
     pin_memory: true
 
 pl_trainer:
@@ -228,9 +208,3 @@ model:
 loss:
   _target_: torch.nn.CrossEntropyLoss
 ```
-
-## ❓ Need Help?
-
-- Check the [User Guide](../user-guide/training.md) for detailed explanations
-- Browse [Examples](../examples/basic-segmentation.md) for more use cases
-- Review the [API Reference](../api/main.md) for advanced usage
