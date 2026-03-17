@@ -142,28 +142,32 @@ class Model(pl.LightningModule):
         try:
             # Get train_dataset config
             if 'train_dataset' not in self.cfg:
-                print("⚠️  'train_dataset' not found in config")
+                print("WARNING:'train_dataset' not found in config")
                 return None
             
             dataset_cfg = self.cfg.train_dataset
             
             # Get CSV path
             if 'input_csv_path' not in dataset_cfg:
-                print("⚠️  'input_csv_path' not found in train_dataset config")
+                print("WARNING:'input_csv_path' not found in train_dataset config")
                 return None
             
             csv_path = dataset_cfg.input_csv_path
-            
-            # Read CSV to get dataset size
+
             import pandas as pd
             import os
-            
+
             if not os.path.exists(csv_path):
-                print(f"⚠️  CSV file not found: {csv_path}")
+                print(f"WARNING: CSV file not found: {csv_path}")
                 return None
-            
-            df = pd.read_csv(csv_path)
-            dataset_size = len(df)
+
+            # Use samples_per_epoch if defined (RandomCropSegmentationDataset),
+            # otherwise fall back to CSV row count
+            if 'samples_per_epoch' in dataset_cfg:
+                dataset_size = dataset_cfg.samples_per_epoch
+            else:
+                df = pd.read_csv(csv_path)
+                dataset_size = len(df)
             
             # Get batch size from config (check multiple locations)
             batch_size = None
@@ -181,7 +185,7 @@ class Model(pl.LightningModule):
                 batch_size = self.cfg.get('batch_size')
             
             if batch_size is None:
-                print("⚠️  Could not find batch_size in config")
+                print("WARNING:Could not find batch_size in config")
                 return None
             
             # Compute device count using improved method
@@ -206,7 +210,7 @@ class Model(pl.LightningModule):
             
             # Print summary
             print(f"\n{'='*60}")
-            print(f"✅ AUTO-COMPUTED STEPS_PER_EPOCH FROM CONFIG")
+            print(f"AUTO-COMPUTED STEPS_PER_EPOCH FROM CONFIG")
             print(f"{'='*60}")
             print(f"CSV path:               {csv_path}")
             print(f"Dataset size:           {dataset_size:>10,} samples")
@@ -220,7 +224,7 @@ class Model(pl.LightningModule):
             return steps_per_epoch
             
         except Exception as e:
-            print(f"⚠️  Error computing steps_per_epoch from config: {e}")
+            print(f"WARNING: Error computing steps_per_epoch from config: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -330,7 +334,7 @@ class Model(pl.LightningModule):
                     
                     if steps_per_epoch is not None:
                         scheduler_config['steps_per_epoch'] = steps_per_epoch
-                        print(f"✅ OneCycleLR: Using steps_per_epoch = {steps_per_epoch:,}")
+                        print(f"OK:OneCycleLR: Using steps_per_epoch = {steps_per_epoch:,}")
                     else:
                         raise ValueError(
                             "\n" + "="*60 + "\n"
@@ -351,7 +355,7 @@ class Model(pl.LightningModule):
                         )
                 else:
                     provided_steps = scheduler_config['steps_per_epoch']
-                    print(f"ℹ️  OneCycleLR: Using provided steps_per_epoch = {provided_steps:,}")
+                    print(f"INFO:OneCycleLR: Using provided steps_per_epoch = {provided_steps:,}")
                 
                 dict_item["scheduler"] = instantiate(
                     scheduler_config, optimizer=optimizer, _recursive_=False
@@ -381,6 +385,9 @@ class Model(pl.LightningModule):
             prefetch_factor=self.cfg.train_dataset.data_loader.prefetch_factor
             if "prefetch_factor" in self.cfg.train_dataset.data_loader
             else 2,
+            persistent_workers=self.cfg.train_dataset.data_loader.persistent_workers
+            if "persistent_workers" in self.cfg.train_dataset.data_loader
+            else False,
         )
 
     def val_dataloader(self):
@@ -400,6 +407,9 @@ class Model(pl.LightningModule):
             prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor
             if "prefetch_factor" in self.cfg.val_dataset.data_loader
             else 2,
+            persistent_workers=self.cfg.val_dataset.data_loader.persistent_workers
+            if "persistent_workers" in self.cfg.val_dataset.data_loader
+            else False,
         )
 
     def _compute_loss(
