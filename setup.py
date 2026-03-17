@@ -43,13 +43,7 @@ except:
     DEP_LINKS = []
 
 # What packages are optional?
-EXTRAS = {
-    "tests": ["pytest", "scikit-image", "parameterized"],
-    # torch-scatter requires a PyG wheel index; install with:
-    #   pip install torch-scatter -f https://data.pyg.org/whl/torch-<VERSION>+cpu.html
-    # See requirements-scatter.txt for details.
-    "scatter": [],
-}
+EXTRAS = {"tests": ["pytest", "scikit-image", "parameterized"]}
 
 # Import the README and use it as the long-description.
 # Note: this will only work if 'README.md' is present in your MANIFEST.in file!

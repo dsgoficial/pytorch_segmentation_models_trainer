@@ -81,7 +81,8 @@ pl_trainer:
   stochastic_weight_avg: true
   sync_batchnorm: true
   max_epochs: ${hyperparameters.epochs}
-  gpus: -1
+  accelerator: cpu
+  devices: 1
   accelerator: ddp
   precision: 32
   default_root_dir: /experiment_data/${backbone.name}_${hyperparameters.model_name}
@@ -148,6 +149,10 @@ val_dataset:
     prefetch_factor: ${hyperparameters.batch_size}
 metrics:
 - _target_: torchmetrics.Accuracy
+  task: binary
 - _target_: torchmetrics.F1Score
+  task: binary
 - _target_: torchmetrics.Precision
+  task: binary
 - _target_: torchmetrics.Recall
+  task: binary

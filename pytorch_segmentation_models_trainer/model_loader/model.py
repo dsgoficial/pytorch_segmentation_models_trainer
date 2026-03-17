@@ -497,7 +497,8 @@ class Model(pl.LightningModule):
         
         # Compute and log metrics - automatically prefixed with train/
         if hasattr(self, 'train_metrics'):
-            metrics = self.train_metrics(predicted_masks, masks)
+            preds_for_metrics = predicted_masks.squeeze(1) if predicted_masks.ndim == 4 and predicted_masks.shape[1] == 1 else predicted_masks
+            metrics = self.train_metrics(preds_for_metrics, masks)
             self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
         
         return loss
@@ -539,7 +540,8 @@ class Model(pl.LightningModule):
         
         # Compute and log metrics - automatically prefixed with val/
         if hasattr(self, 'val_metrics'):
-            metrics = self.val_metrics(predicted_masks, masks)
+            preds_for_metrics = predicted_masks.squeeze(1) if predicted_masks.ndim == 4 and predicted_masks.shape[1] == 1 else predicted_masks
+            metrics = self.val_metrics(preds_for_metrics, masks)
             self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
         
         return loss

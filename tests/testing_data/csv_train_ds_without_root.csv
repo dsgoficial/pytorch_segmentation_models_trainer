@@ -1,0 +1,6 @@
+id,image,mask,rows,columns
+0,/images/image1.png,/labels/label1.png,512,512
+1,/images/image10.png,/labels/label10.png,512,512
+2,/images/image2.png,/labels/label2.png,512,512
+3,/images/image3.png,/labels/label3.png,512,512
+4,/images/image4.png,/labels/label4.png,512,512

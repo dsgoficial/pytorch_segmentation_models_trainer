@@ -1,8 +1,12 @@
 metrics:
   - _target_: torchmetrics.Accuracy
+    task: binary
   - _target_: torchmetrics.IoU
     num_classes: ${model.classes}
   - _target_: torchmetrics.F1Score
+    task: binary
     num_classes: ${model.classes}
   - _target_: torchmetrics.Precision
+    task: binary
   - _target_: torchmetrics.Recall
+    task: binary

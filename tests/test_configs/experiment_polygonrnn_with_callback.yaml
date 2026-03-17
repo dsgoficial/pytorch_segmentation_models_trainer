@@ -14,8 +14,11 @@ device: cpu
 
 metrics:
   - _target_: torchmetrics.F1Score
+    task: binary
   - _target_: torchmetrics.Precision
+    task: binary
   - _target_: torchmetrics.Recall
+    task: binary
 
 hyperparameters:
   batch_size: 2
@@ -24,7 +27,8 @@ hyperparameters:
 
 pl_trainer:
   max_epochs: ${hyperparameters.epochs}
-  gpus: 0
+  accelerator: cpu
+  devices: 1
 
 callbacks:
   - _target_: pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.PolygonRNNResultCallback

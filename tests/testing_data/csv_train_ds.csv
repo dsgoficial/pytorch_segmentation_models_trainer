@@ -1,0 +1,6 @@
+id,image,mask,rows,columns
+0,/Users/philipeborba/github_repos/pytorch_segmentation_models_trainer/tests/testing_data/data/images/image1.png,/Users/philipeborba/github_repos/pytorch_segmentation_models_trainer/tests/testing_data/data/labels/label1.png,512,512
+1,/Users/philipeborba/github_repos/pytorch_segmentation_models_trainer/tests/testing_data/data/images/image10.png,/Users/philipeborba/github_repos/pytorch_segmentation_models_trainer/tests/testing_data/data/labels/label10.png,512,512
+2,/Users/philipeborba/github_repos/pytorch_segmentation_models_trainer/tests/testing_data/data/images/image2.png,/Users/philipeborba/github_repos/pytorch_segmentation_models_trainer/tests/testing_data/data/labels/label2.png,512,512
+3,/Users/philipeborba/github_repos/pytorch_segmentation_models_trainer/tests/testing_data/data/images/image3.png,/Users/philipeborba/github_repos/pytorch_segmentation_models_trainer/tests/testing_data/data/labels/label3.png,512,512
+4,/Users/philipeborba/github_repos/pytorch_segmentation_models_trainer/tests/testing_data/data/images/image4.png,/Users/philipeborba/github_repos/pytorch_segmentation_models_trainer/tests/testing_data/data/labels/label4.png,512,512

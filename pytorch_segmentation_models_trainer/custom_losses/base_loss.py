@@ -267,7 +267,7 @@ class SegLoss(Loss):
         }
         if isinstance(gt_batch, dict) and "seg_loss_weights" in gt_batch:
             weights = gt_batch["seg_loss_weights"][:, self.gt_channel_selector, ...]
-            params["weights"] = weights
+            params["weight"] = weights
         mean_cross_entropy = (
             self.cross_entropy_func(pred_seg, gt_seg, **params)
             if not self.use_mixup

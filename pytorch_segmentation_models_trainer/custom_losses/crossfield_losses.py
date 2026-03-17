@@ -29,6 +29,54 @@ from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor
 from pytorch_segmentation_models_trainer.utils import frame_field_utils, math_utils
 
 
+# ---------------------------------------------------------------------------
+# Pure-PyTorch replacements for torch_scatter CSR operations
+# ---------------------------------------------------------------------------
+
+def _gather_csr(src: torch.Tensor, indptr: torch.Tensor) -> torch.Tensor:
+    """Expand each segment value to fill every position in that segment.
+
+    Equivalent to torch_scatter.gather_csr(src, indptr).
+    Works for both 1-D and 2-D src tensors (operates along dim 0).
+    """
+    counts = indptr[1:] - indptr[:-1]
+    return torch.repeat_interleave(src, counts, dim=0)
+
+
+def _segment_max_csr(src: torch.Tensor, indptr: torch.Tensor):
+    """Per-segment maximum over a 1-D src tensor (CSR format).
+
+    Returns (values, None) to match the torch_scatter.segment_max_csr API
+    (callers only ever use the first element).
+    """
+    n_segs = indptr.shape[0] - 1
+    counts = indptr[1:] - indptr[:-1]
+    seg_ids = torch.repeat_interleave(
+        torch.arange(n_segs, device=src.device), counts
+    )
+    out = src.new_full((n_segs,), float("-inf"))
+    out.scatter_reduce_(0, seg_ids, src, reduce="amax", include_self=True)
+    return out, None
+
+
+def _segment_sum_csr(src: torch.Tensor, indptr: torch.Tensor) -> torch.Tensor:
+    """Per-segment sum over a 1-D src tensor (CSR format).
+
+    Equivalent to torch_scatter.segment_sum_csr(src, indptr).
+    """
+    n_segs = indptr.shape[0] - 1
+    counts = indptr[1:] - indptr[:-1]
+    seg_ids = torch.repeat_interleave(
+        torch.arange(n_segs, device=src.device), counts
+    )
+    out = torch.zeros(n_segs, device=src.device, dtype=src.dtype)
+    out.scatter_add_(0, seg_ids, src)
+    return out
+
+
+# ---------------------------------------------------------------------------
+
+
 class AlignLoss:
     def __init__(
         self,
@@ -299,10 +347,10 @@ class AlignLoss:
             sub_path_normal = sub_path_normal / (
                 torch.norm(sub_path_normal, dim=1)[:, None] + 1e-6
             )
-            expanded_sub_path_start_pos = torch_scatter.gather_csr(
+            expanded_sub_path_start_pos = _gather_csr(
                 sub_path_start_pos, sub_path_delim
             )
-            expanded_sub_path_normal = torch_scatter.gather_csr(
+            expanded_sub_path_normal = _gather_csr(
                 sub_path_normal, sub_path_delim
             )
             relative_path_pos = path_pos - expanded_sub_path_start_pos
@@ -315,7 +363,7 @@ class AlignLoss:
             path_pos_distance = torch.norm(
                 relative_path_pos - relative_path_pos_projected, dim=1
             )
-            sub_path_max_distance = torch_scatter.segment_max_csr(
+            sub_path_max_distance = _segment_max_csr(
                 path_pos_distance, sub_path_delim
             )[0]
             sub_path_small_dissimilarity_mask = (
@@ -357,7 +405,7 @@ class AlignLoss:
         ] = 0  # Zero out invalid angles between paths (caused by the junction points being in all paths of the junction)
         sub_path_vertex_angle_delim = sub_path_delim.clone()
         sub_path_vertex_angle_delim[-1] -= 2
-        sub_path_sum_vertex_angle = torch_scatter.segment_sum_csr(
+        sub_path_sum_vertex_angle = _segment_sum_csr(
             vertex_angles, sub_path_vertex_angle_delim
         )
         sub_path_lengths = sub_path_delim[1:] - sub_path_delim[:-1]
@@ -372,7 +420,7 @@ class AlignLoss:
         sub_path_mean_vertex_angles[
             sub_path_small_dissimilarity_mask
         ] = 0  # Optimize sub-path with a small dissimilarity to have straight edges
-        expanded_sub_path_mean_vertex_angles = torch_scatter.gather_csr(
+        expanded_sub_path_mean_vertex_angles = _gather_csr(
             sub_path_mean_vertex_angles, sub_path_vertex_angle_delim
         )
         curvature_loss = torch.pow(

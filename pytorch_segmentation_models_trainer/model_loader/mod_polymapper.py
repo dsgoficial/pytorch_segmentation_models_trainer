@@ -30,7 +30,7 @@ import torch.nn as nn
 import torch.nn.init
 from hydra.utils import instantiate
 from shapely.geometry import Polygon
-from pytorch_lightning.trainer.supporters import CombinedLoader
+from pytorch_lightning.utilities.combined_loader import CombinedLoader
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
 from pytorch_segmentation_models_trainer.predict import instantiate_polygonizer
 from pytorch_segmentation_models_trainer.utils import (

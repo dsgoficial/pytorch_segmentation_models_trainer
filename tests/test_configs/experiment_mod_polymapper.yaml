@@ -20,7 +20,8 @@ hyperparameters:
 
 pl_trainer:
   max_epochs: ${hyperparameters.epochs}
-  gpus: 0
+  accelerator: cpu
+  devices: 1
 
 train_dataset:
   object_detection:

@@ -8,7 +8,8 @@ model:
   activation: 'sigmoid'
 
 loss:
-  _target_: segmentation_models_pytorch.utils.losses.DiceLoss
+  _target_: segmentation_models_pytorch.losses.DiceLoss
+  mode: binary
 
 optimizer:
   _target_: pytorch_segmentation_models_trainer.optimizers.gradient_centralization.Adam
@@ -17,8 +18,11 @@ optimizer:
 
 metrics:
   - _target_: torchmetrics.F1Score
+    task: binary
   - _target_: torchmetrics.Precision
+    task: binary
   - _target_: torchmetrics.Recall
+    task: binary
 
 hyperparameters:
   batch_size: 2
@@ -27,7 +31,8 @@ hyperparameters:
 
 pl_trainer:
   max_epochs: ${hyperparameters.epochs}
-  gpus: 0
+  accelerator: cpu
+  devices: 1
 
 train_dataset:
   _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
