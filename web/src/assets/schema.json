@@ -1,0 +1,101 @@
+{
+  "generated_at": null,
+  "_note": "Fallback local — substitído pelo generate_schema.py no build de CI. Encoders extraídos de https://smp.readthedocs.io/en/latest/encoders.html",
+  "library_versions": {
+    "segmentation_models_pytorch": null,
+    "albumentations": null,
+    "torchmetrics": null,
+    "torch": null
+  },
+  "smp": {
+    "architectures": [
+      "DeepLabV3", "DeepLabV3Plus", "FPN", "Linknet", "MAnet",
+      "PAN", "PSPNet", "Unet", "UnetPlusPlus"
+    ],
+    "encoders": {
+      "resnet18":               { "pretrained_settings": ["imagenet", "ssl", "swsl"] },
+      "resnet34":               { "pretrained_settings": ["imagenet"] },
+      "resnet50":               { "pretrained_settings": ["imagenet", "ssl", "swsl"] },
+      "resnet101":              { "pretrained_settings": ["imagenet"] },
+      "resnet152":              { "pretrained_settings": ["imagenet"] },
+      "resnext50_32x4d":        { "pretrained_settings": ["imagenet", "ssl", "swsl"] },
+      "resnext101_32x4d":       { "pretrained_settings": ["ssl", "swsl"] },
+      "resnext101_32x8d":       { "pretrained_settings": ["imagenet", "instagram", "ssl", "swsl"] },
+      "resnext101_32x16d":      { "pretrained_settings": ["instagram", "ssl", "swsl"] },
+      "resnext101_32x32d":      { "pretrained_settings": ["instagram"] },
+      "resnext101_32x48d":      { "pretrained_settings": ["instagram"] },
+      "dpn68":                  { "pretrained_settings": ["imagenet"] },
+      "dpn68b":                 { "pretrained_settings": ["imagenet+5k"] },
+      "dpn92":                  { "pretrained_settings": ["imagenet+5k"] },
+      "dpn98":                  { "pretrained_settings": ["imagenet"] },
+      "dpn107":                 { "pretrained_settings": ["imagenet+5k"] },
+      "dpn131":                 { "pretrained_settings": ["imagenet"] },
+      "vgg11":                  { "pretrained_settings": ["imagenet"] },
+      "vgg11_bn":               { "pretrained_settings": ["imagenet"] },
+      "vgg13":                  { "pretrained_settings": ["imagenet"] },
+      "vgg13_bn":               { "pretrained_settings": ["imagenet"] },
+      "vgg16":                  { "pretrained_settings": ["imagenet"] },
+      "vgg16_bn":               { "pretrained_settings": ["imagenet"] },
+      "vgg19":                  { "pretrained_settings": ["imagenet"] },
+      "vgg19_bn":               { "pretrained_settings": ["imagenet"] },
+      "senet154":               { "pretrained_settings": ["imagenet"] },
+      "se_resnet50":            { "pretrained_settings": ["imagenet"] },
+      "se_resnet101":           { "pretrained_settings": ["imagenet"] },
+      "se_resnet152":           { "pretrained_settings": ["imagenet"] },
+      "se_resnext50_32x4d":     { "pretrained_settings": ["imagenet"] },
+      "se_resnext101_32x4d":    { "pretrained_settings": ["imagenet"] },
+      "densenet121":            { "pretrained_settings": ["imagenet"] },
+      "densenet169":            { "pretrained_settings": ["imagenet"] },
+      "densenet201":            { "pretrained_settings": ["imagenet"] },
+      "densenet161":            { "pretrained_settings": ["imagenet"] },
+      "inceptionresnetv2":      { "pretrained_settings": ["imagenet", "imagenet+background"] },
+      "inceptionv4":            { "pretrained_settings": ["imagenet", "imagenet+background"] },
+      "efficientnet-b0":        { "pretrained_settings": ["imagenet", "advprop", "noisy-student"] },
+      "efficientnet-b1":        { "pretrained_settings": ["imagenet", "advprop", "noisy-student"] },
+      "efficientnet-b2":        { "pretrained_settings": ["imagenet", "advprop", "noisy-student"] },
+      "efficientnet-b3":        { "pretrained_settings": ["imagenet", "advprop", "noisy-student"] },
+      "efficientnet-b4":        { "pretrained_settings": ["imagenet", "advprop", "noisy-student"] },
+      "efficientnet-b5":        { "pretrained_settings": ["imagenet", "advprop", "noisy-student"] },
+      "efficientnet-b6":        { "pretrained_settings": ["imagenet", "advprop", "noisy-student"] },
+      "efficientnet-b7":        { "pretrained_settings": ["imagenet", "advprop", "noisy-student"] },
+      "mobilenet_v2":           { "pretrained_settings": ["imagenet"] },
+      "xception":               { "pretrained_settings": ["imagenet"] },
+      "mit_b0":                 { "pretrained_settings": ["imagenet"] },
+      "mit_b1":                 { "pretrained_settings": ["imagenet"] },
+      "mit_b2":                 { "pretrained_settings": ["imagenet"] },
+      "mit_b3":                 { "pretrained_settings": ["imagenet"] },
+      "mit_b4":                 { "pretrained_settings": ["imagenet"] },
+      "mit_b5":                 { "pretrained_settings": ["imagenet"] },
+      "mobileone_s0":           { "pretrained_settings": ["imagenet"] },
+      "mobileone_s1":           { "pretrained_settings": ["imagenet"] },
+      "mobileone_s2":           { "pretrained_settings": ["imagenet"] },
+      "mobileone_s3":           { "pretrained_settings": ["imagenet"] },
+      "mobileone_s4":           { "pretrained_settings": ["imagenet"] }
+    }
+  },
+  "albumentations": {
+    "transforms": {
+      "HorizontalFlip":             { "module": "albumentations.HorizontalFlip",             "params": {} },
+      "VerticalFlip":               { "module": "albumentations.VerticalFlip",               "params": {} },
+      "RandomRotate90":             { "module": "albumentations.RandomRotate90",             "params": {} },
+      "Transpose":                  { "module": "albumentations.Transpose",                  "params": {} },
+      "RandomCrop":                 { "module": "albumentations.RandomCrop",                 "params": { "height": { "default": 512 }, "width": { "default": 512 } } },
+      "RandomBrightnessContrast":   { "module": "albumentations.RandomBrightnessContrast",   "params": { "brightness_limit": { "default": 0.2 }, "contrast_limit": { "default": 0.2 } } },
+      "GaussianBlur":               { "module": "albumentations.GaussianBlur",               "params": { "blur_limit": { "default": 7 } } },
+      "GaussNoise":                 { "module": "albumentations.GaussNoise",                 "params": { "var_limit": { "default": 10.0 } } },
+      "ShiftScaleRotate":           { "module": "albumentations.ShiftScaleRotate",           "params": { "shift_limit": { "default": 0.05 }, "scale_limit": { "default": 0.1 }, "rotate_limit": { "default": 45 } } },
+      "GridDistortion":             { "module": "albumentations.GridDistortion",             "params": {} },
+      "ElasticTransform":           { "module": "albumentations.ElasticTransform",           "params": { "alpha": { "default": 1 }, "sigma": { "default": 50 } } },
+      "CoarseDropout":              { "module": "albumentations.CoarseDropout",              "params": { "max_holes": { "default": 8 }, "max_height": { "default": 8 }, "max_width": { "default": 8 } } },
+      "Sharpen":                    { "module": "albumentations.Sharpen",                    "params": {} },
+      "CLAHE":                      { "module": "albumentations.CLAHE",                      "params": { "clip_limit": { "default": 4.0 } } }
+    }
+  },
+  "torchmetrics": {
+    "metrics": ["Accuracy", "JaccardIndex", "F1Score", "Precision", "Recall", "Specificity", "AUROC", "CohenKappa", "MatthewsCorrCoef", "ConfusionMatrix"]
+  },
+  "torch": {
+    "optimizers": ["Adadelta", "Adagrad", "Adam", "AdamW", "RMSprop", "SGD", "LBFGS"],
+    "schedulers": ["CosineAnnealingLR", "CosineAnnealingWarmRestarts", "CyclicLR", "ExponentialLR", "MultiStepLR", "OneCycleLR", "ReduceLROnPlateau", "StepLR"]
+  }
+}

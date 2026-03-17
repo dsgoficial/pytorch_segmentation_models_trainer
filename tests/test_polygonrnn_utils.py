@@ -31,7 +31,7 @@ import segmentation_models_pytorch as smp
 import shapely
 import shapely.geometry
 import torch
-from hydra.experimental import compose, initialize
+from hydra import compose, initialize
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.custom_models import models as pytorch_smt_cm
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import PolygonRNNDataset
