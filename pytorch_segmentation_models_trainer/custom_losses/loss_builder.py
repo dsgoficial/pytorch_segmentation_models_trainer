@@ -63,7 +63,7 @@ class LossWrapper(nn.Module):
         if not self.is_custom_loss:
             # Create dummy norm for non-custom losses
             self.norm = nn.Parameter(
-                torch.Tensor([1.0], device='cpu'),
+                torch.tensor([1.0]),
                 requires_grad=False,
             )
     
@@ -247,7 +247,7 @@ def build_loss_from_config(cfg: DictConfig, pre_processes: Optional[List] = None
         logger.info("Using legacy multi_loss configuration")
         # Import here to avoid circular dependency
         from pytorch_segmentation_models_trainer.custom_losses.base_loss import build_combined_loss
-        return build_combined_loss(cfg, pre_processes=pre_processes)
+        return build_combined_loss(cfg)
     
     else:
         raise ValueError(

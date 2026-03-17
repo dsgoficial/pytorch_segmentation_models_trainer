@@ -25,7 +25,7 @@ import albumentations as A
 import hydra
 import torch
 from albumentations.pytorch.transforms import ToTensorV2
-from hydra.experimental import compose, initialize
+from hydra import compose, initialize
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     NaiveModPolyMapperDataset,
     ObjectDetectionDataset,
