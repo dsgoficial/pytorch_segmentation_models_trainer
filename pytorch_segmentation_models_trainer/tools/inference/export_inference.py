@@ -23,9 +23,7 @@ from abc import ABC
 import os
 from typing import Dict, Union
 
-import albumentations as A
 import numpy as np
-import rasterio
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
     ObjectDetectionDataWriter,
     RasterDataWriter,

@@ -19,8 +19,7 @@
  ****
 """
 
-import itertools
-from typing import Dict, List, Tuple, Union
+from typing import List, Tuple, Union
 import numpy as np
 import similaritymeasures as sm
 from shapely.geometry import Polygon, LineString, Point
@@ -28,8 +27,6 @@ from shapely.geometry.base import BaseGeometry
 from shapely.geometry.multipolygon import MultiPolygon
 import torch
 from pytorch_segmentation_models_trainer.utils import polygon_utils, polygonrnn_utils
-from shapely.strtree import STRtree
-import shapely.wkt
 
 
 def iou(y_pred: torch.Tensor, y_true: torch.Tensor, threshold: float) -> float:

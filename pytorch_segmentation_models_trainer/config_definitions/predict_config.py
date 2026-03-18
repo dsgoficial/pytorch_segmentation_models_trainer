@@ -28,6 +28,7 @@ class InferenceImageReaderConfig:
     Configuração do leitor de imagens para inferência.
     Usada pelo predict.py via get_images().
     """
+
     _target_: str = MISSING
     input_csv_path: str = MISSING
     key: str = "image"
@@ -40,10 +41,11 @@ class InferenceProcessorConfig:
     """
     Configuração do processador de inferência single-image.
     Usada pelo predict.py via instantiate_inference_processor().
-    
+
     Nota: model, polygonizer, export_strategy, device, batch_size e mask_bands
     são injetados automaticamente pelo código, não precisam estar no YAML.
     """
+
     _target_: str = MISSING
     model_input_shape: Optional[List[int]] = None
     step_shape: Optional[List[int]] = None
@@ -55,6 +57,7 @@ class ExportStrategyConfig:
     Configuração da estratégia de exportação de inferência.
     Usada pelo predict.py (opcional).
     """
+
     _target_: str = MISSING
     # Campos dependem do tipo de estratégia
 
@@ -65,6 +68,7 @@ class PolygonizerConfig:
     Configuração do polygonizer.
     Usada pelo predict.py via instantiate_polygonizer().
     """
+
     _target_: str = MISSING
     config: Optional[Any] = None
     data_writer: Optional[Any] = None
@@ -74,10 +78,10 @@ class PolygonizerConfig:
 class PredictSingleImageConfig:
     """
     Configuração completa para predict.py (single image processor).
-    
+
     Este config é usado pelo script predict.py que processa imagens
     uma por vez usando inference_processor.process().
-    
+
     Campos injetados automaticamente pelo código:
     - inference_processor.model (de checkpoint)
     - inference_processor.polygonizer (de polygonizer config)
@@ -86,31 +90,32 @@ class PredictSingleImageConfig:
     - inference_processor.batch_size (de hyperparameters.batch_size)
     - inference_processor.mask_bands (de seg_params)
     """
+
     # Checkpoint e modelo
     checkpoint_path: str = MISSING
     device: str = "cuda:0"
-    
+
     # Herda de train config (pl_model, hyperparameters, seg_params)
     pl_model: Any = MISSING
     hyperparameters: Any = MISSING
     seg_params: Optional[Any] = None
-    
+
     # Leitor de imagens
     inference_image_reader: InferenceImageReaderConfig = field(
         default_factory=InferenceImageReaderConfig
     )
-    
+
     # Processador de inferência
     inference_processor: InferenceProcessorConfig = field(
         default_factory=InferenceProcessorConfig
     )
-    
+
     # Polygonizer (opcional)
     polygonizer: Optional[PolygonizerConfig] = None
-    
+
     # Export strategy (opcional)
     export_strategy: Optional[ExportStrategyConfig] = None
-    
+
     # Parâmetros de inferência
     inference_threshold: float = 0.5
     save_inference: bool = True

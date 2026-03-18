@@ -19,11 +19,8 @@
  ****
 """
 
-import itertools
-from pathlib import Path
 from typing import Dict, List, Union
 
-import concurrent.futures
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -32,7 +29,6 @@ from hydra.utils import instantiate
 from shapely.geometry import Polygon
 from pytorch_lightning.utilities.combined_loader import CombinedLoader
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
-from pytorch_segmentation_models_trainer.predict import instantiate_polygonizer
 from pytorch_segmentation_models_trainer.utils import (
     object_detection_utils,
     polygonrnn_utils,
@@ -40,8 +36,6 @@ from pytorch_segmentation_models_trainer.utils import (
 from torch import nn
 from torch.utils.data import DataLoader
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
-
-from pytorch_segmentation_models_trainer.utils.tensor_utils import tensor_dict_to_device
 
 
 class GenericPolyMapperPLModel(pl.LightningModule):
@@ -77,9 +71,9 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             self.cfg.val_dataset.polygon_rnn, _recursive_=False
         )
         self.val_mAP = MeanAveragePrecision()
-        
+
         # Save hyperparameters
-        self.save_hyperparameters(ignore=['model'])
+        self.save_hyperparameters(ignore=["model"])
 
     def get_model(self):
         model = instantiate(self.cfg.model, _recursive_=False)
@@ -193,16 +187,18 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         acc, detached_loss_dict, loss = self._compute_acc_loss(
             obj_det_images, obj_det_targets, polygon_rnn_batch
         )
-        
+
         # Log total loss and accuracy
         self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log("metrics/train_acc", acc, on_step=True, on_epoch=True, prog_bar=True)
-        
+
         # Log individual losses
         for loss_name, loss_value in detached_loss_dict.items():
             if loss_name != "acc":
-                self.log(f"losses/train_{loss_name}", loss_value, on_step=True, on_epoch=True)
-        
+                self.log(
+                    f"losses/train_{loss_name}", loss_value, on_step=True, on_epoch=True
+                )
+
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -214,36 +210,40 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             acc, detached_loss_dict, loss = self._compute_acc_loss(
                 obj_det_images, obj_det_targets, polygon_rnn_batch
             )
-        
+
         # Log loss and accuracy
         self.log("loss/val", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("metrics/val_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
-        
+
         # Log individual losses
         for loss_name, loss_value in detached_loss_dict.items():
             if loss_name != "acc":
-                self.log(f"losses/val_{loss_name}", loss_value, on_step=False, on_epoch=True)
-        
+                self.log(
+                    f"losses/val_{loss_name}", loss_value, on_step=False, on_epoch=True
+                )
+
         # Perform evaluation if enabled
         return_dict = {"loss": loss, "acc": acc}
         if self.perform_evaluation:
             self.model.eval()
             outputs = self.model(obj_det_images)
             metrics_dict_item = self.evaluate_output(batch, outputs)
-            
+
             # Log evaluation metrics
             for metric_name, metric_value in metrics_dict_item.items():
                 if metric_name not in ["intersection", "union"]:
                     if torch.is_tensor(metric_value):
                         self.log(
-                            f"metrics/val_{metric_name}", 
-                            metric_value.mean() if metric_value.numel() > 1 else metric_value,
-                            on_step=False, 
-                            on_epoch=True
+                            f"metrics/val_{metric_name}",
+                            metric_value.mean()
+                            if metric_value.numel() > 1
+                            else metric_value,
+                            on_step=False,
+                            on_epoch=True,
                         )
-            
+
             return_dict.update(metrics_dict_item)
-        
+
         return return_dict
 
     def evaluate_output(

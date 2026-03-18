@@ -19,7 +19,6 @@
  ****
 """
 from abc import ABC, abstractmethod
-from collections import OrderedDict
 import csv
 import dataclasses
 import os
@@ -28,21 +27,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, List
 
-import rasterio
-from omegaconf import MISSING, DictConfig, OmegaConf
+from omegaconf import MISSING, DictConfig
 from pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader import (
     DatasetEntry,
     MaskOutputType,
     RasterFile,
 )
 from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import (
-    FileGeoDF,
-    GeoDF,
-    GeomType,
     GeomTypeEnum,
 )
 from pytorch_segmentation_models_trainer.utils.os_utils import make_path_relative
-from rasterio.plot import reshape_as_image
 from hydra.utils import instantiate
 
 mask_dict = {

@@ -23,8 +23,6 @@
 
 import math
 from functools import partial
-from typing import List, Union
-
 import scipy.interpolate
 import numpy as np
 from omegaconf.listconfig import ListConfig
@@ -32,8 +30,6 @@ import torch
 import torch.distributed
 from torch.nn import functional as F
 import logging
-
-from hydra.utils import instantiate
 
 from pytorch_segmentation_models_trainer.utils import math_utils
 from pytorch_segmentation_models_trainer.custom_losses import loss
@@ -58,7 +54,7 @@ class Loss(torch.nn.Module):
         self.name = name
         self.norm_meter = None
         self.norm = torch.nn.parameter.Parameter(
-            torch.tensor([1.0], dtype=torch.float32, device='cpu'),
+            torch.tensor([1.0], dtype=torch.float32, device="cpu"),
             requires_grad=False,
         )
         self.reset_norm()
@@ -79,7 +75,11 @@ class Loss(torch.nn.Module):
         """
         This method should be used to synchronize loss norms across GPUs when using distributed training
         """
-        if world_size > 1 and torch.distributed.is_available() and torch.distributed.is_initialized():
+        if (
+            world_size > 1
+            and torch.distributed.is_available()
+            and torch.distributed.is_initialized()
+        ):
             try:
                 torch.distributed.all_reduce(self.norm)
                 self.norm /= world_size
@@ -186,7 +186,10 @@ class MultiLoss(torch.nn.Module):
             loss_i, extra_dict_i = loss_func_i(
                 pred_batch, gt_batch, normalize=normalize
             )
-            if isinstance(weight_i, scipy.interpolate.interpolate.interp1d) and epoch is not None:
+            if (
+                isinstance(weight_i, scipy.interpolate.interpolate.interp1d)
+                and epoch is not None
+            ):
                 weight_scalar = float(weight_i(epoch))
                 current_weight = weight_scalar
             else:
@@ -199,7 +202,7 @@ class MultiLoss(torch.nn.Module):
     def __repr__(self):
         ret = "\n\t".join([str(loss_func) for loss_func in self.loss_funcs])
         return "{}:\n\t{}".format(self.__class__.__name__, ret)
-    
+
     def set_norm_updated(self, updated):
         self.norm_updated = updated
 
@@ -240,8 +243,10 @@ class SegLoss(Loss):
                 if not self.use_mixed_precision
                 else F.binary_cross_entropy_with_logits
             )
-        else: 
-            self.cross_entropy_func = torch.nn.CrossEntropyLoss(label_smoothing=smooth_factor)
+        else:
+            self.cross_entropy_func = torch.nn.CrossEntropyLoss(
+                label_smoothing=smooth_factor
+            )
         if use_label_smooth:
             self.cross_entropy_func = loss.smooth_cross_entropy_loss
         if use_mixup:
@@ -260,11 +265,17 @@ class SegLoss(Loss):
         @param gt_batch: key "gt_polygons_image" is shape (N, C_gt, H, W)
         @return:
         """
-        pred_seg = pred_batch["seg"] if isinstance(pred_batch, dict) and "seg" in pred_batch else pred_batch
-        gt_seg = gt_batch["gt_polygons_image"][:, self.gt_channel_selector, ...] if isinstance(gt_batch, dict) and "gt_polygons_image" in gt_batch else gt_batch[:, self.gt_channel_selector, ...]
-        params = {
-            "reduction": "mean"
-        }
+        pred_seg = (
+            pred_batch["seg"]
+            if isinstance(pred_batch, dict) and "seg" in pred_batch
+            else pred_batch
+        )
+        gt_seg = (
+            gt_batch["gt_polygons_image"][:, self.gt_channel_selector, ...]
+            if isinstance(gt_batch, dict) and "gt_polygons_image" in gt_batch
+            else gt_batch[:, self.gt_channel_selector, ...]
+        )
+        params = {"reduction": "mean"}
         if isinstance(gt_batch, dict) and "seg_loss_weights" in gt_batch:
             weights = gt_batch["seg_loss_weights"][:, self.gt_channel_selector, ...]
             params["weight"] = weights
@@ -278,7 +289,7 @@ class SegLoss(Loss):
                     gt_batch["mixup_y_b"],
                     gt_batch["mixup_lam"],
                 ),
-                **params
+                **params,
             )
         )
 

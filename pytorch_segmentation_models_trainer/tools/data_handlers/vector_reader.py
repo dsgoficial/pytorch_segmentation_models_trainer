@@ -24,24 +24,17 @@ import functools
 import itertools
 import operator
 import os
-from collections import defaultdict
-from dataclasses import MISSING, dataclass, field
+from dataclasses import MISSING, dataclass
 from enum import Enum
-from multiprocessing import Manager
 from pathlib import Path
-from typing import List, Union
 
 import fiona
 import geopandas
 import numpy as np
 import psycopg2
-from affine import Affine
 from bidict import bidict
 from geopandas import GeoDataFrame, GeoSeries
 from pycocotools.coco import COCO
-from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import (
-    Executor,
-)
 from shapely.geometry import (
     GeometryCollection,
     LineString,
@@ -50,7 +43,6 @@ from shapely.geometry import (
     MultiPolygon,
     Point,
     Polygon,
-    base,
 )
 from tqdm import tqdm
 

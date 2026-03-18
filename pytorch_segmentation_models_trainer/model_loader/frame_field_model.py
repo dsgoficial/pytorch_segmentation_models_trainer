@@ -21,10 +21,7 @@
  ****
 """
 import copy
-from logging import log
 from collections import OrderedDict
-import os
-from pathlib import Path
 from pytorch_toolbelt.inference.tiles import TileMerger
 import torch
 import torch.nn as nn
@@ -33,17 +30,17 @@ from hydra.utils import instantiate
 from omegaconf.dictconfig import DictConfig
 from pytorch_segmentation_models_trainer.custom_losses.loss import mixup_data
 from pytorch_segmentation_models_trainer.custom_losses.base_loss import MultiLoss
-from pytorch_segmentation_models_trainer.custom_losses.loss_builder import build_loss_from_config
+from pytorch_segmentation_models_trainer.custom_losses.loss_builder import (
+    build_loss_from_config,
+)
 from pytorch_segmentation_models_trainer.model_loader.model import Model
 from segmentation_models_pytorch.base.initialization import (
     initialize_decoder,
     initialize_head,
 )
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
-from pytorch_segmentation_models_trainer.predict import instantiate_polygonizer
 from pytorch_segmentation_models_trainer.utils import tensor_utils
 from tqdm import tqdm
-import concurrent.futures
 import kornia as K
 
 
@@ -284,11 +281,11 @@ class FrameFieldSegmentationPLModel(Model):
             mean_iou = torch.mean(iou)
             # Log with step prefix for proper grouping
             self.log(
-                f"iou/{step_prefix}_IoU_{iou_threshold}", 
+                f"iou/{step_prefix}_IoU_{iou_threshold}",
                 mean_iou,
                 on_step=False,
                 on_epoch=True,
-                prog_bar=False
+                prog_bar=False,
             )
 
     def compute_loss_norms(self, dl, total_batches):
@@ -330,7 +327,7 @@ class FrameFieldSegmentationPLModel(Model):
             else self.gpu_train_transform(batch["image"])
         )
         pred = self.model(batch["image"])
-        
+
         if self.use_mixup:
             (
                 batch["mixup_image"],
@@ -344,29 +341,29 @@ class FrameFieldSegmentationPLModel(Model):
                 use_cuda=False if self.cfg.device == "cpu" else True,
             )
             batch["mixup_pred"] = self.model(batch["mixup_image"])
-        
+
         loss, individual_metrics_dict, extra_dict = self.loss_function(
             pred, batch, epoch=self.current_epoch
         )
-        
+
         # Log main loss
         self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True)
-        
+
         # Log individual losses with proper prefixing
         for key, value in individual_metrics_dict.items():
             self.log(f"losses/train_{key}", value, on_step=True, on_epoch=True)
-        
+
         # Compute and log IoU metrics
         if "seg" in pred:
             y_pred = pred["seg"][:, 0, ...]
             y_true = batch["gt_polygons_image"][:, 0, ...]
             self.compute_iou_metrics(y_pred, y_true, step_prefix="train")
-            
+
             # Log torchmetrics if available
-            if hasattr(self, 'train_metrics'):
+            if hasattr(self, "train_metrics"):
                 metrics_output = self.train_metrics(y_pred, y_true.long())
                 self.log_dict(metrics_output, on_step=True, on_epoch=True)
-        
+
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -379,25 +376,25 @@ class FrameFieldSegmentationPLModel(Model):
         loss, individual_metrics_dict, extra_dict = self.loss_function(
             pred, batch, epoch=self.current_epoch
         )
-        
+
         # Log main loss
         self.log("loss/val", loss, on_step=False, on_epoch=True, prog_bar=True)
-        
+
         # Log individual losses with proper prefixing
         for key, value in individual_metrics_dict.items():
             self.log(f"losses/val_{key}", value, on_step=False, on_epoch=True)
-        
+
         # Compute and log IoU metrics
         if "seg" in pred:
             y_pred = pred["seg"][:, 0, ...]
             y_true = batch["gt_polygons_image"][:, 0, ...]
             self.compute_iou_metrics(y_pred, y_true, step_prefix="val")
-            
+
             # Log torchmetrics if available
-            if hasattr(self, 'val_metrics'):
+            if hasattr(self, "val_metrics"):
                 metrics_output = self.val_metrics(y_pred, y_true.long())
                 self.log_dict(metrics_output, on_step=False, on_epoch=True)
-        
+
         return loss
 
     # Removed training_epoch_end and validation_epoch_end

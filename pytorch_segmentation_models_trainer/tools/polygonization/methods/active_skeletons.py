@@ -25,20 +25,15 @@ import functools
 from typing import List
 import numpy as np
 import torch
-import kornia
 import shapely
 import skimage
 import skimage.measure
 from functools import partial
 import logging
 import skan
-import tqdm
 from pytorch_segmentation_models_trainer.optimizers.poly_optimizers import (
-    PolygonAlignLoss,
-    TensorPolyOptimizer,
     TensorSkeletonOptimizer,
 )
-from pytorch_segmentation_models_trainer.tools.visualization import crossfield_plot
 from pytorch_segmentation_models_trainer.utils.math_utils import compute_crossfield_uv
 from pytorch_segmentation_models_trainer.utils import (
     frame_field_utils,
@@ -48,12 +43,10 @@ from pytorch_segmentation_models_trainer.utils import (
 from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor_tools import (
     Paths,
     Skeleton,
-    TensorSkeleton,
     skeletons_to_tensorskeleton,
     tensorskeleton_to_skeletons,
 )
 from pytorch_segmentation_models_trainer.tools.polygonization import polygonize_utils
-from omegaconf.listconfig import ListConfig
 
 logger = logging.getLogger(__name__)
 

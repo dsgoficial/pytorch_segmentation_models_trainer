@@ -20,17 +20,10 @@
  *   https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning/     *
  ****
 """
-import os
-import sys
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
-import skimage.io
 
 from pytorch_segmentation_models_trainer.tools.visualization.crossfield_plot import (
-    get_tensorboard_image_seg_display,
-    get_image_plot_crossfield,
-    plot_crossfield,
     save_poly_viz,
 )
 

@@ -19,7 +19,6 @@
  ****
 """
 import logging
-import albumentations as A
 import pytorch_lightning as pl
 import torchmetrics
 import torch
@@ -28,7 +27,7 @@ from hydra.utils import instantiate
 
 from torch.utils.data import DataLoader
 
-from typing import List, Any, Union, Dict, Tuple
+from typing import Any, Union, Dict, Tuple
 from pytorch_segmentation_models_trainer.utils.model_utils import replace_activation
 from pytorch_segmentation_models_trainer.custom_losses.base_loss import MultiLoss
 
@@ -44,16 +43,26 @@ class Model(pl.LightningModule):
         self.model = self.get_model()
         if inference_mode:
             return
-        self.train_ds = instantiate(self.cfg.train_dataset, _recursive_=False) if "train_dataset" in self.cfg else None
-        self.val_ds = instantiate(self.cfg.val_dataset, _recursive_=False) if "val_dataset" in self.cfg else None
+        self.train_ds = (
+            instantiate(self.cfg.train_dataset, _recursive_=False)
+            if "train_dataset" in self.cfg
+            else None
+        )
+        self.val_ds = (
+            instantiate(self.cfg.val_dataset, _recursive_=False)
+            if "val_dataset" in self.cfg
+            else None
+        )
         self.loss_function = self.get_loss_function()
-        
+
         # NEW: Determine if using compound loss (MultiLoss)
         self.use_compound_loss = isinstance(self.loss_function, MultiLoss)
-        
+
         # Save hyperparameters for better checkpointing
-        self.save_hyperparameters(ignore=['model', 'loss_function', 'train_ds', 'val_ds'])
-        
+        self.save_hyperparameters(
+            ignore=["model", "loss_function", "train_ds", "val_ds"]
+        )
+
         if "metrics" in self.cfg:
             metrics = torchmetrics.MetricCollection(
                 [instantiate(i, _recursive_=False) for i in self.cfg.metrics]
@@ -61,7 +70,7 @@ class Model(pl.LightningModule):
             # Use forward slash for grouping in TensorBoard
             self.train_metrics = metrics.clone(prefix="train/")
             self.val_metrics = metrics.clone(prefix="val/")
-        
+
         self.gpu_train_transform = (
             None
             if "gpu_augmentation_list" not in self.cfg.train_dataset
@@ -75,18 +84,20 @@ class Model(pl.LightningModule):
             else self.get_gpu_augmentations(self.cfg.val_dataset.gpu_augmentation_list)
         )
         self.steps_per_epoch = None
-        
+
         # NEW: Log loss configuration
         logger.info(f"Initialized Model with loss function: {self.loss_function}")
         if self.use_compound_loss:
-            logger.info(f"Using compound loss with {len(self.loss_function.loss_funcs)} components")
+            logger.info(
+                f"Using compound loss with {len(self.loss_function.loss_funcs)} components"
+            )
         self.check_if_should_normalize()
-    
+
     def setup(self, stage=None):
         """Extract dataset info when dataloaders are ready"""
-        if stage == 'fit' or stage is None:
+        if stage == "fit" or stage is None:
             self._compute_steps_from_config()
-    
+
     def _compute_device_count(self):
         """
         Compute the number of devices that will be used for training.
@@ -94,44 +105,46 @@ class Model(pl.LightningModule):
         """
         device_count = 1  # Default to single device
         accelerator = "auto"  # Default accelerator
-        
+
         # Get accelerator and devices from config
-        if 'hyperparameters' in self.cfg:
-            accelerator = self.cfg.hyperparameters.get('accelerator', 'auto')
-            devices = self.cfg.hyperparameters.get('devices', 'auto')
-        elif 'pl_trainer' in self.cfg:
-            accelerator = self.cfg.pl_trainer.get('accelerator', 'auto')
-            devices = self.cfg.pl_trainer.get('devices', 'auto')
+        if "hyperparameters" in self.cfg:
+            accelerator = self.cfg.hyperparameters.get("accelerator", "auto")
+            devices = self.cfg.hyperparameters.get("devices", "auto")
+        elif "pl_trainer" in self.cfg:
+            accelerator = self.cfg.pl_trainer.get("accelerator", "auto")
+            devices = self.cfg.pl_trainer.get("devices", "auto")
         else:
-            devices = 'auto'
-        
+            devices = "auto"
+
         # Handle different device specifications
-        if devices in ['auto', -1, '-1']:
+        if devices in ["auto", -1, "-1"]:
             # Use all available devices for the accelerator
-            if accelerator in ['gpu', 'cuda', 'auto']:
-                device_count = torch.cuda.device_count() if torch.cuda.is_available() else 1
+            if accelerator in ["gpu", "cuda", "auto"]:
+                device_count = (
+                    torch.cuda.device_count() if torch.cuda.is_available() else 1
+                )
             else:
                 device_count = 1  # CPU, MPS, etc.
-        
+
         elif isinstance(devices, int):
             # Specific number of devices
             device_count = max(1, devices)
-        
-        elif hasattr(devices, '__len__') and not isinstance(devices, str):
+
+        elif hasattr(devices, "__len__") and not isinstance(devices, str):
             # List of device IDs (list, tuple, or OmegaConf ListConfig)
             device_count = len(devices)
-        
+
         elif isinstance(devices, str):
             # Handle string specifications like "0,1" or "2"
-            if ',' in devices:
-                device_count = len(devices.split(','))
+            if "," in devices:
+                device_count = len(devices.split(","))
             else:
                 try:
                     device_count = int(devices)
                 except ValueError:
                     # Fallback for unexpected string formats
                     device_count = 1
-        
+
         return max(1, device_count)  # Ensure at least 1
 
     def _compute_steps_from_config(self):
@@ -141,17 +154,17 @@ class Model(pl.LightningModule):
         """
         try:
             # Get train_dataset config
-            if 'train_dataset' not in self.cfg:
+            if "train_dataset" not in self.cfg:
                 print("WARNING:'train_dataset' not found in config")
                 return None
-            
+
             dataset_cfg = self.cfg.train_dataset
-            
+
             # Get CSV path
-            if 'input_csv_path' not in dataset_cfg:
+            if "input_csv_path" not in dataset_cfg:
                 print("WARNING:'input_csv_path' not found in train_dataset config")
                 return None
-            
+
             csv_path = dataset_cfg.input_csv_path
 
             import pandas as pd
@@ -163,51 +176,51 @@ class Model(pl.LightningModule):
 
             # Use samples_per_epoch if defined (RandomCropSegmentationDataset),
             # otherwise fall back to CSV row count
-            if 'samples_per_epoch' in dataset_cfg:
+            if "samples_per_epoch" in dataset_cfg:
                 dataset_size = dataset_cfg.samples_per_epoch
             else:
                 df = pd.read_csv(csv_path)
                 dataset_size = len(df)
-            
+
             # Get batch size from config (check multiple locations)
             batch_size = None
-            
+
             # Try data_loader.batch_size first
-            if 'data_loader' in dataset_cfg and 'batch_size' in dataset_cfg.data_loader:
+            if "data_loader" in dataset_cfg and "batch_size" in dataset_cfg.data_loader:
                 batch_size = dataset_cfg.data_loader.batch_size
-            
+
             # Fallback to hyperparameters.batch_size
-            if batch_size is None and 'hyperparameters' in self.cfg:
-                batch_size = self.cfg.hyperparameters.get('batch_size')
-            
+            if batch_size is None and "hyperparameters" in self.cfg:
+                batch_size = self.cfg.hyperparameters.get("batch_size")
+
             # Fallback to top-level batch_size
             if batch_size is None:
-                batch_size = self.cfg.get('batch_size')
-            
+                batch_size = self.cfg.get("batch_size")
+
             if batch_size is None:
                 print("WARNING:Could not find batch_size in config")
                 return None
-            
+
             # Compute device count using improved method
             device_count = self._compute_device_count()
-            
+
             # Get gradient accumulation steps
             accumulate_grad_batches = 1
-            
+
             # Check both hyperparameters and pl_trainer config
-            if 'hyperparameters' in self.cfg:
+            if "hyperparameters" in self.cfg:
                 accumulate_grad_batches = self.cfg.hyperparameters.get(
-                    'accumulate_grad_batches', 1
+                    "accumulate_grad_batches", 1
                 )
-            elif 'pl_trainer' in self.cfg:
+            elif "pl_trainer" in self.cfg:
                 accumulate_grad_batches = self.cfg.pl_trainer.get(
-                    'accumulate_grad_batches', 1
+                    "accumulate_grad_batches", 1
                 )
-            
+
             # Calculate steps per epoch
             effective_batch_size = batch_size * accumulate_grad_batches * device_count
             steps_per_epoch = dataset_size // effective_batch_size
-            
+
             # Print summary
             print(f"\n{'='*60}")
             print(f"AUTO-COMPUTED STEPS_PER_EPOCH FROM CONFIG")
@@ -220,12 +233,13 @@ class Model(pl.LightningModule):
             print(f"Effective batch size:   {effective_batch_size:>10}")
             print(f"Steps per epoch:        {steps_per_epoch:>10,}")
             print(f"{'='*60}\n")
-            
+
             return steps_per_epoch
-            
+
         except Exception as e:
             print(f"WARNING: Error computing steps_per_epoch from config: {e}")
             import traceback
+
             traceback.print_exc()
             return None
 
@@ -249,37 +263,45 @@ class Model(pl.LightningModule):
     def get_loss_function(self) -> Union[nn.Module, MultiLoss]:
         """
         Get the loss function from configuration.
-        
+
         Supports three modes:
         1. NEW: Compound loss via loss_params.compound_loss (recommended)
         2. LEGACY: Multi loss via loss_params.multi_loss (backward compatible)
         3. SIMPLE: Direct loss specification via cfg.loss
-        
+
         Returns:
             Loss function (can be MultiLoss or simple nn.Module)
         """
         # Check for compound loss configuration (NEW)
-        if hasattr(self.cfg, 'loss_params') and hasattr(self.cfg.loss_params, 'compound_loss'):
+        if hasattr(self.cfg, "loss_params") and hasattr(
+            self.cfg.loss_params, "compound_loss"
+        ):
             if self.cfg.loss_params.compound_loss is not None:
                 logger.info("Building compound loss from loss_params.compound_loss")
                 from pytorch_segmentation_models_trainer.custom_losses.loss_builder import (
-                    build_compound_loss_from_config
+                    build_compound_loss_from_config,
                 )
-                return build_compound_loss_from_config(self.cfg.loss_params.compound_loss)
-        
+
+                return build_compound_loss_from_config(
+                    self.cfg.loss_params.compound_loss
+                )
+
         # Check for legacy multi_loss configuration
-        if hasattr(self.cfg, 'loss_params') and hasattr(self.cfg.loss_params, 'multi_loss'):
+        if hasattr(self.cfg, "loss_params") and hasattr(
+            self.cfg.loss_params, "multi_loss"
+        ):
             logger.info("Building loss from legacy multi_loss configuration")
             from pytorch_segmentation_models_trainer.custom_losses.loss_builder import (
-                build_loss_from_config
+                build_loss_from_config,
             )
+
             return build_loss_from_config(self.cfg)
-        
+
         # Fall back to simple loss specification
         if "loss" in self.cfg:
             logger.info("Building simple loss from cfg.loss")
             return instantiate(self.cfg.loss, _recursive_=False)
-        
+
         # If nothing is specified, raise an error
         raise ValueError(
             "No loss configuration found. Please specify one of:\n"
@@ -308,38 +330,40 @@ class Model(pl.LightningModule):
         """Configure optimizer and schedulers with automatic OneCycleLR setup"""
         optimizer = self.get_optimizer()
         scheduler_list = []
-        
+
         if "scheduler_list" not in self.cfg:
             return [optimizer], scheduler_list
-        
+
         for item in self.cfg.scheduler_list:
             dict_item = dict(item)
-            
+
             # Check if this is OneCycleLR scheduler
-            scheduler_target = item.scheduler.get('_target_', '')
-            is_one_cycle = 'OneCycleLR' in scheduler_target
-            
+            scheduler_target = item.scheduler.get("_target_", "")
+            is_one_cycle = "OneCycleLR" in scheduler_target
+
             if is_one_cycle:
                 scheduler_config = dict(item.scheduler)
-                
+
                 # Check if steps_per_epoch needs to be set automatically
                 needs_auto_steps = (
-                    'steps_per_epoch' not in scheduler_config or 
-                    scheduler_config.get('steps_per_epoch') in [None, 'auto', -1]
+                    "steps_per_epoch" not in scheduler_config
+                    or scheduler_config.get("steps_per_epoch") in [None, "auto", -1]
                 )
-                
+
                 if needs_auto_steps:
                     # Compute steps_per_epoch from config
                     steps_per_epoch = self._compute_steps_from_config()
-                    
+
                     if steps_per_epoch is not None:
-                        scheduler_config['steps_per_epoch'] = steps_per_epoch
-                        print(f"OK:OneCycleLR: Using steps_per_epoch = {steps_per_epoch:,}")
+                        scheduler_config["steps_per_epoch"] = steps_per_epoch
+                        print(
+                            f"OK:OneCycleLR: Using steps_per_epoch = {steps_per_epoch:,}"
+                        )
                     else:
                         raise ValueError(
-                            "\n" + "="*60 + "\n"
+                            "\n" + "=" * 60 + "\n"
                             "ERROR: Cannot determine steps_per_epoch for OneCycleLR!\n"
-                            "="*60 + "\n"
+                            "=" * 60 + "\n"
                             "Could not automatically detect dataset size.\n"
                             "Please manually specify in your config:\n\n"
                             "scheduler_list:\n"
@@ -351,12 +375,14 @@ class Model(pl.LightningModule):
                             "\n"
                             "To calculate: dataset_size / batch_size\n"
                             "Example: 98201 / 24 = 4092\n"
-                            "="*60
+                            "=" * 60
                         )
                 else:
-                    provided_steps = scheduler_config['steps_per_epoch']
-                    print(f"INFO:OneCycleLR: Using provided steps_per_epoch = {provided_steps:,}")
-                
+                    provided_steps = scheduler_config["steps_per_epoch"]
+                    print(
+                        f"INFO:OneCycleLR: Using provided steps_per_epoch = {provided_steps:,}"
+                    )
+
                 dict_item["scheduler"] = instantiate(
                     scheduler_config, optimizer=optimizer, _recursive_=False
                 )
@@ -365,9 +391,9 @@ class Model(pl.LightningModule):
                 dict_item["scheduler"] = instantiate(
                     item.scheduler, optimizer=optimizer, _recursive_=False
                 )
-            
+
             scheduler_list.append(dict_item)
-        
+
         return [optimizer], scheduler_list
 
     def train_dataloader(self):
@@ -413,17 +439,15 @@ class Model(pl.LightningModule):
         )
 
     def _compute_loss(
-        self, 
-        predicted_masks: torch.Tensor, 
-        masks: torch.Tensor
+        self, predicted_masks: torch.Tensor, masks: torch.Tensor
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], Dict[str, Any]]:
         """
         Compute loss handling both simple and compound loss functions.
-        
+
         Args:
             predicted_masks: Model predictions
             masks: Ground truth masks
-            
+
         Returns:
             Tuple of (total_loss, individual_losses_dict, extra_info_dict)
             For simple losses, individual_losses_dict will be empty
@@ -431,13 +455,12 @@ class Model(pl.LightningModule):
         if self.use_compound_loss:
             # Check config for normalization flag
             should_normalize = True
-            if hasattr(self.cfg, 'loss_params'):
-                if hasattr(self.cfg.loss_params, 'compound_loss'):
+            if hasattr(self.cfg, "loss_params"):
+                if hasattr(self.cfg.loss_params, "compound_loss"):
                     should_normalize = self.cfg.loss_params.compound_loss.get(
-                        'normalize_losses', 
-                        True  # Default to True
+                        "normalize_losses", True  # Default to True
                     )
-            
+
             # Compound loss returns (total_loss, individual_losses, extra_info)
             # Need to handle different batch formats
             if isinstance(masks, dict):
@@ -448,12 +471,12 @@ class Model(pl.LightningModule):
                 # Simple segmentation batch
                 pred_batch = predicted_masks
                 gt_batch = masks
-            
+
             return self.loss_function(
-                pred_batch, 
-                gt_batch, 
+                pred_batch,
+                gt_batch,
                 normalize=should_normalize,  # Use config flag
-                epoch=self.current_epoch
+                epoch=self.current_epoch,
             )
         else:
             # Simple loss just returns scalar
@@ -465,24 +488,31 @@ class Model(pl.LightningModule):
         images, masks = batch.values()
         masks = masks.long()
         predicted_masks = self(images)
-        
+
         # Compute loss (handles both simple and compound)
         loss, individual_losses, extra_info = self._compute_loss(predicted_masks, masks)
-        
+
         # Log total loss
-        self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        
+        self.log(
+            "loss/train",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+
         # NEW: Log individual losses if using compound loss
         if individual_losses:
             for loss_name, loss_value in individual_losses.items():
                 self.log(
-                    f"losses/train_{loss_name}", 
-                    loss_value, 
-                    on_step=True, 
+                    f"losses/train_{loss_name}",
+                    loss_value,
+                    on_step=True,
                     on_epoch=True,
-                    sync_dist=False
+                    sync_dist=False,
                 )
-        
+
         # NEW: Log extra info if available
         if extra_info:
             for loss_name, extra_dict in extra_info.items():
@@ -492,15 +522,21 @@ class Model(pl.LightningModule):
                         value,
                         on_step=True,
                         on_epoch=True,
-                        sync_dist=False
+                        sync_dist=False,
                     )
-        
+
         # Compute and log metrics - automatically prefixed with train/
-        if hasattr(self, 'train_metrics'):
-            preds_for_metrics = predicted_masks.squeeze(1) if predicted_masks.ndim == 4 and predicted_masks.shape[1] == 1 else predicted_masks
+        if hasattr(self, "train_metrics"):
+            preds_for_metrics = (
+                predicted_masks.squeeze(1)
+                if predicted_masks.ndim == 4 and predicted_masks.shape[1] == 1
+                else predicted_masks
+            )
             metrics = self.train_metrics(preds_for_metrics, masks)
-            self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
-        
+            self.log_dict(
+                metrics, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True
+            )
+
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -508,13 +544,20 @@ class Model(pl.LightningModule):
         images, masks = batch.values()
         masks = masks.long()
         predicted_masks = self(images)
-        
+
         # Compute loss (handles both simple and compound)
         loss, individual_losses, extra_info = self._compute_loss(predicted_masks, masks)
-        
+
         # Log total loss
-        self.log("loss/val", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-        
+        self.log(
+            "loss/val",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+
         # NEW: Log individual losses if using compound loss
         if individual_losses:
             for loss_name, loss_value in individual_losses.items():
@@ -523,9 +566,9 @@ class Model(pl.LightningModule):
                     loss_value,
                     on_step=False,
                     on_epoch=True,
-                    sync_dist=False
+                    sync_dist=False,
                 )
-        
+
         # NEW: Log extra info if available
         if extra_info:
             for loss_name, extra_dict in extra_info.items():
@@ -535,28 +578,34 @@ class Model(pl.LightningModule):
                         value,
                         on_step=False,
                         on_epoch=True,
-                        sync_dist=False
+                        sync_dist=False,
                     )
-        
+
         # Compute and log metrics - automatically prefixed with val/
-        if hasattr(self, 'val_metrics'):
-            preds_for_metrics = predicted_masks.squeeze(1) if predicted_masks.ndim == 4 and predicted_masks.shape[1] == 1 else predicted_masks
+        if hasattr(self, "val_metrics"):
+            preds_for_metrics = (
+                predicted_masks.squeeze(1)
+                if predicted_masks.ndim == 4 and predicted_masks.shape[1] == 1
+                else predicted_masks
+            )
             metrics = self.val_metrics(preds_for_metrics, masks)
-            self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
-        
+            self.log_dict(
+                metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True
+            )
+
         return loss
-    
+
     def check_if_should_normalize(self):
         self.should_normalize = False
-        if hasattr(self.cfg, 'loss_params') and hasattr(self.cfg.loss_params, 'compound_loss'):
+        if hasattr(self.cfg, "loss_params") and hasattr(
+            self.cfg.loss_params, "compound_loss"
+        ):
             self.should_normalize = self.cfg.loss_params.compound_loss.get(
-                'normalize_losses', 
-                True  # Default to True
+                "normalize_losses", True  # Default to True
             )
         return self.should_normalize
 
     # Removed training_epoch_end and validation_epoch_end
     # Lightning 2.0+ automatically aggregates metrics
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        return self(batch) 
-    
+        return self(batch)

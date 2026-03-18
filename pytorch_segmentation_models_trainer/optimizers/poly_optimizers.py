@@ -23,7 +23,6 @@
 
 import logging
 import torch
-import tqdm
 from pytorch_segmentation_models_trainer.custom_losses.crossfield_losses import (
     AlignLoss,
 )

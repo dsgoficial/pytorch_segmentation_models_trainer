@@ -31,7 +31,6 @@ from typing import Any, Dict, List
 import numpy as np
 import pandas as pd
 import rasterio
-import shapely
 from affine import Affine
 from bidict import bidict
 from geopandas.geoseries import GeoSeries

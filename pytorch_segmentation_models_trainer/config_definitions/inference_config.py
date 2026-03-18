@@ -27,6 +27,7 @@ class DataLoaderConfig:
     """
     Configuração do DataLoader para inferência.
     """
+
     num_workers: int = 4
     prefetch_factor: int = 2
 
@@ -37,6 +38,7 @@ class BuildCSVFromFolderConfig:
     Configuração para construir CSV automaticamente de pasta de imagens.
     Usado pelo predict_from_batch.py.
     """
+
     enabled: bool = False
     images_folder: str = MISSING
     image_pattern: str = "*.tif"
@@ -54,23 +56,22 @@ class InferenceDatasetConfig:
     """
     Configuração do dataset para inferência.
     Usada pelo predict_from_batch.py.
-    
+
     Suporta CSV existente ou construção automática.
     """
+
     # Modo 1: CSV existente
     input_csv_path: str = MISSING
     root_dir: Optional[str] = None
-    
+
     # Modo 2: Construir CSV de pasta
     build_csv_from_folder: BuildCSVFromFolderConfig = field(
         default_factory=BuildCSVFromFolderConfig
     )
-    
+
     # DataLoader settings
-    data_loader: DataLoaderConfig = field(
-        default_factory=DataLoaderConfig
-    )
-    
+    data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+
     # Opcional: limitar número de linhas
     n_first_rows_to_read: Optional[int] = None
 

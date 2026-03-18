@@ -23,14 +23,12 @@
 
 from collections import defaultdict
 from typing import Callable, List, Optional, Union, Tuple, Dict
-from PIL import Image, ImageDraw
 import numpy as np
 from shapely.geometry.collection import GeometryCollection
 import torch
 import itertools
 from shapely.geometry import Polygon, LineString, Point, MultiPolygon, box
 from shapely.geometry.base import BaseGeometry
-import cv2
 from shapely.validation import make_valid
 
 

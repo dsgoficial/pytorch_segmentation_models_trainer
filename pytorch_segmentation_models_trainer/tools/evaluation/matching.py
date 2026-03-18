@@ -18,7 +18,7 @@
  *                                                                         *
  ****
 """
-from typing import Callable, DefaultDict, Dict, List, Tuple, Union
+from typing import Callable, Dict, List, Tuple, Union
 import shapely
 import numpy as np
 from shapely.geometry import Polygon, Point

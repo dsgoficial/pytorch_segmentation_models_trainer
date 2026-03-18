@@ -20,27 +20,17 @@
  *   https://github.com/AlexMa011/pytorch-polygon-rnn                      *
  ****
 """
-from collections import OrderedDict
-from logging import log
 import os
 from pathlib import Path
-from typing import Dict
 
-import segmentation_models_pytorch as smp
 import torch
 import torch.nn as nn
 import torch.nn.init
 from torch.nn.modules.loss import _Loss
 import torch.utils.model_zoo as model_zoo
 import wget
-from hydra.utils import instantiate
-from omegaconf.dictconfig import DictConfig
-from pytorch_segmentation_models_trainer.custom_metrics import metrics
-from pytorch_segmentation_models_trainer.model_loader.model import Model
-from pytorch_segmentation_models_trainer.utils import polygonrnn_utils, tensor_utils
 from torch import nn
 from torch.autograd import Variable
-from tqdm import tqdm
 
 current_dir = os.path.dirname(__file__)
 

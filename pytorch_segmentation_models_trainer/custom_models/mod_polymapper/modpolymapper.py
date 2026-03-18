@@ -23,7 +23,7 @@ from torch import nn
 from torch.nn.modules.loss import _Loss
 from torchvision.models.detection.faster_rcnn import FasterRCNN
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
-from torchvision.ops import RoIAlign, roi_align
+from torchvision.ops import roi_align
 from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import (
     make_basic_conv_block,
     PolygonRNN,

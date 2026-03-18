@@ -22,20 +22,13 @@
 import os
 import unittest
 import warnings
-from pathlib import Path
 
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
-import numpy as np
 import torch
-import matplotlib.pyplot as plt
-
-import torchvision.transforms.functional as F
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     ObjectDetectionDataset,
 )
-from numpy.testing import assert_array_equal
-from parameterized import parameterized
 from pytorch_segmentation_models_trainer.utils.os_utils import (
     create_folder,
     remove_folder,

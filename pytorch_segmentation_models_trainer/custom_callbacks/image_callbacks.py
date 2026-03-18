@@ -21,12 +21,15 @@
 import datetime
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Dict, List, Optional, Union
 
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
 import matplotlib
-matplotlib.use("Agg")  # Backend nao-interativo — evita "main thread is not in main loop"
+
+matplotlib.use(
+    "Agg"
+)  # Backend nao-interativo — evita "main thread is not in main loop"
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.colors import ListedColormap
@@ -35,7 +38,6 @@ import pytorch_lightning as pl
 import torch
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor
-import threading
 from queue import Queue
 import time
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
@@ -114,7 +116,9 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
             Path(self.output_path).mkdir(parents=True, exist_ok=True)
 
     @rank_zero_only
-    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+    def on_validation_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ):
         if not self.save_outputs:
             return
         val_ds = pl_module.val_dataloader().dataset
@@ -152,7 +156,9 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
 
 class FrameFieldResultCallback(ImageSegmentationResultCallback):
     @rank_zero_only
-    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+    def on_validation_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ):
         if not self.save_outputs:
             return
         val_ds = pl_module.val_dataloader()
@@ -204,7 +210,9 @@ class FrameFieldResultCallback(ImageSegmentationResultCallback):
 
 class FrameFieldOverlayedResultCallback(ImageSegmentationResultCallback):
     @rank_zero_only
-    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+    def on_validation_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ):
         if not self.save_outputs:
             return
         val_ds = pl_module.val_dataloader()
@@ -262,7 +270,9 @@ class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
         self.threshold = threshold
 
     @rank_zero_only
-    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+    def on_validation_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ):
         if not self.save_outputs:
             return
         val_ds = pl_module.val_dataloader()
@@ -335,7 +345,9 @@ class PolygonRNNResultCallback(ImageSegmentationResultCallback):
         return saved_image
 
     @rank_zero_only
-    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+    def on_validation_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ):
         if not self.save_outputs:
             return
         val_ds = pl_module.val_dataloader()
@@ -394,7 +406,9 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
         self.n_samples = 16 if n_samples is None else n_samples
 
     @rank_zero_only
-    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+    def on_validation_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ):
         val_ds = pl_module.val_dataloader().loaders  # type: ignore
         current_item = 0
         prepared_input = val_ds[
@@ -492,6 +506,7 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
         plt.close(fig)
         return saved_image
 
+
 class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
     def __init__(
         self,
@@ -501,7 +516,7 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         norm_params: Optional[Dict] = None,
         log_every_k_epochs: int = 1,
         class_colors: Optional[List[str]] = None,
-        colormap: str = 'tab10',
+        colormap: str = "tab10",
         num_classes: Optional[int] = None,
         band_indices: Optional[List[int]] = None,
         alpha_mask: float = 0.7,
@@ -513,7 +528,7 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
     ) -> None:
         """
         Enhanced callback for image segmentation visualization with thread-safe batch processing.
-        
+
         Args:
             n_samples: Number of samples to visualize
             output_path: Path to save outputs
@@ -539,29 +554,29 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         self.save_outputs = False
         self.log_every_k_epochs = log_every_k_epochs
         self.verbose = verbose
-        
+
         # Color and class configuration
         self.colormap_name = colormap
         self.num_classes = num_classes
         self.alpha_mask = alpha_mask
         self.show_class_legend = show_class_legend
         self.class_names = class_names
-        
+
         # Band selection for RGB visualization
         self.band_indices = band_indices if band_indices is not None else [0, 1, 2]
-        
+
         # Setup class colors and create matplotlib colormap
         self.class_colors = self._setup_class_colors(class_colors, num_classes)
         self.cmap, self.norm = self._create_colormap()
-        
+
         # Performance optimizations with thread safety
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.save_futures = []
         self.save_dpi = save_dpi
-        
+
         # Thread-safe queue for TensorBoard logging (only on main thread)
         self.tb_log_queue = Queue()
-        
+
         # Turn off interactive plotting for better performance
         plt.ioff()
 
@@ -581,23 +596,34 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
             secs = seconds % 60
             return f"{mins}m {secs:.1f}s"
 
-    def _setup_class_colors(self, class_colors: Optional[List[str]], num_classes: Optional[int]) -> List[str]:
+    def _setup_class_colors(
+        self, class_colors: Optional[List[str]], num_classes: Optional[int]
+    ) -> List[str]:
         """Setup colors for each class."""
         if class_colors is not None:
             return class_colors
-        
+
         if num_classes is None:
             num_classes = 10
-            
+
         cmap = plt.get_cmap(self.colormap_name)
         colors = []
-        
+
         is_categorical = self.colormap_name in [
-            'tab10', 'tab20', 'tab20b', 'tab20c', 
-            'Set1', 'Set2', 'Set3', 'Paired', 
-            'Accent', 'Dark2', 'Pastel1', 'Pastel2'
+            "tab10",
+            "tab20",
+            "tab20b",
+            "tab20c",
+            "Set1",
+            "Set2",
+            "Set3",
+            "Paired",
+            "Accent",
+            "Dark2",
+            "Pastel1",
+            "Pastel2",
         ]
-        
+
         for i in range(num_classes):
             if is_categorical:
                 rgba_color = cmap(i % cmap.N)
@@ -607,10 +633,10 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
                 else:
                     color_val = 0.1 + (i / (num_classes - 1)) * 0.8
                 rgba_color = cmap(color_val)
-            
+
             hex_color = mcolors.rgb2hex(rgba_color[:3])
             colors.append(hex_color)
-        
+
         return colors
 
     def _create_colormap(self):
@@ -621,34 +647,38 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         norm = mcolors.Normalize(vmin=0, vmax=num_colors)
         return cmap, norm
 
-    def prepare_image_to_plot(self, image: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
+    def prepare_image_to_plot(
+        self, image: Union[np.ndarray, torch.Tensor]
+    ) -> np.ndarray:
         """Prepare image for plotting, ensuring RGB format."""
         # Convert to numpy once if it's a tensor
         if isinstance(image, torch.Tensor):
             image = image.cpu().numpy()
-        
+
         if len(image.shape) == 4:
             image = image.squeeze(0)
-        
+
         # Detect channel order
-        if image.shape[0] <= 20 and image.shape[0] < min(image.shape[1], image.shape[2]):
+        if image.shape[0] <= 20 and image.shape[0] < min(
+            image.shape[1], image.shape[2]
+        ):
             channels_first = True
         else:
             channels_first = False
-        
+
         # Ensure channels-first for denormalization
         if not channels_first:
             image = np.moveaxis(image, -1, 0)
-        
+
         # Denormalize
         if self.normalized_input:
             image = denormalize_np_array(image, **self.norm_params)
-        
+
         # Convert to channels-last
         image = np.moveaxis(image, 0, -1)
-        
+
         num_channels = image.shape[-1]
-        
+
         # Select RGB bands
         if num_channels == 1:
             image = np.repeat(image, 3, axis=-1)
@@ -661,16 +691,16 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
                 image = image[:, :, valid_indices[:3]]
             else:
                 image = image[:, :, :3]
-        
+
         # Normalize to [0, 1] using min-max scaling
         image_min = image.min()
         image_max = image.max()
-        
+
         if image_max > image_min:
             image = (image - image_min) / (image_max - image_min)
         else:
             image = np.zeros_like(image)
-        
+
         return image
 
     def prepare_mask_to_plot(self, mask: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
@@ -678,26 +708,30 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         # Convert to numpy once if it's a tensor
         if isinstance(mask, torch.Tensor):
             mask = mask.cpu().numpy()
-        
+
         if len(mask.shape) == 4:
             mask = mask.squeeze(0)
-        
+
         # Handle multi-channel masks (convert to class indices)
         if len(mask.shape) == 3:
-            if mask.shape[0] <= 20 and mask.shape[0] < min(mask.shape[1], mask.shape[2]):
+            if mask.shape[0] <= 20 and mask.shape[0] < min(
+                mask.shape[1], mask.shape[2]
+            ):
                 mask = np.argmax(mask, axis=0)
             else:
                 mask = np.argmax(mask, axis=-1)
-        
+
         mask = np.squeeze(mask).astype(np.uint8)
         return mask
 
-    def apply_colormap_to_axes(self, axarr, mask_indices: List[int], masks: List[np.ndarray]):
+    def apply_colormap_to_axes(
+        self, axarr, mask_indices: List[int], masks: List[np.ndarray]
+    ):
         """Apply colormap to specific axes after generate_visualization."""
         for idx, mask in zip(mask_indices, masks):
             ax = axarr[idx] if isinstance(axarr, np.ndarray) else axarr
             ax.clear()
-            ax.imshow(mask, cmap=self.cmap, norm=self.norm, interpolation='nearest')
+            ax.imshow(mask, cmap=self.cmap, norm=self.norm, interpolation="nearest")
             ax.set_xticks([])
             ax.set_yticks([])
             if idx == 1:
@@ -711,19 +745,21 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         sm = plt.cm.ScalarMappable(cmap=self.cmap, norm=self.norm)
         sm.set_array([])
         cbar = fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
-        
+
         num_classes = len(self.class_colors)
         ticks = list(range(num_classes))
-        
+
         if self.class_names and len(self.class_names) == num_classes:
             labels = self.class_names
         else:
-            labels = [f'Class {c}' for c in ticks]
-        
+            labels = [f"Class {c}" for c in ticks]
+
         cbar.set_ticks([t + 0.5 for t in ticks])
         cbar.set_ticklabels(labels)
 
-    def _save_visualization_to_disk(self, fig, plot_title: str, current_epoch: int) -> Optional[str]:
+    def _save_visualization_to_disk(
+        self, fig, plot_title: str, current_epoch: int
+    ) -> Optional[str]:
         """Save visualization to disk (runs in worker thread). Returns saved path."""
         try:
             saved_image = self.save_plot_to_disk(fig, plot_title, current_epoch)
@@ -735,7 +771,9 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
             # Always close the figure to free memory
             plt.close(fig)
 
-    def log_data_to_tensorboard(self, saved_image: str, image_path: str, logger, current_epoch: int):
+    def log_data_to_tensorboard(
+        self, saved_image: str, image_path: str, logger, current_epoch: int
+    ):
         """Log visualization to tensorboard (MUST run on main thread)."""
         try:
             image = Image.open(saved_image)
@@ -766,7 +804,7 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         self.output_path = os.path.join(trainer.log_dir, "image_logs")
         if not os.path.exists(self.output_path):
             Path(self.output_path).mkdir(parents=True, exist_ok=True)
-        
+
         self._log("=" * 80, prefix="")
         self._log("CALLBACK INITIALIZATION - Color Configuration:", prefix="🎨")
         self._log(f"Number of classes: {self.num_classes}", prefix="  ")
@@ -774,101 +812,140 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         self._log(f"Class colors list: {self.class_colors}", prefix="  ")
         self._log(f"Colormap: {self.colormap_name}", prefix="  ")
         self._log(f"Class names: {self.class_names}", prefix="  ")
-        self._log(f"Normalization: vmin={self.norm.vmin}, vmax={self.norm.vmax}", prefix="  ")
+        self._log(
+            f"Normalization: vmin={self.norm.vmin}, vmax={self.norm.vmax}", prefix="  "
+        )
         self._log(f"Parallel workers: {self.executor._max_workers}", prefix="  ")
         self._log(f"Save DPI: {self.save_dpi}", prefix="  ")
         self._log(f"Output path: {self.output_path}", prefix="  ")
         self._log("-" * 80, prefix="")
-        self._log(f"Expected mask values: 0 to {self.num_classes - 1} (integers)", prefix="  ")
+        self._log(
+            f"Expected mask values: 0 to {self.num_classes - 1} (integers)", prefix="  "
+        )
         self._log("Color mapping:", prefix="  ")
-        for i, (color, name) in enumerate(zip(self.class_colors, self.class_names or [f'Class {i}' for i in range(len(self.class_colors))])):
+        for i, (color, name) in enumerate(
+            zip(
+                self.class_colors,
+                self.class_names
+                or [f"Class {i}" for i in range(len(self.class_colors))],
+            )
+        ):
             self._log(f"  {i} -> {name}: {color}", prefix="  ")
         self._log("=" * 80, prefix="")
 
     @rank_zero_only
-    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+    def on_validation_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ):
         """Generate and save visualizations at validation end with thread-safe batch processing."""
-        if not self.save_outputs or trainer.current_epoch % self.log_every_k_epochs != 0:
+        if (
+            not self.save_outputs
+            or trainer.current_epoch % self.log_every_k_epochs != 0
+        ):
             return
-        
+
         # Overall timing
         overall_start_time = time.time()
-        
+
         self._log("=" * 80, prefix="")
-        self._log(f"Starting visualization generation for Epoch {trainer.current_epoch}", prefix="🚀")
-        self._log(f"Timestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", prefix="⏰")
-        
+        self._log(
+            f"Starting visualization generation for Epoch {trainer.current_epoch}",
+            prefix="🚀",
+        )
+        self._log(
+            f"Timestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            prefix="⏰",
+        )
+
         # Process any pending TensorBoard logs from previous saves
         cleanup_start = time.time()
         self._process_tensorboard_queue(trainer.logger, trainer.current_epoch)
         self._wait_for_pending_saves()
         cleanup_time = time.time() - cleanup_start
         if cleanup_time > 0.1:
-            self._log(f"Cleanup completed in {self._format_time(cleanup_time)}", prefix="🧹")
-        
+            self._log(
+                f"Cleanup completed in {self._format_time(cleanup_time)}", prefix="🧹"
+            )
+
         val_dataloader = pl_module.val_dataloader()
         device = pl_module.device
         logger = trainer.logger
-        
+
         # Get dataset for path retrieval
         dataset = val_dataloader.dataset
-        has_get_path = hasattr(dataset, 'get_path')
-        
+        has_get_path = hasattr(dataset, "get_path")
+
         # Set model to eval mode
         pl_module.eval()
-        
+
         # Determine how many samples to visualize
         n_samples = self.n_samples or val_dataloader.batch_size
         samples_processed = 0
-        
+
         self._log(f"Target samples to visualize: {n_samples}", prefix="🎯")
         self._log(f"Using device: {device}", prefix="💻")
         self._log("-" * 80, prefix="")
-        
+
         # Phase 1: Generate visualizations and submit for saving
         inference_start_time = time.time()
-        self._log("Phase 1: Generating predictions and creating visualizations...", prefix="🔮")
-        
+        self._log(
+            "Phase 1: Generating predictions and creating visualizations...", prefix="🔮"
+        )
+
         # Process in batches with no gradient computation
         batch_count = 0
         with torch.no_grad():
             for batch_idx, batch in enumerate(val_dataloader):
                 if samples_processed >= n_samples:
                     break
-                
+
                 batch_start_time = time.time()
-                
+
                 # Handle different batch formats
                 if isinstance(batch, dict):
-                    images = batch['image']
-                    masks = batch.get('mask', batch.get('target'))
+                    images = batch["image"]
+                    masks = batch.get("mask", batch.get("target"))
                     # Try to get paths from batch, but prefer dataset.get_path()
-                    batch_paths = batch.get('path', None)
+                    batch_paths = batch.get("path", None)
                 else:
                     try:
-                        batch_dict = dict(batch) if hasattr(batch, 'items') else {'image': batch[0], 'mask': batch[1]}
-                        images = batch_dict.get('image', batch[0] if isinstance(batch, (tuple, list)) else batch)
-                        masks = batch_dict.get('mask', batch[1] if isinstance(batch, (tuple, list)) and len(batch) > 1 else None)
+                        batch_dict = (
+                            dict(batch)
+                            if hasattr(batch, "items")
+                            else {"image": batch[0], "mask": batch[1]}
+                        )
+                        images = batch_dict.get(
+                            "image",
+                            batch[0] if isinstance(batch, (tuple, list)) else batch,
+                        )
+                        masks = batch_dict.get(
+                            "mask",
+                            batch[1]
+                            if isinstance(batch, (tuple, list)) and len(batch) > 1
+                            else None,
+                        )
                         batch_paths = None
                     except Exception as e:
-                        self._log(f"Warning: Error parsing batch format: {e}", prefix="⚠️")
+                        self._log(
+                            f"Warning: Error parsing batch format: {e}", prefix="⚠️"
+                        )
                         continue
-                
+
                 # Move to device and get predictions in batch
                 images_gpu = images.to(device)
                 predicted_masks = pl_module(images_gpu)
-                
+
                 # Move back to CPU for visualization
                 images_cpu = images_gpu.cpu()
                 predicted_masks_cpu = predicted_masks.cpu()
-                
+
                 # Process each sample in the batch
                 batch_size = min(len(images), n_samples - samples_processed)
                 for i in range(batch_size):
                     try:
                         # Get the full path - prioritize dataset.get_path() for consistency
                         global_idx = batch_idx * val_dataloader.batch_size + i
-                        
+
                         if has_get_path:
                             # Use dataset's get_path method to get full path
                             plot_title = dataset.get_path(global_idx)
@@ -880,13 +957,15 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
                                 plot_title = batch_paths
                         else:
                             # Last resort: generic name
-                            plot_title = f'sample_{global_idx}'
-                        
+                            plot_title = f"sample_{global_idx}"
+
                         # Prepare data for visualization
                         image_rgb = self.prepare_image_to_plot(images_cpu[i])
                         gt_mask_indices = self.prepare_mask_to_plot(masks[i])
-                        pred_mask_indices = self.prepare_mask_to_plot(predicted_masks_cpu[i])
-                        
+                        pred_mask_indices = self.prepare_mask_to_plot(
+                            predicted_masks_cpu[i]
+                        )
+
                         # Create visualization with full path as title
                         axarr, fig = generate_visualization(
                             fig_title=plot_title,  # Full path used here
@@ -894,152 +973,189 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
                             ground_truth_mask=gt_mask_indices,
                             predicted_mask=pred_mask_indices,
                         )
-                        
+
                         # Apply colormap to mask axes
                         self.apply_colormap_to_axes(
-                            axarr, 
-                            mask_indices=[1, 2], 
-                            masks=[gt_mask_indices, pred_mask_indices]
+                            axarr,
+                            mask_indices=[1, 2],
+                            masks=[gt_mask_indices, pred_mask_indices],
                         )
-                        
+
                         # Add class legend if requested
                         if self.show_class_legend and self.class_names is not None:
                             self.add_colorbar_legend(fig, axarr, gt_mask_indices)
-                        
+
                         fig.tight_layout()
-                        
+
                         # Save to disk asynchronously (I/O bound - benefits from threading)
                         if self.save_outputs:
                             future = self.executor.submit(
                                 self._save_visualization_to_disk,
                                 fig,
                                 plot_title,
-                                trainer.current_epoch
+                                trainer.current_epoch,
                             )
                             # Store metadata for later TensorBoard logging
                             self.save_futures.append((future, plot_title))
                         else:
                             plt.close(fig)
-                        
+
                         samples_processed += 1
-                        
+
                     except Exception as e:
-                        self._log(f"Error processing sample {i} in batch {batch_idx}: {e}", prefix="❌")
+                        self._log(
+                            f"Error processing sample {i} in batch {batch_idx}: {e}",
+                            prefix="❌",
+                        )
                         import traceback
+
                         self._log(f"Traceback: {traceback.format_exc()}", prefix="❌")
                         continue
-                    
+
                     if samples_processed >= n_samples:
                         break
-                
+
                 batch_count += 1
                 batch_time = time.time() - batch_start_time
-                
+
                 # Progress update every few batches or at the end
                 if batch_count % 5 == 0 or samples_processed >= n_samples:
                     self._log(
                         f"Progress: {samples_processed}/{n_samples} samples processed "
                         f"({batch_count} batches, last batch: {self._format_time(batch_time)})",
-                        prefix="📈"
+                        prefix="📈",
                     )
-        
+
         inference_time = time.time() - inference_start_time
         self._log(
             f"Phase 1 completed in {self._format_time(inference_time)} "
             f"({samples_processed} visualizations submitted for saving)",
-            prefix="✅"
+            prefix="✅",
         )
-        self._log(f"Average time per sample: {self._format_time(inference_time / max(samples_processed, 1))}", prefix="⚡")
-        
+        self._log(
+            f"Average time per sample: {self._format_time(inference_time / max(samples_processed, 1))}",
+            prefix="⚡",
+        )
+
         # Phase 2: Wait for saves and log to TensorBoard
         self._log("-" * 80, prefix="")
         self._log("Phase 2: Saving to disk and logging to TensorBoard...", prefix="💾")
         save_start_time = time.time()
-        
+
         self._wait_and_log_to_tensorboard(logger, trainer.current_epoch)
-        
+
         save_time = time.time() - save_start_time
         self._log(f"Phase 2 completed in {self._format_time(save_time)}", prefix="✅")
-        
+
         # Final summary
         overall_time = time.time() - overall_start_time
         self._log("-" * 80, prefix="")
         self._log("SUMMARY:", prefix="📊")
         self._log(f"  Total samples visualized: {samples_processed}", prefix="  ")
-        self._log(f"  Inference + Visualization: {self._format_time(inference_time)}", prefix="  ")
-        self._log(f"  Disk Save + TB Logging: {self._format_time(save_time)}", prefix="  ")
-        self._log(f"  Total elapsed time: {self._format_time(overall_time)}", prefix="  ")
-        self._log(f"  Average per sample: {self._format_time(overall_time / max(samples_processed, 1))}", prefix="  ")
-        self._log(f"Completed at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", prefix="🏁")
+        self._log(
+            f"  Inference + Visualization: {self._format_time(inference_time)}",
+            prefix="  ",
+        )
+        self._log(
+            f"  Disk Save + TB Logging: {self._format_time(save_time)}", prefix="  "
+        )
+        self._log(
+            f"  Total elapsed time: {self._format_time(overall_time)}", prefix="  "
+        )
+        self._log(
+            f"  Average per sample: {self._format_time(overall_time / max(samples_processed, 1))}",
+            prefix="  ",
+        )
+        self._log(
+            f"Completed at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            prefix="🏁",
+        )
         self._log("=" * 80, prefix="")
 
     def _wait_and_log_to_tensorboard(self, logger, current_epoch: int):
         """Wait for saves and log to TensorBoard on main thread (thread-safe)."""
         if not self.save_futures:
             return
-        
+
         total_futures = len(self.save_futures)
-        self._log(f"Waiting for {total_futures} save operations to complete...", prefix="⏳")
-        
+        self._log(
+            f"Waiting for {total_futures} save operations to complete...", prefix="⏳"
+        )
+
         completed = 0
         failed = 0
-        
+
         for future, plot_title in self.save_futures:
             try:
                 saved_path = future.result(timeout=30)  # Wait for save to complete
                 if saved_path:
                     # Log to TensorBoard on MAIN THREAD (thread-safe)
-                    self.log_data_to_tensorboard(saved_path, plot_title, logger, current_epoch)
+                    self.log_data_to_tensorboard(
+                        saved_path, plot_title, logger, current_epoch
+                    )
                     completed += 1
                 else:
                     failed += 1
             except Exception as e:
-                self._log(f"Error in save/log operation for {plot_title}: {e}", prefix="❌")
+                self._log(
+                    f"Error in save/log operation for {plot_title}: {e}", prefix="❌"
+                )
                 failed += 1
-        
+
         self.save_futures.clear()
-        
+
         if failed > 0:
             self._log(
                 f"Save operations completed: {completed} succeeded, {failed} failed",
-                prefix="⚠️"
+                prefix="⚠️",
             )
         else:
-            self._log(f"All {completed} visualizations saved and logged successfully", prefix="✅")
+            self._log(
+                f"All {completed} visualizations saved and logged successfully",
+                prefix="✅",
+            )
 
     def _process_tensorboard_queue(self, logger, current_epoch: int):
         """Process any queued TensorBoard logging operations (currently unused but kept for future)."""
         while not self.tb_log_queue.empty():
             try:
                 saved_path, plot_title = self.tb_log_queue.get_nowait()
-                self.log_data_to_tensorboard(saved_path, plot_title, logger, current_epoch)
+                self.log_data_to_tensorboard(
+                    saved_path, plot_title, logger, current_epoch
+                )
             except Exception as e:
                 self._log(f"Error processing TensorBoard queue: {e}", prefix="❌")
 
     def _wait_for_pending_saves(self):
         """Wait for all pending save operations to complete."""
         if self.save_futures:
-            self._log(f"Waiting for {len(self.save_futures)} pending operations from previous epoch...", prefix="⏳")
+            self._log(
+                f"Waiting for {len(self.save_futures)} pending operations from previous epoch...",
+                prefix="⏳",
+            )
             for future, plot_title in self.save_futures:
                 try:
                     future.result(timeout=30)
                 except Exception as e:
-                    self._log(f"Error in pending save operation for {plot_title}: {e}", prefix="❌")
+                    self._log(
+                        f"Error in pending save operation for {plot_title}: {e}",
+                        prefix="❌",
+                    )
             self.save_futures.clear()
 
     def on_train_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         """Clean up resources at the end of training."""
         self._log("=" * 80, prefix="")
         self._log("Training ended - cleaning up visualization callback...", prefix="🧹")
-        
+
         cleanup_start = time.time()
-        
+
         # Wait for any remaining saves and log them
         self._wait_and_log_to_tensorboard(trainer.logger, trainer.current_epoch)
-        
+
         # Shutdown the executor
         self.executor.shutdown(wait=True)
-        
+
         cleanup_time = time.time() - cleanup_start
         self._log(f"Cleanup completed in {self._format_time(cleanup_time)}", prefix="✅")
         self._log("Visualization callback shutdown complete", prefix="🏁")
@@ -1047,5 +1163,5 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
 
     def __del__(self):
         """Ensure executor is shut down when callback is destroyed."""
-        if hasattr(self, 'executor'):
+        if hasattr(self, "executor"):
             self.executor.shutdown(wait=False)

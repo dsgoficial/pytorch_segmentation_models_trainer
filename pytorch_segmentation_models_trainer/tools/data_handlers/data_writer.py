@@ -25,9 +25,8 @@ from pathlib import Path
 from typing import List, Union
 import numpy as np
 import os
-import shapely
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from geopandas import GeoDataFrame, GeoSeries
 from omegaconf import MISSING
 import rasterio

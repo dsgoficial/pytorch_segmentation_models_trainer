@@ -77,27 +77,29 @@ class ObjectDetectionPLModel(Model):
     def training_step(self, batch, batch_idx):
         images, targets, _ = batch
         loss_dict = self.model(images, targets)
-        
+
         # Calculate total loss
         total_loss = sum(loss for loss in loss_dict.values())
-        
+
         # Log total loss
         self.log("loss/train", total_loss, on_step=True, on_epoch=True, prog_bar=True)
-        
+
         # Log individual losses
         for loss_name, loss_value in loss_dict.items():
-            self.log(f"losses/train_{loss_name}", loss_value, on_step=True, on_epoch=True)
-        
+            self.log(
+                f"losses/train_{loss_name}", loss_value, on_step=True, on_epoch=True
+            )
+
         return total_loss
 
     def validation_step(self, batch, batch_idx):
         images, targets, _ = batch
-        
+
         # Training mode for loss calculation
         self.model.train()
         loss_dict = self.model(images, targets)
         total_loss = sum(loss for loss in loss_dict.values())
-        
+
         # Evaluation mode for IoU calculation
         self.model.eval()
         outs = self.model(images)
@@ -107,17 +109,19 @@ class ObjectDetectionPLModel(Model):
                 for t, o in zip(targets, outs)
             ]
         ).mean()
-        
+
         # Log total loss
         self.log("loss/val", total_loss, on_step=False, on_epoch=True, prog_bar=True)
-        
+
         # Log IoU
         self.log("metrics/val_iou", iou, on_step=False, on_epoch=True, prog_bar=True)
-        
+
         # Log individual losses
         for loss_name, loss_value in loss_dict.items():
-            self.log(f"losses/val_{loss_name}", loss_value, on_step=False, on_epoch=True)
-        
+            self.log(
+                f"losses/val_{loss_name}", loss_value, on_step=False, on_epoch=True
+            )
+
         return total_loss
 
     # Removed training_epoch_end and validation_epoch_end

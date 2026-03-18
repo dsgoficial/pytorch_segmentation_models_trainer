@@ -25,7 +25,6 @@ from functools import partial
 
 import cv2
 import numpy as np
-import rasterio
 import shapely.affinity
 import shapely.geometry
 from shapely.geometry.linestring import LineString

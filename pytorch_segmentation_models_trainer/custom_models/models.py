@@ -20,27 +20,23 @@
 """
 
 import os
-import dataclasses
-import logging
 import itertools
-from collections import OrderedDict, defaultdict
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from dataclasses import dataclass
+from typing import Dict, Optional, Union
 
-import hydra
 import torch
 import torchvision
-import kornia
-from hydra.core.config_store import ConfigStore
 from hydra.utils import instantiate
-from omegaconf import MISSING, DictConfig, OmegaConf
+from omegaconf import OmegaConf
 from segmentation_models_pytorch.base import SegmentationHead
 from segmentation_models_pytorch.base import initialization as init
 from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import PolygonRNN
 from pytorch_segmentation_models_trainer.custom_models.utils import (
     _SimpleSegmentationModel,
 )
-from pytorch_segmentation_models_trainer.custom_models.hrnet_models import seg_hrnet_ocr
+from pytorch_segmentation_models_trainer.custom_models.hrnet_models import (
+    seg_hrnet_ocr,
+)  # noqa: F401
 from torchvision.datasets.utils import download_url
 
 current_dir = os.path.dirname(__file__)

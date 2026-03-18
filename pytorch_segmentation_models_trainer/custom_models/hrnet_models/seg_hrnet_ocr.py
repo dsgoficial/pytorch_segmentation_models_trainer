@@ -10,7 +10,6 @@ from __future__ import print_function
 
 import os
 import logging
-import functools
 
 import numpy as np
 from omegaconf.omegaconf import OmegaConf

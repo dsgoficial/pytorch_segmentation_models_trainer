@@ -19,35 +19,23 @@
  ****
 """
 
-import io
 from pathlib import Path
 import shutil
 
 from fastapi.params import Depends
-from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import (
-    TemplatePolygonizerProcessor,
-)
 from typing import Optional
 
-import torch
-import torchvision
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
 from hydra import compose, initialize
 from hydra.utils import instantiate
-from PIL import Image
-from starlette.responses import Response
-from torchvision import transforms
 from shapely.geometry import mapping
 
 from pytorch_segmentation_models_trainer.predict import (
     instantiate_inference_processor,
-    instantiate_model_from_checkpoint,
-    instantiate_polygonizer,
 )
 from functools import lru_cache
 from .config import Settings
-from rasterio.io import MemoryFile
 from tempfile import NamedTemporaryFile
 
 

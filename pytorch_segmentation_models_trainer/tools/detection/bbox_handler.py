@@ -23,7 +23,6 @@ import numpy as np
 from pytorch_toolbelt.inference.tiles import TileMerger
 
 import torch
-import torchvision
 from sahi.postprocess.legacy.combine import NMSPostprocess, UnionMergePostprocess
 from sahi.prediction import ObjectPrediction
 

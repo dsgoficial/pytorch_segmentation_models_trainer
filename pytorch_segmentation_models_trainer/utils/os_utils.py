@@ -22,7 +22,6 @@ import hashlib
 from importlib import import_module
 import os
 import shutil
-from pathlib import Path
 
 
 def remove_folder(folder):

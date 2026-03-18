@@ -29,6 +29,8 @@ from torch.nn.modules.loss import _WeightedLoss
 import segmentation_models_pytorch as smp
 
 # Based on https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py
+
+
 class KnowledgeDistillationLoss(nn.Module):
     def __init__(self, alpha, T, criterion):
         super().__init__()
@@ -182,23 +184,25 @@ def focal_tversky_loss(y_pred, y_true, gamma=0.25, alpha=0.01, beta=0.99):
     t_loss = tversky_loss(y_pred, y_true, alpha, beta)
     return torch.pow(1 - t_loss, gamma)
 
+
 class WeightedDiceCrossEntropyLoss(nn.Module):
     """
     Combined Cross Entropy and Dice Loss for segmentation tasks.
-    
+
     Args:
         num_classes (int): Number of classes in the segmentation task
         dice_weight (float): Weight for dice loss (default: 0.75)
         ce_weight (float): Weight for cross entropy loss (default: 0.25)
         smooth_factor (float): Smoothing factor for cross entropy loss (default: 0)
     """
+
     def __init__(
         self,
         num_classes: int,
         dice_weight: float = 0.75,
         ce_weight: float = 0.25,
         smooth_factor: float = 0.0,
-        class_weights: list = None
+        class_weights: list = None,
     ):
         super(WeightedDiceCrossEntropyLoss, self).__init__()
 
@@ -222,23 +226,23 @@ class WeightedDiceCrossEntropyLoss(nn.Module):
             weight=self.ce_class_weights,
             label_smoothing=smooth_factor,
         )
-    
+
     def forward(self, predictions: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
         Compute the combined loss.
-        
+
         Args:
             predictions (torch.Tensor): Model predictions (logits)
             targets (torch.Tensor): Ground truth labels
-            
+
         Returns:
             torch.Tensor: Weighted sum of dice loss and cross entropy loss
         """
         # Compute individual losses
         dice = self.dice_loss(predictions, targets)
         ce = self.ce_loss(predictions, targets)
-        
+
         # Return weighted sum
         combined = self.dice_weight * dice + self.ce_weight * ce
-        
+
         return combined

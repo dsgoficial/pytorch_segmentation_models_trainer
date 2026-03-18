@@ -28,7 +28,6 @@ from affine import Affine
 import torch
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
     AbstractDataWriter,
-    VectorDatabaseDataWriter,
     VectorFileDataWriter,
 )
 from pytorch_segmentation_models_trainer.tools.polygonization.methods import (

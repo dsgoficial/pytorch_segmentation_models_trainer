@@ -25,7 +25,6 @@
 import math
 import torch
 from torch.optim.optimizer import Optimizer, required
-from collections import defaultdict
 
 
 def centralized_gradient(x, use_gc=True, gc_conv_only=False):

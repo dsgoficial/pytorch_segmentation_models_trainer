@@ -25,13 +25,12 @@ import math
 
 import cv2 as cv
 import numpy as np
-import pyproj
 import random
 import shapely
 import skimage
 import skimage.morphology
 from PIL import Image, ImageDraw
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import Polygon
 from matplotlib.patches import PathPatch
 from matplotlib.path import Path
 from tqdm import tqdm

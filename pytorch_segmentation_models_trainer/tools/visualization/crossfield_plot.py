@@ -1,6 +1,4 @@
 import random
-import sys
-import os
 from descartes import PolygonPatch
 from matplotlib.collections import PatchCollection
 from matplotlib.backends.backend_agg import FigureCanvasAgg

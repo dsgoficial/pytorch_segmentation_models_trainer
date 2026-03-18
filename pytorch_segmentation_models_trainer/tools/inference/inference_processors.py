@@ -19,8 +19,6 @@
  ****
 """
 from collections import defaultdict
-from concurrent.futures.thread import ThreadPoolExecutor
-import os
 import math
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -30,7 +28,6 @@ from pytorch_segmentation_models_trainer.tools.detection.bbox_handler import (
     BboxTileMerger,
 )
 from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import (
-    PolygonRNNPolygonizerProcessor,
     TemplatePolygonizerProcessor,
 )
 from typing import Any, Dict, List, Optional, Union
@@ -44,7 +41,6 @@ import torch
 from pytorch_toolbelt.inference.tiles import ImageSlicer, TileMerger
 from pytorch_toolbelt.utils.torch_utils import (
     image_to_tensor,
-    tensor_from_rgb_image,
     to_numpy,
 )
 from torch.utils.data import DataLoader
@@ -94,7 +90,7 @@ class AbstractInferenceProcessor(ABC):
         if not restore_geo_transform:
             profile["crs"] = None
         return image, profile
-    
+
     def get_normalization_function(self):
         if self.normalize_mean is not None and self.normalize_std is not None:
             func = A.Normalize(mean=self.normalize_mean, std=self.normalize_std, p=1.0)
@@ -143,9 +139,20 @@ class AbstractInferenceProcessor(ABC):
             parent_dir_name=image_name,
         )
 
-    def save_inference(self, image_path, threshold, profile, inference, output_dict, apply_threshold=True):
-        inference["seg"] = (inference["seg"] > threshold).astype(np.uint8) if apply_threshold \
+    def save_inference(
+        self,
+        image_path,
+        threshold,
+        profile,
+        inference,
+        output_dict,
+        apply_threshold=True,
+    ):
+        inference["seg"] = (
+            (inference["seg"] > threshold).astype(np.uint8)
+            if apply_threshold
             else inference["seg"].astype(np.uint8)
+        )
         profile["input_name"] = Path(image_path).stem
         profile["suffix"] = Path(image_path).suffix
         if self.export_strategy is not None:
@@ -270,13 +277,14 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
         merged_mask = np.moveaxis(to_numpy(merger_dict["seg"].merge()), 0, -1)
         return {"seg": tiler.crop_to_orignal_size(merged_mask)}
 
+
 class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
     """
     Inference processor para segmentação multi-class.
     Modelo deve retornar logits/probabilidades: [B, num_classes, H, W]
     Resultado final será uma imagem de 1 banda com índices de classe: [H, W]
     """
-    
+
     def __init__(
         self,
         model,
@@ -308,37 +316,45 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
             group_output_by_image_basename=group_output_by_image_basename,
         )
         self.num_classes = num_classes
-    
+
     def merge_masks(self, tiler: ImageSlicer, merger_dict: Dict[str, TileMerger]):
         """
         ✅ Sobrescreve para fazer argmax após merge!
         """
         # Merge ponderado das probabilidades (mantém todas as classes)
         merged_probs = to_numpy(merger_dict["seg"].merge())  # [num_classes, H, W]
-        
+
         # ✅ ARGMAX: converte para índices de classe
         class_indices = np.argmax(merged_probs, axis=0)  # [H, W]
-        
+
         # Crop para tamanho original
         class_indices = tiler.crop_to_orignal_size(class_indices)
         if class_indices.ndim == 2:
             class_indices = class_indices[..., np.newaxis]
-        
+
         # ✅ Retorna 1 banda com índices (0, 1, 2, ..., num_classes-1)
         return {"seg": class_indices}
-    
-    def save_inference(self, image_path, threshold, profile, inference, output_dict, apply_threshold=True):
+
+    def save_inference(
+        self,
+        image_path,
+        threshold,
+        profile,
+        inference,
+        output_dict,
+        apply_threshold=True,
+    ):
         """
         ✅ Salva imagem de 1 banda com índices de classe (sem threshold!)
         """
         # inference["seg"] já é [H, W] com valores 0, 1, 2, ..., num_classes-1
-        
+
         # ✅ Atualiza profile para 1 banda, dtype uint8
         profile["count"] = 1
-        profile["dtype"] = 'uint8'
+        profile["dtype"] = "uint8"
         profile["input_name"] = Path(image_path).stem
         profile["suffix"] = Path(image_path).suffix
-        
+
         if self.export_strategy is not None:
             output_dict["inference"].append(
                 self.export_strategy.save_inference(inference, profile)
@@ -492,7 +508,15 @@ class ObjectDetectionInferenceProcessor(AbstractInferenceProcessor):
                 pred_batch = self.model(tiles_batch)
                 merger.integrate_boxes(pred_batch, crop_coords_batch)
 
-    def save_inference(self, image_path, threshold, profile, inference, output_dict, apply_threshold=True):
+    def save_inference(
+        self,
+        image_path,
+        threshold,
+        profile,
+        inference,
+        output_dict,
+        apply_threshold=True,
+    ):
         inference = [
             {k: v.cpu().tolist() for k, v in item.items()} for item in inference
         ]

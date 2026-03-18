@@ -18,20 +18,19 @@
  *                                                                         *
  ****
 """
-import dataclasses
 from dataclasses import dataclass, field
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, List, Optional, Union
 
 import hydra
 from hydra.core.config_store import ConfigStore
-from hydra.utils import instantiate
 from omegaconf import MISSING, DictConfig, OmegaConf
 
 
 # ============================================================================
 # Individual Loss Configurations
 # ============================================================================
+
 
 @dataclass
 class SegParamsConfig:
@@ -43,6 +42,7 @@ class SegParamsConfig:
 @dataclass
 class BaseLossConfig:
     """Base configuration for any loss function"""
+
     _target_: str = MISSING
     name: str = MISSING
     weight: Union[float, List[float]] = 1.0  # Static weight or list for interpolation
@@ -50,9 +50,13 @@ class BaseLossConfig:
 
 @dataclass
 class SegLossConfig(BaseLossConfig):
-    _target_: str = "pytorch_segmentation_models_trainer.custom_losses.base_loss.SegLoss"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_losses.base_loss.SegLoss"
+    )
     name: str = "seg"
-    gt_channel_selector: Union[SegParamsConfig, int] = field(default_factory=SegParamsConfig)
+    gt_channel_selector: Union[SegParamsConfig, int] = field(
+        default_factory=SegParamsConfig
+    )
     bce_coef: float = 0.5
     dice_coef: float = 0.5
     tversky_focal_coef: float = 0.0
@@ -82,7 +86,9 @@ class CrossfieldSmoothLossConfig(BaseLossConfig):
 
 @dataclass
 class SegCrossfieldLossConfig(BaseLossConfig):
-    _target_: str = "pytorch_segmentation_models_trainer.custom_losses.base_loss.SegCrossfieldLoss"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_losses.base_loss.SegCrossfieldLoss"
+    )
     name: str = "seg_crossfield"
     pred_channel: int = 0
     weight: Union[float, List[float]] = field(default_factory=lambda: [0, 0, 0.2])
@@ -99,9 +105,17 @@ class SegEdgeInteriorLossConfig(BaseLossConfig):
 # Multi-Loss Configuration
 # ============================================================================
 
+
+@dataclass
+class NormalizationParams:
+    min_samples: int = 10
+    max_samples: int = 1000
+
+
 @dataclass
 class LossWeightConfig:
     """Configuration for a single loss with its weight"""
+
     loss: Any = MISSING  # The loss configuration (SegLossConfig, etc.)
     weight: Union[float, List[float]] = 1.0  # Weight can be static or dynamic
 
@@ -110,9 +124,9 @@ class LossWeightConfig:
 class CompoundLossConfig:
     """
     Configuration for compound loss with multiple losses and weights.
-    
+
     Example YAML usage:
-    
+
     compound_loss:
       epoch_thresholds: [0, 5, 10]
       losses:
@@ -123,31 +137,36 @@ class CompoundLossConfig:
             bce_coef: 0.5
             dice_coef: 0.5
           weight: 10.0
-        
+
         - loss:
             _target_: pytorch_segmentation_models_trainer.custom_losses.base_loss.CrossfieldAlignLoss
             name: crossfield_align
           weight: 1.0
-          
+
         - loss:
             _target_: pytorch_segmentation_models_trainer.custom_losses.base_loss.SegCrossfieldLoss
             name: seg_interior_crossfield
             pred_channel: 0
           weight: [0, 0, 0.2]  # Dynamic weight that interpolates based on epoch
     """
+
     losses: List[LossWeightConfig] = field(default_factory=list)
     epoch_thresholds: Optional[List[float]] = field(default_factory=lambda: [0, 5, 10])
     pre_processes: Optional[List[Any]] = None
-    normalization_params: NormalizationParams = field(default_factory=NormalizationParams)
+    normalization_params: NormalizationParams = field(
+        default_factory=NormalizationParams
+    )
 
 
 # ============================================================================
 # Legacy Configurations (for backward compatibility)
 # ============================================================================
 
+
 @dataclass
 class CoefsConfig:
     """Legacy coefficient configuration - kept for backward compatibility"""
+
     epoch_thresholds: List[float] = field(default_factory=lambda: [0, 5, 10])
     seg: float = 10
     crossfield_align: float = 1
@@ -166,12 +185,6 @@ class SegLossParamsConfig:
     use_size: bool = True
     w0: float = 50
     sigma: float = 10
-
-
-@dataclass
-class NormalizationParams:
-    min_samples: int = 10
-    max_samples: int = 1000
 
 
 @dataclass
@@ -222,6 +235,7 @@ cs.store(name="multi_loss", node=MultiLossConfig)
 
 # Register compound loss config
 cs.store(name="compound_loss", node=CompoundLossConfig)
+
 
 @hydra.main(config_name="compound_loss_config")
 def build_config(cfg: DictConfig) -> None:

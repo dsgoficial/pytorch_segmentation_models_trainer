@@ -20,26 +20,16 @@
  *   https://github.com/AlexMa011/pytorch-polygon-rnn                      *
  ****
 """
-from collections import OrderedDict
-from logging import log
 import os
-from pathlib import Path
 
-import segmentation_models_pytorch as smp
 import torch
 import torch.nn as nn
 import torch.nn.init
-import torch.utils.model_zoo as model_zoo
-import wget
-from hydra.utils import instantiate
-from omegaconf.dictconfig import DictConfig
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
 from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import PolygonRNN
 from pytorch_segmentation_models_trainer.model_loader.model import Model
-from pytorch_segmentation_models_trainer.utils import polygonrnn_utils, tensor_utils
+from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 from torch import nn
-from torch.autograd import Variable
-from tqdm import tqdm
 
 current_dir = os.path.dirname(__file__)
 
@@ -61,11 +51,11 @@ class PolygonRNNPLModel(Model):
     def training_step(self, batch, batch_idx):
         result = self.compute(batch)
         loss, acc = self.compute_loss_acc(batch, result)
-        
+
         # Log loss and accuracy
         self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log("metrics/train_acc", acc, on_step=True, on_epoch=True, prog_bar=True)
-        
+
         return loss
 
     def compute(self, batch):
@@ -84,17 +74,17 @@ class PolygonRNNPLModel(Model):
         result = self.compute(batch)
         loss, acc = self.compute_loss_acc(batch, result)
         test_output = self.model.test(batch["image"], self.val_seq_len)
-        
+
         # Evaluate batch
         batch_polis, intersection, union = self.evaluate_batch(batch, test_output)
-        
+
         # Log loss and accuracy
         self.log("loss/val", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("metrics/val_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
-        
+
         # Log polis metric
         self.log("metrics/val_polis", batch_polis.mean(), on_step=False, on_epoch=True)
-        
+
         # Log IoU (computed from intersection and union in on_validation_epoch_end)
         # Store for epoch-level aggregation
         return {
@@ -129,14 +119,14 @@ class PolygonRNNPLModel(Model):
         batch_polis = torch.from_numpy(
             metrics.batch_polis(predicted_polygon_list, gt_polygon_list)
         )
-        
+
         iou = lambda x: metrics.polygon_iou(x[0], x[1])
         output_tensor_iou = torch.tensor(
             list(map(iou, zip(predicted_polygon_list, gt_polygon_list)))
         )
         intersection = output_tensor_iou[:, 1]
         union = output_tensor_iou[:, 2]
-        
+
         return batch_polis, intersection, union
 
     # Removed training_epoch_end and validation_epoch_end

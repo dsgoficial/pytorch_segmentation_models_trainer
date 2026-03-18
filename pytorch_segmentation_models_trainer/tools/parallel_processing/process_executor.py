@@ -21,7 +21,6 @@
 import concurrent.futures
 import itertools
 import os
-from typing import Iterator
 from tqdm import tqdm
 
 

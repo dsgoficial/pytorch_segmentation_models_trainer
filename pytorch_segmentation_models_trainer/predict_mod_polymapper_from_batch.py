@@ -18,9 +18,6 @@
  *                                                                         *
  ****
 """
-import concurrent.futures
-from concurrent.futures.thread import ThreadPoolExecutor
-import itertools
 import logging
 from pathlib import Path
 
@@ -29,44 +26,20 @@ from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks imp
     ModPolymapperPolygonizerCallback,
 )
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import ImageDataset
-from pytorch_segmentation_models_trainer.predict import (
-    instantiate_model_from_checkpoint,
-    instantiate_polygonizer,
-)
-from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import (
-    Executor,
-)
-from typing import Dict, List
-
 import hydra
-import numpy as np
-import omegaconf
 import torch
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf.omegaconf import OmegaConf
 from tqdm import tqdm
 
-from pytorch_segmentation_models_trainer.tools.inference.inference_processors import (
-    AbstractInferenceProcessor,
-)
-from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import (
-    TemplatePolygonizerProcessor,
-)
 from pytorch_segmentation_models_trainer.utils.os_utils import import_module_from_cfg
-from functools import partial
-import copy
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import pandas as pd
 
-from pytorch_segmentation_models_trainer.utils.tensor_utils import tensor_dict_to_device
-
 logger = logging.getLogger(__name__)
 
 import os
-import torch.distributed as dist
-import torch.multiprocessing as mp
 
 WORLD_SIZE = torch.cuda.device_count()
 

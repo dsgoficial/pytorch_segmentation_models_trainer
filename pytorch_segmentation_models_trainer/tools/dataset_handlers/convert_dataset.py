@@ -24,13 +24,11 @@ import json
 import os
 from typing import Dict, List
 import numpy as np
-from copy import deepcopy
 from pathlib import Path
 from PIL import Image
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-import dataclasses
-from omegaconf import MISSING, DictConfig, OmegaConf
+from omegaconf import MISSING
 from shapely.geometry.polygon import Polygon
 
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
@@ -39,7 +37,6 @@ from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
 )
 from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import (
     Executor,
-    ProcessPoolExecutor,
 )
 from pytorch_segmentation_models_trainer.utils.os_utils import create_folder
 from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
