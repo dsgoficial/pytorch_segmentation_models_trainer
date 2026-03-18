@@ -130,8 +130,8 @@ class Model(pl.LightningModule):
             # Specific number of devices
             device_count = max(1, devices)
         
-        elif isinstance(devices, (list, tuple)):
-            # List of device IDs
+        elif hasattr(devices, '__len__') and not isinstance(devices, str):
+            # List of device IDs (list, tuple, or OmegaConf ListConfig)
             device_count = len(devices)
         
         elif isinstance(devices, str):

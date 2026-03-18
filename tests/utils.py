@@ -21,6 +21,7 @@
 """
 import os
 import shutil
+import tempfile
 from typing import Any, List
 import unittest
 import warnings
@@ -53,6 +54,22 @@ def get_config_from_hydra(config_name, overrides_list, config_path=None):
     return cfg
 
 
+def make_hydra_config(fields: dict):
+    """
+    Build a synthetic OmegaConf DictConfig without reading any YAML file.
+
+    Useful for unit tests that need a config object without disk I/O.
+
+    Args:
+        fields: dict of config keys/values (can be nested)
+
+    Returns:
+        OmegaConf DictConfig
+    """
+    from omegaconf import OmegaConf
+    return OmegaConf.create(fields)
+
+
 def load_geometry_list_from_geojson(file_path: str) -> List[Any]:
     """
     Loads data to be used in tests.
@@ -75,8 +92,18 @@ class BasicTestCase(unittest.TestCase):
         warnings.simplefilter("ignore", category=DeprecationWarning)
         warnings.simplefilter("ignore", category=FutureWarning)
         warnings.simplefilter("ignore", category=UserWarning)
+        self._temp_dirs = []
+
+    def make_temp_dir(self) -> str:
+        """Create a temporary directory that is automatically cleaned up in tearDown."""
+        tmp = tempfile.mkdtemp()
+        self._temp_dirs.append(tmp)
+        return tmp
 
     def tearDown(self) -> None:
+        for tmp_dir in self._temp_dirs:
+            if os.path.exists(tmp_dir):
+                shutil.rmtree(tmp_dir)
         outputs_path = os.path.join(os.path.dirname(__file__), "..", "outputs")
         if os.path.exists(outputs_path):
             shutil.rmtree(outputs_path)

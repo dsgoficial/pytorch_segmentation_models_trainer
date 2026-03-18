@@ -24,7 +24,7 @@ import unittest
 import numpy as np
 import hydra
 import segmentation_models_pytorch as smp
-from hydra.experimental import initialize, compose
+from hydra import initialize, compose
 
 
 class Test_SegmentationModel(unittest.TestCase):

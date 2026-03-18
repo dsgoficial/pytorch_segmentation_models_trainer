@@ -261,6 +261,10 @@ class FrameFieldSegmentationPLModel(Model):
         pass
 
 
+# Backwards compatibility alias (FrameFieldModel was renamed to FrameFieldSegmentationPLModel)
+FrameFieldModel = FrameFieldSegmentationPLModel
+
+
 # Example usage in training script:
 """
 from pytorch_segmentation_models_trainer.model_loader.frame_field_model import FrameFieldSegmentationPLModel

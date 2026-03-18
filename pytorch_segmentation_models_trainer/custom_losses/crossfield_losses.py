@@ -23,10 +23,6 @@
 import numpy as np
 import scipy.interpolate
 import torch
-try:
-    import torch_scatter
-except ImportError:
-    torch_scatter = None
 from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor_tools import (
     TensorSkeleton,
 )

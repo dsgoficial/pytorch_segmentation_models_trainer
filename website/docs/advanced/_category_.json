@@ -1,0 +1,11 @@
+{
+  "label": "Advanced Features",
+  "position": 4,
+  "link": {
+    "type": "generated-index",
+    "title": "Advanced Features",
+    "description": "Frame field models, Polygon-RNN, object detection, and polygonization.",
+    "keywords": ["frame-field", "polygon-rnn", "object-detection", "polygonization"]
+  },
+  "collapsed": true
+}

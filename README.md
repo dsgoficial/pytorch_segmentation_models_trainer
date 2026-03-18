@@ -18,6 +18,26 @@
 
 A comprehensive PyTorch + PyTorch Lightning framework for training semantic segmentation models on satellite and aerial imagery, with Hydra configuration management and extensive support for multispectral data.
 
+## Config Builder (Web Interface)
+
+**[Open Config Builder](https://dsgoficial.github.io/pytorch_segmentation_models_trainer/)**
+
+A visual web interface hosted on GitHub Pages for building YAML configuration files without editing text by hand. Supports the **Training** and **Predict** workflows.
+
+### What it does
+
+- **Training tab**: configure model architecture and encoder, normalization parameters, class definitions, hyperparameters, loss function, optimizer, PyTorch Lightning trainer, metrics, callbacks, and train/val datasets (including data augmentation pipeline).
+- **Predict tab**: configure checkpoint path, device, hyperparameters, PL trainer, model, inference processor (sliding window shape, optional normalization), image reader (folder, extension, recursive), and export strategy.
+- **Live YAML preview**: the generated YAML is shown side-by-side and updates in real time as you fill the form.
+- **Import from YAML**: paste an existing config file to populate the form fields automatically.
+- **Searchable dropdowns**: all selectors (architecture, encoder, loss, optimizer, metrics, augmentations, etc.) are filterable comboboxes.
+
+### How the schema stays up to date
+
+A Python script (`scripts/generate_schema.py`) introspects the installed versions of `segmentation_models_pytorch`, `albumentations`, `torchmetrics`, and `torch` at build time, writing `web/src/assets/schema.json`. The GitHub Actions workflow ([`.github/workflows/deploy-config-builder.yml`](.github/workflows/deploy-config-builder.yml)) runs on every push to `main` (when `web/**` or the schema script changes), on manual dispatch, and on a weekly schedule to pick up library updates automatically.
+
+---
+
 ## Features
 
 - **Multiple Architectures**: UNet, DeepLabV3Plus, FPN, PSPNet with various encoders (ResNet34/101/152, EfficientNet, etc.)

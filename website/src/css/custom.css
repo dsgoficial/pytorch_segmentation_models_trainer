@@ -1,0 +1,29 @@
+/**
+ * Any CSS included here will be global. The classic template
+ * bundles Infima by default. Infima is a CSS framework designed to
+ * work well for content-centric websites.
+ */
+
+/* PyTorch red/orange palette */
+:root {
+  --ifm-color-primary: #ee4c2c;
+  --ifm-color-primary-dark: #d94424;
+  --ifm-color-primary-darker: #cc4022;
+  --ifm-color-primary-darkest: #a8341b;
+  --ifm-color-primary-light: #f05a3e;
+  --ifm-color-primary-lighter: #f16249;
+  --ifm-color-primary-lightest: #f47c68;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #f47c68;
+  --ifm-color-primary-dark: #f16249;
+  --ifm-color-primary-darker: #f05a3e;
+  --ifm-color-primary-darkest: #ee4c2c;
+  --ifm-color-primary-light: #f79080;
+  --ifm-color-primary-lighter: #f9a093;
+  --ifm-color-primary-lightest: #fbbfb6;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}
