@@ -55,7 +55,7 @@ class WarmupCallback(pl.callbacks.Callback):
 
     def on_fit_start(self, trainer, pl_module):
         """Called when fit begins - replaces on_init_end"""
-        print(f"\nWarmupCallback initialization at epoch {trainer.current_epoch}.\n")
+        logger.info("WarmupCallback initialization at epoch %d.", trainer.current_epoch)
         if trainer.current_epoch > self.warmup_epochs - 1:
             self.warmed_up = True
 
@@ -63,9 +63,9 @@ class WarmupCallback(pl.callbacks.Callback):
         if self.warmed_up or trainer.current_epoch < self.warmup_epochs - 1:
             return
         if not self.warmed_up:
-            print(
-                f"\nModel will warm up for {self.warmup_epochs} "
-                "epochs. Freezing encoder weights.\n"
+            logger.info(
+                "Model will warm up for %d epochs. Freezing encoder weights.",
+                self.warmup_epochs,
             )
             self.set_component_trainable(pl_module, trainable=False)
 
@@ -73,9 +73,9 @@ class WarmupCallback(pl.callbacks.Callback):
         if self.warmed_up:
             return
         if trainer.current_epoch >= self.warmup_epochs - 1:
-            print(
-                f"\nModel warm up completed in the end of epoch {trainer.current_epoch}. "
-                "Unfreezing encoder weights.\n"
+            logger.info(
+                "Model warm up completed in the end of epoch %d. Unfreezing encoder weights.",
+                trainer.current_epoch,
             )
             self.set_component_trainable(pl_module, trainable=True)
             self.warmed_up = True
@@ -92,8 +92,9 @@ class FrameFieldOnlyCrossfieldWarmupCallback(pl.callbacks.Callback):
 
     def on_fit_start(self, trainer, pl_module):
         """Called when fit begins - replaces on_init_end"""
-        print(
-            f"\nFrameFieldWarmupCallback initialization at epoch {trainer.current_epoch}.\n"
+        logger.info(
+            "FrameFieldWarmupCallback initialization at epoch %d.",
+            trainer.current_epoch,
         )
         if trainer.current_epoch > self.warmup_epochs - 1:
             self.warmed_up = True
@@ -102,9 +103,9 @@ class FrameFieldOnlyCrossfieldWarmupCallback(pl.callbacks.Callback):
         if self.warmed_up or trainer.current_epoch < self.warmup_epochs - 1:
             return
         if not self.warmed_up:
-            print(
-                f"\nFrame field model will warm up for {self.warmup_epochs} "
-                "epochs. Freezing all weights but crossfield's.\n"
+            logger.info(
+                "Frame field model will warm up for %d epochs. Freezing all weights but crossfield's.",
+                self.warmup_epochs,
             )
             self.set_component_trainable(pl_module, trainable=False)
 
@@ -112,9 +113,9 @@ class FrameFieldOnlyCrossfieldWarmupCallback(pl.callbacks.Callback):
         if self.warmed_up:
             return
         if trainer.current_epoch >= self.warmup_epochs - 1:
-            print(
-                f"\nModel warm up completed in the end of epoch {trainer.current_epoch}. "
-                "Unfreezing weights.\n"
+            logger.info(
+                "Model warm up completed in the end of epoch %d. Unfreezing weights.",
+                trainer.current_epoch,
             )
             self.set_component_trainable(pl_module, trainable=True)
             self.warmed_up = True
@@ -254,7 +255,7 @@ class ComputeWeightNormLossesCallback(pl.callbacks.Callback):
         
         # Sync across GPUs if distributed
         if pl_module.trainer.world_size > 1 and torch.distributed.is_initialized():
-            logger.info("Performing loss sync acorss devices")
+            logger.info("Performing loss sync across devices")
             pl_module.loss_function.sync(pl_module.trainer.world_size)
         
         pl_module.loss_function.set_norm_updated(True)
@@ -262,7 +263,7 @@ class ComputeWeightNormLossesCallback(pl.callbacks.Callback):
         logger.info("Loss normalization computed")
         logger.info(f"Loss function: {pl_module.loss_function}")
         for loss in pl_module.loss_function.loss_funcs:
-            logger.info(f"Computed nomalization factor for {loss}: {loss.norm}")
+            logger.info(f"Computed normalization factor for {loss}: {loss.norm}")
 
 
 # Also update the FrameField-specific callback to use the same fix
@@ -487,3 +488,206 @@ class ModPolymapperPolygonizerCallback(pl.callbacks.BasePredictionWriter):
             with rasterio.open(path) as raster_ds:
                 profile_list.append(raster_ds.profile.copy())
         return profile_list
+
+
+class EMACallback(pl.callbacks.Callback):
+    """Exponential Moving Average of model weights.
+
+    Maintains a shadow copy of model parameters updated as:
+        shadow = decay_eff * shadow + (1 - decay_eff) * param
+
+    where ``decay_eff = min(decay, (step+1) / (step+10))`` implements an
+    EMA warmup that lets early updates track the online model closely,
+    avoiding contamination from random initialisation weights.
+    Ref: Busbridge et al., "EMA of Weights in DL", TMLR 2024.
+
+    During validation the shadow weights are swapped in so that metrics
+    reflect the EMA model.  After validation the original (online) weights
+    are restored so training continues normally.
+
+    Fixes vs original:
+      - EMA updates only when global_step changes (correct behavior with
+        accumulate_grad_batches — avoids updating on micro-batches where
+        the optimizer has not yet stepped).
+      - on_save_checkpoint injects EMA weights into the checkpoint so that
+        ModelCheckpoint saves the EMA model (not online weights).  This
+        matches the validation metrics that selected the checkpoint.
+
+    The EMA state is persisted inside checkpoints automatically because
+    Lightning serialises all callback states via ``state_dict`` /
+    ``load_state_dict``.
+
+    Args:
+        decay: Target EMA decay factor (default 0.999).
+    """
+
+    def __init__(self, decay: float = 0.999) -> None:
+        super().__init__()
+        if not 0.0 < decay < 1.0:
+            raise ValueError(f"decay must be in (0, 1), got {decay}")
+        self.decay = decay
+        self._shadow: dict = {}
+        self._original: dict = {}
+        self._last_global_step: int = -1
+
+    # -- build / update shadow --
+
+    def on_fit_start(self, trainer, pl_module):
+        self._shadow = {
+            name: param.data.clone()
+            for name, param in pl_module.named_parameters()
+            if param.requires_grad
+        }
+        self._last_global_step = -1
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        step = trainer.global_step
+        # Only update EMA when the optimizer actually stepped.
+        # With accumulate_grad_batches > 1, on_train_batch_end fires
+        # for every micro-batch, but global_step only increments after
+        # the optimizer step.  Skip micro-batches where step hasn't changed.
+        if step == self._last_global_step:
+            return
+        self._last_global_step = step
+
+        # EMA warmup: ramp decay from ~0.1 to target over first ~1000 steps
+        effective_decay = min(self.decay, (step + 1) / (step + 10))
+        for name, param in pl_module.named_parameters():
+            if param.requires_grad and name in self._shadow:
+                self._shadow[name].mul_(effective_decay).add_(
+                    param.data, alpha=1.0 - effective_decay
+                )
+
+    # -- swap in shadow for validation --
+
+    def on_validation_epoch_start(self, trainer, pl_module):
+        self._original = {}
+        for name, param in pl_module.named_parameters():
+            if name in self._shadow:
+                self._original[name] = param.data.clone()
+                param.data.copy_(self._shadow[name])
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        for name, param in pl_module.named_parameters():
+            if name in self._original:
+                param.data.copy_(self._original[name])
+        self._original = {}
+
+    # -- checkpoint persistence --
+
+    def on_save_checkpoint(self, trainer, pl_module, checkpoint):
+        """Inject EMA weights into the saved checkpoint.
+
+        ModelCheckpoint runs after validation, when metrics were computed
+        using EMA weights.  Without this override the checkpoint would
+        contain the online (non-EMA) weights, which is inconsistent with
+        the monitored metric that triggered the save.
+        """
+        for name, shadow_param in self._shadow.items():
+            if name in checkpoint["state_dict"]:
+                checkpoint["state_dict"][name] = shadow_param.cpu().clone()
+
+    def state_dict(self):
+        return {"shadow": self._shadow, "decay": self.decay}
+
+    def load_state_dict(self, state_dict):
+        self._shadow = state_dict.get("shadow", {})
+        self.decay = state_dict.get("decay", self.decay)
+
+
+class MixStyleCallback(pl.callbacks.Callback):
+    """MixStyle: plug-and-play feature-level domain augmentation.
+
+    Mixes feature statistics (mean/std) between instances in a batch,
+    creating implicit domain augmentation at zero parameter cost.
+    Improves generalization to unseen domains / temporal shifts.
+
+    Ref: Zhou et al., "Domain Generalization with MixStyle", ICLR 2021.
+         Zhou et al., "MixStyle Neural Networks", IJCV 2024.
+
+    Registers forward hooks on specified encoder stages to apply MixStyle
+    after their output.  Only active during training.
+
+    Args:
+        p: Probability of applying MixStyle per forward pass (default 0.5).
+        alpha: Beta distribution parameter for mixing (default 0.1).
+            Smaller values produce mixing closer to the original style.
+        stages: List of encoder stage indices to hook (default [0, 1]).
+            Early stages carry more domain/style information.
+    """
+
+    def __init__(self, p: float = 0.5, alpha: float = 0.1, stages=None) -> None:
+        super().__init__()
+        self.p = p
+        self.alpha = alpha
+        self.stages = stages if stages is not None else [0, 1]
+        self._hooks = []
+        self._training = False
+        self._beta_dist = torch.distributions.Beta(alpha, alpha)
+
+    def _mixstyle_hook(self, module, input, output):
+        """Forward hook that applies MixStyle to a stage's output."""
+        if not self._training:
+            return output
+        if isinstance(output, (list, tuple)):
+            return output  # multi-output stages — skip
+        x = output
+        B = x.size(0)
+        if B < 2 or torch.rand(1).item() > self.p:
+            return output
+
+        eps = 1e-6
+        mu = x.mean(dim=[2, 3], keepdim=True)
+        var = x.var(dim=[2, 3], keepdim=True)
+        sig = (var + eps).sqrt()
+        x_normed = (x - mu) / sig
+
+        # Shuffle within batch
+        perm = torch.randperm(B).to(x.device)
+        mu2, sig2 = mu[perm], sig[perm]
+
+        # Mix with Beta distribution
+        lmbd = self._beta_dist.sample((B, 1, 1, 1)).to(x.device)
+        mu_mix = mu * lmbd + mu2 * (1 - lmbd)
+        sig_mix = sig * lmbd + sig2 * (1 - lmbd)
+
+        return x_normed * sig_mix + mu_mix
+
+    def on_fit_start(self, trainer, pl_module):
+        encoder = pl_module.model.encoder
+
+        # SMP TimmUniversalEncoder: encoder.model.stages
+        stages_module = None
+        if hasattr(encoder, "model") and hasattr(encoder.model, "stages"):
+            stages_module = encoder.model.stages
+        elif hasattr(encoder, "stages"):
+            stages_module = encoder.stages
+
+        if stages_module is None:
+            logger.warning(
+                "MixStyleCallback: could not find encoder stages. "
+                "MixStyle will NOT be applied."
+            )
+            return
+
+        for stage_idx in self.stages:
+            if stage_idx < len(stages_module):
+                hook = stages_module[stage_idx].register_forward_hook(
+                    self._mixstyle_hook
+                )
+                self._hooks.append(hook)
+                logger.info(f"MixStyle: registered hook on encoder stage {stage_idx}")
+
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        self._training = True
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        self._training = False
+
+    def on_validation_epoch_start(self, trainer, pl_module):
+        self._training = False
+
+    def on_fit_end(self, trainer, pl_module):
+        for hook in self._hooks:
+            hook.remove()
+        self._hooks = []

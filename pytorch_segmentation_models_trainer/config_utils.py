@@ -26,7 +26,7 @@ from omegaconf import DictConfig, OmegaConf
 logger = logging.getLogger(__name__)
 
 
-@hydra.main()
+@hydra.main(config_path=None, version_base="1.2")
 def validate_config(cfg: DictConfig) -> None:
     logger.info("Input configuration: \n%s", OmegaConf.to_yaml(cfg))
 

@@ -37,6 +37,9 @@ from tqdm import tqdm
 from pytorch_segmentation_models_trainer.tools.inference.inference_processors import (
     AbstractInferenceProcessor,
 )
+from pytorch_segmentation_models_trainer.tools.inference.export_inference import (
+    ConfidenceExportStrategy,
+)
 from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import (
     TemplatePolygonizerProcessor,
 )
@@ -64,6 +67,8 @@ def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
         cfg=cfg,
         inference_mode=True,
         map_location=map_location,
+        weights_only=False,
+        strict=False,
     )
     model = pl_model.model
     model.to(cfg.device)
@@ -95,6 +100,14 @@ def instantiate_inference_processor(cfg: DictConfig) -> AbstractInferenceProcess
         obj_params["normalize_mean"] = cfg.inference_processor.normalize_mean
     if "normalize_std" in cfg.inference_processor:
         obj_params["normalize_std"] = cfg.inference_processor.normalize_std
+    if "tta_mode" in cfg.inference_processor:
+        obj_params["tta_mode"] = cfg.inference_processor.tta_mode
+    if "confidence_mode" in cfg.inference_processor:
+        obj_params["confidence_mode"] = cfg.inference_processor.confidence_mode
+        if "export_strategy" in cfg:
+            obj_params["confidence_export_strategy"] = ConfidenceExportStrategy(
+                output_file_path=cfg.export_strategy.output_file_path
+            )
     obj_params.pop("_target_")
     for key, value in obj_params.items():
         if isinstance(value, omegaconf.listconfig.ListConfig):
@@ -108,7 +121,7 @@ def get_images(cfg: DictConfig) -> List[str]:
     return image_reader.get_images()
 
 
-@hydra.main()
+@hydra.main(config_path=None, version_base="1.2")
 def predict(cfg: DictConfig):
     logger.info(
         "Starting the prediction of a model with the following configuration: \n%s",

@@ -99,7 +99,7 @@ class AbstractInferenceProcessor(ABC):
         if self.normalize_mean is not None and self.normalize_std is not None:
             func = A.Normalize(mean=self.normalize_mean, std=self.normalize_std, p=1.0)
         else:
-            # Padrão ImageNet RGB
+            # Default ImageNet RGB
             func = A.Normalize()
         return func
 
@@ -183,6 +183,7 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
         normalize_std=None,
         config=None,
         group_output_by_image_basename=False,
+        tile_weight="mean",
     ):
         super(SingleImageInfereceProcessor, self).__init__(
             model,
@@ -197,6 +198,54 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
             normalize_std=normalize_std,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
+        )
+        self._tile_weight = self._resolve_tile_weight(tile_weight)
+
+    @staticmethod
+    def _gaussian_importance_map(patch_size, sigma_scale=0.125):
+        """nnU-Net-style 2D Gaussian importance map.
+
+        Pixels near the tile center get weight ~1.0, edges get near-zero.
+        This reduces border artifacts from sliding window inference because
+        CNN predictions degrade near borders due to padding/context truncation.
+
+        Args:
+            patch_size: (H, W) tuple.
+            sigma_scale: fraction of patch size used as sigma (default 1/8).
+        """
+        center = [(s - 1) / 2.0 for s in patch_size]
+        sigma = [max(s * sigma_scale, 1.0) for s in patch_size]
+
+        axes = [np.arange(s, dtype=np.float32) for s in patch_size]
+        grid = np.meshgrid(*axes, indexing="ij")
+
+        gaussian = np.ones(patch_size, dtype=np.float32)
+        for ax, c, s in zip(grid, center, sigma):
+            gaussian *= np.exp(-0.5 * ((ax - c) / s) ** 2)
+
+        # Numerical stability — floor at 1e-4 of peak
+        gaussian = np.maximum(gaussian, gaussian.max() * 1e-4)
+        return gaussian
+
+    def _resolve_tile_weight(self, tile_weight):
+        """Resolve tile_weight to a value accepted by ImageSlicer.
+
+        Args:
+            tile_weight: "mean" (uniform), "pyramid" (distance-based),
+                "gaussian" (nnU-Net-style Gaussian), or a numpy array.
+
+        Returns:
+            str or np.ndarray passed to ImageSlicer(weight=...).
+        """
+        if isinstance(tile_weight, np.ndarray):
+            return tile_weight
+        if tile_weight in ("mean", "pyramid"):
+            return tile_weight
+        if tile_weight == "gaussian":
+            return self._gaussian_importance_map(tuple(self.model_input_shape))
+        raise ValueError(
+            f"tile_weight must be 'mean', 'pyramid', 'gaussian', or "
+            f"numpy array, got '{tile_weight}'"
         )
 
     def make_inference(
@@ -226,6 +275,7 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
             normalized_image.shape,
             tile_size=self.model_input_shape,
             tile_step=self.step_shape,
+            weight=self._tile_weight,
         )
         tiles = [image_to_tensor(tile) for tile in tiler.split(normalized_image)]
         merger_dict = self.get_merger_dict(tiler)
@@ -272,11 +322,26 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
 
 class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
     """
-    Inference processor para segmentação multi-class.
-    Modelo deve retornar logits/probabilidades: [B, num_classes, H, W]
-    Resultado final será uma imagem de 1 banda com índices de classe: [H, W]
+    Inference processor for multi-class segmentation.
+    Model must return logits/probabilities: [B, num_classes, H, W]
+    Final result is a single-band image with class indices: [H, W]
+
+    TTA (Test-Time Augmentation) modes:
+        None  — no TTA (default, backward compatible)
+        "d4"  — all 8 dihedral symmetries (4 rotations x 2 flips)
+        "flip" — horizontal + vertical flip (4 passes)
     """
-    
+
+    # D4 group: (num_rot90, flip_horizontal)
+    _D4_TRANSFORMS = [
+        (0, False), (1, False), (2, False), (3, False),
+        (0, True),  (1, True),  (2, True),  (3, True),
+    ]
+    _FLIP_TRANSFORMS = [
+        (0, False), (0, True),   # identity, hflip
+        (2, False), (2, True),   # rot180, rot180+hflip (= vflip)
+    ]
+
     def __init__(
         self,
         model,
@@ -286,13 +351,16 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         polygonizer=None,
         model_input_shape=None,
         step_shape=None,
-        num_classes=2,  # ✅ Novo parâmetro!
+        num_classes=2,
         normalize_mean=None,
         normalize_std=None,
         config=None,
         group_output_by_image_basename=False,
+        tta_mode=None,
+        tile_weight="mean",
+        confidence_mode=None,
+        confidence_export_strategy=None,
     ):
-        # ✅ Passa num_classes como mask_bands para TileMerger
         super().__init__(
             model=model,
             device=device,
@@ -301,39 +369,274 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
             polygonizer=polygonizer,
             model_input_shape=model_input_shape,
             step_shape=step_shape,
-            mask_bands=num_classes,  # ✅ TileMerger precisa de todos os canais
+            mask_bands=num_classes,
             normalize_mean=normalize_mean,
             normalize_std=normalize_std,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
+            tile_weight=tile_weight,
         )
         self.num_classes = num_classes
-    
+        if tta_mode is not None and tta_mode not in ("d4", "flip"):
+            raise ValueError(f"tta_mode must be None, 'd4', or 'flip', got '{tta_mode}'")
+        self.tta_mode = tta_mode
+        if confidence_mode is not None and confidence_mode not in ("basic", "full"):
+            raise ValueError(
+                f"confidence_mode must be None, 'basic', or 'full', got '{confidence_mode}'"
+            )
+        self.confidence_mode = confidence_mode
+        self.confidence_export_strategy = confidence_export_strategy
+
+    # ---- TTA helpers (operate on torch tensors [B, C, H, W]) ----
+
+    @staticmethod
+    def _apply_transform(tensor, num_rot90, flip_h):
+        """Apply a D4 transform to a batch tensor [B, C, H, W]."""
+        if flip_h:
+            tensor = torch.flip(tensor, dims=[-1])
+        if num_rot90:
+            tensor = torch.rot90(tensor, k=num_rot90, dims=[-2, -1])
+        return tensor
+
+    @staticmethod
+    def _invert_transform(tensor, num_rot90, flip_h):
+        """Invert a D4 transform on a batch tensor [B, C, H, W]."""
+        if num_rot90:
+            tensor = torch.rot90(tensor, k=-num_rot90, dims=[-2, -1])
+        if flip_h:
+            tensor = torch.flip(tensor, dims=[-1])
+        return tensor
+
+    def _get_tta_transforms(self):
+        if self.tta_mode == "d4":
+            return self._D4_TRANSFORMS
+        elif self.tta_mode == "flip":
+            return self._FLIP_TRANSFORMS
+        return [(0, False)]
+
+    def predict_and_merge(
+        self,
+        tiles: List[np.array],
+        tiler: ImageSlicer,
+        merger_dict: Dict[str, TileMerger],
+    ):
+        """Predict with optional TTA — average logits across transforms."""
+        transforms = self._get_tta_transforms()
+        n_tta = len(transforms)
+
+        with torch.no_grad():
+            for tiles_batch, coords_batch in DataLoader(
+                list(zip(tiles, tiler.crops)),
+                batch_size=self.batch_size,
+                pin_memory=True,
+                num_workers=4,
+                persistent_workers=True,
+                prefetch_factor=2,
+            ):
+                tiles_batch = tiles_batch.float().to(self.device)
+
+                if n_tta <= 1:
+                    # No TTA — fast path (original behavior)
+                    with autocast():
+                        pred_batch = self.model(tiles_batch)
+                else:
+                    # TTA: accumulate logits from all transforms
+                    accum = None
+                    for rot, flip in transforms:
+                        aug = self._apply_transform(tiles_batch, rot, flip)
+                        with autocast():
+                            pred = self.model(aug)  # [B, C, H, W]
+                        pred = pred.float()
+                        pred = self._invert_transform(pred, rot, flip)
+                        accum = pred if accum is None else accum + pred
+                    pred_batch = accum / n_tta
+
+                self.integrate_batch(pred_batch, coords_batch, merger_dict)
+
     def merge_masks(self, tiler: ImageSlicer, merger_dict: Dict[str, TileMerger]):
-        """
-        ✅ Sobrescreve para fazer argmax após merge!
-        """
-        # Merge ponderado das probabilidades (mantém todas as classes)
+        """Argmax after weighted tile merge."""
         merged_probs = to_numpy(merger_dict["seg"].merge())  # [num_classes, H, W]
-        
-        # ✅ ARGMAX: converte para índices de classe
         class_indices = np.argmax(merged_probs, axis=0)  # [H, W]
-        
-        # Crop para tamanho original
         class_indices = tiler.crop_to_orignal_size(class_indices)
         if class_indices.ndim == 2:
             class_indices = class_indices[..., np.newaxis]
-        
-        # ✅ Retorna 1 banda com índices (0, 1, 2, ..., num_classes-1)
         return {"seg": class_indices}
     
+    def make_inference_with_probs(self, image):
+        """Run inference returning class predictions, softmax probabilities,
+        and per-pixel confidence.
+
+        Unlike ``make_inference()``, this returns the full probability maps so
+        that callers can apply confidence-based filtering (e.g. pseudo-labeling).
+
+        Args:
+            image: np.ndarray [H, W, C] — input image (uint8 or float).
+
+        Returns:
+            dict with keys:
+                ``seg``        : np.ndarray [H, W]     uint8   — class indices
+                ``probs``      : np.ndarray [C, H, W]  float32 — softmax probs
+                ``confidence`` : np.ndarray [H, W]     float32 — max prob / pixel
+        """
+        norm_func = self.get_normalization_function()
+        normalized_image = norm_func(image=image)["image"]
+        orig_h, orig_w = image.shape[:2]
+
+        pad_func = A.PadIfNeeded(
+            math.ceil(orig_h / self.model_input_shape[0])
+            * self.model_input_shape[0],
+            math.ceil(orig_w / self.model_input_shape[1])
+            * self.model_input_shape[1],
+            border_mode=cv2.BORDER_REFLECT_101,
+            value=None,
+        )
+        center_crop = A.CenterCrop(orig_h, orig_w)
+        normalized_image = pad_func(image=normalized_image)["image"]
+
+        tiler = ImageSlicer(
+            normalized_image.shape,
+            tile_size=self.model_input_shape,
+            tile_step=self.step_shape,
+            weight=self._tile_weight,
+        )
+        tiles = [image_to_tensor(tile) for tile in tiler.split(normalized_image)]
+        merger_dict = self.get_merger_dict(tiler)
+        self.predict_and_merge(tiles, tiler, merger_dict)
+
+        # Merged logits (before argmax)
+        merged_logits = to_numpy(merger_dict["seg"].merge())  # [C, H_pad, W_pad]
+
+        # Numerically stable softmax
+        shifted = merged_logits - merged_logits.max(axis=0, keepdims=True)
+        exp_l = np.exp(shifted)
+        probs = exp_l / exp_l.sum(axis=0, keepdims=True)  # [C, H_pad, W_pad]
+
+        class_indices = np.argmax(probs, axis=0)  # [H_pad, W_pad]
+        confidence = probs.max(axis=0)             # [H_pad, W_pad]
+
+        # CenterCrop back to original dimensions (mirrors parent make_inference)
+        class_indices = center_crop(
+            image=class_indices[..., np.newaxis]
+        )["image"].squeeze(-1)
+        confidence = center_crop(
+            image=confidence[..., np.newaxis]
+        )["image"].squeeze(-1)
+        probs_hwc = np.moveaxis(probs, 0, -1)  # [H_pad, W_pad, C]
+        probs_hwc = center_crop(image=probs_hwc)["image"]
+
+        return {
+            "seg": class_indices.astype(np.uint8),
+            "probs": np.moveaxis(probs_hwc, -1, 0).astype(np.float32),
+            "confidence": confidence.astype(np.float32),
+        }
+
+    @staticmethod
+    def _compute_confidence_maps(probs):
+        """Compute confidence metrics from softmax probabilities.
+
+        Args:
+            probs: np.ndarray [C, H, W] — softmax probabilities.
+
+        Returns:
+            dict with keys ``max_prob``, ``entropy``, ``margin``
+            (each np.ndarray [H, W] float32, range [0, 1]).
+        """
+        max_prob = probs.max(axis=0)  # [H, W]
+
+        # Normalized entropy (0 = full certainty, 1 = max uncertainty)
+        eps = 1e-10
+        log_probs = np.log(probs + eps)
+        entropy = -(probs * log_probs).sum(axis=0)  # [H, W]
+        max_entropy = np.log(probs.shape[0])  # log(num_classes)
+        entropy_norm = entropy / max_entropy  # [0, 1]
+
+        # Margin between top-2 classes (0 = undecided, 1 = certain)
+        top2 = np.partition(probs, -2, axis=0)[-2:]  # top-2 along class axis
+        margin = top2.max(axis=0) - top2.min(axis=0)  # [H, W]
+
+        return {
+            "max_prob": max_prob.astype(np.float32),
+            "entropy": entropy_norm.astype(np.float32),
+            "margin": margin.astype(np.float32),
+        }
+
+    def process(
+        self,
+        image_path,
+        threshold=0.5,
+        save_inference_output=True,
+        polygonizer=None,
+        restore_geo_transform=True,
+        **kwargs,
+    ):
+        """Process a single image, optionally computing confidence maps.
+
+        When ``confidence_mode`` is set (``"basic"`` or ``"full"``), the
+        method uses ``make_inference_with_probs()`` to obtain softmax
+        probabilities and derives per-pixel confidence metrics that are
+        saved alongside the class prediction GeoTIFF.
+        """
+        image, profile = self.read_image_and_profile(
+            image_path, restore_geo_transform=restore_geo_transform
+        )
+
+        if self.confidence_mode is not None:
+            result = self.make_inference_with_probs(image)
+            inference = {"seg": result["seg"]}
+            confidence_maps = self._compute_confidence_maps(result["probs"])
+        else:
+            inference = self.make_inference(image, **kwargs)
+            confidence_maps = None
+
+        output_dict = defaultdict(list)
+        polygonizer = self.polygonizer if polygonizer is None else polygonizer
+        if polygonizer is not None:
+            output_dict["polygons"] += self.process_polygonizer(
+                polygonizer,
+                inference,
+                profile,
+                image_name=Path(image_path).stem
+                if self.group_output_by_image_basename
+                else None,
+            )
+        if save_inference_output:
+            self.save_inference(
+                image_path, threshold, profile, inference, output_dict
+            )
+            if confidence_maps is not None:
+                self._save_confidence_maps(image_path, profile, confidence_maps)
+        if "output_inferences" in kwargs and kwargs["output_inferences"]:
+            output_dict["inference_output"].append(inference)
+        return output_dict
+
+    def _save_confidence_maps(self, image_path, profile, confidence_maps):
+        """Save confidence metrics as individual float32 GeoTIFFs."""
+        if self.confidence_export_strategy is None:
+            return
+
+        conf_profile = dict(profile)
+        conf_profile["dtype"] = "float32"
+        conf_profile["count"] = 1
+        conf_profile["input_name"] = Path(image_path).stem
+        conf_profile["suffix"] = Path(image_path).suffix
+
+        if self.confidence_mode == "basic":
+            maps_to_save = {"max_prob": confidence_maps["max_prob"]}
+        else:  # "full"
+            maps_to_save = confidence_maps
+
+        for metric_name, data in maps_to_save.items():
+            self.confidence_export_strategy.save_confidence(
+                metric_name, data[..., np.newaxis], dict(conf_profile)
+            )
+
     def save_inference(self, image_path, threshold, profile, inference, output_dict, apply_threshold=True):
         """
-        ✅ Salva imagem de 1 banda com índices de classe (sem threshold!)
+        Save single-band image with class indices (no threshold!)
         """
-        # inference["seg"] já é [H, W] com valores 0, 1, 2, ..., num_classes-1
-        
-        # ✅ Atualiza profile para 1 banda, dtype uint8
+        # inference["seg"] is already [H, W] with values 0, 1, 2, ..., num_classes-1
+
+        # Update profile to 1 band, dtype uint8
         profile["count"] = 1
         profile["dtype"] = 'uint8'
         profile["input_name"] = Path(image_path).stem

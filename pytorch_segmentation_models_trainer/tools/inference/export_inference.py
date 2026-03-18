@@ -81,6 +81,38 @@ class MultipleRasterExportInferenceStrategy(ExportInferenceTemplate):
             writer.write_data(value, profile)
 
 
+class ConfidenceExportStrategy:
+    """Export per-pixel confidence metrics as individual GeoTIFF files.
+
+    Each metric (e.g. ``max_prob``, ``entropy``, ``margin``) is saved in its
+    own subfolder under ``output_file_path``::
+
+        output_file_path/
+        ├── confidence_max_prob/
+        │   └── <image_name>.tif    (float32, 1 band)
+        ├── confidence_entropy/
+        │   └── <image_name>.tif    (float32, 1 band)
+        └── confidence_margin/
+            └── <image_name>.tif    (float32, 1 band)
+    """
+
+    def __init__(self, output_file_path):
+        self.output_file_path = output_file_path
+
+    def save_confidence(self, metric_name, data, profile):
+        """Save a single confidence metric as a GeoTIFF.
+
+        Args:
+            metric_name: Name used for the subfolder (e.g. ``"entropy"``).
+            data: np.ndarray [H, W, 1] float32 with values in [0, 1].
+            profile: rasterio-compatible profile dict (must contain
+                ``input_name`` and ``suffix`` keys).
+        """
+        subfolder = os.path.join(self.output_file_path, f"confidence_{metric_name}")
+        writer = RasterDataWriter(output_file_path=subfolder)
+        writer.write_data(data, profile)
+
+
 class VectorFileExportInferenceStrategy(ExportInferenceTemplate):
     def __init__(self, output_file_path, driver="GeoJSON"):
         super(VectorFileExportInferenceStrategy, self).__init__()

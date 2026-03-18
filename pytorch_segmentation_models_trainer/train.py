@@ -38,7 +38,7 @@ from pytorch_segmentation_models_trainer.utils.os_utils import import_module_fro
 logger = logging.getLogger(__name__)
 
 
-@hydra.main()
+@hydra.main(config_path=None, version_base="1.2")
 def train(cfg: DictConfig):
     """Trains the model.
     Args:
@@ -56,7 +56,9 @@ def train(cfg: DictConfig):
             f"Resuming from checkpoint: {cfg.hyperparameters.resume_from_checkpoint}"
         )
         model = import_module_from_cfg(cfg.pl_model).load_from_checkpoint(
-            cfg.hyperparameters.resume_from_checkpoint, cfg=cfg
+            cfg.hyperparameters.resume_from_checkpoint,
+            cfg=cfg,
+            weights_only=False,
         )
     else:
         model = (

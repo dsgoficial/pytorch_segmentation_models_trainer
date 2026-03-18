@@ -31,6 +31,7 @@ from torch.utils.data import DataLoader
 from typing import List, Any, Union, Dict, Tuple
 from pytorch_segmentation_models_trainer.utils.model_utils import replace_activation
 from pytorch_segmentation_models_trainer.custom_losses.base_loss import MultiLoss
+from pytorch_segmentation_models_trainer.dataset_loader.dataset import _worker_init_fn
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,18 @@ class Model(pl.LightningModule):
             self.train_metrics = metrics.clone(prefix="train/")
             self.val_metrics = metrics.clone(prefix="val/")
         
+        # Per-class IoU: automatically enabled when class_definitions is present
+        self._per_class_iou = None
+        self._class_names = None
+        if "class_definitions" in self.cfg:
+            n_cls = len(self.cfg.class_definitions.names)
+            self._per_class_iou = torchmetrics.JaccardIndex(
+                task="multiclass", num_classes=n_cls,
+                average="none", ignore_index=255,
+            )
+            self._class_names = list(self.cfg.class_definitions.names)
+            logger.info(f"Per-class IoU monitoring enabled for {n_cls} classes")
+
         self.gpu_train_transform = (
             None
             if "gpu_augmentation_list" not in self.cfg.train_dataset
@@ -142,14 +155,14 @@ class Model(pl.LightningModule):
         try:
             # Get train_dataset config
             if 'train_dataset' not in self.cfg:
-                print("WARNING:'train_dataset' not found in config")
+                logger.warning("'train_dataset' not found in config")
                 return None
             
             dataset_cfg = self.cfg.train_dataset
             
             # Get CSV path
             if 'input_csv_path' not in dataset_cfg:
-                print("WARNING:'input_csv_path' not found in train_dataset config")
+                logger.warning("'input_csv_path' not found in train_dataset config")
                 return None
             
             csv_path = dataset_cfg.input_csv_path
@@ -158,13 +171,17 @@ class Model(pl.LightningModule):
             import os
 
             if not os.path.exists(csv_path):
-                print(f"WARNING: CSV file not found: {csv_path}")
+                logger.warning("CSV file not found: %s", csv_path)
                 return None
 
             # Use samples_per_epoch if defined (RandomCropSegmentationDataset),
-            # otherwise fall back to CSV row count
+            # otherwise fall back to CSV row count.
+            # When samples_per_epoch <= 0 (auto mode), read the computed
+            # value from the instantiated dataset instead of the config.
             if 'samples_per_epoch' in dataset_cfg:
                 dataset_size = dataset_cfg.samples_per_epoch
+                if dataset_size <= 0 and self.train_ds is not None and hasattr(self.train_ds, 'samples_per_epoch'):
+                    dataset_size = self.train_ds.samples_per_epoch
             else:
                 df = pd.read_csv(csv_path)
                 dataset_size = len(df)
@@ -185,7 +202,7 @@ class Model(pl.LightningModule):
                 batch_size = self.cfg.get('batch_size')
             
             if batch_size is None:
-                print("WARNING:Could not find batch_size in config")
+                logger.warning("Could not find batch_size in config")
                 return None
             
             # Compute device count using improved method
@@ -208,25 +225,19 @@ class Model(pl.LightningModule):
             effective_batch_size = batch_size * accumulate_grad_batches * device_count
             steps_per_epoch = dataset_size // effective_batch_size
             
-            # Print summary
-            print(f"\n{'='*60}")
-            print(f"AUTO-COMPUTED STEPS_PER_EPOCH FROM CONFIG")
-            print(f"{'='*60}")
-            print(f"CSV path:               {csv_path}")
-            print(f"Dataset size:           {dataset_size:>10,} samples")
-            print(f"Batch size:             {batch_size:>10}")
-            print(f"Devices:                {device_count:>10}")
-            print(f"Gradient accumulation:  {accumulate_grad_batches:>10}")
-            print(f"Effective batch size:   {effective_batch_size:>10}")
-            print(f"Steps per epoch:        {steps_per_epoch:>10,}")
-            print(f"{'='*60}\n")
+            # Log summary
+            logger.info(
+                "AUTO-COMPUTED STEPS_PER_EPOCH: csv=%s, dataset_size=%d, "
+                "batch_size=%d, devices=%d, accumulate=%d, effective_batch=%d, "
+                "steps_per_epoch=%d",
+                csv_path, dataset_size, batch_size, device_count,
+                accumulate_grad_batches, effective_batch_size, steps_per_epoch,
+            )
             
             return steps_per_epoch
             
         except Exception as e:
-            print(f"WARNING: Error computing steps_per_epoch from config: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.warning("Error computing steps_per_epoch from config: %s", e, exc_info=True)
             return None
 
     def get_model(self):
@@ -289,52 +300,149 @@ class Model(pl.LightningModule):
         )
 
     def get_optimizer(self):
+        layer_decay = None
+        if hasattr(self.cfg, 'hyperparameters'):
+            layer_decay = getattr(self.cfg.hyperparameters, 'layer_decay', None)
+
+        if layer_decay is not None and layer_decay < 1.0:
+            param_groups = self._get_param_groups_with_layer_decay(layer_decay)
+            # Cannot use Hydra instantiate with custom param_groups:
+            # it converts Python dicts to OmegaConf DictConfig, losing tensor refs.
+            from hydra.utils import get_class
+            from omegaconf import OmegaConf
+            optimizer_cls = get_class(self.cfg.optimizer._target_)
+            opt_kwargs = OmegaConf.to_container(self.cfg.optimizer, resolve=True)
+            opt_kwargs.pop('_target_')
+            # lr and weight_decay already set per-group; keep remaining (e.g. betas)
+            opt_kwargs.pop('lr', None)
+            opt_kwargs.pop('weight_decay', None)
+            return optimizer_cls(param_groups, **opt_kwargs)
         return instantiate(
             self.cfg.optimizer, params=self.parameters(), _recursive_=False
         )
+
+    def _get_param_groups_with_layer_decay(self, layer_decay):
+        """Create parameter groups with stage-wise LR decay for timm encoders.
+
+        Follows MMSegmentation's LearningRateDecayOptimizerConstructor with
+        stage_wise decay for ConvNeXt models.  Also applies no weight-decay
+        to bias and normalization parameters (1-D tensors).
+
+        Decay is applied by distance from output:
+          decoder/head  : lr
+          encoder stage N-1 : lr * decay
+          encoder stage N-2 : lr * decay^2
+          ...
+          encoder stem  : lr * decay^(N+1)
+        """
+        import re
+
+        base_lr = self.cfg.optimizer.lr
+        weight_decay = getattr(self.cfg.optimizer, 'weight_decay', 0.05)
+
+        # Detect number of encoder stages from parameter names.
+        # SMP TimmUniversalEncoder: encoder.model.stages.X.blocks...
+        # Also try downsample_layers.X for stem-based counting.
+        max_stage = -1
+        encoder_names_sample = []
+        for name, _ in self.named_parameters():
+            if 'encoder' in name:
+                if len(encoder_names_sample) < 5:
+                    encoder_names_sample.append(name)
+                match = re.search(r'stages[\.\[](\d+)', name)
+                if match:
+                    max_stage = max(max_stage, int(match.group(1)))
+        num_stages = max_stage + 1 if max_stage >= 0 else 0
+        if num_stages == 0 and encoder_names_sample:
+            logger.warning(
+                f"LLRD: 0 stages detected. Sample encoder param names: "
+                f"{encoder_names_sample}"
+            )
+
+        param_groups = []
+        for name, param in self.named_parameters():
+            if not param.requires_grad:
+                continue
+
+            # Determine LR based on layer position
+            if 'encoder' not in name:
+                # Decoder / segmentation head: full LR
+                group_lr = base_lr
+            else:
+                match = re.search(r'stages\.(\d+)', name)
+                if match:
+                    stage_id = int(match.group(1))
+                    depth = num_stages - stage_id
+                    group_lr = base_lr * (layer_decay ** depth)
+                else:
+                    # Stem or other encoder components: deepest decay
+                    group_lr = base_lr * (layer_decay ** (num_stages + 1))
+
+            # No weight decay for bias and normalization layers (1-D params)
+            param_wd = 0.0 if param.ndim <= 1 else weight_decay
+
+            param_groups.append({
+                'params': [param],
+                'lr': group_lr,
+                'weight_decay': param_wd,
+            })
+
+        lr_values = [g['lr'] for g in param_groups]
+        logger.info(
+            f"Layer-wise LR decay (rate={layer_decay}, {num_stages} stages): "
+            f"{len(param_groups)} param groups, "
+            f"LR range: [{min(lr_values):.2e}, {max(lr_values):.2e}]"
+        )
+        return param_groups
 
     def set_encoder_trainable(self, trainable=False):
         """Freezes or unfreezes the model encoder."""
         for child in self.model.encoder.children():
             for param in child.parameters():
                 param.requires_grad = trainable
-        print(f"\nEncoder weights set to trainable={trainable}\n")
+        logger.info("Encoder weights set to trainable=%s", trainable)
         return
 
     def forward(self, x):
         return self.model(x)
 
     def configure_optimizers(self):
-        """Configure optimizer and schedulers with automatic OneCycleLR setup"""
+        """Configure optimizer and schedulers with automatic OneCycleLR setup
+        and optional LR warmup via LinearLR + SequentialLR."""
         optimizer = self.get_optimizer()
         scheduler_list = []
-        
+
+        # Read warmup config
+        warmup_epochs = 0
+        if hasattr(self.cfg, 'hyperparameters'):
+            warmup_epochs = getattr(self.cfg.hyperparameters, 'warmup_epochs', 0)
+
         if "scheduler_list" not in self.cfg:
             return [optimizer], scheduler_list
-        
+
         for item in self.cfg.scheduler_list:
             dict_item = dict(item)
-            
+
             # Check if this is OneCycleLR scheduler
             scheduler_target = item.scheduler.get('_target_', '')
             is_one_cycle = 'OneCycleLR' in scheduler_target
-            
+
             if is_one_cycle:
                 scheduler_config = dict(item.scheduler)
-                
+
                 # Check if steps_per_epoch needs to be set automatically
                 needs_auto_steps = (
-                    'steps_per_epoch' not in scheduler_config or 
+                    'steps_per_epoch' not in scheduler_config or
                     scheduler_config.get('steps_per_epoch') in [None, 'auto', -1]
                 )
-                
+
                 if needs_auto_steps:
                     # Compute steps_per_epoch from config
                     steps_per_epoch = self._compute_steps_from_config()
-                    
+
                     if steps_per_epoch is not None:
                         scheduler_config['steps_per_epoch'] = steps_per_epoch
-                        print(f"OK:OneCycleLR: Using steps_per_epoch = {steps_per_epoch:,}")
+                        logger.info("OneCycleLR: Using steps_per_epoch = %d", steps_per_epoch)
                     else:
                         raise ValueError(
                             "\n" + "="*60 + "\n"
@@ -355,19 +463,46 @@ class Model(pl.LightningModule):
                         )
                 else:
                     provided_steps = scheduler_config['steps_per_epoch']
-                    print(f"INFO:OneCycleLR: Using provided steps_per_epoch = {provided_steps:,}")
-                
+                    logger.info("OneCycleLR: Using provided steps_per_epoch = %d", provided_steps)
+
                 dict_item["scheduler"] = instantiate(
                     scheduler_config, optimizer=optimizer, _recursive_=False
                 )
             else:
                 # Other schedulers - instantiate normally
-                dict_item["scheduler"] = instantiate(
+                base_scheduler = instantiate(
                     item.scheduler, optimizer=optimizer, _recursive_=False
                 )
-            
+
+                # Wrap with LinearLR warmup if configured
+                if warmup_epochs > 0 and not is_one_cycle:
+                    from torch.optim.lr_scheduler import LinearLR, SequentialLR
+
+                    # Adjust T_max for CosineAnnealingLR so it finishes at the right epoch
+                    if hasattr(base_scheduler, 'T_max'):
+                        base_scheduler.T_max = base_scheduler.T_max - warmup_epochs
+
+                    warmup_scheduler = LinearLR(
+                        optimizer,
+                        start_factor=1e-2,   # start at 1% of base lr
+                        end_factor=1.0,
+                        total_iters=warmup_epochs,
+                    )
+                    combined = SequentialLR(
+                        optimizer,
+                        schedulers=[warmup_scheduler, base_scheduler],
+                        milestones=[warmup_epochs],
+                    )
+                    dict_item["scheduler"] = combined
+                    logger.info(
+                        f"LR warmup: {warmup_epochs} epochs linear "
+                        f"(1% -> 100% of base lr), then main scheduler"
+                    )
+                else:
+                    dict_item["scheduler"] = base_scheduler
+
             scheduler_list.append(dict_item)
-        
+
         return [optimizer], scheduler_list
 
     def train_dataloader(self):
@@ -388,6 +523,7 @@ class Model(pl.LightningModule):
             persistent_workers=self.cfg.train_dataset.data_loader.persistent_workers
             if "persistent_workers" in self.cfg.train_dataset.data_loader
             else False,
+            worker_init_fn=_worker_init_fn,
         )
 
     def val_dataloader(self):
@@ -410,6 +546,7 @@ class Model(pl.LightningModule):
             persistent_workers=self.cfg.val_dataset.data_loader.persistent_workers
             if "persistent_workers" in self.cfg.val_dataset.data_loader
             else False,
+            worker_init_fn=_worker_init_fn,
         )
 
     def _compute_loss(
@@ -460,89 +597,85 @@ class Model(pl.LightningModule):
             loss = self.loss_function(predicted_masks, masks)
             return loss, {}, {}
 
-    def training_step(self, batch, batch_idx):
-        """Training step - now supports both simple and compound losses."""
+    @staticmethod
+    def _soft_to_hard_masks(masks, ignore_value=255):
+        """Convert soft label masks (B,C,H,W) to hard masks (B,H,W) for metrics.
+
+        Pixels where all class channels are zero (ignore regions) are mapped
+        to ``ignore_value`` instead of class 0 (which argmax would return).
+        """
+        valid_mask = masks.sum(dim=1) > 0  # (B, H, W)
+        hard_masks = masks.argmax(dim=1)  # (B, H, W)
+        hard_masks[~valid_mask] = ignore_value
+        return hard_masks
+
+    def _shared_step(self, batch, prefix):
+        """Shared logic for training and validation steps.
+
+        Args:
+            batch: dict with 'image' and 'mask' tensors.
+            prefix: 'train' or 'val' (used for log keys).
+        """
+        is_train = prefix == "train"
         images, masks = batch.values()
-        masks = masks.long()
+
+        # Soft labels arrive as float (B,C,H,W); hard labels as int/long (B,H,W)
+        if masks.is_floating_point():
+            hard_masks = self._soft_to_hard_masks(masks)  # for metrics only
+        else:
+            masks = masks.long()
+            hard_masks = masks
+
         predicted_masks = self(images)
-        
+
         # Compute loss (handles both simple and compound)
         loss, individual_losses, extra_info = self._compute_loss(predicted_masks, masks)
-        
+
+        # Add MoE auxiliary loss if model exposes it
+        if hasattr(self.model, 'last_aux_loss') and self.model.last_aux_loss is not None:
+            moe_aux_loss = self.model.last_aux_loss
+            loss = loss + moe_aux_loss
+            self.log(f"losses/{prefix}_moe_aux", moe_aux_loss,
+                     on_step=is_train, on_epoch=True, sync_dist=True)
+
         # Log total loss
-        self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        
-        # NEW: Log individual losses if using compound loss
+        self.log(f"loss/{prefix}", loss,
+                 on_step=is_train, on_epoch=True, prog_bar=True, sync_dist=True)
+
+        # Log individual losses if using compound loss
         if individual_losses:
             for loss_name, loss_value in individual_losses.items():
-                self.log(
-                    f"losses/train_{loss_name}", 
-                    loss_value, 
-                    on_step=True, 
-                    on_epoch=True,
-                    sync_dist=False
-                )
-        
-        # NEW: Log extra info if available
+                self.log(f"losses/{prefix}_{loss_name}", loss_value,
+                         on_step=is_train, on_epoch=True, sync_dist=False)
+
+        # Log extra info if available
         if extra_info:
             for loss_name, extra_dict in extra_info.items():
                 for key, value in extra_dict.items():
-                    self.log(
-                        f"extra/train_{loss_name}_{key}",
-                        value,
-                        on_step=True,
-                        on_epoch=True,
-                        sync_dist=False
-                    )
-        
-        # Compute and log metrics - automatically prefixed with train/
-        if hasattr(self, 'train_metrics'):
-            metrics = self.train_metrics(predicted_masks, masks)
-            self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
-        
+                    self.log(f"extra/{prefix}_{loss_name}_{key}", value,
+                             on_step=is_train, on_epoch=True, sync_dist=False)
+
+        # Compute and log metrics
+        metrics_attr = f'{prefix}_metrics'
+        if hasattr(self, metrics_attr):
+            metrics = getattr(self, metrics_attr)(predicted_masks, hard_masks)
+            self.log_dict(metrics, on_step=is_train, on_epoch=True,
+                          prog_bar=False, sync_dist=True)
+
+        # Per-class IoU (validation only)
+        if not is_train and self._per_class_iou is not None:
+            per_class = self._per_class_iou(predicted_masks, hard_masks)
+            for i, name in enumerate(self._class_names):
+                self.log(f"val_iou/{name}", per_class[i],
+                         on_step=False, on_epoch=True, sync_dist=True)
+
         return loss
 
+    def training_step(self, batch, batch_idx):
+        return self._shared_step(batch, "train")
+
     def validation_step(self, batch, batch_idx):
-        """Validation step - now supports both simple and compound losses."""
-        images, masks = batch.values()
-        masks = masks.long()
-        predicted_masks = self(images)
-        
-        # Compute loss (handles both simple and compound)
-        loss, individual_losses, extra_info = self._compute_loss(predicted_masks, masks)
-        
-        # Log total loss
-        self.log("loss/val", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-        
-        # NEW: Log individual losses if using compound loss
-        if individual_losses:
-            for loss_name, loss_value in individual_losses.items():
-                self.log(
-                    f"losses/val_{loss_name}",
-                    loss_value,
-                    on_step=False,
-                    on_epoch=True,
-                    sync_dist=False
-                )
-        
-        # NEW: Log extra info if available
-        if extra_info:
-            for loss_name, extra_dict in extra_info.items():
-                for key, value in extra_dict.items():
-                    self.log(
-                        f"extra/val_{loss_name}_{key}",
-                        value,
-                        on_step=False,
-                        on_epoch=True,
-                        sync_dist=False
-                    )
-        
-        # Compute and log metrics - automatically prefixed with val/
-        if hasattr(self, 'val_metrics'):
-            metrics = self.val_metrics(predicted_masks, masks)
-            self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
-        
-        return loss
+        return self._shared_step(batch, "val")
     
     def check_if_should_normalize(self):
         self.should_normalize = False

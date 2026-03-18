@@ -74,17 +74,17 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 def prepare_inference_csv(cfg):
     """
-    Prepara CSV de inferência.
-    
-    Suporta três modos:
-    1. inference_dataset.input_csv_path (direto)
-    2. inference_dataset.build_csv_from_folder (construir de pasta)
-    3. val_dataset.input_csv_path (retrocompatibilidade)
-    
+    Prepare inference CSV.
+
+    Supports three modes:
+    1. inference_dataset.input_csv_path (direct)
+    2. inference_dataset.build_csv_from_folder (build from folder)
+    3. val_dataset.input_csv_path (backward compatibility)
+
     Returns:
         Tuple (csv_path, root_dir)
     """
-    # Modo 1: inference_dataset com CSV direto
+    # Mode 1: inference_dataset with direct CSV
     if (hasattr(cfg, 'inference_dataset') and 
         hasattr(cfg.inference_dataset, 'input_csv_path') and 
         cfg.inference_dataset.input_csv_path):
@@ -95,7 +95,7 @@ def prepare_inference_csv(cfg):
         
         return csv_path, root_dir
     
-    # Modo 2: inference_dataset com build_csv_from_folder
+    # Mode 2: inference_dataset with build_csv_from_folder
     if (hasattr(cfg, 'inference_dataset') and 
         hasattr(cfg.inference_dataset, 'build_csv_from_folder') and
         cfg.inference_dataset.build_csv_from_folder.get('enabled', False)):
@@ -117,7 +117,7 @@ def prepare_inference_csv(cfg):
         
         return csv_path, root_dir
     
-    # Modo 3: val_dataset (retrocompatibilidade)
+    # Mode 3: val_dataset (backward compatibility)
     if hasattr(cfg, 'val_dataset') and hasattr(cfg.val_dataset, 'input_csv_path'):
         logger.info("Using val_dataset.input_csv_path (legacy mode)")
         csv_path = cfg.val_dataset.input_csv_path
@@ -135,18 +135,18 @@ def prepare_inference_csv(cfg):
 
 def instantiate_dataloaders(cfg):
     """
-    Instancia dataloaders para inferência.
-    
-    Suporta inference_dataset e val_dataset (retrocompatibilidade).
+    Instantiate dataloaders for inference.
+
+    Supports inference_dataset and val_dataset (backward compatibility).
     """
-    # Preparar CSV
+    # Prepare CSV
     csv_path, root_dir = prepare_inference_csv(cfg)
     
     logger.info(f"Loading inference data from: {csv_path}")
     logger.info(f"Root directory: {root_dir}")
     
-    # Ler CSV
-    # Verificar se há limite de linhas
+    # Read CSV
+    # Check if there is a row limit
     n_rows = None
     
     if hasattr(cfg, 'inference_dataset'):
@@ -162,7 +162,7 @@ def instantiate_dataloaders(cfg):
     
     logger.info(f"Loaded {len(df)} images for inference")
     
-    # Obter dataloaders
+    # Get dataloaders
     windowed = (
         False
         if not hasattr(cfg, "use_inference_processor")
@@ -173,13 +173,13 @@ def instantiate_dataloaders(cfg):
 
 
 def get_grouped_dataloaders(cfg, df, root_dir, windowed=False):
-    """Cria dataloaders agrupados por dimensão."""
+    """Create dataloaders grouped by dimension."""
     ds_dict = get_grouped_datasets(cfg, df, root_dir, windowed)
     
-    # Obter batch_size e configurações de dataloader
+    # Get batch_size and dataloader settings
     batch_size = cfg.hyperparameters.batch_size
     
-    # Tentar pegar configurações de inference_dataset, senão val_dataset
+    # Try to get settings from inference_dataset, otherwise val_dataset
     if hasattr(cfg, 'inference_dataset') and hasattr(cfg.inference_dataset, 'data_loader'):
         dl_config = cfg.inference_dataset.data_loader
     elif hasattr(cfg, 'val_dataset') and hasattr(cfg.val_dataset, 'data_loader'):
@@ -214,12 +214,12 @@ def get_grouped_dataloaders(cfg, df, root_dir, windowed=False):
 
 
 def get_grouped_datasets(cfg, df, root_dir, windowed):
-    """Cria datasets agrupados por dimensão."""
+    """Create datasets grouped by dimension."""
     from tqdm import tqdm
 
     tqdm.pandas()
     
-    # Skip de polígonos existentes
+    # Skip existing polygons
     if "skip_existing_polygons" in cfg and cfg.skip_existing_polygons:
         logger.info("Filtering out images with polygonization that already exist.")
         
@@ -254,7 +254,7 @@ def get_grouped_datasets(cfg, df, root_dir, windowed):
             )
         df = df[df["output_exists"] == False].reset_index(drop=True)
     
-    # Criar datasets
+    # Create datasets
     ds_dict = (
         ImageDataset.get_grouped_datasets(
             df,
@@ -276,38 +276,75 @@ def get_grouped_datasets(cfg, df, root_dir, windowed):
     return ds_dict
 
 
-@hydra.main()
+@hydra.main(config_path=None, version_base="1.2")
 def predict_from_batch(cfg: DictConfig):
     """
-    Executa predição em batch.
-    
-    Suporta:
+    Run batch prediction.
+
+    Supports two modes:
+    1. inference_processor in config -> uses sliding window processor (rasterio, TTA, etc.)
+    2. Without inference_processor -> uses trainer.predict() with DataLoader (legacy)
+
+    Image sources:
     - inference_dataset.input_csv_path
     - inference_dataset.build_csv_from_folder
-    - val_dataset.input_csv_path (retrocompatibilidade)
+    - val_dataset.input_csv_path (backward compatibility)
     """
     logger.info(
         "Starting the prediction of a model with the following configuration: \n%s",
         OmegaConf.to_yaml(cfg),
     )
-    
-    # Carregar modelo
+
+    # inference_processor mode: uses sliding window, TTA, rasterio (multi-band)
+    if hasattr(cfg, 'inference_processor'):
+        from pytorch_segmentation_models_trainer.predict import (
+            instantiate_inference_processor,
+        )
+        inference_processor = instantiate_inference_processor(cfg)
+
+        # Get image list from CSV
+        csv_path, root_dir = prepare_inference_csv(cfg)
+        df = pd.read_csv(csv_path)
+        logger.info(f"Loaded {len(df)} images for inference via inference_processor")
+
+        params = {
+            "save_inference_output": cfg.save_inference if "save_inference" in cfg else True
+        }
+        if "inference_threshold" in cfg:
+            params["inference_threshold"] = cfg.inference_threshold
+
+        for _, row in tqdm(
+            df.iterrows(),
+            total=len(df),
+            desc="Processing inference",
+            colour="green",
+        ):
+            image_path = row["image"]
+            if not os.path.isabs(image_path):
+                image_path = os.path.join(root_dir, image_path)
+            try:
+                inference_processor.process(image_path, **params)
+            except Exception as e:
+                logger.exception(
+                    f"Error processing {image_path}: {e}. Continuing..."
+                )
+        return
+
+    # Legacy mode: trainer.predict() with DataLoader
     model = import_module_from_cfg(cfg.pl_model).load_from_checkpoint(
-        cfg.checkpoint_path, cfg=cfg, inference_mode=True
+        cfg.checkpoint_path, cfg=cfg, inference_mode=True,
+        weights_only=False, strict=False,
     )
     model.eval()
-    
-    # Criar dataloaders
+
     dataloader_list = instantiate_dataloaders(cfg)
     callback_list = [] if not isinstance(model, FrameFieldSegmentationPLModel) \
         else [ActiveSkeletonsPolygonizerCallback()]
-    
-    # Criar trainer
+
     trainer = Trainer(
         **cfg.pl_trainer, callbacks=callback_list
     )
-    
-    # Executar predições
+
     for key, dataloader in tqdm(
         dataloader_list,
         total=len(dataloader_list),

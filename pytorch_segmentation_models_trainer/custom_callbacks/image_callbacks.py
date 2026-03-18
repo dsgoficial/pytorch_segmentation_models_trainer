@@ -693,11 +693,23 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         return mask
 
     def apply_colormap_to_axes(self, axarr, mask_indices: List[int], masks: List[np.ndarray]):
-        """Apply colormap to specific axes after generate_visualization."""
+        """Apply colormap to specific axes after generate_visualization.
+
+        Pixels with ignore_index (255) are rendered in light gray instead of
+        being clipped to the highest class color.
+        """
+        IGNORE_VALUE = 255
+        IGNORE_COLOR = (0.75, 0.75, 0.75)  # light gray for ignored pixels
         for idx, mask in zip(mask_indices, masks):
             ax = axarr[idx] if isinstance(axarr, np.ndarray) else axarr
             ax.clear()
-            ax.imshow(mask, cmap=self.cmap, norm=self.norm, interpolation='nearest')
+            ignore_mask = mask == IGNORE_VALUE
+            if np.any(ignore_mask):
+                display = np.ma.array(mask.astype(np.float32), mask=ignore_mask)
+                ax.set_facecolor(IGNORE_COLOR)
+            else:
+                display = mask
+            ax.imshow(display, cmap=self.cmap, norm=self.norm, interpolation='nearest')
             ax.set_xticks([])
             ax.set_yticks([])
             if idx == 1:
