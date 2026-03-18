@@ -24,6 +24,7 @@ import os
 import unittest
 import warnings
 
+import numpy as np
 import torch
 from pytorch_segmentation_models_trainer.tools.detection.bbox_handler import (
     BboxTileMerger,
