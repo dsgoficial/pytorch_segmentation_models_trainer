@@ -48,6 +48,8 @@ jobs:
         pip install flake8 pytest parameterized coverage
         if [ -f requirements.txt ]; then pip install --upgrade --upgrade-strategy eager -r requirements.txt; fi
         pip install .
+        pip uninstall opencv-python -y || true
+        pip install opencv-python-headless
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
