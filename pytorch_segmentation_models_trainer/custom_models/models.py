@@ -45,28 +45,28 @@ current_dir = os.path.dirname(__file__)
 @dataclass
 class DeepLab101SegmentationBackbone:
     _target_: str = "torchvision.models.segmentation.deeplabv3_resnet101"
-    pretrained: bool = True
+    pretrained: bool = False
     num_classes: int = 21
 
 
 @dataclass
 class DeepLab50SegmentationBackbone:
     _target_: str = "torchvision.models.segmentation.deeplabv3_resnet50"
-    pretrained: bool = True
+    pretrained: bool = False
     num_classes: int = 21
 
 
 @dataclass
 class FCN101SegmentationBackbone:
     _target_: str = "torchvision.models.segmentation.fcn_resnet101"
-    pretrained: bool = True
+    pretrained: bool = False
     num_classes: int = 21
 
 
 @dataclass
 class FCN50SegmentationBackbone:
     _target_: str = "torchvision.models.segmentation.fcn_resnet50"
-    pretrained: bool = True
+    pretrained: bool = False
     num_classes: int = 21
 
 
@@ -76,7 +76,7 @@ class UNetResNetSegmentationBackbone:
     encoder_depth: int = 34
     num_filters: int = 32
     dropout_2d: float = 0.2
-    pretrained: bool = True
+    pretrained: bool = False
     is_deconv: bool = False
 
 

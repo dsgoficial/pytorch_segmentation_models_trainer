@@ -5,7 +5,7 @@ model:
   segmentation_model:
     _target_: segmentation_models_pytorch.Unet
     encoder_name: ${backbone.name}
-    encoder_weights: imagenet
+    encoder_weights: null
     in_channels: 3
     classes: ${hyperparameters.classes}
     activation: sigmoid
@@ -83,7 +83,6 @@ pl_trainer:
   max_epochs: ${hyperparameters.epochs}
   accelerator: cpu
   devices: 1
-  accelerator: ddp
   precision: 32
   default_root_dir: /experiment_data/${backbone.name}_${hyperparameters.model_name}
 backbone:

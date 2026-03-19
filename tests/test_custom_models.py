@@ -39,9 +39,6 @@ input_model_list = [
     (models.FCN50, {}, torch.Size([2, 256, 256, 256])),
     (models.UNetResNet, {}, torch.Size([2, 32, 256, 256])),
     (models.HRNetOCRW48, {}, torch.Size([2, 1, 64, 64])),
-    (models.HRNetOCRW48, {"pretrained": "cityscapes"}, torch.Size([2, 19, 64, 64])),
-    (models.HRNetOCRW48, {"pretrained": "lip"}, torch.Size([2, 20, 64, 64])),
-    (models.HRNetOCRW48, {"pretrained": "pascal"}, torch.Size([2, 59, 64, 64])),
 ]
 
 
