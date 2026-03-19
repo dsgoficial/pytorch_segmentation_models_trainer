@@ -1140,6 +1140,8 @@ class ObjectDetectionDataset(AbstractDataset):
             index, key=self.image_key, is_mask=False, force_rgb=True
         )
         bbox_list, label_list = self.load_bounding_boxes_and_labels(index)
+        if hasattr(label_list, "tolist"):
+            label_list = label_list.tolist()
         ds_item_dict = {"image": image, "bboxes": bbox_list, "labels": label_list}
         if self.transform is not None:
             ds_item_dict = self.transform(**ds_item_dict)
@@ -1217,6 +1219,8 @@ class InstanceSegmentationDataset(ObjectDetectionDataset):
             index, key=self.image_key, is_mask=False, force_rgb=True
         )
         bbox_list, label_list = self.load_bounding_boxes_and_labels(index)
+        if hasattr(label_list, "tolist"):
+            label_list = label_list.tolist()
         ds_item_dict = {"image": image, "bboxes": bbox_list, "labels": label_list}
         if self.return_mask:
             ds_item_dict["masks"] = [

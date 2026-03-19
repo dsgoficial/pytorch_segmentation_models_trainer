@@ -1,5 +1,5 @@
 import random
-from descartes import PolygonPatch
+import matplotlib.patches as mpatches
 from matplotlib.collections import PatchCollection
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
@@ -179,7 +179,7 @@ def plot_polygons(
     shapely_geom_list = list(map(polygonrnn_utils.handle_vertices, polygons))
     for shapely_geom in shapely_geom_list:
         if not shapely_geom.is_empty and "Polygon" in shapely_geom.geom_type:
-            patch = PolygonPatch(shapely_geom)
+            patch = mpatches.Polygon(np.array(shapely_geom.exterior.coords)[:, :2])
             patches.append(patch)
     random.seed(1)
     if color_choices is None:

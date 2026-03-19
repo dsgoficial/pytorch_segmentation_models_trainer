@@ -26,6 +26,7 @@ pl_trainer:
 train_dataset:
   object_detection:
     _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.ObjectDetectionDataset
+    _recursive_: false
     input_csv_path: teste
     root_dir: teste
     n_first_rows_to_read: 10
@@ -53,6 +54,7 @@ train_dataset:
         - labels
   polygon_rnn:
     _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.PolygonRNNDataset
+    _recursive_: false
     input_csv_path: teste
     root_dir: teste
     dataset_type: train
@@ -72,6 +74,7 @@ train_dataset:
 val_dataset:
   object_detection:
     _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.ObjectDetectionDataset
+    _recursive_: false
     input_csv_path: teste
     root_dir: teste
     n_first_rows_to_read: 10
@@ -99,6 +102,7 @@ val_dataset:
         - labels
   polygon_rnn:
     _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.PolygonRNNDataset
+    _recursive_: false
     input_csv_path: teste
     root_dir: teste
     dataset_type: val

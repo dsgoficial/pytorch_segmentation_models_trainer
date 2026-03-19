@@ -151,6 +151,8 @@ def merge_csv_datasets(file1, file2, key_column, output_file_name=None):
     df1 = df1.sort_values(by=key_column, ignore_index=True)
     df2 = df2.sort_values(by=key_column, ignore_index=True)
     df2.dropna(axis=1, how="all", inplace=True)
+    common_cols = df1.columns.intersection(df2.columns)
+    df1[common_cols] = df1[common_cols].astype(object)
     df1.update(df2)
     df1.replace({0: False, 1: True}, inplace=True)
     df1.to_csv(output_file_name, index=False)

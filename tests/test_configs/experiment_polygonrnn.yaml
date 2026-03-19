@@ -32,6 +32,7 @@ pl_trainer:
 
 train_dataset:
   _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.PolygonRNNDataset
+  _recursive_: false
   input_csv_path: teste
   root_dir: teste
   sequence_length: 20
@@ -59,6 +60,7 @@ train_dataset:
 
 val_dataset:
   _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.PolygonRNNDataset
+  _recursive_: false
   input_csv_path: teste
   root_dir: teste
   sequence_length: 20

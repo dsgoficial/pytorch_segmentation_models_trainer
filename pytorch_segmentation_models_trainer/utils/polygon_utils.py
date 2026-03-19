@@ -298,7 +298,7 @@ def _compute_distance_and_sizes(
     distance_maps[:, :, i] = polygon_dist
 
     selem = skimage.morphology.disk(line_width)
-    bbox_dilated_mask = skimage.morphology.binary_dilation(bbox_mask, selem=selem)
+    bbox_dilated_mask = skimage.morphology.binary_dilation(bbox_mask, footprint=selem)
     sizes[mini:maxi, minj:maxj][bbox_dilated_mask] = polygon.area / image_area
 
 
