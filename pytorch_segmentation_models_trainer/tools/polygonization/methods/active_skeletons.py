@@ -194,7 +194,7 @@ def get_marching_squares_skeleton(np_int_prob, config):
         # Check if it is a closed contour
         is_closed = np.max(np.abs(contour[0] - contour[-1])) < 1e-6
         _coordinates = contour[:-1, :] if is_closed else contour
-        _degrees = 2 * np.ones(_coordinates.shape[0], dtype=np.long)
+        _degrees = 2 * np.ones(_coordinates.shape[0], dtype=np.int64)
         if not is_closed:
             _degrees[0], _degrees[-1] = 1, 1
         _indices = list(range(indices_offset, indices_offset + _coordinates.shape[0]))

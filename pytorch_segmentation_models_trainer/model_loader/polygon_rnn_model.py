@@ -83,7 +83,12 @@ class PolygonRNNPLModel(Model):
         self.log("metrics/val_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
 
         # Log polis metric
-        self.log("metrics/val_polis", batch_polis.mean(), on_step=False, on_epoch=True)
+        self.log(
+            "metrics/val_polis",
+            batch_polis.float().mean(),
+            on_step=False,
+            on_epoch=True,
+        )
 
         # Log IoU (computed from intersection and union in on_validation_epoch_end)
         # Store for epoch-level aggregation

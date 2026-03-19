@@ -582,7 +582,7 @@ class HRNetOCR(nn.Module):
             self.stage4_cfg, num_channels, multi_scale_output=True
         )
 
-        last_inp_channels = np.int(np.sum(pre_stage_channels))
+        last_inp_channels = int(np.sum(pre_stage_channels))
         ocr_mid_channels = self.ocr.mid_channels
         ocr_key_channels = self.ocr.key_channels
 

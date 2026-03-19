@@ -131,7 +131,9 @@ def shapely_postprocess(contours, u, v, np_indicator, tolerance, config):
         polygons, dangles, cuts, invalids = shapely.ops.polygonize_full(
             multi_line_string
         )
-        polygons = [polygon for polygon in polygons if config.min_area < polygon.area]
+        polygons = [
+            polygon for polygon in polygons.geoms if config.min_area < polygon.area
+        ]
         filtered_polygons, filtered_polygon_probs = [], []
         for polygon in polygons:
             prob = polygonize_utils.compute_geom_prob(polygon, np_indicator)

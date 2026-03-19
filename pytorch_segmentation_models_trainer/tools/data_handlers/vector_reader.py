@@ -313,7 +313,7 @@ def handle_geometry(geom, output_type):
     ):
         return geom
     elif isinstance(geom, GeometryCollection):
-        return GeometryCollection([handle_geometry(i, output_type) for i in geom])
+        return GeometryCollection([handle_geometry(i, output_type) for i in geom.geoms])
     elif isinstance(geom, (Polygon, MultiPolygon)) and output_type == GeomType.LINE:
         # return type is LineString or MultiLinestring, depending whether the polygon
         # has holes, or if it is a MultiPolygon
@@ -326,7 +326,7 @@ def handle_geometry(geom, output_type):
                     geom.boundary.coords
                     if isinstance(geom, Polygon)
                     else functools.reduce(
-                        operator.iconcat, [i.coords for i in geom.boundary]
+                        operator.iconcat, [i.coords for i in geom.boundary.geoms]
                     )
                 )
             )

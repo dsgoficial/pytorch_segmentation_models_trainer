@@ -23,10 +23,6 @@
 import numpy as np
 import torch
 
-from pytorch_segmentation_models_trainer.tools.visualization.crossfield_plot import (
-    save_poly_viz,
-)
-
 
 def compute_crossfield_c0c2(u, v):
     c0 = np.power(u, 2) * np.power(v, 2)
@@ -163,6 +159,10 @@ if __name__ == "__main__":
     # image_seg_display = image_seg_display.cpu().numpy().transpose(0, 2, 3, 1)
     # skimage.io.imsave("image_seg_display.png", image_seg_display[0])
     # skimage.io.imsave("image_cross_display.png", image_seg_display[1])
+    from pytorch_segmentation_models_trainer.tools.visualization.crossfield_plot import (
+        save_poly_viz,
+    )
+
     img = np.moveaxis(image[0].numpy(), 0, -1)
     save_poly_viz(
         img,

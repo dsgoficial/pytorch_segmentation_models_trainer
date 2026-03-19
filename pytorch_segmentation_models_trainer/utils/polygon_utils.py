@@ -470,7 +470,9 @@ def compute_contour_measure(pred_polygon, gt_contours, sampling_spacing, max_str
     # Project sampled contour points to ground truth contours
     projected_pred_contours = project_onto_geometry(sampled_pred_contours, gt_contours)
     contour_measures = []
-    for contour, proj_contour in zip(sampled_pred_contours, projected_pred_contours):
+    for contour, proj_contour in zip(
+        sampled_pred_contours.geoms, projected_pred_contours.geoms
+    ):
         coords = np.array(contour.coords[:])
         proj_coords = np.array(proj_contour.coords[:])
         edges = coords[1:] - coords[:-1]
@@ -516,7 +518,7 @@ def sample_geometry(geom, density):
     sample_lambda = lambda x: _sample_linestring(x, density)
     if isinstance(geom, shapely.geometry.GeometryCollection):
         sampled_geom = shapely.geometry.GeometryCollection(
-            [sample_geometry(g, density) for g in geom]
+            [sample_geometry(g, density) for g in geom.geoms]
         )
     elif isinstance(geom, shapely.geometry.Polygon):
         sampled_exterior = _sample_linestring(geom.exterior, density)
@@ -684,12 +686,14 @@ def project_onto_geometry(geom, target, pool=None):
         # tic = time.time()
 
         if pool is None:
-            projected_geom = [project_onto_geometry(g, target, pool=pool) for g in geom]
+            projected_geom = [
+                project_onto_geometry(g, target, pool=pool) for g in geom.geoms
+            ]
         else:
             partial_project_onto_geometry = partial(
                 project_onto_geometry, target=target
             )
-            projected_geom = pool.map(partial_project_onto_geometry, geom)
+            projected_geom = pool.map(partial_project_onto_geometry, geom.geoms)
         projected_geom = shapely.geometry.GeometryCollection(projected_geom)
 
         # toc = time.time()

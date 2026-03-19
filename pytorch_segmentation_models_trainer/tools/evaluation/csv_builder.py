@@ -203,7 +203,7 @@ class DatasetCSVBuilder:
             (desde que ambos tenham stem = "001" ou "image_001" vs "mask_001")
         """
         # Tentar com extensão da máscara
-        mask_extension = self.mask_pattern.replace("*", "")
+        mask_extension = Path(self.mask_pattern.replace("*", "")).suffix
         mask_path = self.masks_folder / f"{image_path.stem}{mask_extension}"
 
         if mask_path.exists():
@@ -237,7 +237,7 @@ class DatasetCSVBuilder:
 
         # Construir nome da máscara
         mask_stem = f"{mask_prefix}{stem}{mask_suffix}"
-        mask_extension = self.mask_pattern.replace("*", "")
+        mask_extension = Path(self.mask_pattern.replace("*", "")).suffix
         mask_path = self.masks_folder / f"{mask_stem}{mask_extension}"
 
         if mask_path.exists():

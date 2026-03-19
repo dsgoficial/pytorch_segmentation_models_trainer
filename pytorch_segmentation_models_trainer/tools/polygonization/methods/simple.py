@@ -60,7 +60,9 @@ def shapely_postprocess(out_contours, np_indicator, config):
 
     multi_line_string = shapely.ops.unary_union(line_string_list)
     polygons, dangles, cuts, invalids = shapely.ops.polygonize_full(multi_line_string)
-    polygons = [polygon for polygon in list(polygons) if config.min_area < polygon.area]
+    polygons = [
+        polygon for polygon in list(polygons.geoms) if config.min_area < polygon.area
+    ]
 
     filtered_polygons, filtered_polygon_probs = [], []
     for polygon in polygons:

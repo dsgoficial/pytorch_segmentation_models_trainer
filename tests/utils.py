@@ -19,6 +19,7 @@
  *                                                                         *
  ****
 """
+import gc
 import os
 import shutil
 import tempfile
@@ -27,6 +28,7 @@ import unittest
 import warnings
 import geopandas
 import hydra
+import torch
 
 
 def get_file_list(dir_path, extension):
@@ -67,6 +69,7 @@ def make_hydra_config(fields: dict):
         OmegaConf DictConfig
     """
     from omegaconf import OmegaConf
+
     return OmegaConf.create(fields)
 
 
@@ -112,6 +115,9 @@ class BasicTestCase(unittest.TestCase):
         )
         if os.path.exists(lightning_logs_path):
             shutil.rmtree(lightning_logs_path)
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 class CustomTestCase(BasicTestCase):

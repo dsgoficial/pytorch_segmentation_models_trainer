@@ -163,6 +163,6 @@ class Test_PolygonRNNUtils(unittest.TestCase):
             output.pop("bbox")
             scaled_polygon = polygonrnn_utils.scale_shapely_polygon(polygon, **output)
             self.assertTrue(
-                scaled_polygon.almost_equals(expected_outputs[idx])
+                scaled_polygon.equals_exact(expected_outputs[idx], tolerance=1e-6)
                 or scaled_polygon.equals(expected_outputs[idx])
             )

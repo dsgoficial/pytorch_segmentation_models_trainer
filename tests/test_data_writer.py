@@ -76,9 +76,11 @@ class Test_DataWriter(unittest.TestCase):
             ),
             "tiled": False,
             "interleave": "band",
+            "input_name": "output",
+            "suffix": ".tif",
         }
         output_file_path = os.path.join(self.output_dir, "output.tif")
-        data_writer = RasterDataWriter(output_file_path=output_file_path)
+        data_writer = RasterDataWriter(output_file_path=self.output_dir)
         data_writer.write_data(input_data=input_data, profile=profile)
         assert os.path.isfile(output_file_path)
         with rasterio.open(output_file_path, "r") as raster_ds:

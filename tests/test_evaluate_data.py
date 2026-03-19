@@ -133,4 +133,4 @@ class Test_EvaluateData(unittest.TestCase):
             for key, value in item.items():
                 if key in ["reference", "target"]:
                     continue
-                self.assertAlmostEquals(value, expected_results[idx][key])
+                self.assertAlmostEqual(value, expected_results[idx][key])

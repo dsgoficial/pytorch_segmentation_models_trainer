@@ -31,7 +31,7 @@ import torch
 class Skeleton:
     def __init__(self, coordinates=None, paths=None, degrees=None):
         self.coordinates = (
-            np.empty((0, 2), dtype=np.float) if coordinates is None else coordinates
+            np.empty((0, 2), dtype=float) if coordinates is None else coordinates
         )
         self.paths = Paths() if paths is None else paths
         self.degrees = np.empty(0, dtype=np.int64) if degrees is None else degrees

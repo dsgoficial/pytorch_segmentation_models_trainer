@@ -59,7 +59,11 @@ def match_polygon_lists_by_criteria(
     for target in target_list:
         if target.is_empty:
             raise ValueError("Target geometry is empty.")
-        candidates = [i for i in reference_tree.query(target) if i.intersects(target)]
+        candidates = [
+            reference_list[i]
+            for i in reference_tree.query(target)
+            if reference_list[i].intersects(target)
+        ]
         if len(candidates) == 0:
             continue
         metric_values_list = [criteria_func(target, i) for i in candidates]
@@ -200,7 +204,7 @@ def per_vertex_error_list(
     pred_vertexes = list(map(Point, pred_polygon.exterior.coords))
     gt_tree = STRtree(gt_vertexes)
     for pred_vertex in pred_vertexes:
-        gt_vertex = gt_tree.nearest(pred_vertex)
+        gt_vertex = gt_vertexes[gt_tree.nearest(pred_vertex)]
         if gt_vertex.wkt not in paired_dict:
             paired_dict[gt_vertex.wkt] = {
                 "pred_vertex": pred_vertex,

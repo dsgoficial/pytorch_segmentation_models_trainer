@@ -92,7 +92,7 @@ class Test_Visualization(unittest.TestCase):
         image_seg_display = image_seg_display.cpu().numpy().transpose(0, 2, 3, 1)
         skimage.io.imsave(
             os.path.join(self.output_dir, f"image_seg_display.png"),
-            image_seg_display.squeeze(0),
+            image_seg_display.squeeze(0).clip(0, 255).astype(np.uint8),
         )
         self.assertEqual(
             compare_images(
@@ -120,7 +120,7 @@ class Test_Visualization(unittest.TestCase):
         image_seg_display = image_seg_display.cpu().numpy().transpose(0, 2, 3, 1)
         skimage.io.imsave(
             os.path.join(self.output_dir, f"image_seg_display.png"),
-            image_seg_display.squeeze(0),
+            image_seg_display.squeeze(0).clip(0, 255).astype(np.uint8),
         )
         self.assertEqual(
             compare_images(

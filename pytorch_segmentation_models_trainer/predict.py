@@ -59,6 +59,7 @@ def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
         cfg=cfg,
         inference_mode=True,
         map_location=map_location,
+        weights_only=False,
     )
     model = pl_model.model
     model.to(cfg.device)

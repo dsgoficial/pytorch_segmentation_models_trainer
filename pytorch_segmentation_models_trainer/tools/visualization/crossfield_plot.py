@@ -245,7 +245,7 @@ def plot_geometries(axis, geometries, draw_vertices=True, linewidths=2, markersi
         elif isinstance(geometry, shapely.geometry.LineString):
             line_strings.append(geometry)
         elif isinstance(geometry, shapely.geometry.MultiLineString):
-            for line_string in geometry:
+            for line_string in geometry.geoms:
                 line_strings.append(line_string)
         else:
             raise NotImplementedError(f"Geometry type {type(geometry)} not implemented")

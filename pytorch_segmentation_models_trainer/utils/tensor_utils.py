@@ -85,14 +85,14 @@ def polygons_to_tensorpoly(polygons_batch):
         for polygon in polygons:
             if not np.max(np.abs(polygon[0] - polygon[-1])) < 1e-6:
                 # Polygon is open
-                is_endpoint = np.zeros(polygon.shape[0], dtype=np.bool)
+                is_endpoint = np.zeros(polygon.shape[0], dtype=bool)
                 is_endpoint[0] = True
                 is_endpoint[-1] = True
             else:
                 # Polygon is closed, remove last redundant point
                 polygon = polygon[:-1, :]
-                is_endpoint = np.zeros(polygon.shape[0], dtype=np.bool)
-            batch = i * np.ones(polygon.shape[0], dtype=np.long)
+                is_endpoint = np.zeros(polygon.shape[0], dtype=bool)
+            batch = i * np.ones(polygon.shape[0], dtype=np.int64)
             is_endpoint_list.append(is_endpoint)
             batch_list.append(batch)
             polygon_list.append(polygon)
@@ -101,7 +101,7 @@ def polygons_to_tensorpoly(polygons_batch):
     batch = np.concatenate(batch_list, axis=0)
 
     slice_start = 0
-    poly_slice = np.empty((len(polygon_list), 2), dtype=np.long)
+    poly_slice = np.empty((len(polygon_list), 2), dtype=np.int64)
     for i, polygon in enumerate(polygon_list):
         slice_end = slice_start + polygon.shape[0]
         poly_slice[i][0] = slice_start

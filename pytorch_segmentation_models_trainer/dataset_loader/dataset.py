@@ -1236,7 +1236,7 @@ class InstanceSegmentationDataset(ObjectDetectionDataset):
         )
         if self.return_mask:
             ds_item_dict["masks"] = torch.as_tensor(
-                ds_item_dict["masks"], dtype=torch.uint8
+                np.array(ds_item_dict["masks"]), dtype=torch.uint8
             )
         return image, ds_item_dict, index
 

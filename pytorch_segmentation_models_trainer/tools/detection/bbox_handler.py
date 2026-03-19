@@ -23,8 +23,49 @@ import numpy as np
 from pytorch_toolbelt.inference.tiles import TileMerger
 
 import torch
-from sahi.postprocess.legacy.combine import NMSPostprocess, UnionMergePostprocess
+import copy
+from sahi.postprocess.combine import NMSPostprocess
+from sahi.postprocess.legacy.combine import PostprocessPredictions
+from sahi.annotation import BoundingBox, Category
+from sahi.postprocess.utils import calculate_box_union
 from sahi.prediction import ObjectPrediction
+
+
+class UnionMergePostprocess(PostprocessPredictions):
+    """Union merge that works with the new sahi ObjectPrediction API (no bool_mask)."""
+
+    def __call__(self, object_predictions):
+        source_object_predictions = copy.deepcopy(object_predictions)
+        selected_object_predictions = []
+        while len(source_object_predictions) > 0:
+            source_object_predictions.sort(reverse=True, key=self.get_score_func)
+            selected = source_object_predictions[0]
+            del source_object_predictions[0]
+            new_source = []
+            for candidate in source_object_predictions:
+                if self._has_match(selected, candidate):
+                    selected = self._merge(selected, candidate)
+                else:
+                    new_source.append(candidate)
+            source_object_predictions = new_source
+            selected_object_predictions.append(selected)
+        return selected_object_predictions
+
+    @staticmethod
+    def _merge(pred1, pred2):
+        box1 = pred1.bbox.to_xyxy()
+        box2 = pred2.bbox.to_xyxy()
+        merged_box = calculate_box_union(box1, box2)
+        score = max(pred1.score.value, pred2.score.value)
+        category = (
+            pred1.category if pred1.score.value >= pred2.score.value else pred2.category
+        )
+        return ObjectPrediction(
+            bbox=merged_box,
+            score=score,
+            category_id=category.id,
+            category_name=category.name,
+        )
 
 
 def shift_bbox(
@@ -124,12 +165,7 @@ def _build_return_tuple_with_selected_object_predictions(
     selected_object_predictions: List[ObjectPrediction],
 ) -> Tuple[torch.Tensor]:
     return (
-        torch.tensor(
-            [
-                [v for k, v in obj.bbox.__dict__.items() if "_" not in k]
-                for obj in selected_object_predictions
-            ]
-        ),
+        torch.tensor([obj.bbox.to_xyxy() for obj in selected_object_predictions]),
         torch.tensor([obj.score.value for obj in selected_object_predictions]),
         torch.tensor([obj.category.id for obj in selected_object_predictions]),
     )
