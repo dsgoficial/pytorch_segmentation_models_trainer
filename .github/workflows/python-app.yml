@@ -45,7 +45,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 pytest parameterized coverage
+        pip install flake8 pytest parameterized coverage pytest-timeout
         if [ -f requirements.txt ]; then pip install --upgrade --upgrade-strategy eager -r requirements.txt; fi
         pip install .
         pip uninstall opencv-python opencv-python-headless -y || true
@@ -83,13 +83,15 @@ jobs:
           --ignore=tests/test_optimizers.py \
           --ignore=tests/test_custom_models.py \
           --ignore=tests/test_frame_field_model.py \
+          --timeout=120 \
+          -v \
           -p no:warnings
     - name: Test memory-intensive models (isolated)
       run: |
         for f in tests/test_detection_model.py tests/test_gradient_centralization.py tests/test_optimizers.py tests/test_custom_models.py tests/test_frame_field_model.py; do
           echo "=== Running $f in isolation ==="
           coverage run --source pytorch_segmentation_models_trainer --omit pytorch_segmentation_models_trainer/custom_models/sync_bn/* \
-            --append -m pytest "$f" -p no:warnings || true
+            --append -m pytest "$f" --timeout=300 -v -p no:warnings || true
         done
     - name: statistics
       if: success()
