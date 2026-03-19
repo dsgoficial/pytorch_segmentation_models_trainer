@@ -57,23 +57,36 @@ suffix_dict = {"PNG": ".png", "GTiff": ".tif", "JPEG": ".jpg"}
 
 
 class Test_BuildMask(unittest.TestCase):
-    def setUp(self):
+    @classmethod
+    def setUpClass(cls):
         warnings.simplefilter("ignore", category=ImportWarning)
         warnings.simplefilter("ignore", category=DeprecationWarning)
         warnings.simplefilter("ignore", category=FutureWarning)
         warnings.simplefilter("ignore", category=UserWarning)
+        cls.db_available = False
+        try:
+            mask_geo_df = FileGeoDF(
+                os.path.join(root_dir, "data", "build_masks_data", "buildings.geojson")
+            )
+            cls.engine = create_engine(
+                "postgresql://postgres:postgres@localhost:5432/test_db",
+                connect_args={"connect_timeout": 10},
+            )
+            mask_geo_df.gdf.to_postgis("buildings", cls.engine, if_exists="replace")
+            cls.db_available = True
+        except Exception:
+            cls.engine = None
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.engine is not None:
+            cls.engine.dispose()
+
+    def setUp(self):
         self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
         self.replicated_dir = create_folder(
             os.path.join(root_dir, "..", "replicated_dirs")
         )
-        self.build_test_dataset()
-
-    def build_test_dataset(self):
-        mask_geo_df = FileGeoDF(
-            os.path.join(root_dir, "data", "build_masks_data", "buildings.geojson")
-        )
-        engine = create_engine("postgresql://postgres:postgres@localhost:5432/test_db")
-        mask_geo_df.gdf.to_postgis("buildings", engine, if_exists="replace")
 
     def tearDown(self):
         remove_folder(self.output_dir)
@@ -133,6 +146,8 @@ class Test_BuildMask(unittest.TestCase):
             )
 
     def test_build_masks_from_postgis(self):
+        if not self.db_available:
+            self.skipTest("PostgreSQL not available")
         with initialize(config_path="./test_configs"):
             image_dir = os.path.join(root_dir, "data", "build_masks_data", "images")
             expected_output_path = os.path.join(

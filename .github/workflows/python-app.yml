@@ -68,6 +68,13 @@ jobs:
       with:
         path: ~/work/pytorch_segmentation_models_trainer/pytorch_segmentation_models_trainer/pytorch_segmentation_models_trainer/custom_models/pretrained/
         key: ${{ runner.os }}-cache2
+    - name: Wait for PostgreSQL to be ready
+      run: |
+        for i in $(seq 1 30); do
+          pg_isready -h localhost -p 5432 -U postgres && echo "PostgreSQL is ready" && break
+          echo "Waiting for PostgreSQL... ($i/30)"
+          sleep 2
+        done
     - name: Cache test checkpoints
       uses: actions/cache@v4
       id: test-cache
