@@ -304,9 +304,7 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
                 list(zip(tiles, tiler.crops)),
                 batch_size=self.batch_size,
                 pin_memory=True,
-                num_workers=4,
-                persistent_workers=True,
-                prefetch_factor=2,
+                num_workers=0,
             ):
                 tiles_batch = tiles_batch.float().to(self.device)
                 with autocast():
@@ -429,9 +427,7 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
                 list(zip(tiles, tiler.crops)),
                 batch_size=self.batch_size,
                 pin_memory=True,
-                num_workers=4,
-                persistent_workers=True,
-                prefetch_factor=2,
+                num_workers=0,
             ):
                 tiles_batch = tiles_batch.float().to(self.device)
 
@@ -506,13 +502,14 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         # Merged logits (before argmax)
         merged_logits = to_numpy(merger_dict["seg"].merge())  # [C, H_pad, W_pad]
 
-        # Numerically stable softmax
-        shifted = merged_logits - merged_logits.max(axis=0, keepdims=True)
-        exp_l = np.exp(shifted)
-        probs = exp_l / exp_l.sum(axis=0, keepdims=True)  # [C, H_pad, W_pad]
+        # Numerically stable softmax — in-place to save memory
+        merged_logits -= merged_logits.max(axis=0, keepdims=True)
+        np.exp(merged_logits, out=merged_logits)
+        merged_logits /= merged_logits.sum(axis=0, keepdims=True)
+        # merged_logits is now probs [C, H_pad, W_pad]
 
-        class_indices = np.argmax(probs, axis=0)  # [H_pad, W_pad]
-        confidence = probs.max(axis=0)             # [H_pad, W_pad]
+        class_indices = np.argmax(merged_logits, axis=0)  # [H_pad, W_pad]
+        confidence = merged_logits.max(axis=0)             # [H_pad, W_pad]
 
         # CenterCrop back to original dimensions (mirrors parent make_inference)
         class_indices = center_crop(
@@ -521,7 +518,7 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         confidence = center_crop(
             image=confidence[..., np.newaxis]
         )["image"].squeeze(-1)
-        probs_hwc = np.moveaxis(probs, 0, -1)  # [H_pad, W_pad, C]
+        probs_hwc = np.moveaxis(merged_logits, 0, -1)  # [H_pad, W_pad, C]
         probs_hwc = center_crop(image=probs_hwc)["image"]
 
         return {

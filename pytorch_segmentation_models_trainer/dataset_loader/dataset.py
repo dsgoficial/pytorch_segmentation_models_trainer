@@ -582,6 +582,14 @@ class RandomCropSegmentationDataset(AbstractDataset):
         classmix: If True, uses ClassMix (copies class-shaped regions)
             instead of rectangular CutMix. Preserves semantic boundaries.
             Ref: Olsson et al., WACV 2021. Default False.
+        pre_mix_color_aug: Optional list of albumentations color augmentation
+            configs applied independently to each crop BEFORE ClassMix/CutMix.
+            Simulates different radiometric conditions between source images,
+            which is critical for remote sensing where pasted regions should
+            have independent spectral variation. Only applied when mixing
+            is triggered (cutmix_prob). Example:
+            [RandomBrightnessContrast(0.15), RandomGamma([80,120])].
+            Default None (disabled).
         soft_labels: If True, masks are multi-band float32 GeoTIFFs
             (C bands, one per class) with probability distributions
             instead of integer indices. Ignored pixels have all
@@ -615,6 +623,7 @@ class RandomCropSegmentationDataset(AbstractDataset):
         classmix: bool = False,
         soft_labels: bool = False,
         hard_mask_csv: str = None,
+        pre_mix_color_aug: Optional[list] = None,
         root_dir=None,
         augmentation_list=None,
         data_loader=None,
@@ -653,6 +662,14 @@ class RandomCropSegmentationDataset(AbstractDataset):
         self.classmix = classmix
         self.soft_labels = soft_labels
         self.hard_mask_csv = hard_mask_csv
+        # Pre-mix color augmentation: applied independently to each crop
+        # before ClassMix/CutMix, simulating different radiometric conditions
+        # between source images (critical for remote sensing).
+        self._pre_mix_transform = (
+            load_augmentation_object(pre_mix_color_aug)
+            if pre_mix_color_aug
+            else None
+        )
         self._hard_mask_paths = None
         if hard_mask_csv and soft_labels:
             import pandas as pd
@@ -1302,6 +1319,14 @@ class RandomCropSegmentationDataset(AbstractDataset):
         # to contain a specific rare class (e.g., bare_soil), ensuring that
         # extremely under-represented classes appear frequently via
         # CutMix/ClassMix even when not sampled normally.
+        # Apply color augmentation before mixing (and before main augmentation).
+        # When mixing is active, each crop gets independent color aug to simulate
+        # different radiometric conditions. When not mixing, the single crop
+        # still gets color aug once — ensuring all samples see it exactly once.
+        if getattr(self, '_pre_mix_transform', None) is not None:
+            r1 = self._pre_mix_transform(image=image, mask=mask)
+            image, mask = r1["image"], r1["mask"]
+
         if getattr(self, 'cutmix_prob', 0.0) > 0 and np.random.random() < self.cutmix_prob:
             main_class = self._get_dominant_class(mask)
             rare_classes = getattr(self, 'cutmix_rare_classes', [])
@@ -1313,6 +1338,10 @@ class RandomCropSegmentationDataset(AbstractDataset):
                 image2, mask2 = self._get_random_crop(target_class=target)
             else:
                 image2, mask2 = self._get_random_crop(exclude_class=main_class)
+            # Independent color aug on second crop
+            if getattr(self, '_pre_mix_transform', None) is not None:
+                r2 = self._pre_mix_transform(image=image2, mask=mask2)
+                image2, mask2 = r2["image"], r2["mask"]
             if getattr(self, 'classmix', False):
                 image, mask = self._apply_classmix(image, mask, image2, mask2)
             else:
