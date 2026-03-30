@@ -624,6 +624,7 @@ class RandomCropSegmentationDataset(AbstractDataset):
         soft_labels: bool = False,
         hard_mask_csv: str = None,
         pre_mix_color_aug: Optional[list] = None,
+        class_presence_cache: str = None,
         root_dir=None,
         augmentation_list=None,
         data_loader=None,
@@ -670,6 +671,7 @@ class RandomCropSegmentationDataset(AbstractDataset):
             if pre_mix_color_aug
             else None
         )
+        self.class_presence_cache = class_presence_cache
         self._hard_mask_paths = None
         if hard_mask_csv and soft_labels:
             import pandas as pd
@@ -963,7 +965,15 @@ class RandomCropSegmentationDataset(AbstractDataset):
         Used when class_balanced_sampling=False but cutmix_rare_classes
         is set — allows _get_random_crop to target images that contain
         the desired rare class without biasing ALL sampling.
+
+        If class_presence_cache is set and the JSON exists, loads the
+        pre-computed index directly (instant). The JSON maps image
+        filenames to lists of class indices present.
         """
+        # Try loading pre-computed cache
+        if self.class_presence_cache and os.path.exists(self.class_presence_cache):
+            return self._load_class_presence_cache()
+
         use_hard = self._hard_mask_paths is not None
 
         logger.info(
@@ -1010,6 +1020,63 @@ class RandomCropSegmentationDataset(AbstractDataset):
         }
 
         logger.info("Class-presence index built:")
+        for c in range(self.n_classes):
+            n_imgs = len(self._class_to_images.get(c, []))
+            logger.info(f"  Class {c}: present in {n_imgs} images")
+
+    def _load_class_presence_cache(self):
+        """Load pre-computed class-presence index from JSON.
+
+        The JSON maps mask filenames (or image filenames) to lists of
+        class indices present. The method matches filenames to dataset
+        indices via the mask column in the CSV.
+
+        Expected JSON format:
+            {
+                "treino/masks/mask_IMG_0.tif": [0, 1, 4, 5, 6],
+                "treino/masks/mask_IMG_1.tif": [0, 2, 3, 5],
+                ...
+            }
+        """
+        import json
+
+        logger.info(
+            f"Loading class-presence cache from {self.class_presence_cache}..."
+        )
+        with open(self.class_presence_cache) as f:
+            cache = json.load(f)
+
+        # Build lookup: mask_path -> list of classes
+        # The cache keys may be relative or absolute; try matching by basename
+        cache_by_basename = {}
+        for path, classes in cache.items():
+            basename = os.path.basename(path)
+            cache_by_basename[basename] = classes
+
+        class_images = {c: [] for c in range(self.n_classes)}
+
+        matched = 0
+        for idx in self._valid_indices:
+            mask_path = self.get_path(idx, key=self.mask_key)
+            basename = os.path.basename(mask_path)
+            classes = cache_by_basename.get(basename)
+            if classes is None:
+                continue
+            matched += 1
+            for c in classes:
+                if 0 <= c < self.n_classes:
+                    class_images[c].append(idx)
+
+        self._class_to_images = {
+            c: np.array(imgs, dtype=np.int32)
+            for c, imgs in class_images.items()
+            if imgs
+        }
+
+        logger.info(
+            f"Class-presence cache loaded: {matched}/{len(self._valid_indices)} "
+            f"images matched"
+        )
         for c in range(self.n_classes):
             n_imgs = len(self._class_to_images.get(c, []))
             logger.info(f"  Class {c}: present in {n_imgs} images")
