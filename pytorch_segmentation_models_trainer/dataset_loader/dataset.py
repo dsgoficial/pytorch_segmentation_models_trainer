@@ -1123,6 +1123,13 @@ class RandomCropSegmentationDataset(AbstractDataset):
                 f"current={len(self._valid_indices)}. Rebuilding."
             )
             return self._build_grid_positions_fresh()
+        for param in ("overlap_x", "overlap_y", "min_valid_ratio"):
+            if cfg.get(param) != getattr(self, param):
+                logger.warning(
+                    f"Grid cache {param} mismatch: cache={cfg.get(param)}, "
+                    f"current={getattr(self, param)}. Rebuilding."
+                )
+                return self._build_grid_positions_fresh()
 
         self._grid_positions = np.array(cache["grid_positions"], dtype=np.int32)
 
@@ -1231,7 +1238,10 @@ class RandomCropSegmentationDataset(AbstractDataset):
         """
         if self.class_presence_cache and os.path.exists(self.class_presence_cache):
             return self._load_class_presence_cache()
+        return self._build_class_presence_index_fresh()
 
+    def _build_class_presence_index_fresh(self):
+        """Build class-presence index from scratch by reading all masks."""
         logger.info(
             f"Building class-presence index "
             f"({len(self._valid_indices)} images, "
@@ -1259,8 +1269,8 @@ class RandomCropSegmentationDataset(AbstractDataset):
             n_imgs = len(self._class_to_images.get(c, []))
             logger.info(f"  Class {c}: present in {n_imgs} images")
 
-        # Auto-save cache for next time
-        if self.class_presence_cache and not os.path.exists(self.class_presence_cache):
+        # Auto-save (or overwrite stale) cache for next time
+        if self.class_presence_cache:
             self._save_class_presence_cache()
 
     def _save_class_presence_cache(self):
@@ -1271,7 +1281,12 @@ class RandomCropSegmentationDataset(AbstractDataset):
         for c, imgs in self._class_to_images.items():
             for idx in imgs:
                 idx_to_classes.setdefault(int(idx), []).append(int(c))
-        cache = {}
+        cache = {
+            "_config": {
+                "n_images": len(self._valid_indices),
+                "n_classes": self.n_classes,
+            },
+        }
         for idx in self._valid_indices:
             mask_path = self.get_path(idx, key=self.mask_key)
             basename = os.path.basename(mask_path)
@@ -1303,6 +1318,24 @@ class RandomCropSegmentationDataset(AbstractDataset):
         with open(self.class_presence_cache) as f:
             cache = json.load(f)
 
+        # Validate config if present
+        cfg = cache.pop("_config", {})
+        if cfg:
+            if cfg.get("n_images") != len(self._valid_indices):
+                logger.warning(
+                    f"Class-presence cache n_images mismatch: "
+                    f"cache={cfg.get('n_images')}, "
+                    f"current={len(self._valid_indices)}. Rebuilding."
+                )
+                return self._build_class_presence_index_fresh()
+            if cfg.get("n_classes") != self.n_classes:
+                logger.warning(
+                    f"Class-presence cache n_classes mismatch: "
+                    f"cache={cfg.get('n_classes')}, "
+                    f"current={self.n_classes}. Rebuilding."
+                )
+                return self._build_class_presence_index_fresh()
+
         # Build lookup: mask_path -> list of classes
         # The cache keys may be relative or absolute; try matching by basename
         cache_by_basename = {}
@@ -1330,8 +1363,21 @@ class RandomCropSegmentationDataset(AbstractDataset):
             if imgs
         }
 
+        n_total = len(self._valid_indices)
+        unmatched = n_total - matched
+        if unmatched > 0:
+            ratio = matched / n_total if n_total else 0
+            logger.warning(
+                f"Class-presence cache: {unmatched}/{n_total} images NOT matched. "
+                f"Cache may be stale ({self.class_presence_cache})."
+            )
+            if ratio < 0.9:
+                logger.warning(
+                    f"Match ratio {ratio:.1%} < 90%. Rebuilding from scratch."
+                )
+                return self._build_class_presence_index_fresh()
         logger.info(
-            f"Class-presence cache loaded: {matched}/{len(self._valid_indices)} "
+            f"Class-presence cache loaded: {matched}/{n_total} "
             f"images matched"
         )
         for c in range(self.n_classes):
@@ -1460,8 +1506,8 @@ class RandomCropSegmentationDataset(AbstractDataset):
         h, w = image.shape[:2]
 
         cut_ratio = np.sqrt(1.0 - lam)
-        cut_h = int(h * cut_ratio)
-        cut_w = int(w * cut_ratio)
+        cut_h = max(1, int(h * cut_ratio))
+        cut_w = max(1, int(w * cut_ratio))
 
         # Random center
         cx = np.random.randint(w)

@@ -64,32 +64,38 @@ class MixUpAugmentationLoss(nn.Module):
 
 # Based on https://github.com/pytorch/pytorch/issues/7455
 class LabelSmoothingLoss(nn.Module):
-    def __init__(self, n_classes, smoothing=0.0, dim=-1):
+    def __init__(self, n_classes, smoothing=0.0, dim=-1, ignore_index=255):
         super(LabelSmoothingLoss, self).__init__()
         self.confidence = 1.0 - smoothing
         self.smoothing = smoothing
         self.cls = n_classes
         self.dim = dim
+        self.ignore_index = ignore_index
 
     def forward(self, output, target, *args):
         output = output.log_softmax(dim=self.dim)
+        valid_mask = target != self.ignore_index
         with torch.no_grad():
-            # Create matrix with shapes batch_size x n_classes
+            target_safe = torch.where(valid_mask, target, 0)
             true_dist = torch.zeros_like(output)
-            # Initialize all elements with epsilon / N - 1
             true_dist.fill_(self.smoothing / (self.cls - 1))
-            # Fill correct class for each sample in the batch with 1 - epsilon
-            true_dist.scatter_(1, target.data.unsqueeze(1), self.confidence)
-        return torch.mean(torch.sum(-true_dist * output, dim=self.dim))
+            true_dist.scatter_(1, target_safe.data.unsqueeze(1), self.confidence)
+            mask_expanded = valid_mask.unsqueeze(1)
+            true_dist = torch.where(mask_expanded, true_dist, 0.0)
+        per_pixel = torch.sum(-true_dist * output, dim=self.dim)
+        if valid_mask.any():
+            return per_pixel[valid_mask].mean()
+        return torch.tensor(0.0, device=output.device, dtype=output.dtype)
 
 
 # source: https://stackoverflow.com/questions/55681502/label-smoothing-in-pytorch
 class SmoothCrossEntropyLoss(_WeightedLoss):
-    def __init__(self, weight=None, reduction="mean", smoothing=0.0):
+    def __init__(self, weight=None, reduction="mean", smoothing=0.0, ignore_index=255):
         super().__init__(weight=weight, reduction=reduction)
         self.smoothing = smoothing
         self.weight = weight
         self.reduction = reduction
+        self.ignore_index = ignore_index
 
     def k_one_hot(self, targets: torch.Tensor, n_classes: int, smoothing=0.0):
         with torch.no_grad():
@@ -100,7 +106,9 @@ class SmoothCrossEntropyLoss(_WeightedLoss):
             )
         return targets
 
-    def reduce_loss(self, loss):
+    def reduce_loss(self, loss, valid_mask=None):
+        if valid_mask is not None:
+            loss = loss[valid_mask]
         return (
             loss.mean()
             if self.reduction == "mean"
@@ -112,21 +120,25 @@ class SmoothCrossEntropyLoss(_WeightedLoss):
     def forward(self, inputs, targets):
         assert 0 <= self.smoothing < 1
 
-        targets = self.k_one_hot(targets, inputs.size(-1), self.smoothing)
+        valid_mask = targets != self.ignore_index
+        targets_safe = torch.where(valid_mask, targets, 0)
+
+        targets_oh = self.k_one_hot(targets_safe, inputs.size(-1), self.smoothing)
         log_preds = F.log_softmax(inputs, -1)
 
         if self.weight is not None:
             log_preds = log_preds * self.weight.unsqueeze(0)
 
-        return self.reduce_loss(-(targets * log_preds).sum(dim=-1))
+        return self.reduce_loss(-(targets_oh * log_preds).sum(dim=-1), valid_mask)
 
 
 def smooth_cross_entropy_loss(
-    pred, target, weight=None, reduction="mean", smoothing=0.0
+    pred, target, weight=None, reduction="mean", smoothing=0.0, ignore_index=255
 ):
     assert 0 <= smoothing < 1
     return SmoothCrossEntropyLoss(
-        weight=weight, reduction=reduction, smoothing=smoothing
+        weight=weight, reduction=reduction, smoothing=smoothing,
+        ignore_index=ignore_index,
     )(pred, target)
 
 
@@ -821,7 +833,7 @@ class WeightedDiceCrossEntropyLoss(nn.Module):
         self.dice_weight = dice_weight
         self.ce_weight = ce_weight
         self.smooth_factor = smooth_factor
-        self.ignore_index = ignore_index if ignore_index is not None else -100
+        self.ignore_index = ignore_index if ignore_index is not None else 255
 
         # Determine mode based on number of classes
         mode = "multiclass" if num_classes > 2 else "binary"
@@ -829,7 +841,7 @@ class WeightedDiceCrossEntropyLoss(nn.Module):
         # Initialize Dice Loss from segmentation_models_pytorch
         self.dice_loss = smp.losses.DiceLoss(
             mode=mode,
-            ignore_index=ignore_index,
+            ignore_index=self.ignore_index,
         )
 
         # Initialize Cross Entropy Loss
