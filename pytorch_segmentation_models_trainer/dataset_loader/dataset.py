@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+import contextlib
 import itertools
 import json
 import logging
@@ -468,6 +469,20 @@ class SegmentationDataset(AbstractDataset):
 logger = logging.getLogger(__name__)
 
 
+@contextlib.contextmanager
+def _suppress_gdal_crs_warnings():
+    """Temporarily set GTIFF_SRS_SOURCE=GEOKEYS to suppress GDAL CRS mismatch warnings."""
+    prev = os.environ.get("GTIFF_SRS_SOURCE")
+    os.environ["GTIFF_SRS_SOURCE"] = "GEOKEYS"
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop("GTIFF_SRS_SOURCE", None)
+        else:
+            os.environ["GTIFF_SRS_SOURCE"] = prev
+
+
 def _worker_init_fn(worker_id):
     """Seed numpy random per DataLoader worker to avoid duplicate crops.
 
@@ -599,6 +614,19 @@ class RandomCropSegmentationDataset(AbstractDataset):
             class index uses the hard masks (much faster to read).
             The CSV must have the same structure and order as input_csv_path.
             Default None (uses the dataset's own masks).
+        grid_mode: If True, uses deterministic grid-based tiling instead
+            of random crops. Tile positions are pre-computed based on
+            crop_size and overlap, and invalid tiles (below min_valid_ratio)
+            are filtered out during initialization. Randomness is limited
+            to the DataLoader shuffle order per epoch. samples_per_epoch
+            is ignored; __len__ returns the number of valid grid tiles.
+            Default False (random crop mode).
+        overlap_x: Horizontal overlap between adjacent tiles as a fraction
+            [0.0, 1.0). 0.5 means 50% overlap. Only used when grid_mode=True.
+            Default 0.5.
+        overlap_y: Vertical overlap between adjacent tiles as a fraction
+            [0.0, 1.0). 0.5 means 50% overlap. Only used when grid_mode=True.
+            Default 0.5.
     """
 
     def __init__(
@@ -625,6 +653,10 @@ class RandomCropSegmentationDataset(AbstractDataset):
         hard_mask_csv: str = None,
         pre_mix_color_aug: Optional[list] = None,
         class_presence_cache: str = None,
+        grid_cache: str = None,
+        grid_mode: bool = False,
+        overlap_x: float = 0.5,
+        overlap_y: float = 0.5,
         root_dir=None,
         augmentation_list=None,
         data_loader=None,
@@ -672,6 +704,14 @@ class RandomCropSegmentationDataset(AbstractDataset):
             else None
         )
         self.class_presence_cache = class_presence_cache
+        self.grid_cache = grid_cache
+        self.grid_mode = grid_mode
+        self.overlap_x = overlap_x
+        self.overlap_y = overlap_y
+        if grid_mode:
+            for name, val in [("overlap_x", overlap_x), ("overlap_y", overlap_y)]:
+                if not (0.0 <= val < 1.0):
+                    raise ValueError(f"{name} must be in [0.0, 1.0), got {val}")
         self._hard_mask_paths = None
         if hard_mask_csv and soft_labels:
             import pandas as pd
@@ -712,26 +752,17 @@ class RandomCropSegmentationDataset(AbstractDataset):
         self._file_cache = _RasterioLRUCache(maxsize=self.file_cache_maxsize)
 
         # Cache of image dimensions (reads header only, fast)
-        # Suppress GDAL CRS mismatch warning (CPLE_AppDefined) that spams
-        # for every GeoTIFF when EPSG:3857 keys differ from registry.
-        _prev_gtiff_srs = os.environ.get("GTIFF_SRS_SOURCE")
-        os.environ["GTIFF_SRS_SOURCE"] = "GEOKEYS"
         self.image_dims = []  # list of (width, height)
         self._valid_indices = []  # indices of images large enough
         crop_h, crop_w = self.crop_size
-        for i in range(len(self.df)):
-            image_path = self.get_path(i, key=self.image_key)
-            with rasterio.open(image_path) as src:
-                w, h = src.width, src.height
-            self.image_dims.append((w, h))
-            if w >= crop_w and h >= crop_h:
-                self._valid_indices.append(i)
-
-        # Restore GTIFF_SRS_SOURCE
-        if _prev_gtiff_srs is None:
-            os.environ.pop("GTIFF_SRS_SOURCE", None)
-        else:
-            os.environ["GTIFF_SRS_SOURCE"] = _prev_gtiff_srs
+        with _suppress_gdal_crs_warnings():
+            for i in range(len(self.df)):
+                image_path = self.get_path(i, key=self.image_key)
+                with rasterio.open(image_path) as src:
+                    w, h = src.width, src.height
+                self.image_dims.append((w, h))
+                if w >= crop_w and h >= crop_h:
+                    self._valid_indices.append(i)
 
         if not self._valid_indices:
             raise ValueError(
@@ -747,41 +778,54 @@ class RandomCropSegmentationDataset(AbstractDataset):
         total_positions = sum(positions)
         self.image_weights = np.array([p / total_positions for p in positions])
 
-        # Automatic calculation of samples_per_epoch
-        # With random crops, 1x (total_area / crop_area) covers only ~63%
-        # of the area per epoch (1 - e^-1). A 3x multiplier ensures ~95%
-        # coverage: 1 - e^-3 ~ 0.95.
-        if samples_per_epoch <= 0:
-            coverage_multiplier = 3
-            crop_area = crop_h * crop_w
-            total_pixel_area = sum(
-                self.image_dims[idx][0] * self.image_dims[idx][1]
-                for idx in self._valid_indices
-            )
-            self.samples_per_epoch = int(
-                coverage_multiplier * total_pixel_area / crop_area
-            )
-            logger.info(
-                f"RandomCropSegmentationDataset: samples_per_epoch automatically "
-                f"calculated = {self.samples_per_epoch:,} "
-                f"({len(self._valid_indices)} images, "
-                f"total area = {total_pixel_area:,} pixels, "
-                f"crop = {crop_h}x{crop_w}, "
-                f"multiplier = {coverage_multiplier}x for ~95% coverage)"
-            )
-        else:
-            self.samples_per_epoch = samples_per_epoch
-
         # Spatial class index for class-balanced sampling.
         # Built once in init (main process), serialized to
         # workers via pickle. All numpy -> picklable (Windows spawn OK).
         self._class_positions = {}  # {class_id: np.ndarray de (img_idx, col, row)}
         self._class_sampling_weights = np.array([], dtype=np.float64)
         self._class_to_images = {}  # {class_id: np.ndarray of img_idx}
-        if self.class_balanced_sampling:
-            self._build_class_position_index()
-        elif self.cutmix_rare_classes:
-            self._build_class_presence_index()
+
+        if self.grid_mode:
+            # Grid mode: deterministic tile positions, shuffle only per epoch.
+            # samples_per_epoch is ignored — __len__ returns grid size.
+            self._build_grid_positions()
+            self.samples_per_epoch = len(self._grid_positions)
+            if self.class_balanced_sampling:
+                logger.info(
+                    "Grid mode active: class_balanced_sampling only affects "
+                    "CutMix/ClassMix second crops, not main sampling"
+                )
+        else:
+            # Random crop mode (original behavior)
+            # Automatic calculation of samples_per_epoch
+            # With random crops, 1x (total_area / crop_area) covers only ~63%
+            # of the area per epoch (1 - e^-1). A 3x multiplier ensures ~95%
+            # coverage: 1 - e^-3 ~ 0.95.
+            if samples_per_epoch <= 0:
+                coverage_multiplier = 3
+                crop_area = crop_h * crop_w
+                total_pixel_area = sum(
+                    self.image_dims[idx][0] * self.image_dims[idx][1]
+                    for idx in self._valid_indices
+                )
+                self.samples_per_epoch = int(
+                    coverage_multiplier * total_pixel_area / crop_area
+                )
+                logger.info(
+                    f"RandomCropSegmentationDataset: samples_per_epoch automatically "
+                    f"calculated = {self.samples_per_epoch:,} "
+                    f"({len(self._valid_indices)} images, "
+                    f"total area = {total_pixel_area:,} pixels, "
+                    f"crop = {crop_h}x{crop_w}, "
+                    f"multiplier = {coverage_multiplier}x for ~95% coverage)"
+                )
+            else:
+                self.samples_per_epoch = samples_per_epoch
+
+            if self.class_balanced_sampling:
+                self._build_class_position_index()
+            elif self.cutmix_rare_classes:
+                self._build_class_presence_index()
 
     def __getstate__(self):
         """Remove file cache before pickle (for spawn workers on Windows)."""
@@ -843,7 +887,7 @@ class RandomCropSegmentationDataset(AbstractDataset):
         src = self._get_src(image_path)
         if is_mask:
             if self.soft_labels:
-                # Soft labels: 7-band float32 GeoTIFF → (H, W, C)
+                # Soft labels: C-band float32 GeoTIFF → (H, W, C)
                 data = src.read(window=window)  # (C, H, W) float32
                 return np.transpose(data, (1, 2, 0)).copy()  # (H, W, C)
             else:
@@ -858,85 +902,45 @@ class RandomCropSegmentationDataset(AbstractDataset):
             image = np.transpose(data, (1, 2, 0)).copy()
             return image.astype(np.uint8)
 
-    def _build_class_position_index(self):
-        """Build spatial class index for class-balanced sampling.
+    def _read_full_mask(self, idx: int) -> np.ndarray:
+        """Read full mask for image idx as a single-band hard-label array.
 
-        For each valid image, reads the entire mask and uses integral images
-        (summed area tables) to detect which classes are present at each
-        crop position on the grid. The result is a dictionary mapping each
-        class to an array of positions (img_idx, col, row).
+        Handles hard_mask_csv and soft_labels (argmax).
+        Ignore pixels are set to 255 for soft labels.
 
-        Sampling weights are the inverse of the number of positions per
-        class, normalized. Classes with more positions (abundant) receive
-        a lower probability of being sampled.
+        Returns:
+            np.ndarray: (H, W) uint8 mask.
         """
-        crop_h, crop_w = self.crop_size
-        stride = self.class_sampling_stride
-        if stride <= 0:
-            stride = crop_h // 2  # auto: half the crop
+        if self._hard_mask_paths is not None:
+            with rasterio.open(self._hard_mask_paths[idx]) as src:
+                return src.read(1)
 
-        class_positions = {c: [] for c in range(self.n_classes)}
-
-        logger.info(
-            f"Building per-class position index "
-            f"(stride={stride}, {len(self._valid_indices)} images)..."
-        )
-
-        use_hard = self._hard_mask_paths is not None
-        if use_hard:
-            logger.info(
-                "  Using hard masks for index construction (fast, 1-band uint8)"
-            )
-
-        # Suppress GDAL CRS mismatch warning spam
-        _prev_gtiff_srs = os.environ.get("GTIFF_SRS_SOURCE")
-        os.environ["GTIFF_SRS_SOURCE"] = "GEOKEYS"
-
-        for i, idx in enumerate(self._valid_indices):
-            if use_hard:
-                hard_path = self._hard_mask_paths[idx]
-                with rasterio.open(hard_path) as src:
-                    full_mask = src.read(1)  # (H, W) uint8
+        mask_path = self.get_path(idx, key=self.mask_key)
+        with rasterio.open(mask_path) as src:
+            if self.soft_labels:
+                raw = src.read()  # (C, H, W) float32
+                ignore = raw.sum(axis=0) == 0
+                hard = np.argmax(raw, axis=0).astype(np.uint8)
+                hard[ignore] = 255
+                return hard
             else:
-                mask_path = self.get_path(idx, key=self.mask_key)
-                with rasterio.open(mask_path) as src:
-                    if self.soft_labels:
-                        full_mask_raw = src.read()  # (C, H, W) float32
-                        ignore = full_mask_raw.sum(axis=0) == 0  # (H, W)
-                        full_mask = np.argmax(full_mask_raw, axis=0).astype(np.uint8)
-                        full_mask[ignore] = 255
-                    else:
-                        full_mask = src.read(1)  # (H, W)
+                return src.read(1)
 
-            w, h = self.image_dims[idx]
+    def _finalize_class_position_index(self, class_positions: dict, label: str = "built"):
+        """Convert class_positions dict to numpy arrays and compute sampling weights.
 
-            for row in range(0, h - crop_h + 1, stride):
-                for col in range(0, w - crop_w + 1, stride):
-                    crop_region = full_mask[row:row + crop_h, col:col + crop_w]
-                    classes_present = np.unique(crop_region)
-                    for c in classes_present:
-                        if 0 <= c < self.n_classes:
-                            class_positions[c].append((idx, col, row))
-
-        # Restore GTIFF_SRS_SOURCE
-        if _prev_gtiff_srs is None:
-            os.environ.pop("GTIFF_SRS_SOURCE", None)
-        else:
-            os.environ["GTIFF_SRS_SOURCE"] = _prev_gtiff_srs
-
-        # Convert to numpy arrays
-        self._class_positions = {}
+        Args:
+            class_positions: {class_id: list of (img_idx, col, row)} tuples.
+            label: Label for log messages.
+        """
         for c, pos_list in class_positions.items():
             if pos_list:
                 self._class_positions[c] = np.array(pos_list, dtype=np.int32)
 
-        # Sampling weights: inverse of number of positions, normalized.
-        # Classes with 0 positions receive weight 0.
         counts = np.array([
             len(self._class_positions.get(c, []))
             for c in range(self.n_classes)
         ], dtype=np.float64)
-
         weights = np.zeros(self.n_classes, dtype=np.float64)
         mask = counts > 0
         weights[mask] = 1.0 / counts[mask]
@@ -945,14 +949,269 @@ class RandomCropSegmentationDataset(AbstractDataset):
             weights /= total
         self._class_sampling_weights = weights
 
-        # Log summary
-        logger.info("Per-class position index built:")
+        logger.info(f"Per-class position index {label}:")
         for c in range(self.n_classes):
             n_pos = len(self._class_positions.get(c, []))
             logger.info(
                 f"  Class {c}: {n_pos:,} positions, "
                 f"sampling weight={self._class_sampling_weights[c]:.4f}"
             )
+
+    def _build_grid_positions(self):
+        """Build deterministic grid of tile positions and pre-filter invalid ones.
+
+        Reads each mask once per image to check min_valid_ratio for all
+        candidate positions. If class_balanced_sampling or cutmix_rare_classes
+        are active, class presence/position data is collected in the same pass.
+
+        If grid_cache is set and the file exists, loads pre-computed positions
+        directly. Otherwise computes and saves to grid_cache for next time.
+
+        Populates self._grid_positions (Nx3 int32 array of img_idx, col, row).
+        """
+        if self.grid_cache and os.path.exists(self.grid_cache):
+            return self._load_grid_cache()
+
+        crop_h, crop_w = self.crop_size
+        stride_x = max(1, int(crop_w * (1 - self.overlap_x)))
+        stride_y = max(1, int(crop_h * (1 - self.overlap_y)))
+        total_pixels = crop_h * crop_w
+
+        build_class_positions = self.class_balanced_sampling
+        build_class_tiles = bool(self.cutmix_rare_classes) or bool(getattr(self, 'cutmix_prob', 0))
+
+        if build_class_positions:
+            class_positions = {c: [] for c in range(self.n_classes)}
+        class_tiles = {c: [] for c in range(self.n_classes)} if build_class_tiles else None
+
+        logger.info(
+            f"Building grid positions (grid_mode=True, "
+            f"crop={crop_h}x{crop_w}, stride={stride_y}x{stride_x}, "
+            f"overlap={self.overlap_y:.0%}x{self.overlap_x:.0%}, "
+            f"{len(self._valid_indices)} images)..."
+        )
+
+        valid_positions = []
+        total_candidates = 0
+
+        with _suppress_gdal_crs_warnings():
+            for idx in self._valid_indices:
+                w, h = self.image_dims[idx]
+
+                # Flush edges: append clamped position if last stride doesn't reach the edge
+                cols = list(range(0, w - crop_w + 1, stride_x))
+                if cols and cols[-1] < w - crop_w:
+                    cols.append(w - crop_w)
+                elif not cols and w >= crop_w:
+                    cols = [0]
+
+                rows = list(range(0, h - crop_h + 1, stride_y))
+                if rows and rows[-1] < h - crop_h:
+                    rows.append(h - crop_h)
+                elif not rows and h >= crop_h:
+                    rows = [0]
+
+                total_candidates += len(cols) * len(rows)
+                full_mask = self._read_full_mask(idx)
+
+                for row in rows:
+                    for col in cols:
+                        crop_region = full_mask[row:row + crop_h, col:col + crop_w]
+                        valid_pixels = np.sum(crop_region < self.n_classes)
+
+                        if valid_pixels / total_pixels < self.min_valid_ratio:
+                            continue
+
+                        tile_idx = len(valid_positions)
+                        valid_positions.append((idx, col, row))
+
+                        if build_class_positions or build_class_tiles:
+                            bins = np.bincount(
+                                crop_region[crop_region < self.n_classes].ravel(),
+                                minlength=self.n_classes,
+                            )
+                            for c in np.nonzero(bins)[0]:
+                                if build_class_positions:
+                                    class_positions[c].append((idx, col, row))
+                                if build_class_tiles:
+                                    class_tiles[c].append(tile_idx)
+
+                del full_mask
+
+        if not valid_positions:
+            raise ValueError(
+                f"No valid grid tiles found with min_valid_ratio={self.min_valid_ratio}. "
+                f"Consider lowering min_valid_ratio or checking your masks."
+            )
+
+        self._grid_positions = np.array(valid_positions, dtype=np.int32)
+
+        rejected = total_candidates - len(valid_positions)
+        reject_pct = (rejected / total_candidates * 100) if total_candidates > 0 else 0
+        logger.info(
+            f"Grid positions built: {len(valid_positions):,} valid tiles "
+            f"from {total_candidates:,} candidates "
+            f"({rejected:,} rejected, {reject_pct:.1f}% rejection rate)"
+        )
+
+        if build_class_positions:
+            self._finalize_class_position_index(class_positions, label="(from grid pass)")
+
+        if build_class_tiles:
+            self._class_to_tiles = {
+                c: np.array(tiles, dtype=np.int32)
+                for c, tiles in class_tiles.items()
+                if tiles
+            }
+            logger.info("Class-to-tiles index (from grid pass):")
+            for c in range(self.n_classes):
+                n_tiles = len(self._class_to_tiles.get(c, []))
+                logger.info(f"  Class {c}: {n_tiles} tiles")
+
+        # Save cache for next time
+        if self.grid_cache:
+            self._save_grid_cache()
+
+    def _save_grid_cache(self):
+        """Save grid positions and class indices to JSON for fast reload."""
+        import json
+        cache = {
+            "grid_positions": self._grid_positions.tolist(),
+            "class_to_tiles": {
+                str(c): tiles.tolist()
+                for c, tiles in getattr(self, "_class_to_tiles", {}).items()
+            },
+            "class_to_images": {
+                str(c): imgs.tolist()
+                for c, imgs in getattr(self, "_class_to_images", {}).items()
+            },
+            "class_positions": {
+                str(c): pos.tolist()
+                for c, pos in getattr(self, "_class_positions", {}).items()
+            },
+            "config": {
+                "crop_size": self.crop_size,
+                "overlap_x": self.overlap_x,
+                "overlap_y": self.overlap_y,
+                "min_valid_ratio": self.min_valid_ratio,
+                "n_images": len(self._valid_indices),
+            },
+        }
+        os.makedirs(os.path.dirname(self.grid_cache) or ".", exist_ok=True)
+        with open(self.grid_cache, "w") as f:
+            json.dump(cache, f)
+        logger.info(f"Grid cache saved: {self.grid_cache} ({len(self._grid_positions)} tiles)")
+
+    def _load_grid_cache(self):
+        """Load pre-computed grid positions from JSON cache."""
+        import json
+        logger.info(f"Loading grid cache from {self.grid_cache}...")
+        with open(self.grid_cache) as f:
+            cache = json.load(f)
+
+        # Validate config matches
+        cfg = cache.get("config", {})
+        if cfg.get("crop_size") != self.crop_size:
+            logger.warning(
+                f"Grid cache crop_size mismatch: cache={cfg.get('crop_size')}, "
+                f"current={self.crop_size}. Rebuilding."
+            )
+            return self._build_grid_positions_fresh()
+        if cfg.get("n_images") != len(self._valid_indices):
+            logger.warning(
+                f"Grid cache n_images mismatch: cache={cfg.get('n_images')}, "
+                f"current={len(self._valid_indices)}. Rebuilding."
+            )
+            return self._build_grid_positions_fresh()
+
+        self._grid_positions = np.array(cache["grid_positions"], dtype=np.int32)
+
+        # Restore class-to-tiles index
+        if cache.get("class_to_tiles"):
+            self._class_to_tiles = {
+                int(c): np.array(tiles, dtype=np.int32)
+                for c, tiles in cache["class_to_tiles"].items()
+                if tiles
+            }
+
+        # Restore class indices if present
+        if cache.get("class_to_images"):
+            self._class_to_images = {
+                int(c): np.array(imgs, dtype=np.int32)
+                for c, imgs in cache["class_to_images"].items()
+                if imgs
+            }
+        if cache.get("class_positions"):
+            self._class_positions = {
+                int(c): np.array(pos, dtype=np.int32)
+                for c, pos in cache["class_positions"].items()
+                if pos
+            }
+            # Rebuild sampling weights
+            counts = np.array([
+                len(self._class_positions.get(c, []))
+                for c in range(self.n_classes)
+            ], dtype=np.float64)
+            weights = np.zeros(self.n_classes, dtype=np.float64)
+            mask = counts > 0
+            weights[mask] = 1.0 / counts[mask]
+            total = weights.sum()
+            if total > 0:
+                weights /= total
+            self._class_sampling_weights = weights
+
+        logger.info(f"Grid cache loaded: {len(self._grid_positions)} tiles")
+
+    def _build_grid_positions_fresh(self):
+        """Rebuild grid without cache (called when cache is invalid)."""
+        old_cache = self.grid_cache
+        self.grid_cache = None  # Prevent infinite recursion
+        self._build_grid_positions()
+        self.grid_cache = old_cache
+        self._save_grid_cache()
+
+    def _build_class_position_index(self):
+        """Build spatial class index for class-balanced sampling.
+
+        For each valid image, reads the entire mask and detects which classes
+        are present at each crop position on a grid. The result is a dictionary
+        mapping each class to an array of positions (img_idx, col, row).
+
+        Sampling weights are the inverse of the number of positions per
+        class, normalized. Classes with more positions (abundant) receive
+        a lower probability of being sampled.
+        """
+        crop_h, crop_w = self.crop_size
+        stride = self.class_sampling_stride
+        if stride <= 0:
+            stride = crop_h // 2
+
+        class_positions = {c: [] for c in range(self.n_classes)}
+
+        logger.info(
+            f"Building per-class position index "
+            f"(stride={stride}, {len(self._valid_indices)} images)..."
+        )
+
+        if self._hard_mask_paths is not None:
+            logger.info(
+                "  Using hard masks for index construction (fast, 1-band uint8)"
+            )
+
+        with _suppress_gdal_crs_warnings():
+            for idx in self._valid_indices:
+                full_mask = self._read_full_mask(idx)
+                w, h = self.image_dims[idx]
+
+                for row in range(0, h - crop_h + 1, stride):
+                    for col in range(0, w - crop_w + 1, stride):
+                        crop_region = full_mask[row:row + crop_h, col:col + crop_w]
+                        classes_present = np.unique(crop_region)
+                        for c in classes_present:
+                            if 0 <= c < self.n_classes:
+                                class_positions[c].append((idx, col, row))
+
+        self._finalize_class_position_index(class_positions)
 
     def _build_class_presence_index(self):
         """Build lightweight class-to-images index for CutMix rare targeting.
@@ -970,48 +1229,24 @@ class RandomCropSegmentationDataset(AbstractDataset):
         pre-computed index directly (instant). The JSON maps image
         filenames to lists of class indices present.
         """
-        # Try loading pre-computed cache
         if self.class_presence_cache and os.path.exists(self.class_presence_cache):
             return self._load_class_presence_cache()
-
-        use_hard = self._hard_mask_paths is not None
 
         logger.info(
             f"Building class-presence index "
             f"({len(self._valid_indices)} images, "
-            f"{'hard masks' if use_hard else 'soft masks'})..."
+            f"{'hard masks' if self._hard_mask_paths else 'soft masks'})..."
         )
-
-        _prev_gtiff_srs = os.environ.get("GTIFF_SRS_SOURCE")
-        os.environ["GTIFF_SRS_SOURCE"] = "GEOKEYS"
 
         class_images = {c: [] for c in range(self.n_classes)}
 
-        for idx in self._valid_indices:
-            if use_hard:
-                mask_path = self._hard_mask_paths[idx]
-                with rasterio.open(mask_path) as src:
-                    full_mask = src.read(1)
-            else:
-                mask_path = self.get_path(idx, key=self.mask_key)
-                with rasterio.open(mask_path) as src:
-                    if self.soft_labels:
-                        raw = src.read()
-                        ignore = raw.sum(axis=0) == 0
-                        full_mask = np.argmax(raw, axis=0).astype(np.uint8)
-                        full_mask[ignore] = 255
-                    else:
-                        full_mask = src.read(1)
-
-            classes_present = np.unique(full_mask)
-            for c in classes_present:
-                if 0 <= c < self.n_classes:
-                    class_images[c].append(idx)
-
-        if _prev_gtiff_srs is None:
-            os.environ.pop("GTIFF_SRS_SOURCE", None)
-        else:
-            os.environ["GTIFF_SRS_SOURCE"] = _prev_gtiff_srs
+        with _suppress_gdal_crs_warnings():
+            for idx in self._valid_indices:
+                full_mask = self._read_full_mask(idx)
+                classes_present = np.unique(full_mask)
+                for c in classes_present:
+                    if 0 <= c < self.n_classes:
+                        class_images[c].append(idx)
 
         self._class_to_images = {
             c: np.array(imgs, dtype=np.int32)
@@ -1023,6 +1258,28 @@ class RandomCropSegmentationDataset(AbstractDataset):
         for c in range(self.n_classes):
             n_imgs = len(self._class_to_images.get(c, []))
             logger.info(f"  Class {c}: present in {n_imgs} images")
+
+        # Auto-save cache for next time
+        if self.class_presence_cache and not os.path.exists(self.class_presence_cache):
+            self._save_class_presence_cache()
+
+    def _save_class_presence_cache(self):
+        """Save class-presence index to JSON for fast reload."""
+        import json
+        # Build inverse lookup: idx -> set of classes (avoids O(N) numpy search)
+        idx_to_classes = {}
+        for c, imgs in self._class_to_images.items():
+            for idx in imgs:
+                idx_to_classes.setdefault(int(idx), []).append(int(c))
+        cache = {}
+        for idx in self._valid_indices:
+            mask_path = self.get_path(idx, key=self.mask_key)
+            basename = os.path.basename(mask_path)
+            cache[basename] = sorted(idx_to_classes.get(idx, []))
+        os.makedirs(os.path.dirname(self.class_presence_cache) or ".", exist_ok=True)
+        with open(self.class_presence_cache, "w") as f:
+            json.dump(cache, f, indent=2)
+        logger.info(f"Class-presence cache saved: {self.class_presence_cache}")
 
     def _load_class_presence_cache(self):
         """Load pre-computed class-presence index from JSON.
@@ -1352,6 +1609,55 @@ class RandomCropSegmentationDataset(AbstractDataset):
 
         return image, mask
 
+    def _get_random_grid_tile(self, target_class: int = -1, exclude_class: int = -1):
+        """Get a random grid tile, optionally targeting or excluding a class.
+
+        Uses _class_to_tiles index for efficient class-targeted sampling.
+        Falls back to random tile selection if no index is available.
+
+        Args:
+            target_class: If >= 0, sample a tile containing this class.
+            exclude_class: If >= 0, prefer tiles NOT dominated by this class.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: (image, mask).
+        """
+        c2t = getattr(self, '_class_to_tiles', {})
+
+        if target_class >= 0 and target_class in c2t and len(c2t[target_class]) > 0:
+            tile_idx = int(np.random.choice(c2t[target_class]))
+        elif exclude_class >= 0:
+            # Try to find a tile not dominated by exclude_class
+            # Use all tiles as candidates (fast path)
+            tile_idx = int(np.random.randint(len(self._grid_positions)))
+        else:
+            tile_idx = int(np.random.randint(len(self._grid_positions)))
+
+        return self._get_grid_crop(tile_idx)
+
+    def _get_grid_crop(self, idx: int):
+        """Get a pre-computed grid tile by index. No retries needed.
+
+        Args:
+            idx: Index into self._grid_positions.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: (image, mask).
+        """
+        img_idx, x, y = self._grid_positions[idx]
+        img_idx, x, y = int(img_idx), int(x), int(y)
+
+        image_path = self.get_path(img_idx, key=self.image_key)
+        image = self._read_crop(image_path, x, y, is_mask=False)
+
+        mask_path = self.get_path(img_idx, key=self.mask_key)
+        mask = self._read_crop(mask_path, x, y, is_mask=True)
+
+        if self.n_classes == 2 and not self.soft_labels:
+            mask = (mask > 0).astype(np.uint8)
+
+        return image, mask
+
     def _ensure_soft_mask_tensor(self, mask):
         """Ensure soft mask is a float tensor (C, H, W).
 
@@ -1374,8 +1680,11 @@ class RandomCropSegmentationDataset(AbstractDataset):
         return mask
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
-        # Get main crop (with class-aware sampling if active)
-        image, mask = self._get_random_crop()
+        # Get main crop: grid (deterministic) or random
+        if self.grid_mode:
+            image, mask = self._get_grid_crop(idx)
+        else:
+            image, mask = self._get_random_crop()
 
         # Integrated CutMix/ClassMix: second crop seeks a DIFFERENT class from
         # the dominant one in the first, maximizing per-sample diversity.
@@ -1399,12 +1708,17 @@ class RandomCropSegmentationDataset(AbstractDataset):
             rare_classes = getattr(self, 'cutmix_rare_classes', [])
             rare_prob = getattr(self, 'cutmix_rare_prob', 0.5)
             if rare_classes and np.random.random() < rare_prob:
-                # Force rare class as target of the second crop
                 rare_w = getattr(self, 'cutmix_rare_weights', None)
                 target = int(np.random.choice(rare_classes, p=rare_w))
-                image2, mask2 = self._get_random_crop(target_class=target)
+                if self.grid_mode:
+                    image2, mask2 = self._get_random_grid_tile(target_class=target)
+                else:
+                    image2, mask2 = self._get_random_crop(target_class=target)
             else:
-                image2, mask2 = self._get_random_crop(exclude_class=main_class)
+                if self.grid_mode:
+                    image2, mask2 = self._get_random_grid_tile(exclude_class=main_class)
+                else:
+                    image2, mask2 = self._get_random_crop(exclude_class=main_class)
             # Independent color aug on second crop
             if getattr(self, '_pre_mix_transform', None) is not None:
                 r2 = self._pre_mix_transform(image=image2, mask=mask2)

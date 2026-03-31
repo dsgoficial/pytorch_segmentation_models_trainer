@@ -49,7 +49,6 @@ class Model(pl.LightningModule):
         self.val_ds = instantiate(self.cfg.val_dataset, _recursive_=False) if "val_dataset" in self.cfg else None
         self.loss_function = self.get_loss_function()
         
-        # NEW: Determine if using compound loss (MultiLoss)
         self.use_compound_loss = isinstance(self.loss_function, MultiLoss)
         
         # Save hyperparameters for better checkpointing
@@ -89,7 +88,6 @@ class Model(pl.LightningModule):
         )
         self.steps_per_epoch = None
         
-        # NEW: Log loss configuration
         logger.info(f"Initialized Model with loss function: {self.loss_function}")
         if self.use_compound_loss:
             logger.info(f"Using compound loss with {len(self.loss_function.loss_funcs)} components")
@@ -176,9 +174,19 @@ class Model(pl.LightningModule):
 
             # Use samples_per_epoch if defined (RandomCropSegmentationDataset),
             # otherwise fall back to CSV row count.
+            # Grid mode: dataset size is determined by pre-computed grid positions.
             # When samples_per_epoch <= 0 (auto mode), read the computed
             # value from the instantiated dataset instead of the config.
-            if 'samples_per_epoch' in dataset_cfg:
+            if dataset_cfg.get('grid_mode', False):
+                if self.train_ds is not None:
+                    dataset_size = len(self.train_ds)
+                else:
+                    logger.warning(
+                        "Grid mode active but dataset not yet instantiated; "
+                        "cannot compute steps_per_epoch"
+                    )
+                    return None
+            elif 'samples_per_epoch' in dataset_cfg:
                 dataset_size = dataset_cfg.samples_per_epoch
                 if dataset_size <= 0 and self.train_ds is not None and hasattr(self.train_ds, 'samples_per_epoch'):
                     dataset_size = self.train_ds.samples_per_epoch

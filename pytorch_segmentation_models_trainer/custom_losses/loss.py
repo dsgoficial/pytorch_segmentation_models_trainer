@@ -430,6 +430,8 @@ class WeightedJMLSCELoss(nn.Module):
         smooth (float): Smoothing constant for JML (default 1e-3).
         jml_classes (str): 'present' to average only over classes in the
             batch, 'all' to average over all classes.
+        label_smoothing (float): Label smoothing for CE loss (default 0.0).
+            Applied via PyTorch's built-in CrossEntropyLoss label_smoothing.
     """
 
     def __init__(
@@ -442,6 +444,7 @@ class WeightedJMLSCELoss(nn.Module):
         sce_beta: float = 0.5,
         smooth: float = 1e-3,
         jml_classes: str = "present",
+        label_smoothing: float = 0.0,
     ):
         super(WeightedJMLSCELoss, self).__init__()
 
@@ -453,8 +456,35 @@ class WeightedJMLSCELoss(nn.Module):
         self.sce_beta = sce_beta
         self.smooth = smooth
         self.jml_classes = jml_classes
+        self.label_smoothing = label_smoothing
 
-        self.ce_loss = nn.CrossEntropyLoss(ignore_index=ignore_index)
+        self.ce_loss = nn.CrossEntropyLoss(
+            ignore_index=ignore_index, label_smoothing=label_smoothing
+        )
+
+    def _smooth_one_hot(self, targets, valid_mask):
+        """Build smoothed one-hot from hard targets.
+
+        Args:
+            targets: [B, H, W] ground-truth class indices.
+            valid_mask: [B, H, W] boolean mask of valid pixels.
+
+        Returns:
+            label: [B, C, H, W] smoothed one-hot (masked).
+        """
+        C = self.num_classes
+        targets_safe = targets.clone()
+        targets_safe[~valid_mask] = 0
+        one_hot = (
+            F.one_hot(targets_safe, C).permute(0, 3, 1, 2).float()
+        )  # [B, C, H, W]
+
+        if self.label_smoothing > 0:
+            eps = self.label_smoothing
+            one_hot = one_hot * (1.0 - eps) + eps / C
+
+        mask = valid_mask.unsqueeze(1).float()  # [B, 1, H, W]
+        return one_hot * mask
 
     def _jml_loss(self, probas, targets, valid_mask):
         """JML1: Jaccard Metric Loss with L1-norm cardinalities.
@@ -466,17 +496,8 @@ class WeightedJMLSCELoss(nn.Module):
             targets: [B, H, W] ground-truth class indices.
             valid_mask: [B, H, W] boolean mask of valid pixels.
         """
-        C = probas.size(1)
-
-        # One-hot encode targets (invalid pixels mapped to class 0, then masked)
-        targets_safe = targets.clone()
-        targets_safe[~valid_mask] = 0
-        one_hot = (
-            F.one_hot(targets_safe, C).permute(0, 3, 1, 2).float()
-        )  # [B, C, H, W]
-
-        mask = valid_mask.unsqueeze(1).float()  # [B, 1, H, W]
-        label = one_hot * mask
+        label = self._smooth_one_hot(targets, valid_mask)
+        mask = valid_mask.unsqueeze(1).float()
         probas_masked = probas * mask
 
         return _compute_jml(probas_masked, label, self.smooth, self.jml_classes)
@@ -559,9 +580,14 @@ class WeightedJMLSCELoss(nn.Module):
             # Standard CE
             ce = self.ce_loss(predictions, targets)
 
-            # Reverse CE
+            # Reverse CE (uses smoothed one-hot for consistency)
             pred_probs = torch.clamp(probas, min=1e-7, max=1.0)
-            rce = _compute_reverse_ce(pred_probs, targets, valid_mask, self.num_classes)
+            smooth_oh = self._smooth_one_hot(targets, valid_mask)
+            smooth_oh_clamped = torch.clamp(smooth_oh, min=1e-4, max=1.0)
+            mask_float = valid_mask.float()
+            n_valid = mask_float.sum() + 1e-6
+            rce = (-pred_probs * torch.log(smooth_oh_clamped)).sum(dim=1)
+            rce = (rce * mask_float).sum() / n_valid
             sce = self.sce_alpha * ce + self.sce_beta * rce
 
         return self.jml_weight * jml + self.sce_weight * sce
@@ -720,7 +746,8 @@ class WeightedJMLSCEGCBLLoss(nn.Module):
 
     Args:
         num_classes, jml_weight, sce_weight, ignore_index, sce_alpha,
-        sce_beta, smooth, jml_classes: forwarded to WeightedJMLSCELoss.
+        sce_beta, smooth, jml_classes, label_smoothing: forwarded to
+        WeightedJMLSCELoss.
         gcbl_weight: Weight for GCBL term (default 0.1).
         gcbl_embed_dim: Embedding dimension (default 32).
         gcbl_temperature: InfoNCE temperature (default 0.07).
@@ -737,6 +764,7 @@ class WeightedJMLSCEGCBLLoss(nn.Module):
         sce_beta: float = 0.5,
         smooth: float = 1e-3,
         jml_classes: str = "present",
+        label_smoothing: float = 0.0,
         gcbl_weight: float = 0.1,
         gcbl_embed_dim: int = 32,
         gcbl_temperature: float = 0.07,
@@ -752,6 +780,7 @@ class WeightedJMLSCEGCBLLoss(nn.Module):
             sce_beta=sce_beta,
             smooth=smooth,
             jml_classes=jml_classes,
+            label_smoothing=label_smoothing,
         )
         self.gcbl = GCBLLoss(
             num_classes=num_classes,

@@ -331,6 +331,7 @@ class TestSoftLabelIntegration(unittest.TestCase):
         ds.soft_labels = True
         ds.crop_size = [32, 32]
         ds.file_cache_maxsize = 10
+        ds.selected_bands = None
 
         # Use a simple dict cache for testing
         ds._file_cache = {}
@@ -362,6 +363,7 @@ class TestSoftLabelIntegration(unittest.TestCase):
         ds = object.__new__(RandomCropSegmentationDataset)
         ds.soft_labels = False
         ds.crop_size = [32, 32]
+        ds.selected_bands = None
         ds._file_cache = {}
         ds._file_cache[mask_path] = rasterio.open(mask_path)
 
