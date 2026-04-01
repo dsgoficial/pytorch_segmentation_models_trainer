@@ -1090,10 +1090,10 @@ class RandomCropSegmentationDataset(AbstractDataset):
                 for c, pos in getattr(self, "_class_positions", {}).items()
             },
             "config": {
-                "crop_size": self.crop_size,
-                "overlap_x": self.overlap_x,
-                "overlap_y": self.overlap_y,
-                "min_valid_ratio": self.min_valid_ratio,
+                "crop_size": list(self.crop_size),
+                "overlap_x": float(self.overlap_x),
+                "overlap_y": float(self.overlap_y),
+                "min_valid_ratio": float(self.min_valid_ratio),
                 "n_images": len(self._valid_indices),
             },
         }
