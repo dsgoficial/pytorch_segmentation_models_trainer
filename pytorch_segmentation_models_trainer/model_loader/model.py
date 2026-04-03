@@ -661,6 +661,29 @@ class Model(pl.LightningModule):
                         self.log(f"{k}/val", v,
                                  on_step=False, on_epoch=True, sync_dist=False)
 
+        # MEDOE expert-specific loss
+        if hasattr(self.model, 'compute_expert_loss') and self.model.last_expert_outputs is not None:
+            expert_loss = self.model.compute_expert_loss(
+                self.model.last_expert_outputs, hard_masks
+            )
+            loss = loss + expert_loss
+            self.log(f"losses/{prefix}_expert", expert_loss,
+                     on_step=is_train, on_epoch=True, sync_dist=True)
+
+        # MEDOE diagnostics
+        if hasattr(self.model, 'get_medoe_diagnostics'):
+            should_log = (not is_train) or (self.global_step % 50 == 0)
+            if should_log:
+                medoe_diag = self.model.get_medoe_diagnostics(
+                    hard_masks if not is_train else None
+                )
+                for k, v in medoe_diag.items():
+                    self.log(f"{k}/{prefix}", v,
+                             on_step=is_train, on_epoch=True, sync_dist=False)
+            # Free stored tensors after use
+            self.model.last_expert_outputs = None
+            self.model.last_gate_weights = None
+
         # Log total loss
         self.log(f"loss/{prefix}", loss,
                  on_step=is_train, on_epoch=True, prog_bar=True, sync_dist=True)
