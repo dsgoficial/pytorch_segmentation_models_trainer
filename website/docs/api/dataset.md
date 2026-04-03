@@ -118,6 +118,7 @@ Semantic segmentation dataset. Loads image-mask pairs and supports both PIL (RGB
 | `n_classes` | `int` | `2` | Number of segmentation classes. When `2`, masks are binarized (`> 0`). |
 | `selected_bands` | `Optional[List[int]]` | `None` | 1-based list of band indices to load via rasterio. E.g. `[1, 2, 3]` loads the first three bands. When `None`, all bands are loaded. |
 | `use_rasterio` | `bool` | `False` | When `True`, forces rasterio for image loading (recommended for multispectral imagery). |
+| `image_dtype` | `str` | `"uint8"` | Data type applied to the image array after rasterio loading. Accepted values: `"uint8"`, `"uint16"`, `"float32"`, `"native"`. Only takes effect when rasterio is used (`use_rasterio=True` or `selected_bands` is set). `"native"` skips the cast entirely. Raises `ValueError` for unrecognised values. |
 | `reset_augmentation_function` | `bool` | `False` | When `True`, deep-copies the augmentation pipeline before each call to prevent memory leaks from Albumentations caching. |
 
 ### `__getitem__` Returns
@@ -126,7 +127,7 @@ Semantic segmentation dataset. Loads image-mask pairs and supports both PIL (RGB
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `"image"` | `torch.Tensor` (C, H, W) | Float tensor normalized to `[0, 1]`. |
+| `"image"` | `torch.Tensor` (C, H, W) | Float tensor. When no transform is set, automatically normalized: `uint8` → `/255`, `uint16` → `/65535`, `float32`/`native` → no division. |
 | `"mask"` | `torch.Tensor` (H, W) | Long tensor of class labels. Binary (0/1) when `n_classes == 2`. |
 
 ---

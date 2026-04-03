@@ -107,11 +107,13 @@ with rasterio.open("data/train/images/tile_001.tif") as src:
         print(f"Band {i} — min: {band.min()}, max: {band.max()}, mean: {band.mean():.1f}")
 ```
 
-:::warning 16-bit Imagery
-If your GeoTIFFs are 16-bit (`uint16`), you must normalize values to `uint8` (0–255) before training, or adjust the augmentation pipeline to handle `float32` inputs. The `SegmentationDataset` internally casts rasterio output to `uint8` via `np.array(image, dtype=np.uint8)`.
+:::tip 16-bit Imagery
+If your GeoTIFFs are 16-bit (`uint16`), set `image_dtype: uint16` in the dataset config. This preserves the full 16-bit precision and applies the correct normalization factor (`/65535`) automatically in the no-transform path. When using an augmentation pipeline, add `A.ToFloat(max_value=65535)` as the first transform. See the [16-bit example](#step-2b-16-bit-imagery-sentinel-2-landsat) below.
 :::
 
 ## Step 2: Training Configuration
+
+### Step 2a: 8-bit Imagery (standard GeoTIFF)
 
 Create `configs/train.yaml`:
 
@@ -131,6 +133,7 @@ train_dataset:
   input_csv_path: train.csv
   use_rasterio: true          # Required for GeoTIFF multi-band loading
   selected_bands: [1, 2, 3, 4]  # 1-based band indices; loads all 4 bands
+  image_dtype: uint8          # default; explicit for clarity
   n_classes: 2
   data_loader:
     shuffle: true
@@ -169,6 +172,7 @@ val_dataset:
   input_csv_path: val.csv
   use_rasterio: true
   selected_bands: [1, 2, 3, 4]
+  image_dtype: uint8
   n_classes: 2
   data_loader:
     shuffle: false
@@ -188,7 +192,79 @@ val_dataset:
       p: 1.0
     - _target_: albumentations.pytorch.transforms.ToTensorV2
       always_apply: true
+```
 
+### Step 2b: 16-bit Imagery (Sentinel-2, Landsat)
+
+For sensors that store values as `uint16` (0–65535), set `image_dtype: uint16` and add `A.ToFloat` as the first augmentation transform. Albumentations does not handle `uint16` arrays natively, so the conversion to `float32` must happen before any other transform.
+
+```yaml
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: train.csv
+  use_rasterio: true
+  selected_bands: [1, 2, 3, 4]
+  image_dtype: uint16           # preserves full 16-bit precision
+  n_classes: 2
+  data_loader:
+    shuffle: true
+    num_workers: 4
+    pin_memory: true
+    drop_last: true
+    prefetch_factor: 2
+  augmentation_list:
+    - _target_: albumentations.ToFloat
+      max_value: 65535.0        # uint16 → float32 in [0, 1]
+    - _target_: albumentations.RandomRotate90
+      p: 0.5
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.RandomCrop
+      height: 256
+      width: 256
+      always_apply: true
+    - _target_: albumentations.Normalize
+      mean: [0.5, 0.5, 0.5, 0.4]
+      std: [0.2, 0.2, 0.2, 0.15]
+      max_pixel_value: 1.0      # values are already in [0, 1] after ToFloat
+      p: 1.0
+    - _target_: albumentations.pytorch.transforms.ToTensorV2
+      always_apply: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: val.csv
+  use_rasterio: true
+  selected_bands: [1, 2, 3, 4]
+  image_dtype: uint16
+  n_classes: 2
+  data_loader:
+    shuffle: false
+    num_workers: 4
+    pin_memory: true
+    drop_last: false
+    prefetch_factor: 2
+  augmentation_list:
+    - _target_: albumentations.ToFloat
+      max_value: 65535.0
+    - _target_: albumentations.Resize
+      height: 256
+      width: 256
+      always_apply: true
+    - _target_: albumentations.Normalize
+      mean: [0.5, 0.5, 0.5, 0.4]
+      std: [0.2, 0.2, 0.2, 0.15]
+      max_pixel_value: 1.0
+      p: 1.0
+    - _target_: albumentations.pytorch.transforms.ToTensorV2
+      always_apply: true
+```
+
+:::note
+The sections below — `loss_params`, `optimizer`, `scheduler_list`, `hyperparameters`, `pl_trainer`, `callbacks`, `metrics`, and `logger` — are the same regardless of `image_dtype`. Add them to your `configs/train.yaml` after the dataset section.
+:::
+
+```yaml
 # --- Loss Function ---
 # DiceLoss addresses class imbalance; BCEWithLogitsLoss stabilizes early training.
 loss_params:
