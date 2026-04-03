@@ -324,6 +324,16 @@ class TiledInferenceImageDataset(ImageDataset):
         }
 
 
+_DTYPE_NORMALIZATION = {
+    "uint8": 255.0,
+    "uint16": 65535.0,
+    "float32": None,
+    "native": None,
+}
+
+_VALID_IMAGE_DTYPES = set(_DTYPE_NORMALIZATION.keys())
+
+
 class SegmentationDataset(AbstractDataset):
     """Dataset para segmentação com suporte a seleção de bandas.
 
@@ -341,6 +351,13 @@ class SegmentationDataset(AbstractDataset):
             Se None, carrega todas as bandas disponíveis.
         use_rasterio (bool): Se True, usa rasterio para carregar imagens (recomendado
             para imagens multiespectrais). Se False, usa PIL (padrão para RGB).
+        image_dtype (str): Tipo de dado para interpretação da imagem após leitura via
+            rasterio. Valores aceitos: "uint8" (padrão), "uint16", "float32", "native".
+            "native" preserva o dtype original do arquivo sem cast.
+            Configs legados sem este parâmetro mantêm comportamento idêntico ao anterior.
+            Nota: ao usar transform (augmentation_list), a normalização fica a cargo do
+            Albumentations (ex: A.Normalize, A.ToFloat). O image_dtype afeta apenas o
+            cast do array e a normalização automática no caminho sem transform.
     """
 
     def __init__(
@@ -356,6 +373,7 @@ class SegmentationDataset(AbstractDataset):
         selected_bands: Optional[List[int]] = None,
         use_rasterio: bool = False,
         reset_augmentation_function: bool = False,
+        image_dtype: str = "uint8",
     ) -> None:
         super(SegmentationDataset, self).__init__(
             input_csv_path=input_csv_path,
@@ -370,6 +388,13 @@ class SegmentationDataset(AbstractDataset):
         self.selected_bands = selected_bands
         self.use_rasterio = use_rasterio
         self.reset_augmentation_function = reset_augmentation_function
+
+        if image_dtype not in _VALID_IMAGE_DTYPES:
+            raise ValueError(
+                f"image_dtype '{image_dtype}' inválido. "
+                f"Valores aceitos: {sorted(_VALID_IMAGE_DTYPES)}"
+            )
+        self.image_dtype = image_dtype
 
         # Validação das bandas selecionadas
         if self.selected_bands is not None:
@@ -429,7 +454,9 @@ class SegmentationDataset(AbstractDataset):
             image = np.transpose(data, (1, 2, 0)).copy()
             del data
             src.close()
-        return np.array(image, dtype=np.uint8)
+        if self.image_dtype == "native":
+            return image
+        return np.array(image, dtype=np.dtype(self.image_dtype))
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """Retorna item do dataset com suporte a bandas personalizadas."""
@@ -442,7 +469,9 @@ class SegmentationDataset(AbstractDataset):
         if self.transform is None:
             image = torch.from_numpy(image).float()
             image = image.permute(2, 0, 1)  # (H,W,C) → (C,H,W) para PyTorch
-            image = image / 255.0
+            norm_factor = _DTYPE_NORMALIZATION.get(self.image_dtype)
+            if norm_factor is not None:
+                image = image / norm_factor
             mask = torch.from_numpy(mask).long()
             return {"image": image, "mask": mask}
         # This copy is to avoid data leaks from albumentations.
@@ -494,6 +523,8 @@ class RandomCropSegmentationDataset(AbstractDataset):
         reset_augmentation_function: Deepcopy do transform para evitar memory leak
         min_valid_ratio: Fracao minima de pixels validos (>0) no crop
         max_retries: Tentativas maximas para encontrar crop valido
+        image_dtype: Tipo de dado para interpretação da imagem. Valores aceitos:
+            "uint8" (padrão), "uint16", "float32", "native". Ver SegmentationDataset.
     """
 
     def __init__(
@@ -513,6 +544,7 @@ class RandomCropSegmentationDataset(AbstractDataset):
         image_key=None,
         mask_key=None,
         n_first_rows_to_read=None,
+        image_dtype: str = "uint8",
     ) -> None:
         super(RandomCropSegmentationDataset, self).__init__(
             input_csv_path=input_csv_path,
@@ -531,6 +563,13 @@ class RandomCropSegmentationDataset(AbstractDataset):
         self.reset_augmentation_function = reset_augmentation_function
         self.min_valid_ratio = min_valid_ratio
         self.max_retries = max_retries
+
+        if image_dtype not in _VALID_IMAGE_DTYPES:
+            raise ValueError(
+                f"image_dtype '{image_dtype}' inválido. "
+                f"Valores aceitos: {sorted(_VALID_IMAGE_DTYPES)}"
+            )
+        self.image_dtype = image_dtype
 
         if self.selected_bands is not None:
             if not all(isinstance(b, int) and b > 0 for b in self.selected_bands):
@@ -630,7 +669,9 @@ class RandomCropSegmentationDataset(AbstractDataset):
                 data = src.read(window=window)
             # (C, H, W) -> (H, W, C)
             image = np.transpose(data, (1, 2, 0)).copy()
-            return image.astype(np.uint8)
+            if self.image_dtype == "native":
+                return image
+            return image.astype(np.dtype(self.image_dtype))
 
     def _is_crop_valid(self, image_data: np.ndarray) -> bool:
         """Verifica se o crop tem pixels validos suficientes."""
@@ -673,7 +714,9 @@ class RandomCropSegmentationDataset(AbstractDataset):
         if self.transform is None:
             image = torch.from_numpy(image).float()
             image = image.permute(2, 0, 1)  # (H,W,C) -> (C,H,W)
-            image = image / 255.0
+            norm_factor = _DTYPE_NORMALIZATION.get(self.image_dtype)
+            if norm_factor is not None:
+                image = image / norm_factor
             mask = torch.from_numpy(mask).long()
             return {"image": image, "mask": mask}
 

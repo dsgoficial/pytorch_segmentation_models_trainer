@@ -43,6 +43,7 @@ class DatasetConfig:
     gpu_augmentation_list: List = field(default_factory=list)
     augmentation_list: List = field(default_factory=list)
     data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+    image_dtype: str = "uint8"
 
 
 @dataclass
