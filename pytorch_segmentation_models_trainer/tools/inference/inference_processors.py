@@ -20,6 +20,8 @@
 """
 from collections import defaultdict
 from concurrent.futures.thread import ThreadPoolExecutor
+import gc
+import logging
 import os
 import math
 from abc import ABC, abstractmethod
@@ -40,6 +42,7 @@ import cv2
 from torch.cuda.amp import autocast
 import numpy as np
 import rasterio
+import rasterio.windows
 import torch
 from pytorch_toolbelt.inference.tiles import ImageSlicer, TileMerger
 from pytorch_toolbelt.utils.torch_utils import (
@@ -48,6 +51,8 @@ from pytorch_toolbelt.utils.torch_utils import (
     to_numpy,
 )
 from torch.utils.data import DataLoader
+
+logger = logging.getLogger(__name__)
 
 
 class AbstractInferenceProcessor(ABC):
@@ -310,6 +315,7 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
                 with autocast():
                     pred_batch = self.model(tiles_batch)
                 self.integrate_batch(pred_batch, coords_batch, merger_dict)
+                del tiles_batch, pred_batch
 
     def integrate_batch(self, pred_batch, coords_batch, merger_dict):
         merger_dict["seg"].integrate_batch(pred_batch, coords_batch)
@@ -442,12 +448,16 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
                         aug = self._apply_transform(tiles_batch, rot, flip)
                         with autocast():
                             pred = self.model(aug)  # [B, C, H, W]
+                        del aug
                         pred = pred.float()
                         pred = self._invert_transform(pred, rot, flip)
                         accum = pred if accum is None else accum + pred
+                        del pred
                     pred_batch = accum / n_tta
+                    del accum
 
                 self.integrate_batch(pred_batch, coords_batch, merger_dict)
+                del tiles_batch, pred_batch
 
     def merge_masks(self, tiler: ImageSlicer, merger_dict: Dict[str, TileMerger]):
         """Argmax after weighted tile merge."""
@@ -626,6 +636,223 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
             self.confidence_export_strategy.save_confidence(
                 metric_name, data[..., np.newaxis], dict(conf_profile)
             )
+
+    # ---- Striped inference for large images (BigTIFF) ----
+
+    def _predict_batch_to_merger(self, batch_tiles, batch_coords, merger, transforms, n_tta):
+        """Predict a batch with optional TTA, move to CPU, integrate into merger.
+
+        Args:
+            batch_tiles: list of tensors [C, H, W]
+            batch_coords: list of (x, y, w, h) tuples
+            merger: TileMerger on CPU
+            transforms: list of (rot, flip) tuples
+            n_tta: number of TTA passes
+        """
+        tiles_tensor = torch.stack(batch_tiles).float().to(self.device)
+        coords_tensor = torch.from_numpy(np.array(batch_coords))
+
+        if n_tta <= 1:
+            with autocast():
+                pred = self.model(tiles_tensor)
+            pred = pred.float().cpu()
+        else:
+            accum = None
+            for rot, flip in transforms:
+                aug = self._apply_transform(tiles_tensor, rot, flip)
+                with autocast():
+                    p = self.model(aug)
+                del aug
+                p = p.float()
+                p = self._invert_transform(p, rot, flip)
+                accum = p if accum is None else accum + p
+                del p
+            pred = (accum / n_tta).cpu()
+            del accum
+
+        del tiles_tensor
+        merger.integrate_batch(pred, coords_tensor)
+        del pred
+
+    def _infer_stripe(self, stripe_normalized):
+        """Process a single normalized stripe, returning merged logits on CPU.
+
+        Uses iter_split() (generator) to avoid materializing all tiles, and
+        TileMerger on CPU to avoid GPU memory accumulation.
+
+        Args:
+            stripe_normalized: np.ndarray [h, W, C] — already normalized.
+
+        Returns:
+            np.ndarray [num_classes, h, W] — merged logits (CPU, float32).
+        """
+        h, w = stripe_normalized.shape[:2]
+
+        pad_func = A.PadIfNeeded(
+            math.ceil(h / self.model_input_shape[0]) * self.model_input_shape[0],
+            math.ceil(w / self.model_input_shape[1]) * self.model_input_shape[1],
+            border_mode=cv2.BORDER_REFLECT_101,
+            position="top_left",
+        )
+        padded = pad_func(image=stripe_normalized)["image"]
+
+        tiler = ImageSlicer(
+            padded.shape,
+            tile_size=self.model_input_shape,
+            tile_step=self.step_shape,
+            weight=self._tile_weight,
+        )
+
+        merger = TileMerger(
+            tiler.target_shape, self.num_classes, tiler.weight, device="cpu"
+        )
+
+        transforms = self._get_tta_transforms()
+        n_tta = len(transforms)
+        batch_tiles = []
+        batch_coords = []
+
+        with torch.no_grad():
+            for tile, coords in tiler.iter_split(padded):
+                batch_tiles.append(image_to_tensor(tile))
+                batch_coords.append(coords)
+
+                if len(batch_tiles) == self.batch_size:
+                    self._predict_batch_to_merger(
+                        batch_tiles, batch_coords, merger, transforms, n_tta
+                    )
+                    batch_tiles.clear()
+                    batch_coords.clear()
+
+            if batch_tiles:
+                self._predict_batch_to_merger(
+                    batch_tiles, batch_coords, merger, transforms, n_tta
+                )
+
+        # merged has shape [C, target_H, target_W] (includes ImageSlicer margins)
+        merged = to_numpy(merger.merge())
+        del merger
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        # Remove ImageSlicer margins, then PadIfNeeded padding (top_left → just crop to h,w)
+        mt, ml = tiler.margin_top, tiler.margin_left
+        cropped = merged[
+            :,
+            mt : mt + tiler.image_height,
+            ml : ml + tiler.image_width,
+        ]
+        return cropped[:, :h, :w].copy()
+
+    def make_inference_striped(
+        self,
+        image_path,
+        output_seg_path,
+        output_probs_path=None,
+        stripe_height=4096,
+    ):
+        """Streaming stripe-based inference for large/BigTIFF images.
+
+        Reads the image in horizontal stripes via rasterio windowed reads,
+        runs inference per stripe with TileMerger on CPU, and writes results
+        directly to disk via rasterio windowed writes. Never loads the full
+        image into RAM.
+
+        Args:
+            image_path: path to input GeoTIFF.
+            output_seg_path: path for output segmentation GeoTIFF (uint8).
+            output_probs_path: optional path for softmax probabilities
+                (num_classes bands, float32). If None, probabilities are not saved.
+            stripe_height: height in pixels of each processing stripe (default 4096).
+        """
+        src_ds = rasterio.open(image_path)
+        H, W = src_ds.height, src_ds.width
+        profile = src_ds.profile.copy()
+
+        overlap = self.model_input_shape[0]
+        n_stripes = math.ceil(H / stripe_height)
+        logger.info(
+            f"Striped inference: {H}x{W} image, {n_stripes} stripes "
+            f"(height={stripe_height}, overlap={overlap})"
+        )
+
+        seg_profile = {
+            **profile,
+            "dtype": "uint8",
+            "count": 1,
+            "compress": "deflate",
+            "nodata": 255,
+            "BIGTIFF": "YES",
+        }
+        dst_seg = rasterio.open(output_seg_path, "w", **seg_profile)
+
+        dst_probs = None
+        if output_probs_path:
+            probs_profile = {
+                **profile,
+                "dtype": "float32",
+                "count": self.num_classes,
+                "compress": "deflate",
+                "BIGTIFF": "YES",
+            }
+            dst_probs = rasterio.open(output_probs_path, "w", **probs_profile)
+
+        norm_func = self.get_normalization_function()
+
+        try:
+            y = 0
+            stripe_idx = 0
+            while y < H:
+                y_end = min(y + stripe_height, H)
+                read_y0 = max(0, y - overlap)
+                read_y1 = min(H, y_end + overlap)
+
+                logger.info(
+                    f"  Stripe {stripe_idx + 1}/{n_stripes}: "
+                    f"rows [{y}:{y_end}] (read [{read_y0}:{read_y1}])"
+                )
+
+                window_read = rasterio.windows.Window(
+                    col_off=0, row_off=read_y0, width=W, height=read_y1 - read_y0
+                )
+                stripe = src_ds.read(window=window_read)
+                stripe = np.moveaxis(stripe, 0, -1)
+
+                stripe_norm = norm_func(image=stripe)["image"]
+                del stripe
+
+                merged_logits = self._infer_stripe(stripe_norm)
+                del stripe_norm
+
+                crop_top = y - read_y0
+                logits_cropped = merged_logits[:, crop_top:crop_top + (y_end - y), :].copy()
+                del merged_logits
+
+                window_write = rasterio.windows.Window(
+                    col_off=0, row_off=y, width=W, height=y_end - y
+                )
+
+                if dst_probs is not None:
+                    # Softmax needed for probability output
+                    logits_cropped -= logits_cropped.max(axis=0, keepdims=True)
+                    np.exp(logits_cropped, out=logits_cropped)
+                    logits_cropped /= logits_cropped.sum(axis=0, keepdims=True)
+                    dst_probs.write(logits_cropped, window=window_write)
+
+                seg = np.argmax(logits_cropped, axis=0).astype(np.uint8)
+                dst_seg.write(seg[np.newaxis], window=window_write)
+                del seg, logits_cropped
+                gc.collect()
+
+                y = y_end
+                stripe_idx += 1
+        finally:
+            src_ds.close()
+            dst_seg.close()
+            if dst_probs is not None:
+                dst_probs.close()
+
+        logger.info(f"Striped inference complete: {output_seg_path}")
 
     def save_inference(self, image_path, threshold, profile, inference, output_dict, apply_threshold=True):
         """

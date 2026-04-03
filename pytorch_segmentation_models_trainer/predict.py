@@ -71,6 +71,9 @@ def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
         strict=False,
     )
     model = pl_model.model
+    del pl_model  # free duplicate weights (EMA + original) from checkpoint
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     model.to(cfg.device)
     model.eval()
     return model

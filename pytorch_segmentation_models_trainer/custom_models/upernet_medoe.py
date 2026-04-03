@@ -94,8 +94,13 @@ class UPerNetMEDOE(nn.Module):
             body+tail, TAIL sees only tail.
             Default: HEAD=[0..5], BODY=[2,3,5], TAIL=[2] for 6-class LULC.
         expert_loss_weight: Weight for expert CE losses.
+        expert_weights: Optional per-expert loss multipliers. List of floats
+            with length == number of experts. E.g. [1, 1, 3] gives TAIL 3x
+            more weight. Default: equal weights.
         aux_suppression_weight: Weight for L2 suppression of non-assigned
             class logits (paper default: 0.2).
+        gate_entropy_weight: Weight for gate entropy regularization. Penalizes
+            gate collapse (all weight on one expert). 0 = disabled.
         label_smoothing: Label smoothing for expert CE loss.
         ignore_index: Index for ignored pixels.
     """
@@ -113,7 +118,9 @@ class UPerNetMEDOE(nn.Module):
         upsampling: int = 4,
         class_groups: Optional[Dict[str, List[int]]] = None,
         expert_loss_weight: float = 0.5,
+        expert_weights: Optional[List[float]] = None,
         aux_suppression_weight: float = 0.2,
+        gate_entropy_weight: float = 0.0,
         label_smoothing: float = 0.1,
         ignore_index: int = 255,
         **kwargs: Any,
@@ -124,6 +131,7 @@ class UPerNetMEDOE(nn.Module):
         self.ignore_index = ignore_index
         self.expert_loss_weight = expert_loss_weight
         self.aux_suppression_weight = aux_suppression_weight
+        self.gate_entropy_weight = gate_entropy_weight
 
         # Convert OmegaConf to plain Python if needed
         if class_groups is not None:
@@ -148,6 +156,18 @@ class UPerNetMEDOE(nn.Module):
         self.class_groups = class_groups
         self.group_names = list(class_groups.keys())
         self.num_experts = len(self.group_names)
+
+        # Per-expert loss weights (e.g. [1, 1, 3] to give TAIL 3x more weight)
+        if expert_weights is not None:
+            if len(expert_weights) != self.num_experts:
+                raise ValueError(
+                    f"expert_weights length {len(expert_weights)} != "
+                    f"num_experts {self.num_experts}"
+                )
+            total = sum(expert_weights)
+            self.expert_weights = [w * self.num_experts / total for w in expert_weights]
+        else:
+            self.expert_weights = [1.0] * self.num_experts
 
         # Pre-compute class-to-group membership masks and their complements
         for i, (name, indices) in enumerate(class_groups.items()):
@@ -247,26 +267,43 @@ class UPerNetMEDOE(nn.Module):
         interfering_logits = expert_out[:, complement]  # (B, C', H, W)
         return interfering_logits.pow(2).mean()
 
+    def _compute_gate_entropy_reg(self, gate_weights: torch.Tensor) -> torch.Tensor:
+        """Entropy regularization on gate weights to prevent collapse.
+
+        Maximizes entropy = encourages the gate to distribute weight
+        across experts instead of putting everything on HEAD.
+
+        Returns negative entropy (to be minimized).
+        """
+        # gate_weights: (B, E, H, W), already softmax
+        entropy = -(gate_weights * torch.log(gate_weights.clamp(min=1e-8))).sum(dim=1)
+        # Maximize entropy → minimize negative entropy
+        max_entropy = torch.log(torch.tensor(float(self.num_experts)))
+        return max_entropy - entropy.mean()
+
     def compute_expert_loss(
         self,
         expert_outputs: List[torch.Tensor],
         target: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute masked expert losses + L2 suppression on interfering classes.
+        """Compute masked expert losses + L2 suppression + gate entropy reg.
 
         Each expert's CE loss is computed only on pixels of its assigned
-        class group. An auxiliary L2 loss penalizes logits of non-assigned
-        classes to prevent experts from interfering with each other.
+        class group, weighted by expert_weights. An auxiliary L2 loss
+        penalizes logits of non-assigned classes. Gate entropy regularization
+        prevents gate collapse to a single expert.
 
         Returns:
-            Weighted combination of expert CE + suppression losses (scalar).
+            Weighted combination of all loss terms (scalar).
         """
         ce_losses = []
+        ce_weights = []
         suppression_losses = []
         for i, expert_out in enumerate(expert_outputs):
             masked_target = self._make_masked_target(target, i)
             if (masked_target != self.ignore_index).any():
                 ce_losses.append(self.expert_criterion(expert_out, masked_target))
+                ce_weights.append(self.expert_weights[i])
             suppression_losses.append(
                 self._compute_suppression_loss(expert_out, i)
             )
@@ -274,11 +311,21 @@ class UPerNetMEDOE(nn.Module):
         if not ce_losses:
             ce_term = torch.zeros(1, device=target.device, dtype=torch.float32).squeeze()
         else:
-            ce_term = torch.stack(ce_losses).mean()
+            # Weighted mean of expert CE losses
+            weights_t = torch.tensor(ce_weights, device=target.device, dtype=torch.float32)
+            ce_term = (torch.stack(ce_losses) * weights_t).sum() / weights_t.sum()
 
         suppression_term = torch.stack(suppression_losses).mean()
 
-        return self.expert_loss_weight * ce_term + self.aux_suppression_weight * suppression_term
+        total = self.expert_loss_weight * ce_term + self.aux_suppression_weight * suppression_term
+
+        # Gate entropy regularization (needs grad-connected weights)
+        if self.gate_entropy_weight > 0 and self._gate_weights_with_grad is not None:
+            gate_reg = self._compute_gate_entropy_reg(self._gate_weights_with_grad)
+            total = total + self.gate_entropy_weight * gate_reg
+            self._gate_weights_with_grad = None  # free after use
+
+        return total
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass. Returns ensemble logits.
@@ -306,6 +353,8 @@ class UPerNetMEDOE(nn.Module):
             ensemble = ensemble + gate_weights[:, i : i + 1] * expert_out
 
         self.last_expert_outputs = expert_outputs
+        # Keep graph-connected version for gate entropy regularization
+        self._gate_weights_with_grad = gate_weights
         self.last_gate_weights = gate_weights.detach()
         self.last_aux_loss = aux_loss
 

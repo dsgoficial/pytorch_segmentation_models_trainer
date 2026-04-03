@@ -683,6 +683,8 @@ class Model(pl.LightningModule):
             # Free stored tensors after use
             self.model.last_expert_outputs = None
             self.model.last_gate_weights = None
+            if hasattr(self.model, '_gate_weights_with_grad'):
+                self.model._gate_weights_with_grad = None
 
         # Log total loss
         self.log(f"loss/{prefix}", loss,
