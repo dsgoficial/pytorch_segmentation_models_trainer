@@ -91,6 +91,7 @@ When `n_classes=2` (the default), the dataset automatically binarises the mask: 
 | `n_classes`                  | `int`                  | `2`      | Number of segmentation classes                                              |
 | `selected_bands`             | `List[int]`            | `None`   | 1-based list of band indices to read (e.g. `[1, 2, 3]`)                    |
 | `use_rasterio`               | `bool`                 | `False`  | Use rasterio instead of PIL for image loading                               |
+| `image_dtype`                | `str`                  | `"uint8"` | Data type for image interpretation when using rasterio. Accepted values: `"uint8"`, `"uint16"`, `"float32"`, `"native"`. See [Image Dtype](#image-dtype) below. |
 | `reset_augmentation_function`| `bool`                 | `False`  | Deep-copy the transform on each call to prevent albumentations memory leaks |
 
 ### `data_loader` Sub-Config
@@ -147,6 +148,41 @@ If `selected_bands` is omitted while `use_rasterio` is `true`, all available ban
 Setting `use_rasterio: true` also works for standard 3-band GeoTIFFs when you need correct handling of geospatial metadata or when PIL cannot open the format.
 :::
 
+## Image Dtype
+
+The `image_dtype` parameter controls how the pixel values are interpreted after loading via rasterio. It only affects the rasterio code path (i.e. when `use_rasterio: true` or `selected_bands` is set).
+
+| Value | numpy dtype | Automatic normalization (no-transform path) | Typical use case |
+|-------|-------------|---------------------------------------------|------------------|
+| `"uint8"` (default) | `np.uint8` | divided by `255.0` | Standard RGB / 8-bit GeoTIFF |
+| `"uint16"` | `np.uint16` | divided by `65535.0` | 16-bit satellite imagery (Sentinel-2, Landsat, WorldView) |
+| `"float32"` | `np.float32` | no division | Imagery already stored as normalized floats |
+| `"native"` | unchanged | no division | Preserves the file's original dtype; useful for inspection |
+
+The default `"uint8"` preserves the original behaviour, so **existing configuration files do not need any change**.
+
+:::note Transform vs no-transform path
+When an `augmentation_list` is provided, normalization is fully handled by Albumentations (e.g. `A.Normalize`, `A.ToFloat`). In that case `image_dtype` only controls the cast applied to the numpy array before it enters the transform pipeline. The automatic division described in the table above applies only when `augmentation_list` is `null`.
+:::
+
+:::warning Albumentations and uint16
+Albumentations does not natively support `uint16` arrays. When using `image_dtype: uint16` with an augmentation pipeline, add `A.ToFloat` as the **first** transform to convert values to `float32` in `[0, 1]`:
+
+```yaml
+augmentation_list:
+  - _target_: albumentations.ToFloat
+    max_value: 65535.0
+  - _target_: albumentations.RandomCrop
+    height: 256
+    width: 256
+  - _target_: albumentations.Normalize
+    mean: [0.5, 0.5, 0.5, 0.4]
+    std: [0.2, 0.2, 0.2, 0.15]
+    max_pixel_value: 1.0   # values are already in [0, 1] after ToFloat
+  - _target_: albumentations.pytorch.ToTensorV2
+```
+:::
+
 ## Full YAML Configuration Example
 
 The following example shows a complete train/val dataset configuration for a binary building segmentation task:
@@ -201,7 +237,7 @@ val_dataset:
     drop_last: false
 ```
 
-### Multispectral Example
+### Multispectral Example — 8-bit GeoTIFF
 
 ```yaml
 train_dataset:
@@ -211,6 +247,7 @@ train_dataset:
   n_classes: 5
   use_rasterio: true
   selected_bands: [1, 2, 3, 4]   # RGB + NIR
+  image_dtype: uint8              # default; explicit for clarity
   augmentation_list:
     - _target_: albumentations.RandomCrop
       height: 256
@@ -229,6 +266,38 @@ train_dataset:
     drop_last: true
 ```
 
+### Multispectral Example — 16-bit GeoTIFF (Sentinel-2, Landsat)
+
+```yaml
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/sentinel2/train.csv
+  root_dir: /data/sentinel2
+  n_classes: 2
+  use_rasterio: true
+  selected_bands: [1, 2, 3, 4]
+  image_dtype: uint16             # preserves 16-bit precision
+  augmentation_list:
+    - _target_: albumentations.ToFloat
+      max_value: 65535.0          # converts uint16 → float32 in [0, 1]
+    - _target_: albumentations.RandomCrop
+      height: 256
+      width: 256
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.5, 0.5, 0.5, 0.4]
+      std: [0.2, 0.2, 0.2, 0.15]
+      max_pixel_value: 1.0        # values are already in [0, 1] after ToFloat
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    shuffle: true
+    num_workers: 4
+    pin_memory: true
+    batch_size: 8
+    drop_last: true
+```
+
 ## Dataset Output
 
 `__getitem__` returns a dictionary with the following keys:
@@ -238,4 +307,13 @@ train_dataset:
 | `image` | `(C, H, W)`     | `torch.float32`  | Normalised image tensor                  |
 | `mask`  | `(H, W)`        | `torch.int64`    | Class-index mask                         |
 
-When `transform` is `None`, the image is converted to `(C, H, W)` float and scaled to `[0, 1]` automatically, and the mask is cast to `torch.int64`.
+When `augmentation_list` is `null`, the image is automatically converted to a `(C, H, W)` float tensor. The normalization factor depends on `image_dtype`:
+
+| `image_dtype` | Automatic scaling |
+|---------------|-------------------|
+| `"uint8"` | divided by `255.0` → `[0, 1]` |
+| `"uint16"` | divided by `65535.0` → `[0, 1]` |
+| `"float32"` | no scaling applied |
+| `"native"` | no scaling applied |
+
+The mask is always cast to `torch.int64`.
