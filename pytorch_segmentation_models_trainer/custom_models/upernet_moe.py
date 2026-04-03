@@ -288,6 +288,7 @@ class UPerNetMoE(nn.Module):
 
         self.moe_aux_loss_weight = moe_aux_loss_weight
         self.last_aux_loss = torch.tensor(0.0)
+        self.num_classes = classes
 
         self.encoder = get_encoder(
             encoder_name,
@@ -349,3 +350,106 @@ class UPerNetMoE(nn.Module):
         self.last_aux_loss = self.moe_aux_loss_weight * aux_loss
 
         return masks
+
+    def _get_active_moe_blocks(self) -> List[Tuple[int, str, MoEConv2dReLU]]:
+        """Return MoE blocks that have stored weight maps from the last forward pass."""
+        blocks = []
+        for name, module in self.decoder.named_modules():
+            if isinstance(module, MoEConv2dReLU) and hasattr(module, "last_expert_weight_maps"):
+                blocks.append((len(blocks), name, module))
+        return blocks
+
+    @torch.no_grad()
+    def get_moe_diagnostics(self) -> Dict[str, torch.Tensor]:
+        """Collect routing diagnostics from all MoE blocks.
+
+        Returns dict with scalar metrics (detached, ready for logging):
+          - moe/expert_{e}_utilization: fraction of pixels selected by expert e
+          - moe/expert_overlap: mean number of active experts per pixel
+          - moe/routing_entropy: entropy of per-pixel expert distribution (0=collapse, log(E)=uniform)
+          - moe/max_weight_mean: mean of the max expert weight per pixel (confidence)
+        """
+        diagnostics: Dict[str, torch.Tensor] = {}
+        moe_blocks = self._get_active_moe_blocks()
+        if not moe_blocks:
+            return diagnostics
+
+        use_prefix = len(moe_blocks) > 1
+        for idx, block_name, block in moe_blocks:
+            p = f"moe/b{idx}_" if use_prefix else "moe/"
+            w = block.last_expert_weight_maps  # (B, E, H, W)
+            E = w.shape[1]
+
+            active = (w > 0).float()  # (B, E, H, W)
+            for e in range(E):
+                diagnostics[f"{p}expert_{e}_utilization"] = active[:, e].mean()
+
+            experts_per_pixel = active.sum(dim=1)  # (B, H, W)
+            diagnostics[f"{p}expert_overlap"] = experts_per_pixel.mean()
+
+            # Routing entropy
+            w_sum = w.sum(dim=1, keepdim=True).clamp(min=1e-8)
+            w_norm = w / w_sum  # (B, E, H, W)
+            entropy = -(w_norm * torch.log(w_norm.clamp(min=1e-8))).sum(dim=1)
+            diagnostics[f"{p}routing_entropy"] = entropy.mean()
+
+            max_weight = w.max(dim=1).values  # (B, H, W)
+            diagnostics[f"{p}max_weight_mean"] = max_weight.mean()
+
+        return diagnostics
+
+    @torch.no_grad()
+    def get_expert_class_affinity(
+        self, hard_masks: torch.Tensor
+    ) -> Dict[str, torch.Tensor]:
+        """Compute expert-class affinity: which experts prefer which classes.
+
+        For each expert e and class c, computes the mean routing weight
+        on pixels of class c. High values mean expert e specializes in class c.
+
+        Args:
+            hard_masks: Ground truth masks (B, H, W) at model output resolution.
+                        Pixels with value 255 are ignored.
+
+        Returns:
+            Dict with moe/affinity_e{e}_c{c} scalars.
+        """
+        num_classes = self.num_classes
+        diagnostics: Dict[str, torch.Tensor] = {}
+        moe_blocks = self._get_active_moe_blocks()
+        if not moe_blocks:
+            return diagnostics
+
+        use_prefix = len(moe_blocks) > 1
+        for idx, block_name, block in moe_blocks:
+            p = f"moe/b{idx}_" if use_prefix else "moe/"
+            w = block.last_expert_weight_maps  # (B, E, H_feat, W_feat)
+            E = w.shape[1]
+
+            # Resize masks to feature map resolution
+            masks_resized = F.interpolate(
+                hard_masks.unsqueeze(1).float(),
+                size=w.shape[2:],
+                mode="nearest",
+            ).squeeze(1).long()  # (B, H_feat, W_feat)
+
+            valid = masks_resized != 255
+            # Vectorized: compute mean weight per expert per class in one pass
+            # Replace invalid pixels with num_classes so they don't match any class
+            safe_masks = masks_resized.clone()
+            safe_masks[~valid] = num_classes
+            # One-hot encode: (B, num_classes+1, H, W), drop the extra channel
+            one_hot = F.one_hot(safe_masks, num_classes + 1).permute(0, 3, 1, 2).float()
+            one_hot = one_hot[:, :num_classes]  # (B, C, H, W)
+            pixels_per_class = one_hot.sum(dim=(0, 2, 3))  # (C,)
+
+            for e in range(E):
+                w_e = w[:, e:e+1]  # (B, 1, H, W)
+                weighted = (w_e * one_hot).sum(dim=(0, 2, 3))  # (C,)
+                for c in range(num_classes):
+                    if pixels_per_class[c] > 0:
+                        diagnostics[f"{p}affinity_e{e}_c{c}"] = weighted[c] / pixels_per_class[c]
+                    else:
+                        diagnostics[f"{p}affinity_e{e}_c{c}"] = w.new_tensor(0.0)
+
+        return diagnostics

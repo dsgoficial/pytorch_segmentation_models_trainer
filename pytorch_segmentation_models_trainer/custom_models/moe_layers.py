@@ -338,6 +338,9 @@ class MoEConv2dReLU(nn.Module):
         expert_weight_maps, aux_loss = self.router(x)
         # expert_weight_maps: (B, num_experts, H, W)
 
+        # Store for diagnostics (detached to avoid graph retention)
+        self.last_expert_weight_maps = expert_weight_maps.detach()
+
         # 3. Sparse experts with gradient checkpointing
         for e, expert in enumerate(self.experts):
             w_map = expert_weight_maps[:, e: e + 1, :, :]  # (B, 1, H, W)

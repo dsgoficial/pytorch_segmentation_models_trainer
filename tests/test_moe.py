@@ -619,5 +619,135 @@ class TestMoETrainingIntegration(unittest.TestCase):
         self.assertAlmostEqual(total_loss.item(), 1.0, places=5)
 
 
+# ----------------------------------------------------------------------
+# H. MoE Diagnostics & Expert-Class Affinity
+# ----------------------------------------------------------------------
+
+
+class TestMoEDiagnostics(unittest.TestCase):
+
+    def setUp(self):
+        warnings.simplefilter("ignore")
+        self.model = UPerNetMoE(
+            encoder_name="resnet18",
+            encoder_weights=None,
+            in_channels=3,
+            classes=6,
+            moe_num_experts=6,
+            moe_use_shared_expert=True,
+            moe_routing="expert_choice",
+            moe_capacity_factor=1.5,
+            moe_aux_loss_weight=0.0,
+            moe_at_fusion=True,
+            moe_at_fpn=False,
+        )
+
+    def test_diagnostics_keys(self):
+        x = torch.randn(2, 3, 64, 64)
+        _ = self.model(x)
+        diag = self.model.get_moe_diagnostics()
+        # Should have per-expert utilization
+        for e in range(6):
+            self.assertIn(f"moe/expert_{e}_utilization", diag)
+        self.assertIn("moe/expert_overlap", diag)
+        self.assertIn("moe/routing_entropy", diag)
+        self.assertIn("moe/max_weight_mean", diag)
+
+    def test_diagnostics_values_reasonable(self):
+        x = torch.randn(2, 3, 64, 64)
+        _ = self.model(x)
+        diag = self.model.get_moe_diagnostics()
+        # Utilization should be between 0 and 1
+        for e in range(6):
+            val = diag[f"moe/expert_{e}_utilization"].item()
+            self.assertGreaterEqual(val, 0.0)
+            self.assertLessEqual(val, 1.0)
+        # Overlap should be >= 1 (capacity_factor=1.5)
+        self.assertGreater(diag["moe/expert_overlap"].item(), 0.5)
+        # Entropy should be >= 0
+        self.assertGreaterEqual(diag["moe/routing_entropy"].item(), 0.0)
+
+    def test_diagnostics_empty_without_forward(self):
+        """Before any forward pass, no weight maps stored yet."""
+        model = UPerNetMoE(
+            encoder_name="resnet18",
+            encoder_weights=None,
+            in_channels=3,
+            classes=6,
+            moe_at_fusion=True,
+        )
+        diag = model.get_moe_diagnostics()
+        self.assertEqual(len(diag), 0)
+
+    def test_diagnostics_no_moe(self):
+        model = UPerNetMoE(
+            encoder_name="resnet18",
+            encoder_weights=None,
+            in_channels=3,
+            classes=6,
+            moe_at_fusion=False,
+            moe_at_fpn=False,
+        )
+        x = torch.randn(2, 3, 128, 128)
+        _ = model(x)
+        diag = model.get_moe_diagnostics()
+        self.assertEqual(len(diag), 0)
+
+    def test_weight_maps_detached(self):
+        """Stored weight maps should not retain computation graph."""
+        x = torch.randn(2, 3, 128, 128, requires_grad=True)
+        _ = self.model(x)
+        for name, module in self.model.decoder.named_modules():
+            if hasattr(module, "last_expert_weight_maps"):
+                self.assertFalse(module.last_expert_weight_maps.requires_grad)
+
+
+class TestExpertClassAffinity(unittest.TestCase):
+
+    def setUp(self):
+        warnings.simplefilter("ignore")
+        self.model = UPerNetMoE(
+            encoder_name="resnet18",
+            encoder_weights=None,
+            in_channels=3,
+            classes=6,
+            moe_num_experts=6,
+            moe_use_shared_expert=True,
+            moe_routing="expert_choice",
+            moe_capacity_factor=1.5,
+            moe_at_fusion=True,
+        )
+
+    def test_affinity_keys(self):
+        x = torch.randn(2, 3, 64, 64)
+        _ = self.model(x)
+        masks = torch.randint(0, 6, (2, 64, 64))
+        affinity = self.model.get_expert_class_affinity(masks)
+        for e in range(6):
+            for c in range(6):
+                self.assertIn(f"moe/affinity_e{e}_c{c}", affinity)
+
+    def test_affinity_values_range(self):
+        x = torch.randn(2, 3, 64, 64)
+        _ = self.model(x)
+        masks = torch.randint(0, 6, (2, 64, 64))
+        affinity = self.model.get_expert_class_affinity(masks)
+        for k, v in affinity.items():
+            self.assertGreaterEqual(v.item(), 0.0)
+
+    def test_affinity_with_ignore(self):
+        x = torch.randn(2, 3, 128, 128)
+        _ = self.model(x)
+        masks = torch.full((2, 128, 128), 255, dtype=torch.long)
+        masks[:, :64, :] = 0  # half valid
+        affinity = self.model.get_expert_class_affinity(masks)
+        # Class 0 should have valid affinity, others should be 0
+        for e in range(6):
+            for c in range(1, 6):
+                self.assertAlmostEqual(
+                    affinity[f"moe/affinity_e{e}_c{c}"].item(), 0.0, places=5
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

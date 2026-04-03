@@ -646,6 +646,21 @@ class Model(pl.LightningModule):
             self.log(f"losses/{prefix}_moe_aux", moe_aux_loss,
                      on_step=is_train, on_epoch=True, sync_dist=True)
 
+        # MoE routing diagnostics
+        if hasattr(self.model, 'get_moe_diagnostics'):
+            should_log_moe = (not is_train) or (self.global_step % 50 == 0)
+            if should_log_moe:
+                diag = self.model.get_moe_diagnostics()
+                for k, v in diag.items():
+                    self.log(f"{k}/{prefix}", v,
+                             on_step=is_train, on_epoch=True, sync_dist=False)
+                # Expert-class affinity (validation only, more expensive)
+                if not is_train and hasattr(self.model, 'get_expert_class_affinity'):
+                    affinity = self.model.get_expert_class_affinity(hard_masks)
+                    for k, v in affinity.items():
+                        self.log(f"{k}/val", v,
+                                 on_step=False, on_epoch=True, sync_dist=False)
+
         # Log total loss
         self.log(f"loss/{prefix}", loss,
                  on_step=is_train, on_epoch=True, prog_bar=True, sync_dist=True)
