@@ -60,6 +60,7 @@ Abstract base class that defines the shared interface and shared utilities for a
 | `mask_bands` | `int` | `1` | Number of output channels (bands) in the prediction mask. |
 | `normalize_mean` | `list[float]` | `None` | Per-channel mean for normalisation. Falls back to ImageNet defaults when `None`. |
 | `normalize_std` | `list[float]` | `None` | Per-channel standard deviation for normalisation. Falls back to ImageNet defaults when `None`. |
+| `normalize_max_value` | `float` | `None` | Maximum pixel value used to scale the image before applying mean/std normalisation (`max_pixel_value` in `A.Normalize`). When `None`, Albumentations uses its default of `255.0`. Set to `65535.0` for 16-bit imagery or `1.0` when the image is already in `[0, 1]`. |
 | `config` | any | `None` | Optional Hydra config object passed through for advanced use. |
 | `group_output_by_image_basename` | `bool` | `False` | Group polygonizer output under subdirectories named after the input image stem. |
 
@@ -68,8 +69,8 @@ Abstract base class that defines the shared interface and shared utilities for a
 | Method | Description |
 |---|---|
 | `process(image_path, threshold, save_inference_output, polygonizer, restore_geo_transform, **kwargs)` | Main entry point. Reads the image, runs `make_inference()`, optionally runs a polygonizer, and calls `save_inference()`. Returns a dict with keys `"inference"` and optionally `"polygons"`. |
-| `read_image_and_profile(image_path, restore_geo_transform)` | Opens a raster with rasterio, returns `(image_ndarray, profile_dict)`. Set `restore_geo_transform=False` to strip CRS from the profile. |
-| `get_normalization_function()` | Returns an Albumentations `Normalize` transform. Uses custom mean/std when provided, otherwise ImageNet defaults. |
+| `read_image_and_profile(image_path, restore_geo_transform)` | Opens a raster with rasterio, returns `(image_ndarray, profile_dict)`. The image is returned with its **native dtype** (no cast applied). Set `restore_geo_transform=False` to strip CRS from the profile. |
+| `get_normalization_function()` | Returns an Albumentations `Normalize` transform configured from `normalize_mean`, `normalize_std`, and `normalize_max_value`. |
 | `save_inference(image_path, threshold, profile, inference, output_dict, apply_threshold)` | Thresholds the `"seg"` band (if `apply_threshold=True`), enriches `profile` with `input_name` and `suffix`, and delegates serialisation to `export_strategy`. |
 | `make_inference(image, **kwargs)` | **Abstract.** Must be implemented by subclasses. Receives a raw NumPy image array and returns a dict of output arrays. |
 
@@ -99,6 +100,7 @@ Concrete processor for standard binary or single-output segmentation models. Inh
 
 ### Example YAML Config
 
+8-bit RGB:
 ```yaml
 inference_processor:
   _target_: pytorch_segmentation_models_trainer.tools.inference.inference_processors.SingleImageInfereceProcessor
@@ -108,6 +110,20 @@ inference_processor:
   mask_bands: 1
   normalize_mean: [0.485, 0.456, 0.406]
   normalize_std: [0.229, 0.224, 0.225]
+  # normalize_max_value omitted → defaults to 255.0 (standard 8-bit)
+```
+
+16-bit multispectral (e.g. Sentinel-2):
+```yaml
+inference_processor:
+  _target_: pytorch_segmentation_models_trainer.tools.inference.inference_processors.SingleImageInfereceProcessor
+  model_input_shape: [256, 256]
+  step_shape: [128, 128]
+  batch_size: 4
+  mask_bands: 1
+  normalize_mean: [0.5, 0.5, 0.5, 0.4]
+  normalize_std: [0.2, 0.2, 0.2, 0.15]
+  normalize_max_value: 65535.0   # scales uint16 values before mean/std normalisation
 ```
 
 ---
