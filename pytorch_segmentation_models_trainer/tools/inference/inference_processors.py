@@ -63,6 +63,7 @@ class AbstractInferenceProcessor(ABC):
         mask_bands=1,
         normalize_mean=None,
         normalize_std=None,
+        normalize_max_value: Optional[float] = None,
         config=None,
         group_output_by_image_basename=False,
     ):
@@ -81,6 +82,7 @@ class AbstractInferenceProcessor(ABC):
         self.group_output_by_image_basename = group_output_by_image_basename
         self.normalize_mean = normalize_mean
         self.normalize_std = normalize_std
+        self.normalize_max_value = normalize_max_value
 
     def read_image_and_profile(self, image_path, restore_geo_transform=True):
         with rasterio.open(image_path, "r") as raster_ds:
@@ -92,12 +94,13 @@ class AbstractInferenceProcessor(ABC):
         return image, profile
 
     def get_normalization_function(self):
+        kwargs = {}
         if self.normalize_mean is not None and self.normalize_std is not None:
-            func = A.Normalize(mean=self.normalize_mean, std=self.normalize_std, p=1.0)
-        else:
-            # Padrão ImageNet RGB
-            func = A.Normalize()
-        return func
+            kwargs["mean"] = self.normalize_mean
+            kwargs["std"] = self.normalize_std
+        if self.normalize_max_value is not None:
+            kwargs["max_pixel_value"] = self.normalize_max_value
+        return A.Normalize(p=1.0, **kwargs)
 
     def process(
         self,
@@ -188,6 +191,7 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
         mask_bands=1,
         normalize_mean=None,
         normalize_std=None,
+        normalize_max_value: Optional[float] = None,
         config=None,
         group_output_by_image_basename=False,
     ):
@@ -202,6 +206,7 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
             mask_bands=mask_bands,
             normalize_mean=normalize_mean,
             normalize_std=normalize_std,
+            normalize_max_value=normalize_max_value,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
         )
@@ -294,13 +299,13 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         polygonizer=None,
         model_input_shape=None,
         step_shape=None,
-        num_classes=2,  # ✅ Novo parâmetro!
+        num_classes=2,
         normalize_mean=None,
         normalize_std=None,
+        normalize_max_value: Optional[float] = None,
         config=None,
         group_output_by_image_basename=False,
     ):
-        # ✅ Passa num_classes como mask_bands para TileMerger
         super().__init__(
             model=model,
             device=device,
@@ -309,9 +314,10 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
             polygonizer=polygonizer,
             model_input_shape=model_input_shape,
             step_shape=step_shape,
-            mask_bands=num_classes,  # ✅ TileMerger precisa de todos os canais
+            mask_bands=num_classes,
             normalize_mean=normalize_mean,
             normalize_std=normalize_std,
+            normalize_max_value=normalize_max_value,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
         )
@@ -374,6 +380,7 @@ class SingleImageFromFrameFieldProcessor(SingleImageInfereceProcessor):
         mask_bands=1,
         normalize_mean=None,
         normalize_std=None,
+        normalize_max_value: Optional[float] = None,
         config=None,
         group_output_by_image_basename=False,
     ):
@@ -388,6 +395,7 @@ class SingleImageFromFrameFieldProcessor(SingleImageInfereceProcessor):
             mask_bands=mask_bands,
             normalize_mean=normalize_mean,
             normalize_std=normalize_std,
+            normalize_max_value=normalize_max_value,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
         )
@@ -427,6 +435,7 @@ class ObjectDetectionInferenceProcessor(AbstractInferenceProcessor):
         min_visibility=0.3,
         normalize_mean=None,
         normalize_std=None,
+        normalize_max_value: Optional[float] = None,
         config=None,
         group_output_by_image_basename=False,
     ):
@@ -441,6 +450,7 @@ class ObjectDetectionInferenceProcessor(AbstractInferenceProcessor):
             mask_bands=mask_bands,
             normalize_mean=normalize_mean,
             normalize_std=normalize_std,
+            normalize_max_value=normalize_max_value,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
         )
@@ -536,6 +546,7 @@ class PolygonRNNInferenceProcessor(AbstractInferenceProcessor):
         polygonizer=None,
         normalize_mean=None,
         normalize_std=None,
+        normalize_max_value: Optional[float] = None,
         config=None,
         sequence_length=60,
         group_output_by_image_basename=False,
@@ -549,6 +560,7 @@ class PolygonRNNInferenceProcessor(AbstractInferenceProcessor):
             model_input_shape=(224, 224),
             normalize_mean=normalize_mean,
             normalize_std=normalize_std,
+            normalize_max_value=normalize_max_value,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
         )

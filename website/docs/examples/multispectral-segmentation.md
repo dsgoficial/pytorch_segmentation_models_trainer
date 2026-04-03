@@ -388,9 +388,11 @@ inference_processor:
   _target_: pytorch_segmentation_models_trainer.tools.inference.inference_processors.SingleImageInfereceProcessor
   model_input_shape: [256, 256]
   step_shape: [128, 128]
-  # Match the same normalization used during training
+  # Match the same normalization used during training.
+  # For 16-bit imagery add: normalize_max_value: 65535.0
   normalize_mean: [0.485, 0.456, 0.406, 0.350]
   normalize_std: [0.229, 0.224, 0.225, 0.180]
+  # normalize_max_value: 65535.0   # uncomment for uint16 images
 
 export_strategy:
   _target_: pytorch_segmentation_models_trainer.tools.inference.export_inference.RasterExportInferenceStrategy
