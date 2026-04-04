@@ -660,12 +660,8 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
     def _predict_batch_to_merger(self, batch_tiles, batch_coords, merger, transforms, n_tta):
         """Predict a batch with optional TTA, move to CPU, integrate into merger.
 
-        Args:
-            batch_tiles: list of tensors [C, H, W]
-            batch_coords: list of (x, y, w, h) tuples
-            merger: TileMerger on CPU
-            transforms: list of (rot, flip) tuples
-            n_tta: number of TTA passes
+        TTA accumulation happens on CPU to keep GPU memory bounded
+        regardless of the number of TTA passes (8 for D4).
         """
         tiles_tensor = torch.stack(batch_tiles).float().to(self.device)
         coords_tensor = torch.from_numpy(np.array(batch_coords))
@@ -675,20 +671,23 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
                 pred = self.model(tiles_tensor)
             pred = pred.float().cpu()
         else:
+            # Accumulate on CPU to avoid GPU OOM with large batches + D4 TTA
             accum = None
             for rot, flip in transforms:
                 aug = self._apply_transform(tiles_tensor, rot, flip)
                 with autocast():
                     p = self.model(aug)
                 del aug
-                p = p.float()
+                p = p.float().cpu()
                 p = self._invert_transform(p, rot, flip)
                 accum = p if accum is None else accum + p
                 del p
-            pred = (accum / n_tta).cpu()
+            pred = accum / n_tta
             del accum
 
         del tiles_tensor
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         merger.integrate_batch(pred, coords_tensor)
         del pred
 
