@@ -636,8 +636,12 @@ class Model(pl.LightningModule):
 
         predicted_masks = self(images)
 
-        # Compute loss (handles both simple and compound)
-        loss, individual_losses, extra_info = self._compute_loss(predicted_masks, masks)
+        # Compute loss — with OHEM if model supports it
+        if hasattr(self.model, 'compute_ohem_loss') and getattr(self.model, 'ohem_ratio', 0) > 0 and is_train:
+            loss = self.model.compute_ohem_loss(self.loss_function, predicted_masks, masks)
+            individual_losses, extra_info = {}, {}
+        else:
+            loss, individual_losses, extra_info = self._compute_loss(predicted_masks, masks)
 
         # Add MoE auxiliary loss if model exposes it
         if hasattr(self.model, 'last_aux_loss') and self.model.last_aux_loss is not None:
