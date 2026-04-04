@@ -364,6 +364,8 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         tile_weight="mean",
         confidence_mode=None,
         confidence_export_strategy=None,
+        striped_threshold_pixels=50_000_000,
+        stripe_height=4096,
     ):
         super().__init__(
             model=model,
@@ -384,6 +386,8 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         if tta_mode is not None and tta_mode not in ("d4", "flip"):
             raise ValueError(f"tta_mode must be None, 'd4', or 'flip', got '{tta_mode}'")
         self.tta_mode = tta_mode
+        self.striped_threshold_pixels = striped_threshold_pixels
+        self.stripe_height = stripe_height
         if confidence_mode is not None and confidence_mode not in ("basic", "full"):
             raise ValueError(
                 f"confidence_mode must be None, 'basic', or 'full', got '{confidence_mode}'"
@@ -567,6 +571,11 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
             "margin": margin.astype(np.float32),
         }
 
+    def _is_large_image(self, image_path):
+        """Check if image exceeds striped_threshold_pixels."""
+        with rasterio.open(image_path) as ds:
+            return ds.height * ds.width > self.striped_threshold_pixels
+
     def process(
         self,
         image_path,
@@ -578,11 +587,20 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
     ):
         """Process a single image, optionally computing confidence maps.
 
-        When ``confidence_mode`` is set (``"basic"`` or ``"full"``), the
-        method uses ``make_inference_with_probs()`` to obtain softmax
-        probabilities and derives per-pixel confidence metrics that are
-        saved alongside the class prediction GeoTIFF.
+        Automatically uses striped inference for large images to avoid OOM.
         """
+        # Auto-detect large images and use striped inference
+        if self._is_large_image(image_path):
+            output_dir = self.export_strategy.output_file_path if self.export_strategy else "."
+            os.makedirs(output_dir, exist_ok=True)
+            stem = Path(image_path).stem
+            output_seg = os.path.join(output_dir, f"{stem}.tif")
+            logger.info(f"Large image detected, using striped inference: {image_path}")
+            self.make_inference_striped(
+                image_path, output_seg, stripe_height=self.stripe_height
+            )
+            return defaultdict(list)
+
         image, profile = self.read_image_and_profile(
             image_path, restore_geo_transform=restore_geo_transform
         )
