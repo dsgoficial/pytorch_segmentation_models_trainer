@@ -1,0 +1,100 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: SMP + ViT (timm) backbone – linear probe
+# ──────────────────────────────────────────────────────────────────────────────
+# Trains only the segmentation head; the entire ViT backbone is frozen.
+# Useful for fast evaluation of a pretrained representation without full
+# fine-tuning.
+#
+# strategy: linear_probe freezes all parameters then unfreezes the head.
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+backbone:
+  name: tu-vit_base_patch16_224
+  input_width: 224
+  input_height: 224
+
+hyperparameters:
+  model_name: vit_base_linear_probe
+  backbone: tu-vit_base_patch16_224
+  batch_size: 16
+  epochs: 20
+  max_lr: 1e-3
+  classes: 2
+
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: tu-vit_base_patch16_224
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: ${hyperparameters.classes}
+
+fine_tuning:
+  strategy: linear_probe
+  trainable_modules: [segmentation_head]
+
+loss:
+  _target_: torch.nn.CrossEntropyLoss
+
+optimizer:
+  _target_: torch.optim.Adam
+  lr: ${hyperparameters.max_lr}
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.StepLR
+      step_size: 5
+      gamma: 0.5
+    interval: epoch
+    frequency: 1
+
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+  precision: "32-true"
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/train.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width: ${backbone.input_width}
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/val.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width: ${backbone.input_width}
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${hyperparameters.classes}

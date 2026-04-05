@@ -36,6 +36,10 @@ from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import
     TemplatePolygonizerProcessor,
 )
 from pytorch_segmentation_models_trainer.utils.os_utils import import_module_from_cfg
+from pytorch_segmentation_models_trainer.fine_tuning.lora_utils import (
+    is_peft_model,
+    merge_lora_weights,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +66,15 @@ def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
         weights_only=False,
     )
     model = pl_model.model
+
+    # Merge LoRA adapter weights (if any) before inference so that the model
+    # runs without the PEFT wrapper overhead.  Set merge_lora=false in config
+    # to keep adapters active (e.g. for continued fine-tuning).
+    should_merge = not bool(getattr(cfg, "keep_lora_adapters", False))
+    if should_merge and is_peft_model(model):
+        logger.info("Merging LoRA adapter weights before inference.")
+        model = merge_lora_weights(model)
+
     model.to(cfg.device)
     model.eval()
     return model

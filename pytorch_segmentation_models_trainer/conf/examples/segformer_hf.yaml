@@ -1,0 +1,117 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: HuggingFace Segformer-B2 via HuggingFaceSegmentationWrapper
+# ──────────────────────────────────────────────────────────────────────────────
+# Requires: pip install transformers
+#
+# The wrapper handles:
+#   - Loading the model from HuggingFace Hub (or a local path)
+#   - Extracting logits from the SegmentationModelOutput dataclass
+#   - Upsampling the 1/4-resolution output back to input size
+#
+# Normalisation mean/std must match the model's pretraining stats.
+# Segformer was pretrained with ImageNet stats.
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+backbone:
+  name: segformer_b2
+  input_width: 512
+  input_height: 512
+
+hyperparameters:
+  model_name: segformer_b2_hf
+  backbone: segformer_b2
+  batch_size: 8
+  epochs: 50
+  max_lr: 6e-5
+  classes: 2
+
+# Use HuggingFaceSegmentationWrapper to normalise the HF model output
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.huggingface_models.HuggingFaceSegmentationWrapper
+  pretrained_model_name_or_path: nvidia/mit-b2
+  num_labels: ${hyperparameters.classes}
+  ignore_mismatched_sizes: true
+  output_size: input       # upsample logits (H/4,W/4) → input size
+
+# Or alternatively, use ModelOutputAdapter directly for full control:
+# model:
+#   _target_: pytorch_segmentation_models_trainer.custom_models.transformer_adapters.ModelOutputAdapter
+#   output_size: input
+#   model:
+#     _target_: transformers.AutoModelForSemanticSegmentation.from_pretrained
+#     pretrained_model_name_or_path: nvidia/segformer-b2-finetuned-ade-512-512
+#     num_labels: 2
+#     ignore_mismatched_sizes: true
+
+loss:
+  _target_: torch.nn.CrossEntropyLoss
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1e-4
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.PolynomialLR
+      total_iters: ${hyperparameters.epochs}
+      power: 1.0
+    interval: epoch
+    frequency: 1
+
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+  precision: "16-mixed"
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/train.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width: ${backbone.input_width}
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]   # ImageNet stats used by Segformer
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/val.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width: ${backbone.input_width}
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${hyperparameters.classes}
+  - _target_: torchmetrics.F1Score
+    task: multiclass
+    num_classes: ${hyperparameters.classes}

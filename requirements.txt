@@ -44,3 +44,16 @@ seaborn==0.13.2
 scikit-learn>=1.3.2
 scikit-image>=0.21.0
 typing_extensions>=4.0.0
+
+# ── Transformer / foundation-model support (optional) ──────────────────────
+# Install the libraries you need:
+#   pip install transformers          # HuggingFace models (Segformer, Mask2Former…)
+#   pip install peft                  # LoRA / adapter fine-tuning
+#   pip install timm                  # timm standalone encoder support
+#   pip install terratorch            # TerraTorch geospatial foundation models
+#
+# Commented out to keep the base install lightweight:
+# transformers>=4.30.0
+# peft>=0.6.0
+# timm>=0.9.0
+# terratorch>=0.1.0

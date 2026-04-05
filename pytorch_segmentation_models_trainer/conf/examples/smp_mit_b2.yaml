@@ -1,0 +1,106 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: SMP + Mix Transformer (MiT-B2) encoder
+# ──────────────────────────────────────────────────────────────────────────────
+# This config uses segmentation_models_pytorch with the MiT-B2 transformer
+# encoder.  No extra dependencies required — SMP ships transformer encoders
+# out of the box.
+#
+# MiT encoders available: mit_b0 … mit_b5
+# Architectures: Unet, UnetPlusPlus, FPN, DeepLabV3Plus, PAN, PSPNet
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+backbone:
+  name: mit_b2
+  input_width: 512
+  input_height: 512
+
+hyperparameters:
+  model_name: unet_mit_b2
+  backbone: mit_b2
+  batch_size: 8
+  epochs: 50
+  max_lr: 6e-5
+  classes: 2
+
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: mit_b2
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: ${hyperparameters.classes}
+  decoder_channels: [256, 128, 64, 32, 16]
+
+loss:
+  _target_: segmentation_models_pytorch.losses.DiceLoss
+  mode: multiclass
+  from_logits: true
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1e-4
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: ${hyperparameters.epochs}
+      eta_min: 1e-7
+    interval: epoch
+    frequency: 1
+
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+  precision: "16-mixed"
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/train.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width: ${backbone.input_width}
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/val.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width: ${backbone.input_width}
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${hyperparameters.classes}
+  - _target_: torchmetrics.F1Score
+    task: multiclass
+    num_classes: ${hyperparameters.classes}

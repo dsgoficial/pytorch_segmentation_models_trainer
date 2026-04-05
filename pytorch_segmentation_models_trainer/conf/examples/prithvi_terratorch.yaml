@@ -1,0 +1,117 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: TerraTorch Prithvi-100M geospatial foundation model
+# ──────────────────────────────────────────────────────────────────────────────
+# Requires: pip install terratorch
+#
+# Prithvi is a ViT-based geospatial foundation model pretrained on
+# Harmonized Landsat-Sentinel-2 (HLS) data with 6 spectral bands.
+# Single-temporal inputs (B, 6, H, W) are auto-expanded to (B, 6, 1, H, W).
+#
+# Download pretrained weights from HuggingFace:
+#   https://huggingface.co/ibm-nasa-geospatial/Prithvi-100M
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+backbone:
+  name: prithvi_100M
+  input_width: 224
+  input_height: 224
+
+hyperparameters:
+  model_name: prithvi_100M_seg
+  backbone: prithvi_100M
+  batch_size: 4
+  epochs: 50
+  max_lr: 1e-4
+  classes: 2
+
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.terratorch_models.TerraTorchSegmentationWrapper
+  backbone_name: prithvi_100M
+  num_classes: ${hyperparameters.classes}
+  in_channels: 6                   # HLS: Blue, Green, Red, NIR, SWIR1, SWIR2
+  num_frames: 1                    # single time step
+  img_size: ${backbone.input_height}
+  head_type: linear                # "linear" or "fpn"
+  pretrained_path: /weights/prithvi_100M.pt   # path to downloaded weights
+
+# Fine-tune only the segmentation head; keep the backbone frozen
+fine_tuning:
+  strategy: freeze_backbone
+  frozen_modules: [backbone]
+  trainable_modules: [head]
+
+loss:
+  _target_: segmentation_models_pytorch.losses.DiceLoss
+  mode: multiclass
+  from_logits: true
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1e-4
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: ${hyperparameters.epochs}
+      eta_min: 1e-7
+    interval: epoch
+    frequency: 1
+
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+  precision: "16-mixed"
+
+# NOTE: 6-band input – update Normalize mean/std to match your dataset statistics
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/train.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width: ${backbone.input_width}
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.033, 0.046, 0.045, 0.195, 0.106, 0.071]   # HLS statistics
+      std:  [0.023, 0.027, 0.031, 0.061, 0.052, 0.044]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 4
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/val.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width: ${backbone.input_width}
+    - _target_: albumentations.Normalize
+      mean: [0.033, 0.046, 0.045, 0.195, 0.106, 0.071]
+      std:  [0.023, 0.027, 0.031, 0.061, 0.052, 0.044]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 4
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${hyperparameters.classes}
+  - _target_: torchmetrics.F1Score
+    task: multiclass
+    num_classes: ${hyperparameters.classes}
