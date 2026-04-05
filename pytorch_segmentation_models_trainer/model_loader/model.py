@@ -30,6 +30,10 @@ from torch.utils.data import DataLoader
 from typing import Any, Union, Dict, Tuple
 from pytorch_segmentation_models_trainer.utils.model_utils import replace_activation
 from pytorch_segmentation_models_trainer.custom_losses.base_loss import MultiLoss
+from pytorch_segmentation_models_trainer.fine_tuning.lora_utils import (
+    apply_fine_tuning_strategy,
+    is_peft_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +257,8 @@ class Model(pl.LightningModule):
                 self.cfg.replace_model_activation.new_activation, _recursive_=False
             )
             replace_activation(model, old_activation, new_activation)
+        if "fine_tuning" in self.cfg:
+            model = apply_fine_tuning_strategy(model, self.cfg.fine_tuning)
         return model
 
     def get_gpu_augmentations(self, augmentation_list):
@@ -316,12 +322,56 @@ class Model(pl.LightningModule):
         )
 
     def set_encoder_trainable(self, trainable=False):
-        """Freezes or unfreezes the model encoder."""
-        for child in self.model.encoder.children():
-            for param in child.parameters():
-                param.requires_grad = trainable
+        """Freeze or unfreeze the encoder/backbone of the model.
+
+        Works for SMP models (``self.model.encoder``), HuggingFace wrappers
+        and any model whose backbone is accessible via common attribute names
+        (``encoder``, ``backbone``, ``model.encoder``, ``model.backbone``).
+        Falls back to a name-based search when no direct attribute is found.
+        """
+        backbone_attrs = ("encoder", "backbone")
+        found = False
+
+        # Try direct attribute access first (SMP, custom models)
+        target = self.model
+        # Unwrap one level for wrappers like ModelOutputAdapter / HF wrapper
+        inner = getattr(self.model, "model", None)
+        if inner is not None:
+            inner2 = getattr(inner, "model", None)
+            candidates = [self.model] + ([inner] if inner else []) + ([inner2] if inner2 else [])
+        else:
+            candidates = [self.model]
+
+        for obj in candidates:
+            for attr in backbone_attrs:
+                backbone = getattr(obj, attr, None)
+                if backbone is not None:
+                    for param in backbone.parameters():
+                        param.requires_grad = trainable
+                    logger.info(
+                        "set_encoder_trainable: set '%s.%s' trainable=%s",
+                        type(obj).__name__, attr, trainable,
+                    )
+                    found = True
+                    break
+            if found:
+                break
+
+        if not found:
+            # Generic fallback: use parameter name matching
+            backbone_keywords = ("encoder", "backbone", "patch_embed", "blocks")
+            head_keywords = ("decoder", "head", "segmentation_head", "neck", "classifier")
+            for name, param in self.model.named_parameters():
+                is_backbone = any(kw in name for kw in backbone_keywords)
+                is_head = any(kw in name for kw in head_keywords)
+                if is_backbone and not is_head:
+                    param.requires_grad = trainable
+            logger.info(
+                "set_encoder_trainable: applied keyword-based freeze (trainable=%s).",
+                trainable,
+            )
+
         print(f"\nEncoder weights set to trainable={trainable}\n")
-        return
 
     def forward(self, x):
         return self.model(x)
@@ -483,9 +533,26 @@ class Model(pl.LightningModule):
             loss = self.loss_function(predicted_masks, masks)
             return loss, {}, {}
 
+    def _unpack_batch(self, batch):
+        """Extract (images, masks) from a batch dict.
+
+        Supports configurable key names via ``cfg.image_key`` /
+        ``cfg.mask_key`` (defaults: ``"image"`` / ``"mask"``).
+        Extra keys in the batch dict are silently ignored.
+        """
+        image_key = getattr(self.cfg, "image_key", "image")
+        mask_key = getattr(self.cfg, "mask_key", "mask")
+        if isinstance(batch, dict):
+            images = batch[image_key]
+            masks = batch[mask_key]
+        else:
+            # Fallback for tuple/list batches
+            images, masks = batch[0], batch[1]
+        return images, masks
+
     def training_step(self, batch, batch_idx):
         """Training step - now supports both simple and compound losses."""
-        images, masks = batch.values()
+        images, masks = self._unpack_batch(batch)
         masks = masks.long()
         predicted_masks = self(images)
 
@@ -527,21 +594,18 @@ class Model(pl.LightningModule):
 
         # Compute and log metrics - automatically prefixed with train/
         if hasattr(self, "train_metrics"):
-            preds_for_metrics = (
-                predicted_masks.squeeze(1)
-                if predicted_masks.ndim == 4 and predicted_masks.shape[1] == 1
-                else predicted_masks
-            )
-            metrics = self.train_metrics(preds_for_metrics, masks)
-            self.log_dict(
-                metrics, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True
-            )
+            preds_for_metrics = self._prepare_preds_for_metrics(predicted_masks)
+            if preds_for_metrics is not None:
+                metrics = self.train_metrics(preds_for_metrics, masks)
+                self.log_dict(
+                    metrics, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True
+                )
 
         return loss
 
     def validation_step(self, batch, batch_idx):
         """Validation step - now supports both simple and compound losses."""
-        images, masks = batch.values()
+        images, masks = self._unpack_batch(batch)
         masks = masks.long()
         predicted_masks = self(images)
 
@@ -583,15 +647,12 @@ class Model(pl.LightningModule):
 
         # Compute and log metrics - automatically prefixed with val/
         if hasattr(self, "val_metrics"):
-            preds_for_metrics = (
-                predicted_masks.squeeze(1)
-                if predicted_masks.ndim == 4 and predicted_masks.shape[1] == 1
-                else predicted_masks
-            )
-            metrics = self.val_metrics(preds_for_metrics, masks)
-            self.log_dict(
-                metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True
-            )
+            preds_for_metrics = self._prepare_preds_for_metrics(predicted_masks)
+            if preds_for_metrics is not None:
+                metrics = self.val_metrics(preds_for_metrics, masks)
+                self.log_dict(
+                    metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True
+                )
 
         return loss
 
@@ -604,6 +665,24 @@ class Model(pl.LightningModule):
                 "normalize_losses", True  # Default to True
             )
         return self.should_normalize
+
+    def _prepare_preds_for_metrics(self, predicted_masks):
+        """Safely prepare predictions for torchmetrics.
+
+        Squeezes the channel dim for binary models (shape B,1,H,W → B,H,W).
+        Returns ``None`` if *predicted_masks* is not a tensor so that metric
+        logging is silently skipped rather than crashing.
+        """
+        if not isinstance(predicted_masks, torch.Tensor):
+            logger.warning(
+                "Model output is not a torch.Tensor (%s); skipping metrics. "
+                "Wrap your model with ModelOutputAdapter to fix this.",
+                type(predicted_masks).__name__,
+            )
+            return None
+        if predicted_masks.ndim == 4 and predicted_masks.shape[1] == 1:
+            return predicted_masks.squeeze(1)
+        return predicted_masks
 
     # Removed training_epoch_end and validation_epoch_end
     # Lightning 2.0+ automatically aggregates metrics

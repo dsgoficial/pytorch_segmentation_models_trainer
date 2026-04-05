@@ -44,3 +44,24 @@ seaborn==0.13.2
 scikit-learn>=1.3.2
 scikit-image>=0.21.0
 typing_extensions>=4.0.0
+
+# ── Transformer / foundation-model support (optional) ──────────────────────
+# These libraries are NOT installed by default to keep the base footprint small.
+#
+# Install all at once via the pip extras group:
+#   pip install "pytorch_segmentation_models_trainer[transformers]"
+#
+# Or individually:
+#   pip install transformers>=4.30.0  # HuggingFace models (Segformer, Mask2Former…)
+#   pip install peft>=0.6.0           # LoRA / adapter fine-tuning
+#   pip install timm>=0.9.0           # timm standalone encoder support
+#
+# TerraTorch (geospatial foundation models – Prithvi, Clay, SatMAE) is not yet
+# on PyPI; install directly from source:
+#   pip install terratorch
+#
+# Uncomment below only if you want these pinned in a requirements-based install:
+# transformers>=4.30.0
+# peft>=0.6.0
+# timm>=0.9.0
+# terratorch
