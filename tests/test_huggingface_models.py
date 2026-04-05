@@ -4,6 +4,9 @@ Tests for HuggingFaceSegmentationWrapper (Phase 2).
 
 All HuggingFace network calls are mocked so these tests run offline
 without downloading any weights.
+
+Skipped automatically when 'transformers' is not installed.  Install it
+with:  pip install pytorch_segmentation_models_trainer[transformers]
 """
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -11,6 +14,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 import torch.nn as nn
+
+# Skip the entire module when transformers is not installed so that the main
+# CI job (which does not install optional deps) reports SKIPPED instead of ERROR.
+pytest.importorskip(
+    "transformers",
+    reason="transformers not installed – run: pip install '.[transformers]'",
+)
 
 from pytorch_segmentation_models_trainer.custom_models.huggingface_models import (
     HuggingFaceSegmentationWrapper,

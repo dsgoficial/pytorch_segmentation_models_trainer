@@ -43,7 +43,26 @@ except:
     DEP_LINKS = []
 
 # What packages are optional?
-EXTRAS = {"tests": ["pytest", "scikit-image", "parameterized"]}
+EXTRAS = {
+    # Run the test suite
+    "tests": ["pytest", "scikit-image", "parameterized"],
+    # Transformer / foundation-model support
+    #   pip install pytorch_segmentation_models_trainer[transformers]
+    "transformers": [
+        "transformers>=4.30.0",  # HuggingFace models (Segformer, Mask2Former, …)
+        "peft>=0.6.0",           # LoRA / adapter fine-tuning
+        "timm>=0.9.0",           # timm standalone encoder support
+        # terratorch is not on PyPI – install manually: pip install terratorch
+    ],
+    # Everything at once
+    #   pip install pytorch_segmentation_models_trainer[all]
+    "all": [
+        "pytest", "scikit-image", "parameterized",
+        "transformers>=4.30.0",
+        "peft>=0.6.0",
+        "timm>=0.9.0",
+    ],
+}
 
 # Import the README and use it as the long-description.
 # Note: this will only work if 'README.md' is present in your MANIFEST.in file!
