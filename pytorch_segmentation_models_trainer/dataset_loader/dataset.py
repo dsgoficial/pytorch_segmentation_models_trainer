@@ -614,6 +614,11 @@ class RandomCropSegmentationDataset(AbstractDataset):
             class index uses the hard masks (much faster to read).
             The CSV must have the same structure and order as input_csv_path.
             Default None (uses the dataset's own masks).
+        return_hard_mask: If True and soft_labels=True and hard_mask_csv
+            is provided, __getitem__ returns a "hard_mask" key in addition
+            to "image" and "mask". The hard mask is read at the same crop
+            position and receives the same geometric augmentations.
+            Used for dual-head training. Default False.
         grid_mode: If True, uses deterministic grid-based tiling instead
             of random crops. Tile positions are pre-computed based on
             crop_size and overlap, and invalid tiles (below min_valid_ratio)
@@ -651,6 +656,7 @@ class RandomCropSegmentationDataset(AbstractDataset):
         classmix: bool = False,
         soft_labels: bool = False,
         hard_mask_csv: str = None,
+        return_hard_mask: bool = False,
         pre_mix_color_aug: Optional[list] = None,
         class_presence_cache: str = None,
         grid_cache: str = None,
@@ -695,6 +701,9 @@ class RandomCropSegmentationDataset(AbstractDataset):
         self.classmix = classmix
         self.soft_labels = soft_labels
         self.hard_mask_csv = hard_mask_csv
+        self.return_hard_mask = return_hard_mask and soft_labels
+        # Cached transform with additional_targets for hard_mask (built lazily)
+        self._transform_with_hard_mask = None
         # Pre-mix color augmentation: applied independently to each crop
         # before ClassMix/CutMix, simulating different radiometric conditions
         # between source images (critical for remote sensing).
@@ -1523,6 +1532,7 @@ class RandomCropSegmentationDataset(AbstractDataset):
         image[y1:y2, x1:x2] = image2[y1:y2, x1:x2]
         mask[y1:y2, x1:x2] = mask2[y1:y2, x1:x2]
 
+        self._last_cutmix_box = (y1, y2, x1, x2)
         return image, mask
 
     def _apply_classmix(self, image, mask, image2, mask2):
@@ -1653,6 +1663,7 @@ class RandomCropSegmentationDataset(AbstractDataset):
         if self.n_classes == 2 and not self.soft_labels:
             mask = (mask > 0).astype(np.uint8)
 
+        self._last_crop_position = (img_idx, x, y)
         return image, mask
 
     def _get_random_grid_tile(self, target_class: int = -1, exclude_class: int = -1):
@@ -1702,7 +1713,42 @@ class RandomCropSegmentationDataset(AbstractDataset):
         if self.n_classes == 2 and not self.soft_labels:
             mask = (mask > 0).astype(np.uint8)
 
+        self._last_crop_position = (img_idx, x, y)
         return image, mask
+
+    def _read_hard_mask_crop(self):
+        """Read hard mask crop at the same position as the last soft mask crop.
+
+        Uses _last_crop_position set by _get_random_crop / _get_grid_crop
+        and _hard_mask_paths for the file path.  Returns (H, W) uint8.
+        Delegates to _read_crop with soft_labels temporarily disabled.
+        """
+        if not hasattr(self, '_last_crop_position') or self._hard_mask_paths is None:
+            return None
+        img_idx, x, y = self._last_crop_position
+        hard_path = self._hard_mask_paths[img_idx]
+        # Temporarily disable soft_labels so _read_crop reads single-band uint8
+        orig = self.soft_labels
+        self.soft_labels = False
+        result = self._read_crop(hard_path, x, y, is_mask=True)
+        self.soft_labels = orig
+        return result
+
+    @staticmethod
+    def _to_hard_mask_tensor(hard_mask):
+        """Convert hard mask to long tensor, handling both numpy and torch."""
+        if isinstance(hard_mask, np.ndarray):
+            return torch.from_numpy(hard_mask.copy()).long()
+        return hard_mask.clone().detach().long()
+
+    def _get_transform_with_hard_mask(self):
+        """Get (or build once) transform with additional_targets for hard_mask."""
+        if self._transform_with_hard_mask is None and self.transform is not None:
+            self._transform_with_hard_mask = A.Compose(
+                self.transform.transforms,
+                additional_targets={"hard_mask": "mask"},
+            )
+        return self._transform_with_hard_mask
 
     def _ensure_soft_mask_tensor(self, mask):
         """Ensure soft mask is a float tensor (C, H, W).
@@ -1731,6 +1777,11 @@ class RandomCropSegmentationDataset(AbstractDataset):
             image, mask = self._get_grid_crop(idx)
         else:
             image, mask = self._get_random_crop()
+
+        # Read hard mask at same crop position (for dual-head training)
+        hard_mask = None
+        if self.return_hard_mask and self._hard_mask_paths is not None:
+            hard_mask = self._read_hard_mask_crop()
 
         # Integrated CutMix/ClassMix: second crop seeks a DIFFERENT class from
         # the dominant one in the first, maximizing per-sample diversity.
@@ -1765,14 +1816,35 @@ class RandomCropSegmentationDataset(AbstractDataset):
                     image2, mask2 = self._get_random_grid_tile(exclude_class=main_class)
                 else:
                     image2, mask2 = self._get_random_crop(exclude_class=main_class)
+
+            # Read hard mask for second crop (CutMix/ClassMix)
+            hard_mask2 = None
+            if self.return_hard_mask and self._hard_mask_paths is not None:
+                hard_mask2 = self._read_hard_mask_crop()
+
             # Independent color aug on second crop
             if getattr(self, '_pre_mix_transform', None) is not None:
                 r2 = self._pre_mix_transform(image=image2, mask=mask2)
                 image2, mask2 = r2["image"], r2["mask"]
             if getattr(self, 'classmix', False):
                 image, mask = self._apply_classmix(image, mask, image2, mask2)
+                # Apply same ClassMix mask to hard_mask
+                if hard_mask is not None and hard_mask2 is not None:
+                    # ClassMix uses dominant class region from mask2
+                    dom = self._get_dominant_class(mask2)
+                    if self.soft_labels:
+                        cls_mask = np.argmax(mask2, axis=-1) == dom
+                    else:
+                        cls_mask = mask2 == dom
+                    hard_mask = np.where(cls_mask, hard_mask2, hard_mask)
             else:
                 image, mask = self._apply_cutmix(image, mask, image2, mask2)
+                # Apply same CutMix box to hard_mask
+                if hard_mask is not None and hard_mask2 is not None:
+                    # _apply_cutmix stores the box in self._last_cutmix_box
+                    if hasattr(self, '_last_cutmix_box'):
+                        y1, y2, x1, x2 = self._last_cutmix_box
+                        hard_mask[y1:y2, x1:x2] = hard_mask2[y1:y2, x1:x2]
 
         if self.transform is None:
             image = torch.from_numpy(image).float()
@@ -1783,16 +1855,32 @@ class RandomCropSegmentationDataset(AbstractDataset):
                 mask = mask.permute(2, 0, 1)  # (H,W,C) -> (C,H,W)
             else:
                 mask = torch.from_numpy(mask).long()
-            return {"image": image, "mask": mask}
+            result = {"image": image, "mask": mask}
+            if hard_mask is not None:
+                result["hard_mask"] = self._to_hard_mask_tensor(hard_mask)
+            return result
 
+        # Apply augmentation (with or without hard_mask as additional target)
         if not self.reset_augmentation_function:
-            result = self.transform(image=image, mask=mask)
+            if hard_mask is not None:
+                result = self._get_transform_with_hard_mask()(
+                    image=image, mask=mask, hard_mask=hard_mask)
+                result["hard_mask"] = self._to_hard_mask_tensor(result["hard_mask"])
+            else:
+                result = self.transform(image=image, mask=mask)
             if self.soft_labels:
                 result["mask"] = self._ensure_soft_mask_tensor(result["mask"])
             return result
 
         transform_func = deepcopy(self.transform)
-        output = transform_func(image=image, mask=mask)
+        if hard_mask is not None:
+            transform_func = A.Compose(
+                transform_func.transforms,
+                additional_targets={"hard_mask": "mask"},
+            )
+            output = transform_func(image=image, mask=mask, hard_mask=hard_mask)
+        else:
+            output = transform_func(image=image, mask=mask)
         output_dict = {
             "image": output["image"].clone().detach()
             if torch.is_tensor(output["image"])
@@ -1801,6 +1889,8 @@ class RandomCropSegmentationDataset(AbstractDataset):
             if torch.is_tensor(output["mask"])
             else output["mask"].copy(),
         }
+        if hard_mask is not None:
+            output_dict["hard_mask"] = self._to_hard_mask_tensor(output["hard_mask"])
         if self.soft_labels:
             output_dict["mask"] = self._ensure_soft_mask_tensor(output_dict["mask"])
         del output

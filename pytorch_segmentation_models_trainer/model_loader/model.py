@@ -48,7 +48,12 @@ class Model(pl.LightningModule):
         self.train_ds = instantiate(self.cfg.train_dataset, _recursive_=False) if "train_dataset" in self.cfg else None
         self.val_ds = instantiate(self.cfg.val_dataset, _recursive_=False) if "val_dataset" in self.cfg else None
         self.loss_function = self.get_loss_function()
-        
+
+        # Dual-head: connect loss to model so it can access stored logits
+        self._is_dual_head = getattr(self.loss_function, 'is_dual_head_loss', False)
+        if self._is_dual_head:
+            self.loss_function.set_model(self.model)
+
         self.use_compound_loss = isinstance(self.loss_function, MultiLoss)
         
         # Save hyperparameters for better checkpointing
@@ -621,11 +626,12 @@ class Model(pl.LightningModule):
         """Shared logic for training and validation steps.
 
         Args:
-            batch: dict with 'image' and 'mask' tensors.
+            batch: dict with 'image', 'mask', and optionally 'hard_mask' tensors.
             prefix: 'train' or 'val' (used for log keys).
         """
         is_train = prefix == "train"
-        images, masks = batch.values()
+        images = batch["image"]
+        masks = batch["mask"]
 
         # Soft labels arrive as float (B,C,H,W); hard labels as int/long (B,H,W)
         if masks.is_floating_point():
@@ -634,10 +640,21 @@ class Model(pl.LightningModule):
             masks = masks.long()
             hard_masks = masks
 
+        # Dual-head support: store hard_mask from batch in model for loss access
+        if self._is_dual_head:
+            if "hard_mask" in batch:
+                self.model.last_hard_mask = batch["hard_mask"].long()
+            else:
+                self.model.last_hard_mask = hard_masks
+
         predicted_masks = self(images)
 
+        # Dual-head loss: pass epoch for consistency warmup
+        if self._is_dual_head:
+            loss = self.loss_function(predicted_masks, masks, epoch=self.current_epoch)
+            individual_losses, extra_info = {}, {}
         # Compute loss — with OHEM if model supports it
-        if hasattr(self.model, 'compute_ohem_loss') and getattr(self.model, 'ohem_ratio', 0) > 0 and is_train:
+        elif hasattr(self.model, 'compute_ohem_loss') and getattr(self.model, 'ohem_ratio', 0) > 0 and is_train:
             loss = self.model.compute_ohem_loss(self.loss_function, predicted_masks, masks)
             individual_losses, extra_info = {}, {}
         else:
@@ -689,6 +706,24 @@ class Model(pl.LightningModule):
             self.model.last_gate_weights = None
             if hasattr(self.model, '_gate_weights_with_grad'):
                 self.model._gate_weights_with_grad = None
+
+        # Dual-head Kendall diagnostics
+        if self._is_dual_head:
+            should_log_dh = (not is_train) or (self.global_step % 50 == 0)
+            if should_log_dh:
+                self.log(f"kendall/{prefix}_sigma_hard",
+                         self.loss_function.log_sigma_hard.exp(),
+                         on_step=is_train, on_epoch=True, sync_dist=False)
+                self.log(f"kendall/{prefix}_sigma_soft",
+                         self.loss_function.log_sigma_soft.exp(),
+                         on_step=is_train, on_epoch=True, sync_dist=False)
+                self.log(f"kendall/{prefix}_sigma_consist",
+                         self.loss_function.log_sigma_consist.exp(),
+                         on_step=is_train, on_epoch=True, sync_dist=False)
+            # Clean up stored tensors
+            if hasattr(self.model, 'last_logits_A'):
+                self.model.last_logits_A = None
+                self.model.last_logits_B = None
 
         # Log total loss
         self.log(f"loss/{prefix}", loss,

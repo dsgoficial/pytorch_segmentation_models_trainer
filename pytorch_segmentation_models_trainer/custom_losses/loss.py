@@ -941,3 +941,177 @@ class WeightedDiceSCELoss(nn.Module):
         sce = self.sce_alpha * ce + self.sce_beta * rce
 
         return self.dice_weight * dice + self.sce_weight * sce
+
+
+class DualHeadKendallLoss(nn.Module):
+    """Dual-head loss with Kendall uncertainty weighting.
+
+    Designed for models with two decoder heads (e.g. UPerNetDualHead):
+      - Head A: supervised with hard labels (concordância masks)
+      - Head B: supervised with soft labels (Dawid-Skene posteriors)
+      - Consistency: symmetric KL divergence between the two heads
+
+    The three loss terms are balanced via learnable log-variance parameters
+    (Kendall et al., "Multi-Task Learning Using Uncertainty to Weigh Losses
+    for Scene Geometry and Semantics", CVPR 2018).
+
+    The model must store ``last_logits_A``, ``last_logits_B``, and
+    ``last_hard_mask`` as attributes (set by the training loop).
+
+    Args:
+        num_classes: Number of segmentation classes.
+        consistency_warmup_epochs: Epochs before consistency loss is fully
+            active.  Ramps linearly from 0 to 1 over this period.
+        jml_weight: JML weight forwarded to both WeightedJMLSCEGCBLLoss.
+        sce_weight: SCE weight forwarded to both WeightedJMLSCEGCBLLoss.
+        ignore_index: Label value to ignore in hard labels.
+        sce_alpha: CE weight inside SCE (forwarded).
+        sce_beta: Reverse-CE weight inside SCE (forwarded).
+        smooth: JML smoothing constant (forwarded).
+        jml_classes: 'present' or 'all' (forwarded).
+        label_smoothing: Label smoothing for CE (forwarded).
+        gcbl_weight: GCBL term weight (forwarded).
+        gcbl_embed_dim: GCBL embedding dimension (forwarded).
+        gcbl_temperature: GCBL InfoNCE temperature (forwarded).
+        gcbl_max_samples: GCBL max boundary samples (forwarded).
+    """
+
+    def __init__(
+        self,
+        num_classes: int = 6,
+        consistency_warmup_epochs: int = 20,
+        jml_weight: float = 0.25,
+        sce_weight: float = 0.75,
+        ignore_index: int = 255,
+        sce_alpha: float = 1.0,
+        sce_beta: float = 0.8,
+        smooth: float = 1e-3,
+        jml_classes: str = "present",
+        label_smoothing: float = 0.0,
+        gcbl_weight: float = 0.1,
+        gcbl_embed_dim: int = 32,
+        gcbl_temperature: float = 0.07,
+        gcbl_max_samples: int = 512,
+    ):
+        super().__init__()
+        self.num_classes = num_classes
+        self.consistency_warmup_epochs = consistency_warmup_epochs
+        self.ignore_index = ignore_index
+
+        loss_kwargs = dict(
+            num_classes=num_classes,
+            jml_weight=jml_weight,
+            sce_weight=sce_weight,
+            ignore_index=ignore_index,
+            sce_alpha=sce_alpha,
+            sce_beta=sce_beta,
+            smooth=smooth,
+            jml_classes=jml_classes,
+            label_smoothing=label_smoothing,
+            gcbl_weight=gcbl_weight,
+            gcbl_embed_dim=gcbl_embed_dim,
+            gcbl_temperature=gcbl_temperature,
+            gcbl_max_samples=gcbl_max_samples,
+        )
+
+        self.loss_hard = WeightedJMLSCEGCBLLoss(**loss_kwargs)
+        self.loss_soft = WeightedJMLSCEGCBLLoss(**loss_kwargs)
+
+        # Kendall learnable log-variance parameters
+        self.log_sigma_hard = nn.Parameter(torch.tensor(0.0))
+        self.log_sigma_soft = nn.Parameter(torch.tensor(0.0))
+        self.log_sigma_consist = nn.Parameter(torch.tensor(0.0))
+
+        # Model reference, set by _shared_step before calling this loss
+        self._model_ref = None
+
+    @property
+    def is_dual_head_loss(self):
+        """Marker for _shared_step to detect dual-head loss without duck-typing."""
+        return True
+
+    def set_model(self, model):
+        """Store a reference to the dual-head model (not as a submodule)."""
+        self._model_ref = model
+
+    @staticmethod
+    def _symmetric_kl(log_p_a, p_a, log_p_b, p_b):
+        """Compute symmetric KL from pre-computed softmax outputs.
+
+        Args:
+            log_p_a, p_a: log-softmax and softmax of logits_A.
+            log_p_b, p_b: log-softmax and softmax of logits_B.
+
+        Returns:
+            0.5 * [KL(p_A || p_B) + KL(p_B || p_A)]
+        """
+        kl_ab = F.kl_div(log_p_b, p_a, reduction="batchmean", log_target=False)
+        kl_ba = F.kl_div(log_p_a, p_b, reduction="batchmean", log_target=False)
+        return 0.5 * (kl_ab + kl_ba)
+
+    def forward(
+        self,
+        predictions: torch.Tensor,
+        targets: torch.Tensor,
+        epoch: int = 0,
+    ) -> torch.Tensor:
+        """Compute dual-head loss with Kendall weighting.
+
+        The model's forward() stores last_logits_A, last_logits_B, and
+        the training loop stores last_hard_mask. This loss uses them.
+
+        Args:
+            predictions: Model output (average or primary head logits).
+                Not used directly — individual head logits come from model attrs.
+            targets: Soft labels (B, C, H, W) from the dataloader.
+            epoch: Current epoch for consistency warmup scheduling.
+
+        Returns:
+            Scalar loss.
+        """
+        model = self._model_ref
+        logits_A = model.last_logits_A
+        logits_B = model.last_logits_B
+        hard_mask = model.last_hard_mask
+
+        # Head A: hard labels (concordância v2 masks)
+        if hard_mask is not None:
+            L_hard = self.loss_hard(logits_A, hard_mask)
+        else:
+            L_hard = self.loss_hard(logits_A, targets)
+
+        # Head B: soft labels (Dawid-Skene posteriors)
+        L_soft = self.loss_soft(logits_B, targets)
+
+        # Consistency: symmetric KL between the two heads.
+        # Compute softmax once per head, reuse for both gradient directions.
+        # Each head gets gradients from the KL where its logits are NOT detached.
+        log_pA = F.log_softmax(logits_A, dim=1)
+        pA = log_pA.exp()
+        log_pB = F.log_softmax(logits_B, dim=1)
+        pB = log_pB.exp()
+
+        # A→B: gradients flow to B only (A detached)
+        kl_to_B = self._symmetric_kl(log_pA.detach(), pA.detach(), log_pB, pB)
+        # B→A: gradients flow to A only (B detached)
+        kl_to_A = self._symmetric_kl(log_pA, pA, log_pB.detach(), pB.detach())
+        L_consist = 0.5 * (kl_to_B + kl_to_A)
+
+        # Consistency warmup: linear ramp from 0 to 1
+        if self.consistency_warmup_epochs > 0 and epoch < self.consistency_warmup_epochs:
+            warmup_factor = epoch / self.consistency_warmup_epochs
+        else:
+            warmup_factor = 1.0
+
+        # Kendall multi-task uncertainty weighting
+        precision_hard = torch.exp(-self.log_sigma_hard)
+        precision_soft = torch.exp(-self.log_sigma_soft)
+        precision_consist = torch.exp(-self.log_sigma_consist)
+
+        loss = (
+            precision_hard * L_hard + self.log_sigma_hard
+            + precision_soft * L_soft + self.log_sigma_soft
+            + warmup_factor * (precision_consist * L_consist + self.log_sigma_consist)
+        )
+
+        return loss
