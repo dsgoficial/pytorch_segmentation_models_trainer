@@ -657,30 +657,28 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
     # ---- Striped inference for large images (BigTIFF) ----
 
     def _predict_batch_to_merger(self, batch_tiles, batch_coords, merger, transforms, n_tta):
-        """Predict a batch with optional TTA, move to CPU, integrate into merger.
+        """Predict a batch with optional TTA and integrate into merger.
 
-        TTA accumulation happens on CPU to keep GPU memory bounded
-        regardless of the number of TTA passes (8 for D4).
+        Both the TTA accumulation and the merger integration happen on the
+        same device as the merger (GPU when possible) to avoid costly
+        GPU-to-CPU transfers every batch.
         """
         tiles_tensor = torch.stack(batch_tiles).float().to(self.device)
         coords_tensor = torch.from_numpy(np.array(batch_coords))
+        merger_on_cpu = merger.weight.device.type == "cpu"
 
         if n_tta <= 1:
             with autocast():
                 pred = self.model(tiles_tensor)
-            if merger.weight.device.type == "cpu":
-                pred = pred.float().cpu()
-            else:
-                pred = pred.float()
+            pred = pred.float().cpu() if merger_on_cpu else pred.float()
         else:
-            # Accumulate on CPU to avoid GPU OOM with large batches + D4 TTA
             accum = None
             for rot, flip in transforms:
                 aug = self._apply_transform(tiles_tensor, rot, flip)
                 with autocast():
                     p = self.model(aug)
                 del aug
-                p = p.float().cpu()
+                p = p.float().cpu() if merger_on_cpu else p.float()
                 p = self._invert_transform(p, rot, flip)
                 accum = p if accum is None else accum + p
                 del p
@@ -695,9 +693,9 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         """Process a single normalized stripe, returning merged logits on CPU.
 
         Uses iter_split() (generator) to avoid materializing all tiles.
-        TileMerger runs on GPU when available for maximum throughput,
-        falling back to CPU only when TTA is enabled (to bound GPU memory
-        across multiple augmentation passes).
+        TileMerger runs on GPU to keep predictions on-device and avoid
+        per-batch GPU-to-CPU transfers.  Falls back to CPU only when
+        self.device is "cpu".
 
         Args:
             stripe_normalized: np.ndarray [h, W, C] — already normalized.
@@ -725,11 +723,8 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         transforms = self._get_tta_transforms()
         n_tta = len(transforms)
 
-        # Use GPU for merger when no TTA (keeps everything on GPU, no transfers).
-        # With TTA, keep merger on CPU to avoid OOM from multiple augmentation passes.
-        merger_device = self.device if n_tta <= 1 else "cpu"
         merger = TileMerger(
-            tiler.target_shape, self.num_classes, tiler.weight, device=merger_device
+            tiler.target_shape, self.num_classes, tiler.weight, device=self.device
         )
 
         batch_tiles = []
