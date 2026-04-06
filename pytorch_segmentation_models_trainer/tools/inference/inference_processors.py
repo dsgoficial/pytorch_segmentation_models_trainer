@@ -20,7 +20,6 @@
 """
 from collections import defaultdict
 from concurrent.futures.thread import ThreadPoolExecutor
-import gc
 import logging
 import os
 import math
@@ -669,7 +668,10 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         if n_tta <= 1:
             with autocast():
                 pred = self.model(tiles_tensor)
-            pred = pred.float().cpu()
+            if merger.weight.device.type == "cpu":
+                pred = pred.float().cpu()
+            else:
+                pred = pred.float()
         else:
             # Accumulate on CPU to avoid GPU OOM with large batches + D4 TTA
             accum = None
@@ -686,16 +688,16 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
             del accum
 
         del tiles_tensor
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
         merger.integrate_batch(pred, coords_tensor)
         del pred
 
     def _infer_stripe(self, stripe_normalized):
         """Process a single normalized stripe, returning merged logits on CPU.
 
-        Uses iter_split() (generator) to avoid materializing all tiles, and
-        TileMerger on CPU to avoid GPU memory accumulation.
+        Uses iter_split() (generator) to avoid materializing all tiles.
+        TileMerger runs on GPU when available for maximum throughput,
+        falling back to CPU only when TTA is enabled (to bound GPU memory
+        across multiple augmentation passes).
 
         Args:
             stripe_normalized: np.ndarray [h, W, C] — already normalized.
@@ -720,12 +722,16 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
             weight=self._tile_weight,
         )
 
-        merger = TileMerger(
-            tiler.target_shape, self.num_classes, tiler.weight, device="cpu"
-        )
-
         transforms = self._get_tta_transforms()
         n_tta = len(transforms)
+
+        # Use GPU for merger when no TTA (keeps everything on GPU, no transfers).
+        # With TTA, keep merger on CPU to avoid OOM from multiple augmentation passes.
+        merger_device = self.device if n_tta <= 1 else "cpu"
+        merger = TileMerger(
+            tiler.target_shape, self.num_classes, tiler.weight, device=merger_device
+        )
+
         batch_tiles = []
         batch_coords = []
 
@@ -759,7 +765,7 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
             mt : mt + tiler.image_height,
             ml : ml + tiler.image_width,
         ]
-        return cropped[:, :h, :w].copy()
+        return cropped[:, :h, :w]
 
     def make_inference_striped(
         self,
@@ -859,7 +865,6 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
                 seg = np.argmax(logits_cropped, axis=0).astype(np.uint8)
                 dst_seg.write(seg[np.newaxis], window=window_write)
                 del seg, logits_cropped
-                gc.collect()
 
                 y = y_end
                 stripe_idx += 1
