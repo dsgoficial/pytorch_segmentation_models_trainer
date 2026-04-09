@@ -594,9 +594,16 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
             os.makedirs(output_dir, exist_ok=True)
             stem = Path(image_path).stem
             output_seg = os.path.join(output_dir, f"{stem}.tif")
+            output_probs = None
+            if self.confidence_mode is not None:
+                probs_dir = os.path.join(output_dir, "probs")
+                os.makedirs(probs_dir, exist_ok=True)
+                output_probs = os.path.join(probs_dir, f"{stem}.tif")
             logger.info(f"Large image detected, using striped inference: {image_path}")
             self.make_inference_striped(
-                image_path, output_seg, stripe_height=self.stripe_height
+                image_path, output_seg,
+                output_probs_path=output_probs,
+                stripe_height=self.stripe_height,
             )
             return defaultdict(list)
 
