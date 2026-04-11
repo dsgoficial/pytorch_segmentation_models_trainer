@@ -317,3 +317,133 @@ When `augmentation_list` is `null`, the image is automatically converted to a `(
 | `"native"` | no scaling applied |
 
 The mask is always cast to `torch.int64`.
+
+---
+
+## Folder-Based Dataset (No CSV Required)
+
+When your images and masks are already organized in matching folder hierarchies, you can skip the CSV preparation step entirely and use `SegmentationDatasetFromFolder`. It scans both folders recursively with `pathlib.Path.rglob()` and automatically builds the image/mask pairs.
+
+### Matching Rules
+
+A pair is valid when both conditions are met:
+
+1. **Same relative subfolder** — the path from the root to the file's parent directory is identical in both trees.
+2. **Same file stem** — the filename without extension is identical.
+
+Files present in only one folder (or in a different subfolder) are silently excluded.
+
+### Folder Structure Example
+
+```
+/data/my_dataset/
+├── images/
+│   ├── area_a/
+│   │   ├── tile_001.tif
+│   │   └── tile_002.tif
+│   └── area_b/
+│       └── tile_003.tif
+└── masks/
+    ├── area_a/
+    │   ├── tile_001.tif   ← paired
+    │   └── tile_002.tif   ← paired
+    └── area_b/
+        └── tile_003.tif   ← paired
+```
+
+### Python Usage
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.dataset import SegmentationDatasetFromFolder
+
+ds = SegmentationDatasetFromFolder(
+    image_folder="/data/my_dataset/images",
+    mask_folder="/data/my_dataset/masks",
+    image_extension=".tif",   # leading dot is optional
+)
+
+print(len(ds))    # number of matched pairs
+item = ds[0]
+print(item["image"].shape)   # (C, H, W) float32 tensor
+print(item["mask"].shape)    # (H, W) int64 tensor
+```
+
+### Different Extensions for Images and Masks
+
+When images and masks have different file extensions, use the `mask_extension` argument:
+
+```python
+ds = SegmentationDatasetFromFolder(
+    image_folder="/data/my_dataset/images",
+    mask_folder="/data/my_dataset/masks",
+    image_extension=".tif",
+    mask_extension=".png",   # masks stored as PNG, images as GeoTIFF
+)
+```
+
+### Multispectral Support
+
+All parameters of `SegmentationDataset` are available, including `use_rasterio`, `selected_bands`, and `image_dtype`:
+
+```python
+ds = SegmentationDatasetFromFolder(
+    image_folder="/data/sentinel2/images",
+    mask_folder="/data/sentinel2/masks",
+    image_extension=".tif",
+    mask_extension=".png",
+    use_rasterio=True,
+    selected_bands=[1, 2, 3, 4],   # RGB + NIR
+    image_dtype="uint16",
+    n_classes=2,
+)
+```
+
+### With Augmentation Pipeline
+
+```python
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+
+augmentation_list = [
+    A.RandomCrop(height=512, width=512),
+    A.HorizontalFlip(p=0.5),
+    A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ToTensorV2(),
+]
+
+ds = SegmentationDatasetFromFolder(
+    image_folder="/data/my_dataset/images",
+    mask_folder="/data/my_dataset/masks",
+    image_extension=".tif",
+    augmentation_list=augmentation_list,
+    n_classes=2,
+)
+```
+
+### Error Handling
+
+A `ValueError` is raised at construction time if no valid pairs are found. This usually means:
+
+- The extension is wrong (e.g. searching for `.tif` in a folder of `.png` files).
+- The subfolder structure does not match between the image and mask trees.
+- One of the provided folders is empty or does not exist.
+
+```python
+try:
+    ds = SegmentationDatasetFromFolder(
+        image_folder="/data/images",
+        mask_folder="/data/masks",
+        image_extension=".tif",
+    )
+except ValueError as e:
+    print(e)
+    # Nenhum par imagem/máscara encontrado entre ...
+```
+
+### When to Use Each Approach
+
+| Scenario | Recommended class |
+|----------|-------------------|
+| Pre-existing CSV index | `SegmentationDataset` |
+| Structured folder hierarchy, no CSV needed | `SegmentationDatasetFromFolder` |
+| Large images that require on-the-fly cropping | `RandomCropSegmentationDataset` |
