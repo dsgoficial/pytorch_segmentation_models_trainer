@@ -36,7 +36,8 @@ A complete training config contains the following top-level keys:
 | `metrics` | `torchmetrics` metrics to compute |
 | `logger` | TensorBoard, WandB, CSV logger |
 | `train_dataset` | Training dataset and dataloader settings |
-| `val_dataset` | Validation dataset and dataloader settings |
+| `val_dataset` | Validation dataset — monitored at the end of every epoch during `fit` |
+| `test_dataset` | *(optional)* Test dataset — evaluated once after `fit` via `trainer.test()` |
 | `mode` | `train` or `predict` |
 
 ---
@@ -215,6 +216,24 @@ val_dataset:
     drop_last: false
     prefetch_factor: 2
 
+# ── Test Dataset (optional) ───────────────────────────────────────────────────
+# When present, trainer.test() is called automatically after trainer.fit().
+# All metrics are logged with the "test/" prefix.
+test_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/test.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+  data_loader:
+    shuffle: false
+    num_workers: 4
+    pin_memory: true
+    drop_last: false
+    prefetch_factor: 2
+
 # ── Mode ─────────────────────────────────────────────────────────────────────
 mode: train
 device: cuda
@@ -321,6 +340,25 @@ pytorch-smt --config-dir ./configs --config-name train_unet --cfg job
 
 ---
 
+## Dataset Splits
+
+The framework follows the standard three-way split used in machine learning:
+
+| Config key | PyTorch Lightning step | When it runs | Metric prefix |
+|---|---|---|---|
+| `train_dataset` | `training_step` | Every batch during `trainer.fit()` | `train/` |
+| `val_dataset` | `validation_step` | End of every epoch during `trainer.fit()` | `val/` |
+| `test_dataset` | `test_step` | Once after `trainer.fit()`, via `trainer.test()` | `test/` |
+
+`val_dataset` and `test_dataset` are both **optional**. When `val_dataset` is absent, Lightning skips the validation loop entirely. When `test_dataset` is absent, `trainer.test()` is not called. You can use all three, only train + val, or only train.
+
+:::tip When to use each split
+- **`val_dataset`**: use this for epoch-level monitoring during training — it drives early stopping, `ModelCheckpoint`, and LR schedulers that `monitor` a `val/` metric.
+- **`test_dataset`**: use this for the final held-out evaluation reported in papers or production metrics. It is intentionally kept separate from `val_dataset` so that hyperparameter tuning decisions are not influenced by test-set performance.
+:::
+
+---
+
 ## Logged Metrics
 
 During training, the following metrics are written to the logger automatically:
@@ -328,8 +366,11 @@ During training, the following metrics are written to the logger automatically:
 | Metric key | When logged |
 |---|---|
 | `loss/train` | Each step and epoch |
-| `loss/val` | Each validation epoch |
+| `loss/val` | Each validation epoch (requires `val_dataset`) |
+| `loss/test` | Once after training (requires `test_dataset`) |
 | `train/<metric_name>` | Per step and epoch (from `metrics` list) |
 | `val/<metric_name>` | Per validation epoch (from `metrics` list) |
+| `test/<metric_name>` | Once after training (from `metrics` list) |
 | `losses/train_<name>` | Per component when using compound loss |
 | `losses/val_<name>` | Per component when using compound loss |
+| `losses/test_<name>` | Per component when using compound loss (test run) |

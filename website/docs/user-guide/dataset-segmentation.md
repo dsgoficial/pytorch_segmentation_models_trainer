@@ -185,10 +185,12 @@ augmentation_list:
 
 ## Full YAML Configuration Example
 
-The following example shows a complete train/val dataset configuration for a binary building segmentation task:
+The following example shows a complete train / val / test dataset configuration for a binary building segmentation task.
+
+`val_dataset` is monitored at the end of every training epoch (early stopping, checkpointing, LR scheduling). `test_dataset` is evaluated once after training completes via `trainer.test()` and its metrics are logged with a `test/` prefix. Both are optional.
 
 ```yaml
-# configs/dataset/train_val.yaml
+# configs/dataset/train_val_test.yaml
 
 train_dataset:
   _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
@@ -217,6 +219,30 @@ train_dataset:
 val_dataset:
   _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
   input_csv_path: /data/my_dataset/val.csv
+  root_dir: /data/my_dataset
+  n_classes: 2
+  use_rasterio: false
+  selected_bands: null
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: 512
+      width: 512
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    shuffle: false
+    num_workers: 4
+    pin_memory: true
+    batch_size: 8
+    drop_last: false
+
+# Optional — when present, trainer.test() is called automatically after fit.
+# Metrics are logged with the "test/" prefix.
+test_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/my_dataset/test.csv
   root_dir: /data/my_dataset
   n_classes: 2
   use_rasterio: false
