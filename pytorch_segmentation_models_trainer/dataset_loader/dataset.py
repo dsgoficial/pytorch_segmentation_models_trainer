@@ -338,7 +338,11 @@ class SegmentationDataset(AbstractDataset):
     """Dataset para segmentação com suporte a seleção de bandas.
 
     Args:
-        input_csv_path (Path): Caminho para o arquivo CSV com os dados
+        input_csv_path (Path): Caminho para o arquivo CSV com os dados. Mutuamente
+            exclusivo com ``df``; um dos dois deve ser fornecido.
+        df (Optional[pd.DataFrame]): DataFrame já construído com colunas ``image`` e
+            ``mask``. Permite criar o dataset sem CSV em disco (ex.: via
+            :class:`SegmentationDatasetFromFolder`).
         root_dir: Diretório raiz dos dados
         augmentation_list: Lista de augmentações do Albumentations
         data_loader: Configuração do DataLoader
@@ -362,7 +366,8 @@ class SegmentationDataset(AbstractDataset):
 
     def __init__(
         self,
-        input_csv_path: Path,
+        input_csv_path: Path = None,
+        df: Optional[pd.DataFrame] = None,
         root_dir=None,
         augmentation_list=None,
         data_loader=None,
@@ -377,6 +382,7 @@ class SegmentationDataset(AbstractDataset):
     ) -> None:
         super(SegmentationDataset, self).__init__(
             input_csv_path=input_csv_path,
+            df=df,
             root_dir=root_dir,
             augmentation_list=augmentation_list,
             data_loader=data_loader,
@@ -496,6 +502,155 @@ class SegmentationDataset(AbstractDataset):
         if idx % 100 == 0:
             gc.collect()
         return output_dict
+
+
+class SegmentationDatasetFromFolder(SegmentationDataset):
+    """Dataset de segmentação que descobre pares imagem/máscara recursivamente a partir
+    de duas pastas raiz, sem necessitar de um arquivo CSV em disco.
+
+    O matching é feito por **caminho relativo** (subpasta) **e** por **stem** (nome sem
+    extensão): somente os arquivos presentes em ambas as pastas, dentro da mesma
+    subpasta e com o mesmo nome de arquivo, são incluídos no dataset.
+
+    Exemplo de estrutura esperada::
+
+        images_root/
+            area_a/
+                tile_001.tif
+                tile_002.tif
+            area_b/
+                tile_003.tif
+
+        masks_root/
+            area_a/
+                tile_001.tif   # par de images_root/area_a/tile_001.tif
+                tile_002.tif
+            area_b/
+                tile_003.tif
+
+    Args:
+        image_folder (Union[str, Path]): Pasta raiz que contém as imagens.
+        mask_folder (Union[str, Path]): Pasta raiz que contém as máscaras.
+        image_extension (str): Extensão dos arquivos de imagem (ex: ``".tif"`` ou
+            ``"tif"``). O ponto inicial é opcional — é normalizado internamente.
+        mask_extension (Optional[str]): Extensão dos arquivos de máscara. Se ``None``,
+            usa o mesmo valor de ``image_extension``.
+        augmentation_list: Lista de augmentações do Albumentations.
+        data_loader: Configuração do DataLoader.
+        n_classes (int): Número de classes de segmentação.
+        selected_bands (Optional[List[int]]): Bandas a carregar (base 1). ``None`` =
+            todas.
+        use_rasterio (bool): Usa rasterio para leitura (recomendado para imagens
+            multiespectrais).
+        reset_augmentation_function (bool): Deepcopy do transform para evitar memory
+            leak em treinamentos longos.
+        image_dtype (str): Tipo de dado da imagem. Ver :class:`SegmentationDataset`.
+
+    Raises:
+        ValueError: Se nenhum par imagem/máscara for encontrado nas pastas fornecidas.
+    """
+
+    def __init__(
+        self,
+        image_folder: Union[str, Path],
+        mask_folder: Union[str, Path],
+        image_extension: str = ".tif",
+        mask_extension: Optional[str] = None,
+        augmentation_list=None,
+        data_loader=None,
+        n_classes: int = 2,
+        selected_bands: Optional[List[int]] = None,
+        use_rasterio: bool = False,
+        reset_augmentation_function: bool = False,
+        image_dtype: str = "uint8",
+    ) -> None:
+        image_folder = Path(image_folder)
+        mask_folder = Path(mask_folder)
+
+        image_extension = self._normalize_extension(image_extension)
+        mask_extension = (
+            image_extension
+            if mask_extension is None
+            else self._normalize_extension(mask_extension)
+        )
+
+        df = self._build_dataframe(image_folder, mask_folder, image_extension, mask_extension)
+
+        super().__init__(
+            input_csv_path=None,
+            df=df,
+            augmentation_list=augmentation_list,
+            data_loader=data_loader,
+            n_classes=n_classes,
+            selected_bands=selected_bands,
+            use_rasterio=use_rasterio,
+            reset_augmentation_function=reset_augmentation_function,
+            image_dtype=image_dtype,
+        )
+
+        self.image_folder = image_folder
+        self.mask_folder = mask_folder
+        self.image_extension = image_extension
+        self.mask_extension = mask_extension
+
+    # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_extension(ext: str) -> str:
+        """Garante que a extensão comece com ponto (ex: 'tif' → '.tif')."""
+        return ext if ext.startswith(".") else f".{ext}"
+
+    @staticmethod
+    def _build_dataframe(
+        image_folder: Path,
+        mask_folder: Path,
+        image_extension: str,
+        mask_extension: str,
+    ) -> pd.DataFrame:
+        """Escaneia as pastas recursivamente e constrói um DataFrame com os pares.
+
+        A chave de matching é ``(subpasta_relativa, stem)``: somente arquivos com
+        a mesma subpasta e o mesmo nome (sem extensão) em ambas as pastas são
+        incluídos.
+
+        Args:
+            image_folder: Pasta raiz das imagens.
+            mask_folder: Pasta raiz das máscaras.
+            image_extension: Extensão dos arquivos de imagem (com ponto).
+            mask_extension: Extensão dos arquivos de máscara (com ponto).
+
+        Returns:
+            pd.DataFrame com colunas ``image`` e ``mask`` (caminhos absolutos como str).
+
+        Raises:
+            ValueError: Quando nenhum par correspondente é encontrado.
+        """
+        image_map: Dict[Tuple[Path, str], Path] = {
+            (p.parent.relative_to(image_folder), p.stem): p
+            for p in image_folder.rglob(f"*{image_extension}")
+        }
+        mask_map: Dict[Tuple[Path, str], Path] = {
+            (p.parent.relative_to(mask_folder), p.stem): p
+            for p in mask_folder.rglob(f"*{mask_extension}")
+        }
+
+        common_keys = sorted(image_map.keys() & mask_map.keys())
+
+        if not common_keys:
+            raise ValueError(
+                f"Nenhum par imagem/máscara encontrado entre "
+                f"'{image_folder}' (extensão '{image_extension}') e "
+                f"'{mask_folder}' (extensão '{mask_extension}'). "
+                "Verifique se as subpastas e nomes de arquivo coincidem."
+            )
+
+        records = [
+            {"image": str(image_map[k]), "mask": str(mask_map[k])}
+            for k in common_keys
+        ]
+        return pd.DataFrame(records)
 
 
 class RandomCropSegmentationDataset(AbstractDataset):
