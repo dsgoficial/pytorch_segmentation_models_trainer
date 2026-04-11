@@ -142,6 +142,22 @@ class TestTrainingStepEndToEnd:
         assert isinstance(loss, torch.Tensor)
         assert loss.ndim == 0
 
+    def test_test_step_returns_scalar_loss(self):
+        model = _make_model()
+        batch = _make_batch()
+        model.log = MagicMock()
+        loss = model.test_step(batch, 0)
+        assert isinstance(loss, torch.Tensor)
+        assert loss.ndim == 0
+
+    def test_test_step_logs_loss_test_prefix(self):
+        model = _make_model()
+        batch = _make_batch()
+        model.log = MagicMock()
+        model.test_step(batch, 0)
+        logged_keys = [call.args[0] for call in model.log.call_args_list]
+        assert "loss/test" in logged_keys
+
     def test_training_step_with_extra_batch_keys(self):
         model = _make_model()
         batch = _make_batch(extra_keys=["filename"])
@@ -181,3 +197,32 @@ class TestSetEncoderTrainable:
             p for n, p in model.model.named_parameters() if "encoder" in n
         ]
         assert any(p.requires_grad for p in encoder_params)
+
+
+# ─── Tests: guard behaviour when val/test_dataset absent ─────────────────────
+
+class TestDatasetAbsenceGuards:
+    """Verify Model does not crash when val_dataset or test_dataset are absent."""
+
+    def test_init_without_val_dataset_no_crash(self):
+        cfg = _make_cfg()
+        # cfg has no val_dataset key — must not raise
+        model = Model(cfg, inference_mode=False)
+        assert model.val_ds is None
+        assert model.gpu_val_transform is None
+
+    def test_init_without_test_dataset_no_crash(self):
+        cfg = _make_cfg()
+        model = Model(cfg, inference_mode=False)
+        assert model.test_ds is None
+        assert model.gpu_test_transform is None
+
+    def test_val_dataloader_returns_none_when_val_ds_absent(self):
+        cfg = _make_cfg()
+        model = Model(cfg, inference_mode=False)
+        assert model.val_dataloader() is None
+
+    def test_test_dataloader_returns_none_when_test_ds_absent(self):
+        cfg = _make_cfg()
+        model = Model(cfg, inference_mode=False)
+        assert model.test_dataloader() is None

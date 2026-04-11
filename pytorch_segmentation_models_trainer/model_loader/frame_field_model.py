@@ -223,9 +223,6 @@ class FrameFieldSegmentationPLModel(Model):
                 trainable=self.cfg.pl_model.set_crossfield_trainable
             )
 
-    def set_test_dataset(self, dataset):
-        self.test_dataset = dataset
-
     def get_loss_function(self) -> MultiLoss:
         return build_loss_from_config(self.cfg)
 
@@ -393,6 +390,38 @@ class FrameFieldSegmentationPLModel(Model):
             # Log torchmetrics if available
             if hasattr(self, "val_metrics"):
                 metrics_output = self.val_metrics(y_pred, y_true.long())
+                self.log_dict(metrics_output, on_step=False, on_epoch=True)
+
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        """Test step — runs once after training via trainer.test()."""
+        image = (
+            batch["image"]
+            if self.gpu_test_transform is None
+            else self.gpu_test_transform(batch["image"])
+        )
+        pred = self.model(image)
+        loss, individual_metrics_dict, extra_dict = self.loss_function(
+            pred, batch, epoch=self.current_epoch
+        )
+
+        # Log main loss
+        self.log("loss/test", loss, on_step=False, on_epoch=True, prog_bar=True)
+
+        # Log individual losses with proper prefixing
+        for key, value in individual_metrics_dict.items():
+            self.log(f"losses/test_{key}", value, on_step=False, on_epoch=True)
+
+        # Compute and log IoU metrics
+        if "seg" in pred:
+            y_pred = pred["seg"][:, 0, ...]
+            y_true = batch["gt_polygons_image"][:, 0, ...]
+            self.compute_iou_metrics(y_pred, y_true, step_prefix="test")
+
+            # Log torchmetrics if available
+            if hasattr(self, "test_metrics"):
+                metrics_output = self.test_metrics(y_pred, y_true.long())
                 self.log_dict(metrics_output, on_step=False, on_epoch=True)
 
         return loss

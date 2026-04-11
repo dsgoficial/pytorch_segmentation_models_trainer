@@ -217,3 +217,87 @@ class Test_FrameFieldModel(CustomTestCase):
             )
             result = train(cfg)
         mock_trainer_instance.fit.assert_called_once()
+
+    # ------------------------------------------------------------------ #
+    # test_step tests — verify FrameFieldSegmentationPLModel.test_step()
+    # ------------------------------------------------------------------ #
+
+    def _make_ff_batch(self):
+        """Minimal FrameField-style batch with required keys."""
+        B, H, W = 2, 64, 64
+        return {
+            "image": torch.randn(B, 3, H, W),
+            "gt_polygons_image": torch.zeros(B, 3, H, W),
+            "class_freq": torch.ones(B),
+        }
+
+    def test_frame_field_validation_step_returns_loss(self) -> None:
+        csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_frame_field.yaml",
+                overrides=[
+                    "train_dataset.input_csv_path=" + csv_path,
+                    "train_dataset.root_dir=" + frame_field_root_dir,
+                    "val_dataset.input_csv_path=" + csv_path,
+                    "val_dataset.root_dir=" + frame_field_root_dir,
+                ],
+            )
+            from importlib import import_module
+            module_path, class_name = cfg.pl_model._target_.rsplit(".", 1)
+            module = import_module(module_path)
+            ff_model = getattr(module, class_name)(cfg)
+
+        ff_model.log = MagicMock()
+        batch = self._make_ff_batch()
+        loss = ff_model.validation_step(batch, 0)
+        self.assertIsInstance(loss, torch.Tensor)
+        self.assertEqual(loss.ndim, 0)
+
+    def test_frame_field_test_step_returns_loss(self) -> None:
+        csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_frame_field.yaml",
+                overrides=[
+                    "train_dataset.input_csv_path=" + csv_path,
+                    "train_dataset.root_dir=" + frame_field_root_dir,
+                    "val_dataset.input_csv_path=" + csv_path,
+                    "val_dataset.root_dir=" + frame_field_root_dir,
+                ],
+            )
+            from importlib import import_module
+            module_path, class_name = cfg.pl_model._target_.rsplit(".", 1)
+            module = import_module(module_path)
+            ff_model = getattr(module, class_name)(cfg)
+
+        ff_model.log = MagicMock()
+        batch = self._make_ff_batch()
+        loss = ff_model.test_step(batch, 0)
+        self.assertIsInstance(loss, torch.Tensor)
+        self.assertEqual(loss.ndim, 0)
+
+    def test_frame_field_test_step_logs_test_prefix(self) -> None:
+        csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_frame_field.yaml",
+                overrides=[
+                    "train_dataset.input_csv_path=" + csv_path,
+                    "train_dataset.root_dir=" + frame_field_root_dir,
+                    "val_dataset.input_csv_path=" + csv_path,
+                    "val_dataset.root_dir=" + frame_field_root_dir,
+                ],
+            )
+            from importlib import import_module
+            module_path, class_name = cfg.pl_model._target_.rsplit(".", 1)
+            module = import_module(module_path)
+            ff_model = getattr(module, class_name)(cfg)
+
+        ff_model.log = MagicMock()
+        ff_model.log_dict = MagicMock()
+        batch = self._make_ff_batch()
+        ff_model.test_step(batch, 0)
+        logged_keys = [call.args[0] for call in ff_model.log.call_args_list]
+        self.assertIn("loss/test", logged_keys)
+        self.assertFalse(any("/val" in k for k in logged_keys))

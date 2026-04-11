@@ -57,6 +57,11 @@ class Model(pl.LightningModule):
             if "val_dataset" in self.cfg
             else None
         )
+        self.test_ds = (
+            instantiate(self.cfg.test_dataset, _recursive_=False)
+            if "test_dataset" in self.cfg
+            else None
+        )
         self.loss_function = self.get_loss_function()
 
         # NEW: Determine if using compound loss (MultiLoss)
@@ -64,7 +69,7 @@ class Model(pl.LightningModule):
 
         # Save hyperparameters for better checkpointing
         self.save_hyperparameters(
-            ignore=["model", "loss_function", "train_ds", "val_ds"]
+            ignore=["model", "loss_function", "train_ds", "val_ds", "test_ds"]
         )
 
         if "metrics" in self.cfg:
@@ -74,18 +79,29 @@ class Model(pl.LightningModule):
             # Use forward slash for grouping in TensorBoard
             self.train_metrics = metrics.clone(prefix="train/")
             self.val_metrics = metrics.clone(prefix="val/")
+            self.test_metrics = metrics.clone(prefix="test/")
 
         self.gpu_train_transform = (
             None
-            if "gpu_augmentation_list" not in self.cfg.train_dataset
+            if "train_dataset" not in self.cfg
+            or "gpu_augmentation_list" not in self.cfg.train_dataset
             else self.get_gpu_augmentations(
                 self.cfg.train_dataset.gpu_augmentation_list
             )
         )
         self.gpu_val_transform = (
             None
-            if "gpu_augmentation_list" not in self.cfg.val_dataset
+            if "val_dataset" not in self.cfg
+            or "gpu_augmentation_list" not in self.cfg.val_dataset
             else self.get_gpu_augmentations(self.cfg.val_dataset.gpu_augmentation_list)
+        )
+        self.gpu_test_transform = (
+            None
+            if "test_dataset" not in self.cfg
+            or "gpu_augmentation_list" not in self.cfg.test_dataset
+            else self.get_gpu_augmentations(
+                self.cfg.test_dataset.gpu_augmentation_list
+            )
         )
         self.steps_per_epoch = None
 
@@ -467,6 +483,8 @@ class Model(pl.LightningModule):
         )
 
     def val_dataloader(self):
+        if self.val_ds is None:
+            return None
         return DataLoader(
             self.val_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
@@ -479,12 +497,36 @@ class Model(pl.LightningModule):
             else True,
             drop_last=self.cfg.val_dataset.data_loader.drop_last
             if "drop_last" in self.cfg.val_dataset.data_loader
-            else True,
+            else False,
             prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor
             if "prefetch_factor" in self.cfg.val_dataset.data_loader
             else 2,
             persistent_workers=self.cfg.val_dataset.data_loader.persistent_workers
             if "persistent_workers" in self.cfg.val_dataset.data_loader
+            else False,
+        )
+
+    def test_dataloader(self):
+        if self.test_ds is None:
+            return None
+        return DataLoader(
+            self.test_ds,
+            batch_size=self.cfg.hyperparameters.batch_size,
+            shuffle=self.cfg.test_dataset.data_loader.shuffle
+            if "shuffle" in self.cfg.test_dataset.data_loader
+            else False,
+            num_workers=self.cfg.test_dataset.data_loader.num_workers,
+            pin_memory=self.cfg.test_dataset.data_loader.pin_memory
+            if "pin_memory" in self.cfg.test_dataset.data_loader
+            else True,
+            drop_last=self.cfg.test_dataset.data_loader.drop_last
+            if "drop_last" in self.cfg.test_dataset.data_loader
+            else False,
+            prefetch_factor=self.cfg.test_dataset.data_loader.prefetch_factor
+            if "prefetch_factor" in self.cfg.test_dataset.data_loader
+            else 2,
+            persistent_workers=self.cfg.test_dataset.data_loader.persistent_workers
+            if "persistent_workers" in self.cfg.test_dataset.data_loader
             else False,
         )
 
@@ -650,6 +692,56 @@ class Model(pl.LightningModule):
             preds_for_metrics = self._prepare_preds_for_metrics(predicted_masks)
             if preds_for_metrics is not None:
                 metrics = self.val_metrics(preds_for_metrics, masks)
+                self.log_dict(
+                    metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True
+                )
+
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        """Test step — runs once after training via trainer.test()."""
+        images, masks = self._unpack_batch(batch)
+        if self.gpu_test_transform is not None:
+            images = self.gpu_test_transform(images)
+        masks = masks.long()
+        predicted_masks = self(images)
+
+        loss, individual_losses, extra_info = self._compute_loss(predicted_masks, masks)
+
+        self.log(
+            "loss/test",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+
+        if individual_losses:
+            for loss_name, loss_value in individual_losses.items():
+                self.log(
+                    f"losses/test_{loss_name}",
+                    loss_value,
+                    on_step=False,
+                    on_epoch=True,
+                    sync_dist=False,
+                )
+
+        if extra_info:
+            for loss_name, extra_dict in extra_info.items():
+                for key, value in extra_dict.items():
+                    self.log(
+                        f"extra/test_{loss_name}_{key}",
+                        value,
+                        on_step=False,
+                        on_epoch=True,
+                        sync_dist=False,
+                    )
+
+        if hasattr(self, "test_metrics"):
+            preds_for_metrics = self._prepare_preds_for_metrics(predicted_masks)
+            if preds_for_metrics is not None:
+                metrics = self.test_metrics(preds_for_metrics, masks)
                 self.log_dict(
                     metrics, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True
                 )

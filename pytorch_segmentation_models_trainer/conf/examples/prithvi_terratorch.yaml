@@ -108,6 +108,27 @@ val_dataset:
     pin_memory: true
     drop_last: false
 
+# test_dataset is optional. When present, trainer.test() is called automatically
+# after trainer.fit(), logging metrics with the "test/" prefix.
+test_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/test.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width: ${backbone.input_width}
+    - _target_: albumentations.Normalize
+      mean: [0.033, 0.046, 0.045, 0.195, 0.106, 0.071]
+      std:  [0.023, 0.027, 0.031, 0.061, 0.052, 0.044]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 4
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
 metrics:
   - _target_: torchmetrics.JaccardIndex
     task: multiclass

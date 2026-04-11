@@ -83,6 +83,9 @@ def train(cfg: DictConfig):
     model.setup('fit')
     trainer = Trainer(**cfg.pl_trainer, logger=trainer_logger, callbacks=callback_list)
     trainer.fit(model)
+    if "test_dataset" in cfg:
+        logger.info("test_dataset found in config — running trainer.test()")
+        trainer.test(model)
     return trainer
 
 

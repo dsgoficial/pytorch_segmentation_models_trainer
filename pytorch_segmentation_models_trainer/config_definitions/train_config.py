@@ -125,4 +125,5 @@ class TrainConfig:
     pl_trainer: PLTrainerConfig = field(default_factory=PLTrainerConfig)
     train_dataset: DatasetConfig = field(default_factory=DatasetConfig)
     val_dataset: DatasetConfig = field(default_factory=DatasetConfig)
+    test_dataset: DatasetConfig = field(default_factory=DatasetConfig)
     metrics: List[MetricConfig] = MISSING

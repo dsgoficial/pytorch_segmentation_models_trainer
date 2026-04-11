@@ -184,6 +184,17 @@ val_dataset:
     num_workers: 8
     batch_size: ${hyperparameters.batch_size}
 
+# test_dataset is optional. When present, trainer.test() is called after fit,
+# logging all metrics with the "test/" prefix.
+test_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/test.csv
+  root_dir: /data
+  data_loader:
+    shuffle: false
+    num_workers: 8
+    batch_size: ${hyperparameters.batch_size}
+
 # Trainer Configuration
 pl_trainer:
   max_epochs: ${hyperparameters.epochs}
