@@ -48,3 +48,49 @@ class Test_Train(CustomTestCase):
 
         mock_trainer_instance.fit.assert_called_once()
         self.assertIs(result, mock_trainer_instance)
+
+    @patch("pytorch_segmentation_models_trainer.train.Trainer")
+    @patch.object(Model, "setup")
+    def test_trainer_test_called_when_test_dataset_present(
+        self, mock_setup, MockTrainer
+    ) -> None:
+        """trainer.test() must be called exactly once when test_dataset is in config."""
+        mock_trainer_instance = MagicMock(spec=pl.Trainer)
+        MockTrainer.return_value = mock_trainer_instance
+
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_with_test.yaml",
+                overrides=[
+                    "train_dataset.input_csv_path=" + self.csv_ds_file,
+                    "val_dataset.input_csv_path=" + self.csv_ds_file,
+                    "test_dataset.input_csv_path=" + self.csv_ds_file,
+                ],
+            )
+            result = train(cfg)
+
+        mock_trainer_instance.fit.assert_called_once()
+        mock_trainer_instance.test.assert_called_once()
+        self.assertIs(result, mock_trainer_instance)
+
+    @patch("pytorch_segmentation_models_trainer.train.Trainer")
+    @patch.object(Model, "setup")
+    def test_trainer_test_not_called_when_test_dataset_absent(
+        self, mock_setup, MockTrainer
+    ) -> None:
+        """trainer.test() must NOT be called when test_dataset is absent from config."""
+        mock_trainer_instance = MagicMock(spec=pl.Trainer)
+        MockTrainer.return_value = mock_trainer_instance
+
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment.yaml",
+                overrides=[
+                    "train_dataset.input_csv_path=" + self.csv_ds_file,
+                    "val_dataset.input_csv_path=" + self.csv_ds_file,
+                ],
+            )
+            result = train(cfg)
+
+        mock_trainer_instance.fit.assert_called_once()
+        mock_trainer_instance.test.assert_not_called()

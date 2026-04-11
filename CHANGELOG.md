@@ -1,5 +1,10 @@
 # Unreleased
 
+- Added `test_dataset` support with `test_step()`, `test_dataloader()`, and `test_metrics` (prefixed `test/`) in `Model` and `FrameFieldSegmentationPLModel`. `trainer.test()` is now called automatically after `trainer.fit()` when `test_dataset` is present in the config. This completes the three-way dataset split: `train_dataset` → training loop; `val_dataset` → per-epoch monitoring during fit; `test_dataset` → final held-out evaluation after fit.
+- Added `test_dataset` field to `TrainConfig` dataclass and `test_dataset` block to all example YAML configs (`smp_mit_b2.yaml`, `segformer_hf.yaml`, `segformer_lora.yaml`, `smp_tu_convnext.yaml`, `vit_linear_probe.yaml`, `prithvi_terratorch.yaml`).
+- Fixed bug in `Model.__init__`: `gpu_val_transform` and `gpu_train_transform` were accessed via `cfg.val_dataset`/`cfg.train_dataset` without checking if those keys exist, causing `AttributeError` when the corresponding dataset config was omitted.
+- Fixed `val_dataloader()` to return `None` gracefully when `val_ds` is `None` (i.e. `val_dataset` absent from config), allowing training-only runs without a validation loop.
+- Removed the orphan `set_test_dataset()` method from `FrameFieldSegmentationPLModel` (superseded by the new `test_ds` attribute set in `Model.__init__`).
 - Added `SegmentationDatasetFromFolder`: a new dataset class that discovers image/mask pairs recursively from two root folders, without requiring a CSV file. Matching is done by relative subfolder path and file stem. Supports all parameters of `SegmentationDataset` (augmentations, rasterio, band selection, `image_dtype`). Raises `ValueError` when no valid pairs are found.
 - `SegmentationDataset.__init__` now accepts an optional `df` parameter (pre-built `pd.DataFrame`) in addition to `input_csv_path`, enabling programmatic dataset creation without a CSV file on disk. Fully backwards-compatible.
 

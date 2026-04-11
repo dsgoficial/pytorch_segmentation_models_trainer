@@ -33,9 +33,11 @@ Model(cfg, inference_mode=False)
 | `get_loss_function` | `() -> Union[nn.Module, MultiLoss]` | Resolves the loss function using three dispatch paths (see below) |
 | `training_step` | `(batch, batch_idx) -> Tensor` | Unpacks `batch` as `(images, masks)`, runs forward pass, computes loss (simple or compound), logs `loss/train` and individual component losses |
 | `validation_step` | `(batch, batch_idx) -> Tensor` | Same as `training_step` but logs `loss/val`; also logs `val/` metrics if `cfg.metrics` is configured |
+| `test_step` | `(batch, batch_idx) -> Tensor` | Runs after training via `trainer.test()`; logs `loss/test` and `test/` metrics. Applies `gpu_test_transform` if configured |
 | `configure_optimizers` | `() -> Tuple[List, List]` | Builds optimizer from `cfg.optimizer`; builds scheduler list from `cfg.scheduler_list`. Automatically computes `steps_per_epoch` for `OneCycleLR` by reading the training CSV |
 | `train_dataloader` | `() -> DataLoader` | Creates `DataLoader` for `train_ds` using `cfg.hyperparameters.batch_size` and `cfg.train_dataset.data_loader` settings |
-| `val_dataloader` | `() -> DataLoader` | Creates `DataLoader` for `val_ds` using `cfg.hyperparameters.batch_size` and `cfg.val_dataset.data_loader` settings |
+| `val_dataloader` | `() -> Optional[DataLoader]` | Creates `DataLoader` for `val_ds`, or returns `None` if `val_dataset` is absent from the config |
+| `test_dataloader` | `() -> Optional[DataLoader]` | Creates `DataLoader` for `test_ds`, or returns `None` if `test_dataset` is absent from the config |
 | `forward` | `(x) -> Tensor` | Delegates to `self.model(x)` |
 | `predict_step` | `(batch, batch_idx, dataloader_idx=0) -> Tensor` | Runs `self(batch)` for inference |
 | `set_encoder_trainable` | `(trainable=False) -> None` | Freezes or unfreezes the `model.encoder` parameters |
@@ -50,14 +52,15 @@ Model(cfg, inference_mode=False)
 | `loss_params.multi_loss` | Conditional | Legacy multi-loss config (medium priority) |
 | `optimizer` | Yes | Hydra target for the optimizer |
 | `scheduler_list` | No | List of scheduler configs; each entry has a `scheduler` key and Lightning interval/frequency keys |
-| `hyperparameters.batch_size` | Yes | Batch size for both train and val dataloaders |
+| `hyperparameters.batch_size` | Yes | Batch size for train, val, and test dataloaders |
 | `hyperparameters.epochs` | No | Used when auto-computing `steps_per_epoch` |
 | `pl_trainer` | No | Passed to the Lightning `Trainer`; also checked for `devices` and `accumulate_grad_batches` |
 | `callbacks` | No | List of Hydra-instantiated callbacks |
-| `metrics` | No | List of `torchmetrics` metrics to compute; auto-prefixed `train/` or `val/` |
+| `metrics` | No | List of `torchmetrics` metrics to compute; auto-prefixed `train/`, `val/`, or `test/` |
 | `logger` | No | Logger configuration |
 | `train_dataset` | Yes (unless `inference_mode`) | Dataset config including `input_csv_path` and `data_loader` sub-config |
-| `val_dataset` | Yes (unless `inference_mode`) | Dataset config for validation |
+| `val_dataset` | No | Dataset config for per-epoch validation during `fit`. When absent, `val_dataloader()` returns `None` and Lightning skips the validation loop |
+| `test_dataset` | No | Dataset config for final held-out evaluation. When present, `trainer.test()` is called automatically after `fit`; metrics are logged with `test/` prefix |
 | `replace_model_activation` | No | Dict with `old_activation` and `new_activation` for activation replacement |
 
 ---
@@ -93,8 +96,9 @@ Additional configuration keys beyond `Model`:
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `training_step` | `(batch, batch_idx) -> Tensor` | Runs forward pass, computes `MultiLoss`, logs `loss/train` and all component losses under `losses/train_{name}` |
-| `validation_step` | `(batch, batch_idx) -> Tensor` | Same as training but logs `loss/val` and `losses/val_{name}` |
+| `training_step` | `(batch, batch_idx) -> Tensor` | Runs forward pass, computes `MultiLoss`, logs `loss/train` and all component losses under `losses/train_{name}`; also logs `iou/train_IoU_{threshold}` |
+| `validation_step` | `(batch, batch_idx) -> Tensor` | Same as training but logs `loss/val`, `losses/val_{name}`, and `iou/val_IoU_{threshold}` |
+| `test_step` | `(batch, batch_idx) -> Tensor` | Runs after training via `trainer.test()`; logs `loss/test`, `losses/test_{name}`, and `iou/test_IoU_{threshold}` |
 | `on_train_start` | `() -> None` | Triggers loss normalization computation via `_compute_loss_normalization()` |
 
 Model output dict keys:

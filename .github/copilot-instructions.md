@@ -32,6 +32,7 @@ Project-specific conventions (do not assume defaults)
 - Hydra config composition is heavily used — configs frequently refer to `_target_` keys to instantiate classes. When editing code that is constructed by config, check `config_definitions/*` and `conf/` for expected keys and shapes.
 - Callbacks are listed in config and instantiated dynamically; adding a callback typically requires adding it to the config rather than hard-coding in `train.py`.
 - The framework supports multiple modes (train, predict, convert-dataset, evaluate-experiments). Add new modes by extending `main.py`'s mode dispatcher.
+- **Dataset splits**: three dataset keys are supported. `train_dataset` feeds `training_step` (gradient updates); `val_dataset` feeds `validation_step` (called at the end of every epoch during `trainer.fit()`, used for early stopping and LR scheduling); `test_dataset` feeds `test_step` (called once via `trainer.test()` after `trainer.fit()`, used for final held-out evaluation). All three are optional — absent splits return `None` from their respective dataloader methods and are silently skipped by Lightning. Metrics are logged with `train/`, `val/`, and `test/` prefixes respectively.
 
 Important integration points & dependencies
 - PyTorch Lightning Trainer is created with `cfg.pl_trainer` in `train.py` — changes to Lightning arguments should be reflected in the config (`conf/` files).
