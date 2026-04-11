@@ -1,3 +1,8 @@
+# Unreleased
+
+- Added `SegmentationDatasetFromFolder`: a new dataset class that discovers image/mask pairs recursively from two root folders, without requiring a CSV file. Matching is done by relative subfolder path and file stem. Supports all parameters of `SegmentationDataset` (augmentations, rasterio, band selection, `image_dtype`). Raises `ValueError` when no valid pairs are found.
+- `SegmentationDataset.__init__` now accepts an optional `df` parameter (pre-built `pd.DataFrame`) in addition to `input_csv_path`, enabling programmatic dataset creation without a CSV file on disk. Fully backwards-compatible.
+
 # Version 1.0.1
 
 - Bug fix on prediction in a multi gpu environment;

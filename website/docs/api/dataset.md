@@ -23,6 +23,7 @@ torch.utils.data.Dataset
     ├── ImageDataset
     │   └── TiledInferenceImageDataset
     ├── SegmentationDataset
+    │   ├── SegmentationDatasetFromFolder
     │   └── FrameFieldSegmentationDataset
     ├── ObjectDetectionDataset
     │   └── InstanceSegmentationDataset
@@ -108,7 +109,8 @@ Semantic segmentation dataset. Loads image-mask pairs and supports both PIL (RGB
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `input_csv_path` | `Path` | **required** | Path to the CSV file. |
+| `input_csv_path` | `Path` | `None` | Path to the CSV file. Mutually exclusive with `df`; at least one must be provided. |
+| `df` | `pd.DataFrame` | `None` | Pre-built DataFrame with `image` and `mask` columns. Allows creating the dataset without a CSV file on disk (e.g. via `SegmentationDatasetFromFolder`). |
 | `root_dir` | `Any` | `None` | Root directory for path resolution. |
 | `augmentation_list` | `Any` | `None` | Albumentations augmentation pipeline. |
 | `data_loader` | `Any` | `None` | DataLoader sub-configuration. |
@@ -129,6 +131,85 @@ Semantic segmentation dataset. Loads image-mask pairs and supports both PIL (RGB
 |-----|------|-------------|
 | `"image"` | `torch.Tensor` (C, H, W) | Float tensor. When no transform is set, automatically normalized: `uint8` → `/255`, `uint16` → `/65535`, `float32`/`native` → no division. |
 | `"mask"` | `torch.Tensor` (H, W) | Long tensor of class labels. Binary (0/1) when `n_classes == 2`. |
+
+---
+
+## `SegmentationDatasetFromFolder`
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.dataset import SegmentationDatasetFromFolder
+```
+
+Extends `SegmentationDataset` to discover image/mask pairs **recursively from two root folders**, without requiring a CSV file on disk. Matching is performed by **relative subfolder path** and **file stem** (name without extension): only files present in both folders, inside the same subfolder and with the same filename, are included in the dataset.
+
+### Expected Folder Structure
+
+```
+images_root/
+    area_a/
+        tile_001.tif
+        tile_002.tif
+    area_b/
+        tile_003.tif
+
+masks_root/
+    area_a/
+        tile_001.tif   ← paired with images_root/area_a/tile_001.tif
+        tile_002.tif
+    area_b/
+        tile_003.tif
+```
+
+Only files with a matching `(subfolder, stem)` key in both trees are included. Files present in only one folder are silently ignored.
+
+### Constructor Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `image_folder` | `Union[str, Path]` | **required** | Root folder containing the images. |
+| `mask_folder` | `Union[str, Path]` | **required** | Root folder containing the masks. |
+| `image_extension` | `str` | `".tif"` | File extension for images. The leading dot is optional and normalized internally (e.g. `"tif"` and `".tif"` are equivalent). |
+| `mask_extension` | `Optional[str]` | `None` | File extension for masks. When `None`, uses the same value as `image_extension`. |
+| `augmentation_list` | `Any` | `None` | Albumentations augmentation pipeline. |
+| `data_loader` | `Any` | `None` | DataLoader sub-configuration. |
+| `n_classes` | `int` | `2` | Number of segmentation classes. When `2`, masks are binarized (`> 0`). |
+| `selected_bands` | `Optional[List[int]]` | `None` | 1-based band indices to load via rasterio. `None` loads all bands. |
+| `use_rasterio` | `bool` | `False` | Forces rasterio for image loading. |
+| `image_dtype` | `str` | `"uint8"` | Data type for rasterio-loaded images. See `SegmentationDataset`. |
+| `reset_augmentation_function` | `bool` | `False` | Deep-copy the transform to prevent Albumentations memory leaks. |
+
+### Raises
+
+| Exception | When |
+|-----------|------|
+| `ValueError` | No matching image/mask pairs are found (wrong extension, mismatched subfolder structure, etc.). |
+
+### Instance Attributes
+
+After construction the following extra attributes are available:
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `image_folder` | `Path` | Resolved root folder for images. |
+| `mask_folder` | `Path` | Resolved root folder for masks. |
+| `image_extension` | `str` | Normalized image extension (with leading dot). |
+| `mask_extension` | `str` | Normalized mask extension (with leading dot). |
+
+### `__getitem__` Returns
+
+Same as `SegmentationDataset`:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `"image"` | `torch.Tensor` (C, H, W), float32 | Normalized image tensor. |
+| `"mask"` | `torch.Tensor` (H, W), int64 | Class-index mask. |
+
+### Static Helper Methods
+
+| Method | Description |
+|--------|-------------|
+| `_normalize_extension(ext)` | Ensures the extension starts with a dot. |
+| `_build_dataframe(image_folder, mask_folder, image_extension, mask_extension)` | Scans both folders recursively, matches pairs, and returns a `pd.DataFrame` with `image` and `mask` columns. Raises `ValueError` if no pairs are found. |
 
 ---
 

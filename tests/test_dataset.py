@@ -44,11 +44,12 @@ from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     ObjectDetectionDataset,
     PolygonRNNDataset,
     SegmentationDataset,
+    SegmentationDatasetFromFolder,
     load_augmentation_object,
     ModPolyMapperDataset,
 )
 
-from tests.utils import CustomTestCase
+from tests.utils import BasicTestCase, CustomTestCase
 
 current_dir = os.path.dirname(__file__)
 frame_field_root_dir = os.path.join(
@@ -58,6 +59,7 @@ polygon_rnn_root_dir = os.path.join(
     current_dir, "testing_data", "data", "polygon_rnn_data"
 )
 detection_root_dir = os.path.join(current_dir, "testing_data", "data", "detection_data")
+folder_dataset_root_dir = os.path.join(current_dir, "testing_data", "data", "folder_dataset")
 
 
 class Test_Dataset(CustomTestCase):
@@ -678,3 +680,184 @@ class Test_Dataset(CustomTestCase):
         self.assertEqual(targets[0]["x2"].shape, (2, 58, 787))
         self.assertEqual(targets[0]["x3"].shape, (2, 58, 787))
         self.assertEqual(targets[0]["ta"].shape, (2, 58))
+
+
+class Test_SegmentationDatasetFromFolder(BasicTestCase):
+    """Testes unitários para SegmentationDatasetFromFolder."""
+
+    # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def image_folder(self):
+        return os.path.join(folder_dataset_root_dir, "images")
+
+    @property
+    def mask_folder(self):
+        return os.path.join(folder_dataset_root_dir, "masks")
+
+    # ------------------------------------------------------------------
+    # tests
+    # ------------------------------------------------------------------
+
+    def test_create_instance_and_length(self):
+        """Instância criada corretamente e len() reflete apenas os pares válidos."""
+        ds = SegmentationDatasetFromFolder(
+            image_folder=self.image_folder,
+            mask_folder=self.mask_folder,
+            image_extension=".png",
+        )
+        # Pares válidos: area_a/image1, area_a/image2, area_b/image3  →  3
+        self.assertEqual(len(ds), 3)
+
+    def test_extension_without_dot_is_accepted(self):
+        """Extensão sem ponto inicial ('png') deve funcionar igual a '.png'."""
+        ds_with_dot = SegmentationDatasetFromFolder(
+            image_folder=self.image_folder,
+            mask_folder=self.mask_folder,
+            image_extension=".png",
+        )
+        ds_without_dot = SegmentationDatasetFromFolder(
+            image_folder=self.image_folder,
+            mask_folder=self.mask_folder,
+            image_extension="png",
+        )
+        self.assertEqual(len(ds_with_dot), len(ds_without_dot))
+
+    def test_getitem_returns_image_and_mask_tensors(self):
+        """__getitem__ retorna dict com 'image' (float32, CHW) e 'mask' (int64, HW)."""
+        ds = SegmentationDatasetFromFolder(
+            image_folder=self.image_folder,
+            mask_folder=self.mask_folder,
+            image_extension=".png",
+        )
+        item = ds[0]
+        self.assertIn("image", item)
+        self.assertIn("mask", item)
+
+        image = item["image"]
+        mask = item["mask"]
+
+        # image: float32, shape (C, H, W)
+        self.assertTrue(torch.is_tensor(image))
+        self.assertEqual(image.dtype, torch.float32)
+        self.assertEqual(image.ndim, 3)
+
+        # mask: int64, shape (H, W)
+        self.assertTrue(torch.is_tensor(mask))
+        self.assertEqual(mask.dtype, torch.int64)
+        self.assertEqual(mask.ndim, 2)
+
+        # dimensões espaciais devem coincidir
+        self.assertEqual(image.shape[1], mask.shape[0])
+        self.assertEqual(image.shape[2], mask.shape[1])
+
+    def test_matching_excludes_orphan_files(self):
+        """Arquivos sem correspondente (subpasta ou nome diferentes) não entram no dataset."""
+        ds = SegmentationDatasetFromFolder(
+            image_folder=self.image_folder,
+            mask_folder=self.mask_folder,
+            image_extension=".png",
+        )
+        # area_b/image4.png existe só em images/  →  não deve aparecer
+        # area_c/image5.png existe só em masks/   →  não deve aparecer
+        image_paths = [ds.df.iloc[i]["image"] for i in range(len(ds))]
+        mask_paths  = [ds.df.iloc[i]["mask"]  for i in range(len(ds))]
+
+        self.assertFalse(any("image4" in p for p in image_paths))
+        self.assertFalse(any("image5" in p for p in mask_paths))
+
+    def test_matching_preserves_subfolder_structure(self):
+        """Cada par no DataFrame deve ter image e mask na mesma subpasta relativa."""
+        from pathlib import Path
+
+        ds = SegmentationDatasetFromFolder(
+            image_folder=self.image_folder,
+            mask_folder=self.mask_folder,
+            image_extension=".png",
+        )
+        img_root = Path(self.image_folder)
+        msk_root = Path(self.mask_folder)
+
+        for i in range(len(ds)):
+            img_path = Path(ds.df.iloc[i]["image"])
+            msk_path = Path(ds.df.iloc[i]["mask"])
+            img_rel_parent = img_path.parent.relative_to(img_root)
+            msk_rel_parent = msk_path.parent.relative_to(msk_root)
+            self.assertEqual(img_rel_parent, msk_rel_parent)
+            self.assertEqual(img_path.stem, msk_path.stem)
+
+    def test_different_mask_extension(self):
+        """Aceita extensão de máscara diferente da imagem."""
+        # Cria pasta temporária com máscaras renomeadas para .tif
+        import shutil
+        from pathlib import Path
+
+        tmp = self.make_temp_dir()
+        src_masks = Path(self.mask_folder)
+        dst_masks = Path(tmp) / "masks_tif"
+
+        for p in src_masks.rglob("*.png"):
+            rel = p.relative_to(src_masks)
+            dst = dst_masks / rel.parent / (rel.stem + ".tif")
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(str(p), str(dst))
+
+        ds = SegmentationDatasetFromFolder(
+            image_folder=self.image_folder,
+            mask_folder=str(dst_masks),
+            image_extension=".png",
+            mask_extension=".tif",
+        )
+        self.assertEqual(len(ds), 3)
+
+    def test_no_matching_pairs_raises_value_error(self):
+        """ValueError quando nenhum par é encontrado (extensão incorreta)."""
+        with self.assertRaises(ValueError):
+            SegmentationDatasetFromFolder(
+                image_folder=self.image_folder,
+                mask_folder=self.mask_folder,
+                image_extension=".xyz",  # extensão inexistente
+            )
+
+    def test_dataframe_is_sorted_reproducibly(self):
+        """Duas instâncias com as mesmas pastas produzem o mesmo DataFrame."""
+        ds1 = SegmentationDatasetFromFolder(
+            image_folder=self.image_folder,
+            mask_folder=self.mask_folder,
+            image_extension=".png",
+        )
+        ds2 = SegmentationDatasetFromFolder(
+            image_folder=self.image_folder,
+            mask_folder=self.mask_folder,
+            image_extension=".png",
+        )
+        self.assertTrue(ds1.df.equals(ds2.df))
+
+    def test_folder_attributes_stored(self):
+        """image_folder, mask_folder e extensões ficam disponíveis como atributos."""
+        from pathlib import Path
+
+        ds = SegmentationDatasetFromFolder(
+            image_folder=self.image_folder,
+            mask_folder=self.mask_folder,
+            image_extension="png",
+            mask_extension=".png",
+        )
+        self.assertEqual(ds.image_folder, Path(self.image_folder))
+        self.assertEqual(ds.mask_folder, Path(self.mask_folder))
+        self.assertEqual(ds.image_extension, ".png")
+        self.assertEqual(ds.mask_extension, ".png")
+
+    def test_all_items_loadable(self):
+        """Todos os itens do dataset devem carregar sem erro."""
+        ds = SegmentationDatasetFromFolder(
+            image_folder=self.image_folder,
+            mask_folder=self.mask_folder,
+            image_extension=".png",
+        )
+        for i in range(len(ds)):
+            item = ds[i]
+            self.assertIn("image", item)
+            self.assertIn("mask", item)
