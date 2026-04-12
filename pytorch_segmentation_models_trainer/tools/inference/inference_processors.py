@@ -30,7 +30,11 @@ from pytorch_segmentation_models_trainer.tools.detection.bbox_handler import (
 from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import (
     TemplatePolygonizerProcessor,
 )
-from typing import Any, Dict, List, Optional, Union
+from pytorch_segmentation_models_trainer.tools.tta.tta import (
+    ROTATION_AUGMENTATIONS as _DEFAULT_TTA_AUGMENTATIONS,
+    apply_tta,
+)
+from typing import Any, Dict, FrozenSet, List, Optional, Union
 
 import albumentations as A
 import cv2
@@ -66,6 +70,8 @@ class AbstractInferenceProcessor(ABC):
         normalize_max_value: Optional[float] = None,
         config=None,
         group_output_by_image_basename=False,
+        use_tta: bool = False,
+        tta_augmentations: Optional[List[str]] = None,
     ):
         self.model = model
         self.device = device
@@ -83,6 +89,15 @@ class AbstractInferenceProcessor(ABC):
         self.normalize_mean = normalize_mean
         self.normalize_std = normalize_std
         self.normalize_max_value = normalize_max_value
+        self.use_tta = use_tta
+        self.tta_augmentations = (
+            tta_augmentations
+            if tta_augmentations is not None
+            else list(_DEFAULT_TTA_AUGMENTATIONS)
+        )
+        # Keys in model output that cannot be spatially de-augmented.
+        # Subclasses override this when needed (e.g. frame-field crossfield).
+        self._tta_skip_keys: FrozenSet[str] = frozenset()
 
     def read_image_and_profile(self, image_path, restore_geo_transform=True):
         with rasterio.open(image_path, "r") as raster_ds:
@@ -194,6 +209,8 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
         normalize_max_value: Optional[float] = None,
         config=None,
         group_output_by_image_basename=False,
+        use_tta: bool = False,
+        tta_augmentations: Optional[List[str]] = None,
     ):
         super(SingleImageInfereceProcessor, self).__init__(
             model,
@@ -209,6 +226,8 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
             normalize_max_value=normalize_max_value,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
+            use_tta=use_tta,
+            tta_augmentations=tta_augmentations,
         )
 
     def make_inference(
@@ -271,8 +290,20 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
                 prefetch_factor=2,
             ):
                 tiles_batch = tiles_batch.float().to(self.device)
-                with autocast():
-                    pred_batch = self.model(tiles_batch)
+                if self.use_tta:
+                    def _model_fn(x):
+                        with autocast():
+                            return self.model(x)
+
+                    pred_batch = apply_tta(
+                        model_fn=_model_fn,
+                        batch=tiles_batch,
+                        augmentations=self.tta_augmentations,
+                        skip_keys=self._tta_skip_keys,
+                    )
+                else:
+                    with autocast():
+                        pred_batch = self.model(tiles_batch)
                 self.integrate_batch(pred_batch, coords_batch, merger_dict)
 
     def integrate_batch(self, pred_batch, coords_batch, merger_dict):
@@ -305,6 +336,8 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         normalize_max_value: Optional[float] = None,
         config=None,
         group_output_by_image_basename=False,
+        use_tta: bool = False,
+        tta_augmentations: Optional[List[str]] = None,
     ):
         super().__init__(
             model=model,
@@ -320,6 +353,8 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
             normalize_max_value=normalize_max_value,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
+            use_tta=use_tta,
+            tta_augmentations=tta_augmentations,
         )
         self.num_classes = num_classes
 
@@ -383,6 +418,8 @@ class SingleImageFromFrameFieldProcessor(SingleImageInfereceProcessor):
         normalize_max_value: Optional[float] = None,
         config=None,
         group_output_by_image_basename=False,
+        use_tta: bool = False,
+        tta_augmentations: Optional[List[str]] = None,
     ):
         super(SingleImageFromFrameFieldProcessor, self).__init__(
             model,
@@ -398,7 +435,14 @@ class SingleImageFromFrameFieldProcessor(SingleImageInfereceProcessor):
             normalize_max_value=normalize_max_value,
             config=config,
             group_output_by_image_basename=group_output_by_image_basename,
+            use_tta=use_tta,
+            tta_augmentations=tta_augmentations,
         )
+        # The crossfield tensor encodes tangent-field angles whose values must
+        # also be rotated when the spatial axes are rotated.  That transform is
+        # non-trivial, so we skip crossfield de-augmentation and take it from
+        # the identity (rot0) pass instead.
+        self._tta_skip_keys: FrozenSet[str] = frozenset({"crossfield"})
 
     def get_merger_dict(self, tiler: ImageSlicer):
         return {

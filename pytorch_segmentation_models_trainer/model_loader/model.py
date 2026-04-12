@@ -27,12 +27,16 @@ from hydra.utils import instantiate
 
 from torch.utils.data import DataLoader
 
-from typing import Any, Union, Dict, Tuple
+from typing import Any, List, Optional, Union, Dict, Tuple
 from pytorch_segmentation_models_trainer.utils.model_utils import replace_activation
 from pytorch_segmentation_models_trainer.custom_losses.base_loss import MultiLoss
 from pytorch_segmentation_models_trainer.fine_tuning.lora_utils import (
     apply_fine_tuning_strategy,
     is_peft_model,
+)
+from pytorch_segmentation_models_trainer.tools.tta.tta import (
+    ROTATION_AUGMENTATIONS as _DEFAULT_TTA_AUGMENTATIONS,
+    apply_tta,
 )
 
 logger = logging.getLogger(__name__)
@@ -698,13 +702,67 @@ class Model(pl.LightningModule):
 
         return loss
 
+    # ------------------------------------------------------------------
+    # TTA helpers
+    # ------------------------------------------------------------------
+
+    def _get_tta_augmentations(self) -> Optional[List[str]]:
+        """Return the TTA augmentation list from config, or None if TTA is off.
+
+        Reads ``cfg.use_tta`` (bool) and ``cfg.tta_augmentations`` (list of
+        strings).  Falls back to the four standard rotations when
+        ``tta_augmentations`` is not set.
+
+        YAML example::
+
+            use_tta: true
+            tta_augmentations:
+              - rot0          # original image
+              - rot90         # 90° counter-clockwise
+              - rot180        # 180°
+              - rot270        # 270° counter-clockwise
+              - flip_h        # horizontal flip
+              - flip_v        # vertical flip
+              - flip_h_rot90  # horizontal flip + 90° CCW
+              - flip_v_rot90  # vertical flip + 90° CCW
+        """
+        use_tta = getattr(self.cfg, "use_tta", False)
+        if not use_tta:
+            return None
+        tta_augmentations = getattr(self.cfg, "tta_augmentations", None)
+        if tta_augmentations is None:
+            return list(_DEFAULT_TTA_AUGMENTATIONS)
+        return list(tta_augmentations)
+
+    def _predict_with_tta(self, images: torch.Tensor) -> torch.Tensor:
+        """Run the model with TTA and return the averaged prediction.
+
+        For each augmentation in ``cfg.tta_augmentations``:
+
+        1. Apply the augmentation to the image batch.
+        2. Run the model forward pass.
+        3. Apply the inverse augmentation to the prediction.
+
+        Returns the element-wise mean of all de-augmented predictions.
+        """
+        augmentations = self._get_tta_augmentations()
+        return apply_tta(
+            model_fn=self,
+            batch=images,
+            augmentations=augmentations,
+        )
+
     def test_step(self, batch, batch_idx):
         """Test step — runs once after training via trainer.test()."""
         images, masks = self._unpack_batch(batch)
         if self.gpu_test_transform is not None:
             images = self.gpu_test_transform(images)
         masks = masks.long()
-        predicted_masks = self(images)
+        tta_augmentations = self._get_tta_augmentations()
+        if tta_augmentations is not None:
+            predicted_masks = self._predict_with_tta(images)
+        else:
+            predicted_masks = self(images)
 
         loss, individual_losses, extra_info = self._compute_loss(predicted_masks, masks)
 

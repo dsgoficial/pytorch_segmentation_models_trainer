@@ -25,8 +25,8 @@ from hydra.core.config_store import ConfigStore
 @dataclass
 class InferenceImageReaderConfig:
     """
-    Configuração do leitor de imagens para inferência.
-    Usada pelo predict.py via get_images().
+    Image reader configuration for inference.
+    Used by predict.py via get_images().
     """
 
     _target_: str = MISSING
@@ -39,34 +39,99 @@ class InferenceImageReaderConfig:
 @dataclass
 class InferenceProcessorConfig:
     """
-    Configuração do processador de inferência single-image.
-    Usada pelo predict.py via instantiate_inference_processor().
+    Single-image inference processor configuration.
+    Used by predict.py via instantiate_inference_processor().
 
-    Nota: model, polygonizer, export_strategy, device, batch_size e mask_bands
-    são injetados automaticamente pelo código, não precisam estar no YAML.
+    Note: model, polygonizer, export_strategy, device, batch_size and
+    mask_bands are injected automatically by the calling code and do not
+    need to appear in the YAML.
+
+    Test Time Augmentation (TTA)
+    ----------------------------
+    When ``use_tta: true``, each tile is run through the model once per
+    augmentation listed in ``tta_augmentations``.  The predictions are
+    de-augmented (reversed) and averaged before being handed to the
+    TileMerger.
+
+    Available augmentations (D4 dihedral group — 8 symmetries of a square).
+    Use the names below literally in the ``tta_augmentations`` field:
+
+    +------------------+-----------------------------------------------------+
+    | Name             | Transformation                                      |
+    +==================+=====================================================+
+    | ``rot0``         | Identity — original image, no transformation        |
+    | ``rot90``        | 90° counter-clockwise rotation                      |
+    | ``rot180``       | 180° rotation                                       |
+    | ``rot270``       | 270° counter-clockwise rotation                     |
+    | ``flip_h``       | Horizontal flip (left-right mirror)                 |
+    | ``flip_v``       | Vertical flip (up-down mirror)                      |
+    | ``flip_h_rot90`` | Horizontal flip + 90° counter-clockwise rotation    |
+    | ``flip_v_rot90`` | Vertical flip + 90° counter-clockwise rotation      |
+    +------------------+-----------------------------------------------------+
+
+    The default is the four 90° rotations (``rot0``, ``rot90``, ``rot180``,
+    ``rot270``).  List all 8 names to use the full D4 group.
+
+    YAML example — 4 rotations (default)::
+
+        inference_processor:
+          _target_: ...SingleImageInfereceProcessor
+          model_input_shape: [448, 448]
+          step_shape: [224, 224]
+          use_tta: true
+          tta_augmentations:
+            - rot0     # original image (identity)
+            - rot90    # 90° counter-clockwise rotation
+            - rot180   # 180° rotation
+            - rot270   # 270° counter-clockwise rotation
+
+    YAML example — full D4 group (8 augmentations)::
+
+        inference_processor:
+          use_tta: true
+          tta_augmentations:
+            - rot0          # original image (identity)
+            - rot90         # 90° counter-clockwise rotation
+            - rot180        # 180° rotation
+            - rot270        # 270° counter-clockwise rotation
+            - flip_h        # horizontal flip (left-right mirror)
+            - flip_v        # vertical flip (up-down mirror)
+            - flip_h_rot90  # horizontal flip + 90° counter-clockwise rotation
+            - flip_v_rot90  # vertical flip + 90° counter-clockwise rotation
     """
 
     _target_: str = MISSING
     model_input_shape: Optional[List[int]] = None
     step_shape: Optional[List[int]] = None
+    use_tta: bool = False
+    # Default: four 90° rotations.
+    # Add flip_h, flip_v, flip_h_rot90, flip_v_rot90 for the full D4 group.
+    tta_augmentations: List[str] = field(
+        default_factory=lambda: [
+            "rot0",    # original image (identity)
+            "rot90",   # 90° counter-clockwise rotation
+            "rot180",  # 180° rotation
+            "rot270",  # 270° counter-clockwise rotation
+        ]
+    )
 
 
 @dataclass
 class ExportStrategyConfig:
     """
-    Configuração da estratégia de exportação de inferência.
-    Usada pelo predict.py (opcional).
+    Inference export strategy configuration.
+    Used by predict.py (optional).
     """
 
     _target_: str = MISSING
-    # Campos dependem do tipo de estratégia
+    # Remaining fields depend on the concrete strategy type
 
 
 @dataclass
 class PolygonizerConfig:
     """
-    Configuração do polygonizer.
-    Usada pelo predict.py via instantiate_polygonizer().
+    Polygonizer configuration.
+    Used by predict.py via instantiate_polygonizer().
     """
 
     _target_: str = MISSING
@@ -77,51 +142,67 @@ class PolygonizerConfig:
 @dataclass
 class PredictSingleImageConfig:
     """
-    Configuração completa para predict.py (single image processor).
+    Full configuration for predict.py (single image processor).
 
-    Este config é usado pelo script predict.py que processa imagens
-    uma por vez usando inference_processor.process().
+    This config is used by the predict.py script, which processes images
+    one at a time using inference_processor.process().
 
-    Campos injetados automaticamente pelo código:
-    - inference_processor.model (de checkpoint)
-    - inference_processor.polygonizer (de polygonizer config)
-    - inference_processor.export_strategy (de export_strategy config)
-    - inference_processor.device (de device)
-    - inference_processor.batch_size (de hyperparameters.batch_size)
-    - inference_processor.mask_bands (de seg_params)
+    Fields injected automatically by the code:
+    - inference_processor.model          (from checkpoint)
+    - inference_processor.polygonizer    (from polygonizer config)
+    - inference_processor.export_strategy (from export_strategy config)
+    - inference_processor.device         (from device)
+    - inference_processor.batch_size     (from hyperparameters.batch_size)
+    - inference_processor.mask_bands     (from seg_params)
     """
 
-    # Checkpoint e modelo
+    # Checkpoint and model
     checkpoint_path: str = MISSING
     device: str = "cuda:0"
 
-    # Herda de train config (pl_model, hyperparameters, seg_params)
+    # Inherited from train config (pl_model, hyperparameters, seg_params)
     pl_model: Any = MISSING
     hyperparameters: Any = MISSING
     seg_params: Optional[Any] = None
 
-    # Leitor de imagens
+    # Image reader
     inference_image_reader: InferenceImageReaderConfig = field(
         default_factory=InferenceImageReaderConfig
     )
 
-    # Processador de inferência
+    # Inference processor
     inference_processor: InferenceProcessorConfig = field(
         default_factory=InferenceProcessorConfig
     )
 
-    # Polygonizer (opcional)
+    # Polygonizer (optional)
     polygonizer: Optional[PolygonizerConfig] = None
 
-    # Export strategy (opcional)
+    # Export strategy (optional)
     export_strategy: Optional[ExportStrategyConfig] = None
 
-    # Parâmetros de inferência
+    # Inference parameters
     inference_threshold: float = 0.5
     save_inference: bool = True
 
+    # ── Test Time Augmentation for the model test_step ────────────────────────
+    # When use_tta=True, test_step runs the model under each augmentation listed
+    # below, reverses the transformation, and averages the predictions.
+    # Valid names are the same as in InferenceProcessorConfig.tta_augmentations.
+    use_tta: bool = False
+    # Default: four 90° rotations.
+    # Add flip_h, flip_v, flip_h_rot90, flip_v_rot90 for the full D4 group.
+    tta_augmentations: List[str] = field(
+        default_factory=lambda: [
+            "rot0",    # original image (identity)
+            "rot90",   # 90° counter-clockwise rotation
+            "rot180",  # 180° rotation
+            "rot270",  # 270° counter-clockwise rotation
+        ]
+    )
 
-# Registrar configurações com Hydra
+
+# Register configurations with Hydra
 cs = ConfigStore.instance()
 cs.store(name="predict_single_image_config", node=PredictSingleImageConfig)
 cs.store(name="inference_image_reader", node=InferenceImageReaderConfig)
