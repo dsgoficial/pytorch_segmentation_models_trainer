@@ -19,10 +19,11 @@
  ****
 """
 import bisect
+import gc
 import warnings
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import rasterio
@@ -49,6 +50,13 @@ class RasterPatchDataset(Dataset):
     A leitura efetiva dos pixels é feita sob demanda em ``__getitem__`` usando
     ``rasterio`` windowed read, tornando o dataset adequado para imagens grandes
     (geotiffs de centenas de megabytes).
+
+    **Comportamento para arquivos sem correspondência:**
+
+    - *Imagem sem máscara*: emite ``UserWarning`` e exclui a imagem do dataset.
+    - *Máscara sem imagem*: o ``mask_dir`` é varrido independentemente após o loop
+      principal; cada máscara sem imagem correspondente em ``image_dir`` emite
+      ``UserWarning`` e é ignorada.
 
     Exemplo de estrutura de diretórios esperada::
 
@@ -89,11 +97,25 @@ class RasterPatchDataset(Dataset):
             ``"native"`` (preserva o dtype original sem cast).
             Quando não há augmentação, ``"uint8"`` e ``"uint16"`` são normalizados
             para ``[0, 1]`` automaticamente (divisão por 255 ou 65535).
+            Nota: ao usar ``augmentation_list``, a normalização fica a cargo do
+            Albumentations (ex: ``A.Normalize``, ``A.ToFloat``). O ``image_dtype``
+            afeta apenas o cast do array antes de entrar no pipeline.
+        n_classes (int): Número de classes de segmentação. Quando ``2`` (padrão),
+            as máscaras são binarizadas automaticamente: qualquer valor ``> 0``
+            vira ``1``. Para segmentação multi-classe, passe o número real de classes
+            e os valores de pixel da máscara devem corresponder diretamente aos índices
+            de classe.
+        reset_augmentation_function (bool): Quando ``True``, faz deepcopy do pipeline
+            de augmentação antes de cada chamada e o deleta em seguida, evitando o
+            acúmulo de cache interno do Albumentations em treinos longos que pode levar
+            a crashes por falta de memória. Ativa coleta de lixo a cada 100 itens.
+            ``False`` (padrão) reutiliza o mesmo objeto — mais rápido, recomendado
+            para uso normal.
 
     Raises:
         ValueError: Se ``image_dtype`` não for um dos valores aceitos.
         ValueError: Se ``selected_bands`` contiver valores não positivos.
-        ValueError: Se nenhum par imagem/máscara for encontrado.
+        ValueError: Se nenhum par imagem/máscara válido for encontrado.
 
     Example::
 
@@ -130,6 +152,8 @@ class RasterPatchDataset(Dataset):
         data_loader=None,
         selected_bands: Optional[List[int]] = None,
         image_dtype: str = "uint8",
+        n_classes: int = 2,
+        reset_augmentation_function: bool = False,
     ) -> None:
         super().__init__()
 
@@ -148,10 +172,14 @@ class RasterPatchDataset(Dataset):
         self.stride = stride
         self.image_dtype = image_dtype
         self.selected_bands = selected_bands
+        self.n_classes = n_classes
+        self.reset_augmentation_function = reset_augmentation_function
         self.data_loader = data_loader
 
         image_dir = Path(image_dir)
         mask_dir = Path(mask_dir)
+        self.image_dir = image_dir
+        self.mask_dir = mask_dir
 
         image_extension = self._normalize_extension(extension)
         mask_ext = (
@@ -159,6 +187,8 @@ class RasterPatchDataset(Dataset):
             if mask_extension is None
             else self._normalize_extension(mask_extension)
         )
+        self.image_extension = image_extension
+        self.mask_extension = mask_ext
 
         self.transform = (
             None
@@ -172,6 +202,7 @@ class RasterPatchDataset(Dataset):
         self._image_info: List[Dict[str, Any]] = []
         self._cumulative: List[int] = [0]  # cumulative patch counts per image
         self._total_patches: int = 0
+        matched_mask_paths: set = set()
 
         for img_path in image_paths:
             mask_path = mask_dir / img_path.relative_to(image_dir).with_suffix(mask_ext)
@@ -208,6 +239,7 @@ class RasterPatchDataset(Dataset):
                     "patches_per_col": patches_per_col,
                 }
             )
+            matched_mask_paths.add(mask_path)
             self._total_patches += n_patches
             self._cumulative.append(self._total_patches)
 
@@ -216,6 +248,18 @@ class RasterPatchDataset(Dataset):
                 f"Nenhum par imagem/máscara válido encontrado em "
                 f"'{image_dir}' / '{mask_dir}' com extensão '{image_extension}'. "
                 "Verifique os diretórios, a extensão e o tamanho de patch."
+            )
+
+        # ── Warn about masks that have no corresponding image ─────────────────
+        # Scan mask_dir independently so that orphan mask files (misconfigured
+        # directories, deleted images, wrong extension) are detected early rather
+        # than silently ignored.
+        all_mask_paths = set(mask_dir.rglob(f"*{mask_ext}"))
+        for orphan in sorted(all_mask_paths - matched_mask_paths):
+            warnings.warn(
+                f"Máscara {orphan} não possui imagem correspondente em "
+                f"'{image_dir}'; ignorada.",
+                stacklevel=2,
             )
 
     # ── Properties ────────────────────────────────────────────────────────────
@@ -243,7 +287,8 @@ class RasterPatchDataset(Dataset):
                   patch de imagem normalizado para ``[0, 1]`` quando não há
                   transform e ``image_dtype`` não é ``"native"`` ou ``"float32"``.
                 - ``"mask"`` (torch.Tensor int64, shape ``(H, W)``): patch de
-                  máscara. Quando há transform, o tipo depende do pipeline
+                  máscara. Quando ``n_classes == 2`` a máscara é binarizada
+                  (``> 0 → 1``). Quando há transform, o tipo depende do pipeline
                   Albumentations configurado.
 
         Raises:
@@ -277,36 +322,69 @@ class RasterPatchDataset(Dataset):
         if self.transform is None:
             return self._to_tensors_no_transform(patch_img, patch_mask)
 
-        return self.transform(image=patch_img, mask=patch_mask)
+        # Reutiliza o mesmo objeto de transform (caminho padrão, mais rápido)
+        if not self.reset_augmentation_function:
+            return self.transform(image=patch_img, mask=patch_mask)
+
+        # Deepcopy do transform para evitar acúmulo de cache do Albumentations.
+        # Ver nota em SegmentationDataset sobre memory leaks em treinos longos.
+        transform_func = deepcopy(self.transform)
+        output = transform_func(image=patch_img, mask=patch_mask)
+        output_dict = {
+            "image": output["image"].clone().detach()
+            if torch.is_tensor(output["image"])
+            else output["image"].copy(),
+            "mask": output["mask"].clone().detach()
+            if torch.is_tensor(output["mask"])
+            else output["mask"].copy(),
+        }
+        del output
+        del transform_func
+        if idx % 100 == 0:
+            gc.collect()
+        return output_dict
 
     # ── I/O helpers ───────────────────────────────────────────────────────────
 
     def _read_image(self, path: str, window: Window) -> np.ndarray:
-        """Lê patch de imagem como array (H, W, C) para Albumentations."""
+        """Lê patch de imagem como array ``(H, W, C)`` para Albumentations.
+
+        Segue a mesma lógica de ``SegmentationDataset._load_image_with_rasterio``:
+        transpõe ``(C, H, W) → (H, W, C)``, libera o buffer intermediário e faz
+        o cast via ``np.array(..., dtype=)``.
+        """
         with rasterio.open(path) as src:
             data = (
                 src.read(window=window)
                 if self.selected_bands is None
                 else src.read(self.selected_bands, window=window)
             )
-        # (C, H, W) → (H, W, C) — formato esperado por Albumentations
-        image = np.transpose(data, (1, 2, 0)).copy()
+            image = np.transpose(data, (1, 2, 0)).copy()
+            del data
         if self.image_dtype == "native":
             return image
-        return image.astype(np.dtype(self.image_dtype))
+        return np.array(image, dtype=np.dtype(self.image_dtype))
 
     def _read_mask(self, path: str, window: Window) -> np.ndarray:
-        """Lê patch de máscara como array (H, W) uint8."""
+        """Lê patch de máscara como array ``(H, W)`` uint8.
+
+        Quando ``n_classes == 2``, aplica binarização ``(> 0)`` para alinhar
+        com o comportamento de ``SegmentationDataset`` que passa
+        ``is_binary_mask=(n_classes == 2)`` ao carregar máscaras.
+        """
         with rasterio.open(path) as src:
             data = src.read(1, window=window)
-        return data.astype(np.uint8)
+        mask = data.astype(np.uint8)
+        if self.n_classes == 2:
+            mask = (mask > 0).astype(np.uint8)
+        return mask
 
     def _to_tensors_no_transform(
         self, image: np.ndarray, mask: np.ndarray
     ) -> Dict[str, torch.Tensor]:
         """Converte arrays numpy para tensores PyTorch sem augmentação.
 
-        A imagem é convertida para float32 e normalizada para [0, 1] quando
+        A imagem é convertida para float32 e normalizada para ``[0, 1]`` quando
         ``image_dtype`` é ``"uint8"`` ou ``"uint16"``. A máscara é mantida
         como int64.
         """
@@ -318,7 +396,7 @@ class RasterPatchDataset(Dataset):
         tensor_mask = torch.from_numpy(mask).long()
         return {"image": tensor_img, "mask": tensor_mask}
 
-    # ── Pickling support (DataLoader multi-worker) ────────────────────────────
+    # ── repr ──────────────────────────────────────────────────────────────────
 
     def __repr__(self) -> str:
         return (

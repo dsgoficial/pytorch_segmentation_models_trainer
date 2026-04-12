@@ -80,6 +80,8 @@ class RasterPatchDatasetConfig:
     data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
     selected_bands: Optional[List[int]] = None
     image_dtype: str = "uint8"
+    n_classes: int = 2
+    reset_augmentation_function: bool = False
 
 
 @dataclass

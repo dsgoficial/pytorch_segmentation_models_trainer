@@ -459,3 +459,116 @@ class TestRasterPatchDataset(BasicTestCase):
             stride=64,
         )
         self.assertEqual(len(ds.image_info), 3)  # 2 root + 1 subdir
+
+    # ── n_classes / mask binarization ────────────────────────────────────────
+
+    def test_n_classes_2_binarizes_mask(self):
+        """With n_classes=2 (default) any non-zero pixel in the mask becomes 1."""
+        # Write a mask with pixel values 0, 1, 2, 128, 255
+        multi_mask_dir = self.tmp / "multi_masks"
+        _write_tif(self.img_dir / "multi.tif", width=200, height=200, bands=3)
+
+        multi_mask_path = multi_mask_dir / "multi.tif"
+        multi_mask_path.parent.mkdir(parents=True, exist_ok=True)
+        import rasterio
+        from rasterio.transform import from_bounds
+        data = np.array([[[0, 1, 2, 128, 255] * 40] * 200], dtype=np.uint8)
+        # Pad/crop to exact 200×200
+        mask_data = np.zeros((1, 200, 200), dtype=np.uint8)
+        mask_data[0, :, :5] = [0, 1, 2, 128, 255]
+        transform = from_bounds(0, 0, 1, 1, 200, 200)
+        with rasterio.open(
+            multi_mask_path, "w", driver="GTiff",
+            height=200, width=200, count=1, dtype="uint8",
+            crs="EPSG:4326", transform=transform,
+        ) as dst:
+            dst.write(mask_data)
+
+        ds = RasterPatchDataset(
+            image_dir=self.img_dir,
+            mask_dir=multi_mask_dir,
+            extension=".tif",
+            patch_size=64,
+            stride=32,
+            n_classes=2,
+        )
+        item = ds[0]
+        unique_values = item["mask"].unique().tolist()
+        # After binarization only 0 and 1 are allowed
+        self.assertTrue(all(v in (0, 1) for v in unique_values))
+
+    def test_n_classes_gt_2_does_not_binarize_mask(self):
+        """With n_classes > 2 the raw mask pixel values are preserved."""
+        multi_mask_dir = self.tmp / "multi_masks_mc"
+        _write_tif(self.img_dir / "mc.tif", width=200, height=200, bands=3)
+
+        mc_mask_path = multi_mask_dir / "mc.tif"
+        mc_mask_path.parent.mkdir(parents=True, exist_ok=True)
+        import rasterio
+        from rasterio.transform import from_bounds
+        mask_data = np.full((1, 200, 200), fill_value=3, dtype=np.uint8)
+        transform = from_bounds(0, 0, 1, 1, 200, 200)
+        with rasterio.open(
+            mc_mask_path, "w", driver="GTiff",
+            height=200, width=200, count=1, dtype="uint8",
+            crs="EPSG:4326", transform=transform,
+        ) as dst:
+            dst.write(mask_data)
+
+        ds = RasterPatchDataset(
+            image_dir=self.img_dir,
+            mask_dir=multi_mask_dir,
+            extension=".tif",
+            patch_size=64,
+            stride=32,
+            n_classes=4,
+        )
+        item = ds[0]
+        # Value 3 must be preserved, not binarized to 1
+        self.assertIn(3, item["mask"].unique().tolist())
+
+    # ── reset_augmentation_function ──────────────────────────────────────────
+
+    def test_reset_augmentation_function_returns_valid_output(self):
+        """reset_augmentation_function=True still returns correctly shaped tensors."""
+        import albumentations as A
+        from albumentations.pytorch import ToTensorV2
+
+        aug = [
+            {"_target_": "albumentations.HorizontalFlip", "p": 0.0},
+            {"_target_": "albumentations.pytorch.ToTensorV2"},
+        ]
+        ds = RasterPatchDataset(
+            image_dir=self.img_dir,
+            mask_dir=self.mask_dir,
+            extension=".tif",
+            patch_size=64,
+            stride=32,
+            augmentation_list=aug,
+            reset_augmentation_function=True,
+        )
+        item = ds[0]
+        self.assertIn("image", item)
+        self.assertIn("mask", item)
+
+    # ── Orphan masks (masks without a corresponding image) ────────────────────
+
+    def test_orphan_mask_emits_warning(self):
+        """A mask file with no corresponding image triggers a UserWarning."""
+        _write_mask(self.mask_dir / "orphan_mask.tif", width=200, height=200)
+        # No image named orphan_mask.tif exists in self.img_dir
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            ds = RasterPatchDataset(
+                image_dir=self.img_dir,
+                mask_dir=self.mask_dir,
+                extension=".tif",
+                patch_size=64,
+                stride=32,
+            )
+
+        # The orphan mask must not enter the dataset
+        self.assertEqual(len(ds.image_info), 2)
+        warning_messages = [str(w.message) for w in caught]
+        self.assertTrue(any("orphan_mask.tif" in m for m in warning_messages))
