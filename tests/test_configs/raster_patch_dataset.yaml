@@ -1,0 +1,6 @@
+_target_: pytorch_segmentation_models_trainer.dataset_loader.raster_patch_dataset.RasterPatchDataset
+image_dir: ???
+mask_dir: ???
+extension: .tif
+patch_size: 64
+stride: 32

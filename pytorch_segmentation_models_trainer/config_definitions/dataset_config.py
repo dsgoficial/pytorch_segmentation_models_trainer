@@ -19,7 +19,7 @@
  ****
 """
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 from omegaconf import MISSING
 
@@ -43,6 +43,42 @@ class DatasetConfig:
     gpu_augmentation_list: List = field(default_factory=list)
     augmentation_list: List = field(default_factory=list)
     data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+    image_dtype: str = "uint8"
+
+
+@dataclass
+class RasterPatchDatasetConfig:
+    """Configuração para RasterPatchDataset (janela deslizante determinística).
+
+    O dataset varre dois diretórios recursivamente, emparelha imagens e máscaras
+    por caminho relativo, e expõe cada patch possível como um item independente.
+    O total de items em ``__len__`` é a soma de patches de todas as imagens — não
+    o número de imagens.
+
+    Exemplo de YAML::
+
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.raster_patch_dataset.RasterPatchDataset
+          image_dir: /data/images
+          mask_dir: /data/masks
+          extension: .tif
+          patch_size: 256
+          stride: 128
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".raster_patch_dataset.RasterPatchDataset"
+    )
+    image_dir: str = MISSING
+    mask_dir: str = MISSING
+    extension: str = ".tif"
+    patch_size: int = 256
+    stride: int = 128
+    mask_extension: Optional[str] = None
+    augmentation_list: List = field(default_factory=list)
+    data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+    selected_bands: Optional[List[int]] = None
     image_dtype: str = "uint8"
 
 
