@@ -365,6 +365,7 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         confidence_export_strategy=None,
         striped_threshold_pixels=50_000_000,
         stripe_height=4096,
+        output_probs_dir=None,
     ):
         super().__init__(
             model=model,
@@ -387,6 +388,9 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         self.tta_mode = tta_mode
         self.striped_threshold_pixels = striped_threshold_pixels
         self.stripe_height = stripe_height
+        self.output_probs_dir = output_probs_dir
+        if output_probs_dir is not None:
+            os.makedirs(output_probs_dir, exist_ok=True)
         if confidence_mode is not None and confidence_mode not in ("basic", "full"):
             raise ValueError(
                 f"confidence_mode must be None, 'basic', or 'full', got '{confidence_mode}'"
@@ -595,7 +599,9 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
             stem = Path(image_path).stem
             output_seg = os.path.join(output_dir, f"{stem}.tif")
             output_probs = None
-            if self.confidence_mode is not None:
+            if self.output_probs_dir is not None:
+                output_probs = os.path.join(self.output_probs_dir, f"{stem}.tif")
+            elif self.confidence_mode is not None:
                 probs_dir = os.path.join(output_dir, "probs")
                 os.makedirs(probs_dir, exist_ok=True)
                 output_probs = os.path.join(probs_dir, f"{stem}.tif")
