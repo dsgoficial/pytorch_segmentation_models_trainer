@@ -7,10 +7,16 @@ title: Dataset Classes
 
 This page is the API reference for all dataset classes in `pytorch_segmentation_models_trainer`.
 
-All classes live in:
+Most classes live in:
 
 ```python
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import <ClassName>
+```
+
+`RasterPatchDataset` lives in its own module:
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.raster_patch_dataset import RasterPatchDataset
 ```
 
 ---
@@ -19,16 +25,85 @@ from pytorch_segmentation_models_trainer.dataset_loader.dataset import <ClassNam
 
 ```
 torch.utils.data.Dataset
-└── AbstractDataset
+├── RasterPatchDataset          ← sliding-window, folder-based (no CSV)
+└── AbstractDataset             ← CSV / DataFrame-based
     ├── ImageDataset
     │   └── TiledInferenceImageDataset
     ├── SegmentationDataset
     │   ├── SegmentationDatasetFromFolder
     │   └── FrameFieldSegmentationDataset
+    ├── RandomCropSegmentationDataset
     ├── ObjectDetectionDataset
     │   └── InstanceSegmentationDataset
     └── PolygonRNNDataset
 ```
+
+---
+
+## `RasterPatchDataset`
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.raster_patch_dataset import RasterPatchDataset
+```
+
+Systematic sliding-window dataset for semantic segmentation directly over full-size raster files. Discovers image/mask pairs by **recursive folder scan**, computes all valid `patch_size × patch_size` windows for each image, and maps a global 1-D index to the correct (image, row, column) in O(log N) via binary search. Only the requested window pixels are read from disk at `__getitem__` time — full images are never loaded into memory.
+
+See the [Sliding-Window Patch Dataset](../user-guide/dataset-raster-patch.md) user guide for usage examples and the full YAML reference.
+
+### Constructor Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `image_dir` | `str \| Path` | **required** | Root directory of input images. Scanned recursively. |
+| `mask_dir` | `str \| Path` | **required** | Root directory of segmentation masks. Matching is by relative path. |
+| `extension` | `str` | `".tif"` | Image file extension. Leading dot is optional and normalized internally. |
+| `patch_size` | `int` | `256` | Side length of each square patch in pixels. |
+| `stride` | `int` | `128` | Step between patch origins. `stride < patch_size` produces overlapping patches. |
+| `mask_extension` | `str \| None` | `None` | Mask file extension. When `None`, uses the same value as `extension`. |
+| `augmentation_list` | `list \| A.Compose \| None` | `None` | Albumentations augmentation pipeline. Image is passed as `(H, W, C)`, mask as `(H, W)`. |
+| `data_loader` | `Any \| None` | `None` | DataLoader sub-configuration. Stored as `ds.data_loader`; consumed by the Lightning `Model`. |
+| `selected_bands` | `List[int] \| None` | `None` | 1-based rasterio band indices to load. `None` loads all bands. |
+| `image_dtype` | `str` | `"uint8"` | Array dtype after reading. Accepted: `"uint8"`, `"uint16"`, `"float32"`, `"native"`. |
+
+### Raises
+
+| Exception | When |
+|---|---|
+| `ValueError` | `image_dtype` is not one of the accepted values. |
+| `ValueError` | `selected_bands` contains a non-positive integer. |
+| `ValueError` | No valid image/mask pairs are found after scanning both directories. |
+| `UserWarning` | An image is smaller than `patch_size` (skipped silently). |
+| `UserWarning` | A mask file is missing for a discovered image (skipped silently). |
+
+### Key Attributes
+
+| Attribute | Type | Description |
+|---|---|---|
+| `image_info` | `List[Dict]` | Per-image metadata: `img_path`, `mask_path`, `height`, `width`, `patches_per_row`, `patches_per_col`. |
+| `patch_size` | `int` | Patch side length. |
+| `stride` | `int` | Step between patch origins. |
+| `image_dtype` | `str` | Configured dtype. |
+| `selected_bands` | `List[int] \| None` | Band selection (1-based). |
+| `data_loader` | `Any` | Stored DataLoader config. |
+
+### `__len__`
+
+Returns the **total number of patches** across all images, not the number of images.
+
+```
+len(ds) = Σ_i  patches_per_row_i × patches_per_col_i
+```
+
+### `__getitem__` Returns
+
+`Dict[str, torch.Tensor]` with keys:
+
+| Key | dtype | shape | Notes |
+|---|---|---|---|
+| `"image"` | `torch.float32` | `(C, patch_size, patch_size)` | Normalised ÷255 (`uint8`) or ÷65535 (`uint16`) when no transform; unchanged for `float32`/`native`. |
+| `"mask"` | `torch.int64` | `(patch_size, patch_size)` | Raw pixel values from the mask file. |
+
+When `augmentation_list` is set the return type matches whatever the Albumentations pipeline produces (typically the same keys with transformed tensors after `ToTensorV2`).
 
 ---
 

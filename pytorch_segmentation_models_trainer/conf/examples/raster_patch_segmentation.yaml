@@ -1,0 +1,126 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: Sliding-window patch dataset (RasterPatchDataset) + SMP Unet
+# ──────────────────────────────────────────────────────────────────────────────
+# Uses RasterPatchDataset for systematic sliding-window training directly from
+# full-size GeoTIFFs — no pre-generated tiles on disk required.
+#
+# Key parameters:
+#   patch_size : size of each square patch (pixels)
+#   stride     : step between patches; stride < patch_size → overlap
+#
+# Patch count per image = ((W - patch_size) // stride + 1)
+#                       × ((H - patch_size) // stride + 1)
+#
+# With patch_size=256 and stride=128 (50 % overlap), a 1024×1024 image
+# produces 7×7 = 49 patches.
+#
+# Augmentation note: because patches are already the right size, no Resize is
+# needed here. Add geometric/photometric augmentations directly.
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+backbone:
+  name: resnet34
+  input_width: 256
+  input_height: 256
+
+hyperparameters:
+  model_name: unet_resnet34_raster_patch
+  backbone: resnet34
+  batch_size: 16
+  epochs: 50
+  max_lr: 6e-5
+  classes: 2
+
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet34
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: ${hyperparameters.classes}
+
+loss:
+  _target_: segmentation_models_pytorch.losses.DiceLoss
+  mode: multiclass
+  from_logits: true
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1e-4
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: ${hyperparameters.epochs}
+      eta_min: 1e-7
+    interval: epoch
+    frequency: 1
+
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+  precision: "16-mixed"
+
+# ── Datasets ──────────────────────────────────────────────────────────────────
+# The dataset discovers all *.tif pairs under image_dir/mask_dir recursively.
+# __len__ returns the total number of patches across all images, not the
+# number of images. Shuffle=True in the DataLoader will mix patches from
+# different images and locations.
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.raster_patch_dataset.RasterPatchDataset
+  image_dir: /data/train/images
+  mask_dir: /data/train/masks
+  extension: .tif
+  patch_size: ${backbone.input_width}
+  stride: 128   # 50 % overlap → denser coverage, higher redundancy
+  image_dtype: uint8
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.VerticalFlip
+      p: 0.5
+    - _target_: albumentations.RandomRotate90
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.raster_patch_dataset.RasterPatchDataset
+  image_dir: /data/val/images
+  mask_dir: /data/val/masks
+  extension: .tif
+  patch_size: ${backbone.input_width}
+  stride: ${backbone.input_width}   # no overlap in validation → each pixel seen once
+  image_dtype: uint8
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${hyperparameters.classes}
+  - _target_: torchmetrics.F1Score
+    task: multiclass
+    num_classes: ${hyperparameters.classes}
