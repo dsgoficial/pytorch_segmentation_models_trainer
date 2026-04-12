@@ -350,3 +350,89 @@ class Test_Inference(unittest.TestCase):
         with open(os.path.join(self.output_dir, f"obj_det_result.json")) as f:
             result_list = json.load(f)
         self.assertEqual(len(result_list), 18)
+
+    # ------------------------------------------------------------------
+    # TTA tests
+    # ------------------------------------------------------------------
+
+    @parameterized.expand([
+        ("rotations_4", ["rot0", "rot90", "rot180", "rot270"]),
+        ("d4_group",    ["rot0", "rot90", "rot180", "rot270",
+                         "flip_h", "flip_v", "flip_h_rot90", "flip_v_rot90"]),
+        ("two_rots",    ["rot0", "rot180"]),
+    ])
+    def test_tta_produces_output_file(self, _name, tta_augmentations) -> None:
+        """TTA-enabled processor must write a valid output file."""
+        output_file_path = os.path.join(self.output_dir, f"output_tta_{_name}.tif")
+        inference_processor = SingleImageInfereceProcessor(
+            model=smp.Unet(),
+            device=device,
+            batch_size=1,
+            export_strategy=RasterExportInferenceStrategy(
+                output_file_path=output_file_path
+            ),
+            use_tta=True,
+            tta_augmentations=tta_augmentations,
+        )
+        inference_processor.process(image_path=self.frame_field_ds[0]["path"])
+        assert os.path.isfile(output_file_path)
+
+    def test_tta_output_shape_matches_no_tta(self) -> None:
+        """TTA result must have the same spatial shape as a standard run."""
+        image_path = self.frame_field_ds[0]["path"]
+        model = smp.Unet()
+
+        def _run(use_tta):
+            out_path = os.path.join(
+                self.output_dir, f"shape_check_tta_{use_tta}.tif"
+            )
+            proc = SingleImageInfereceProcessor(
+                model=model,
+                device=device,
+                batch_size=1,
+                export_strategy=RasterExportInferenceStrategy(
+                    output_file_path=out_path
+                ),
+                use_tta=use_tta,
+                tta_augmentations=["rot0", "rot90", "rot180", "rot270"],
+            )
+            proc.process(image_path=image_path)
+            with rasterio.open(out_path) as ds:
+                return ds.shape
+
+        shape_no_tta = _run(False)
+        shape_with_tta = _run(True)
+        self.assertEqual(shape_no_tta, shape_with_tta)
+
+    def test_tta_disabled_by_default(self) -> None:
+        """Processor created without use_tta must not use TTA."""
+        proc = SingleImageInfereceProcessor(
+            model=smp.Unet(),
+            device=device,
+            batch_size=1,
+            export_strategy=None,
+        )
+        self.assertFalse(proc.use_tta)
+
+    def test_tta_frame_field_processor_produces_output(self) -> None:
+        """Frame-field processor with TTA must write seg and crossfield files."""
+        inference_processor = SingleImageFromFrameFieldProcessor(
+            model=self.get_model_for_eval(),
+            device=device,
+            batch_size=1,
+            export_strategy=MultipleRasterExportInferenceStrategy(
+                output_folder=self.output_dir,
+                output_basename="tta_ff_output.tif",
+            ),
+            mask_bands=2,
+            use_tta=True,
+            tta_augmentations=["rot0", "rot90", "rot180", "rot270"],
+        )
+        inference_processor.process(image_path=self.frame_field_ds[0]["path"])
+        name = Path(self.frame_field_ds[0]["path"]).stem
+        assert os.path.isfile(
+            os.path.join(self.output_dir, f"seg_{name}_tta_ff_output.tif")
+        )
+        assert os.path.isfile(
+            os.path.join(self.output_dir, f"crossfield_{name}_tta_ff_output.tif")
+        )

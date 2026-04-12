@@ -44,11 +44,74 @@ class InferenceProcessorConfig:
 
     Nota: model, polygonizer, export_strategy, device, batch_size e mask_bands
     são injetados automaticamente pelo código, não precisam estar no YAML.
+
+    Configuração de TTA (Test Time Augmentation)
+    --------------------------------------------
+    Quando ``use_tta: true``, cada tile é inferido sob todas as augmentações
+    listadas em ``tta_augmentations``, as predições são desfeitas e a média
+    é consolidada antes de ser entregue ao TileMerger.
+
+    Augmentações disponíveis (grupo D4 — 8 simetrias do quadrado).
+    Use os nomes abaixo literalmente no campo ``tta_augmentations``:
+
+    +------------------+---------------------------------------------------+
+    | Nome             | Transformação                                     |
+    +==================+===================================================+
+    | ``rot0``         | Identidade — imagem original sem transformação    |
+    | ``rot90``        | Rotação 90° no sentido anti-horário               |
+    | ``rot180``       | Rotação 180°                                      |
+    | ``rot270``       | Rotação 270° no sentido anti-horário              |
+    | ``flip_h``       | Espelhamento horizontal (esquerda-direita)        |
+    | ``flip_v``       | Espelhamento vertical (cima-baixo)                |
+    | ``flip_h_rot90`` | Espelhamento horizontal + rotação 90° anti-horária|
+    | ``flip_v_rot90`` | Espelhamento vertical + rotação 90° anti-horária  |
+    +------------------+---------------------------------------------------+
+
+    O padrão é as 4 rotações de 90° (``rot0``, ``rot90``, ``rot180``,
+    ``rot270``).  Para usar o grupo D4 completo liste todos os 8 nomes.
+
+    Exemplo YAML — 4 rotações (padrão)::
+
+        inference_processor:
+          _target_: ...SingleImageInfereceProcessor
+          model_input_shape: [448, 448]
+          step_shape: [224, 224]
+          use_tta: true
+          tta_augmentations:
+            - rot0          # imagem original (identidade)
+            - rot90         # rotação 90° anti-horário
+            - rot180        # rotação 180°
+            - rot270        # rotação 270° anti-horário
+
+    Exemplo YAML — grupo D4 completo (8 augmentações)::
+
+        inference_processor:
+          use_tta: true
+          tta_augmentations:
+            - rot0          # imagem original (identidade)
+            - rot90         # rotação 90° anti-horário
+            - rot180        # rotação 180°
+            - rot270        # rotação 270° anti-horário
+            - flip_h        # espelhamento horizontal (esquerda-direita)
+            - flip_v        # espelhamento vertical (cima-baixo)
+            - flip_h_rot90  # espelhamento horizontal + rotação 90° anti-horário
+            - flip_v_rot90  # espelhamento vertical + rotação 90° anti-horário
     """
 
     _target_: str = MISSING
     model_input_shape: Optional[List[int]] = None
     step_shape: Optional[List[int]] = None
+    use_tta: bool = False
+    # Augmentações padrão: quatro rotações de 90°.
+    # Adicione flip_h, flip_v, flip_h_rot90, flip_v_rot90 para o grupo D4 completo.
+    tta_augmentations: List[str] = field(
+        default_factory=lambda: [
+            "rot0",    # imagem original (identidade)
+            "rot90",   # rotação 90° anti-horário
+            "rot180",  # rotação 180°
+            "rot270",  # rotação 270° anti-horário
+        ]
+    )
 
 
 @dataclass
@@ -119,6 +182,22 @@ class PredictSingleImageConfig:
     # Parâmetros de inferência
     inference_threshold: float = 0.5
     save_inference: bool = True
+
+    # ── Test Time Augmentation para o test_step do modelo ────────────────────
+    # Quando use_tta=True, o test_step executa o modelo com cada augmentação
+    # listada abaixo, desfaz a transformação e calcula a média das predições.
+    # Os nomes válidos são os mesmos de InferenceProcessorConfig.tta_augmentations.
+    use_tta: bool = False
+    # Augmentações padrão: quatro rotações de 90°.
+    # Adicione flip_h, flip_v, flip_h_rot90, flip_v_rot90 para o grupo D4 completo.
+    tta_augmentations: List[str] = field(
+        default_factory=lambda: [
+            "rot0",    # imagem original (identidade)
+            "rot90",   # rotação 90° anti-horário
+            "rot180",  # rotação 180°
+            "rot270",  # rotação 270° anti-horário
+        ]
+    )
 
 
 # Registrar configurações com Hydra

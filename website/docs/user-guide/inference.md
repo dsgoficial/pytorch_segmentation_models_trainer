@@ -120,6 +120,54 @@ Overlap is controlled by the gap between `model_input_shape` and `step_shape`. A
 A common setting is `step_shape = model_input_shape / 2`. For example, with `model_input_shape: [448, 448]`, set `step_shape: [224, 224]` for 50% overlap. Reduce the step further for very high-detail predictions.
 :::
 
+### Test Time Augmentation (TTA)
+
+TTA improves prediction quality by running the model on multiple transformed versions of each tile, reversing the transformation on each output, and averaging the results before handing the tile to the `TileMerger`. The sliding-window pipeline itself is not affected — it always receives one already-consolidated prediction per tile.
+
+Add `use_tta: true` and `tta_augmentations` to any `inference_processor` block:
+
+```yaml
+inference_processor:
+  _target_: pytorch_segmentation_models_trainer.tools.inference.inference_processors.SingleImageInfereceProcessor
+  model_input_shape: [448, 448]
+  step_shape: [224, 224]
+  use_tta: true
+  tta_augmentations:
+    - rot0          # original image (identity — always include this)
+    - rot90         # 90° counter-clockwise rotation
+    - rot180        # 180° rotation
+    - rot270        # 270° counter-clockwise rotation
+    - flip_h        # horizontal flip (left-right mirror)
+    - flip_v        # vertical flip (up-down mirror)
+    - flip_h_rot90  # horizontal flip + 90° counter-clockwise rotation
+    - flip_v_rot90  # vertical flip + 90° counter-clockwise rotation
+```
+
+The eight augmentations form the **D4 dihedral group** — all symmetries of a square. You can use any subset; the default when `tta_augmentations` is omitted is the four 90° rotations (`rot0`, `rot90`, `rot180`, `rot270`).
+
+| Augmentation name | Transformation |
+|---|---|
+| `rot0` | Identity — original image |
+| `rot90` | 90° counter-clockwise rotation |
+| `rot180` | 180° rotation |
+| `rot270` | 270° counter-clockwise rotation |
+| `flip_h` | Horizontal flip (left-right mirror) |
+| `flip_v` | Vertical flip (up-down mirror) |
+| `flip_h_rot90` | Horizontal flip + 90° counter-clockwise rotation |
+| `flip_v_rot90` | Vertical flip + 90° counter-clockwise rotation |
+
+Each augmentation has an exact mathematical inverse — predictions are de-augmented before averaging, so no spatial artifact is introduced.
+
+:::caution TTA and computational cost
+Each augmentation in `tta_augmentations` adds one full model forward pass per tile. Four rotations = 4× the inference time; the full D4 group = 8×. Balance quality vs. speed accordingly.
+:::
+
+:::note Frame-field models (`SingleImageFromFrameFieldProcessor`)
+The `crossfield` output encodes tangent angles that require non-trivial transformation under spatial rotations. TTA is applied normally to `seg`; `crossfield` is always taken from the identity (`rot0`) pass. Include `rot0` in `tta_augmentations` when using this processor with TTA enabled.
+:::
+
+See the **[TTA advanced guide](../advanced/tta.md)** for full details, API reference, and config examples.
+
 ### `SingleImageInfereceProcessor`
 
 General-purpose sliding-window processor for binary or single-output segmentation.
