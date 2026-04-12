@@ -5,54 +5,54 @@ title: Test Time Augmentation (TTA)
 
 # Test Time Augmentation (TTA)
 
-Test Time Augmentation (TTA) melhora a qualidade das predições sem retraining: o modelo é executado múltiplas vezes sobre versões transformadas do mesmo input, os resultados são desfeitos de volta à orientação original e em seguida são calculada sua média.
+Test Time Augmentation improves prediction quality without retraining: the model runs multiple times on geometrically transformed versions of the same input, each prediction is reversed back to the original orientation, and the results are averaged.
 
 ---
 
-## Como funciona
+## How it works
 
-Para cada augmentação configurada, o pipeline executa os seguintes passos:
+For each configured augmentation the pipeline executes:
 
 ```
-entrada → augmentação → modelo → augmentação inversa → predição de-augmentada
-                                                              ↓
-                                                 média de todas as predições
-                                                              ↓
-                                               resultado final consolidado
+input → augmentation → model → inverse augmentation → de-augmented prediction
+                                                               ↓
+                                                  average all predictions
+                                                               ↓
+                                                     final consolidated output
 ```
 
-Na inferência por **janela deslizante**, o TTA é aplicado por tile — a média já consolidada é entregue ao `TileMerger`, que então faz a junção espacial normal. O código da janela deslizante em si não é alterado.
+In **sliding-window inference** TTA is applied per tile — the averaged, de-augmented prediction is handed to the `TileMerger`, which then performs the normal spatial blending. The sliding-window code itself is unchanged.
 
-No **test step** do modelo (avaliação com `trainer.test()`), o TTA é aplicado a cada batch completo de imagens.
+In the **model test step** (`trainer.test()`), TTA is applied to each full image batch.
 
 ---
 
-## Augmentações disponíveis
+## Available augmentations
 
-As oito augmentações formam o **grupo diedral D4** — todas as simetrias de um quadrado. Cada uma possui uma inversa exata, garantindo que a de-augmentação não introduza artefatos.
+The eight supported augmentations form the **D4 dihedral group** — all symmetries of a square.  Each has an exact inverse, so de-augmentation introduces no spatial artifacts.
 
-| Nome no config   | Transformação                                  | Inversa              |
-|------------------|------------------------------------------------|----------------------|
-| `rot0`           | Identidade (imagem original)                   | `rot0`               |
-| `rot90`          | Rotação 90° no sentido anti-horário            | `rot270`             |
-| `rot180`         | Rotação 180°                                   | `rot180`             |
-| `rot270`         | Rotação 270° no sentido anti-horário           | `rot90`              |
-| `flip_h`         | Espelhamento horizontal (esquerda-direita)     | `flip_h`             |
-| `flip_v`         | Espelhamento vertical (cima-baixo)             | `flip_v`             |
-| `flip_h_rot90`   | Espelhamento horizontal + rotação 90° anti-horária | `rot270` + `flip_h` |
-| `flip_v_rot90`   | Espelhamento vertical + rotação 90° anti-horária   | `rot270` + `flip_v` |
+| Name in config   | Transformation                                       | Inverse              |
+|------------------|------------------------------------------------------|----------------------|
+| `rot0`           | Identity (original image, no transformation)         | `rot0`               |
+| `rot90`          | 90° counter-clockwise rotation                       | `rot270`             |
+| `rot180`         | 180° rotation                                        | `rot180`             |
+| `rot270`         | 270° counter-clockwise rotation                      | `rot90`              |
+| `flip_h`         | Horizontal flip (left-right mirror)                  | `flip_h`             |
+| `flip_v`         | Vertical flip (up-down mirror)                       | `flip_v`             |
+| `flip_h_rot90`   | Horizontal flip + 90° counter-clockwise rotation     | `rot270` + `flip_h`  |
+| `flip_v_rot90`   | Vertical flip + 90° counter-clockwise rotation       | `rot270` + `flip_v`  |
 
-:::tip Presets recomendados
-- **Rotações apenas (padrão):** `rot0`, `rot90`, `rot180`, `rot270` — 4× forward passes, excelente custo-benefício.
-- **D4 completo:** todos os 8 — 8× forward passes, máxima cobertura de simetrias.
-- **Mínimo:** `rot0`, `rot180` — 2× forward passes, útil para ortofotos sem orientação predominante.
+:::tip Recommended presets
+- **4 rotations (default):** `rot0`, `rot90`, `rot180`, `rot270` — 4× forward passes, excellent cost-benefit ratio.
+- **Full D4 group:** all 8 augmentations — 8× forward passes, maximum symmetry coverage.
+- **Minimum:** `rot0`, `rot180` — 2× forward passes, useful for overhead imagery with no dominant orientation.
 :::
 
 ---
 
-## Usando TTA na inferência (`predict`)
+## TTA in inference (`predict`)
 
-Adicione `use_tta` e `tta_augmentations` ao bloco `inference_processor` do seu YAML de predict:
+Add `use_tta: true` and `tta_augmentations` to the `inference_processor` block of your predict YAML:
 
 ```yaml title="configs/predict_with_tta.yaml"
 checkpoint_path: /checkpoints/unet_best.ckpt
@@ -76,14 +76,14 @@ inference_processor:
   # ── TTA ──────────────────────────────────────────────────────────────────
   use_tta: true
   tta_augmentations:
-    - rot0          # imagem original
-    - rot90         # 90° anti-horário
-    - rot180        # 180°
-    - rot270        # 270° anti-horário
-    - flip_h        # espelhamento horizontal
-    - flip_v        # espelhamento vertical
-    - flip_h_rot90  # espelhamento horizontal + 90° anti-horário
-    - flip_v_rot90  # espelhamento vertical + 90° anti-horário
+    - rot0          # original image (identity)
+    - rot90         # 90° counter-clockwise rotation
+    - rot180        # 180° rotation
+    - rot270        # 270° counter-clockwise rotation
+    - flip_h        # horizontal flip (left-right mirror)
+    - flip_v        # vertical flip (up-down mirror)
+    - flip_h_rot90  # horizontal flip + 90° counter-clockwise rotation
+    - flip_v_rot90  # vertical flip + 90° counter-clockwise rotation
   # ─────────────────────────────────────────────────────────────────────────
 
 export_strategy:
@@ -93,7 +93,7 @@ export_strategy:
 inference_threshold: 0.5
 ```
 
-O mesmo parâmetro funciona para `MultiClassInferenceProcessor`:
+The same parameters work for `MultiClassInferenceProcessor`:
 
 ```yaml
 inference_processor:
@@ -103,50 +103,50 @@ inference_processor:
   num_classes: 5
   use_tta: true
   tta_augmentations:
-    - rot0
-    - rot90
-    - rot180
-    - rot270
+    - rot0     # original image (identity)
+    - rot90    # 90° counter-clockwise rotation
+    - rot180   # 180° rotation
+    - rot270   # 270° counter-clockwise rotation
 ```
 
 ---
 
-## Usando TTA no test step (`trainer.test()`)
+## TTA in the test step (`trainer.test()`)
 
-Para ativar o TTA durante a avaliação do modelo, adicione `use_tta` diretamente no config de treino/avaliação (mesma raiz que o modelo):
+To enable TTA during model evaluation, add `use_tta` directly to the training / evaluation config (at the same level as the model):
 
 ```yaml title="configs/train_with_tta_eval.yaml"
-# ... demais configurações de treino ...
+# ... other training settings ...
 
-# ── TTA para o test_step ────────────────────────────────────────────────────
+# ── TTA for test_step ────────────────────────────────────────────────────────
 use_tta: true
 tta_augmentations:
-  - rot0          # imagem original
-  - rot90         # 90° anti-horário
-  - rot180        # 180°
-  - rot270        # 270° anti-horário
+  - rot0     # original image (identity)
+  - rot90    # 90° counter-clockwise rotation
+  - rot180   # 180° rotation
+  - rot270   # 270° counter-clockwise rotation
 ```
 
-Quando `use_tta: true`, o método `test_step` aplica automaticamente as augmentações ao batch, faz a média das predições de-augmentadas e usa o resultado no cálculo de perda e métricas.
+When `use_tta: true`, `test_step` automatically applies the augmentations to each batch, averages the de-augmented predictions, and uses the result for loss and metric computation.
 
 :::note
-O TTA no test step **não afeta** o treino (`training_step`) nem a validação (`validation_step`) — é ativado exclusivamente durante `trainer.test()`.
+TTA in the test step **does not affect** training (`training_step`) or validation (`validation_step`) — it is activated exclusively during `trainer.test()`.
 :::
 
 ---
 
-## TTA com modelos Frame Field (`SingleImageFromFrameFieldProcessor`)
+## TTA with frame-field models (`SingleImageFromFrameFieldProcessor`)
 
-O processador frame field produz dois tensores de saída: `seg` (máscara de segmentação) e `crossfield` (campo vetorial de tangentes).
+Frame-field processors produce two output tensors: `seg` (segmentation mask) and `crossfield` (tangent-field tensor).
 
-O `crossfield` codifica ângulos tangenciais. Corrigir os valores de ângulo corretamente durante a de-augmentação exigiria transformações no espaço de Fourier/complexos, o que vai além do escopo da implementação atual.
+The `crossfield` encodes tangent angles. Correctly de-augmenting it requires transforming the angle values themselves — a non-trivial operation that is out of scope for the current implementation.
 
-**Comportamento com TTA ativado:**
+**Behaviour with TTA enabled:**
 
-| Saída        | Tratamento com TTA                                               |
-|--------------|------------------------------------------------------------------|
-| `seg`        | De-augmentado e médio sobre todas as augmentações               |
-| `crossfield` | Tomado diretamente da passagem de identidade (`rot0`); se `rot0` não estiver na lista, usa a primeira augmentação |
+| Output       | TTA treatment                                                                |
+|--------------|------------------------------------------------------------------------------|
+| `seg`        | De-augmented and averaged across all augmentations                           |
+| `crossfield` | Taken from the identity (`rot0`) pass; if `rot0` is absent, from the first pass |
 
 ```yaml
 inference_processor:
@@ -156,52 +156,52 @@ inference_processor:
   mask_bands: 1
   use_tta: true
   tta_augmentations:
-    - rot0      # necessário para crossfield correto
-    - rot90
-    - rot180
-    - rot270
+    - rot0     # required — crossfield is taken from this pass
+    - rot90    # 90° counter-clockwise rotation
+    - rot180   # 180° rotation
+    - rot270   # 270° counter-clockwise rotation
 ```
 
 :::caution
-Para `SingleImageFromFrameFieldProcessor` inclua sempre `rot0` na lista de augmentações quando `use_tta: true`, para garantir que o `crossfield` seja tomado da passagem sem transformação.
+Always include `rot0` in `tta_augmentations` when using `SingleImageFromFrameFieldProcessor` with TTA, so that `crossfield` is taken from the unmodified pass.
 :::
 
 ---
 
-## Custo computacional
+## Computational cost
 
-O TTA aumenta o número de forward passes proporcionalmente ao tamanho da lista de augmentações. Com `batch_size` e `step_shape` equivalentes:
+Each augmentation in `tta_augmentations` adds one full model forward pass per tile. With equivalent `batch_size` and `step_shape`:
 
-| Augmentações | Forward passes | Custo relativo |
-|---|---|---|
-| Nenhum (sem TTA) | 1× | 1× |
-| 4 rotações (`ROTATION_AUGMENTATIONS`) | 4× | ~4× |
-| D4 completo (8 augmentações) | 8× | ~8× |
+| Augmentations         | Forward passes | Relative cost |
+|-----------------------|----------------|---------------|
+| None (TTA disabled)   | 1×             | 1×            |
+| 4 rotations (default) | 4×             | ~4×           |
+| Full D4 group (8 aug) | 8×             | ~8×           |
 
-O custo de memória por inferência não aumenta significativamente — as augmentações são aplicadas e acumuladas em sequência por batch.
+Memory cost per inference does not increase significantly — augmentations are applied and accumulated sequentially per batch.
 
 ---
 
-## API Python
+## Python API
 
 ```python
 from pytorch_segmentation_models_trainer.tools.tta.tta import (
     apply_tta,
-    ROTATION_AUGMENTATIONS,
-    D4_AUGMENTATIONS,
+    ROTATION_AUGMENTATIONS,   # ["rot0", "rot90", "rot180", "rot270"]
+    D4_AUGMENTATIONS,         # all 8 symmetries
     ROT0, ROT90, ROT180, ROT270,
     FLIP_H, FLIP_V, FLIP_H_ROT90, FLIP_V_ROT90,
 )
 
-# Uso direto com qualquer callable
+# Direct usage with any callable
 pred = apply_tta(
     model_fn=model,
-    batch=tiles_batch,          # torch.Tensor [B, C, H, W]
+    batch=tiles_batch,            # torch.Tensor [B, C, H, W]
     augmentations=["rot0", "rot90", "rot180", "rot270"],
 )
 
-# Com skip_keys (para modelos com saída dict onde alguns tensores não devem
-# ser de-augmentados):
+# With skip_keys — for dict-output models where certain tensors
+# should not be spatially de-augmented (e.g. crossfield in frame-field models):
 pred = apply_tta(
     model_fn=model,
     batch=tiles_batch,
