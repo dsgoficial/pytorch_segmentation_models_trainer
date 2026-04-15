@@ -291,6 +291,112 @@ Generates a `sklearn.metrics.classification_report` (precision, recall, F1, supp
 
 ## Training Utility Callbacks
 
+### `EMACallback`
+
+**Import path**
+
+```python
+from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import EMACallback
+```
+
+Maintains an Exponential Moving Average (EMA) of model weights alongside the online (SGD-updated) weights. The EMA model tends to be smoother and generalises better than the checkpoint from any single epoch.
+
+**How it works:**
+
+At each optimizer step the shadow weights are updated as:
+
+```text
+shadow = decay_eff × shadow + (1 − decay_eff) × param
+```
+
+where `decay_eff = min(decay, (step+1) / (step+10))` applies a warmup that prevents early random-initialisation weights from contaminating the EMA. During validation the shadow weights are swapped in so that metrics reflect the EMA model; after validation the online weights are restored so training continues normally. The EMA state is saved inside every checkpoint automatically.
+
+:::tip Loading EMA checkpoints
+Because `EMACallback` injects the EMA weights into `state_dict` at save time, loading a checkpoint produces the EMA model automatically. `load_from_checkpoint` must be called with `strict=False` (the framework already does this in `predict.py`).
+:::
+
+#### Fires on
+
+- `on_fit_start` — initialises shadow weights from the current model parameters.
+- `on_train_batch_end` — updates shadow weights (only when the optimizer has actually stepped).
+- `on_validation_epoch_start` — swaps in shadow weights.
+- `on_validation_epoch_end` — restores online weights.
+- `on_save_checkpoint` — injects EMA weights into the checkpoint state dict.
+
+#### Constructor Parameters
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `decay` | `float` | `0.999` | Target EMA decay. Higher values → slower-moving average. Typical range: `0.99`–`0.9999`. |
+
+#### Example Config
+
+```yaml
+callbacks:
+  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks.EMACallback
+    decay: 0.999
+
+  - _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    monitor: loss/val
+    mode: min
+    save_top_k: 3
+```
+
+---
+
+### `MixStyleCallback`
+
+**Import path**
+
+```python
+from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import MixStyleCallback
+```
+
+Applies MixStyle (Zhou et al., ICLR 2021) as a forward hook on the encoder. MixStyle mixes feature-level statistics (mean and standard deviation) between random pairs of instances in a batch, creating implicit domain augmentation at zero parameter cost. This improves generalisation to unseen acquisition conditions, sensors, or temporal shifts.
+
+**How it works:**
+
+At each forward pass during training, with probability `p`, the feature map output of each hooked encoder stage is normalised to zero mean / unit variance and then re-scaled with a Beta-distributed convex combination of the original instance's and a random other instance's statistics:
+
+```text
+mu_mix  = λ × mu_i  + (1−λ) × mu_j
+sig_mix = λ × sig_i + (1−λ) × sig_j
+```
+
+The hook is only active during training (`on_train_batch_start` / `on_train_batch_end` guard). Hooks are registered on `encoder.model.stages` (SMP TimmUniversalEncoder) or `encoder.stages`; a warning is emitted if neither attribute is found and MixStyle is silently disabled.
+
+#### Fires on
+
+- `on_fit_start` — registers forward hooks on the configured encoder stages.
+- `on_train_batch_start` — enables the hook.
+- `on_train_batch_end` — disables the hook.
+- `on_validation_epoch_start` — ensures the hook is disabled during validation.
+- `on_fit_end` — removes all hooks.
+
+#### Constructor Parameters
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `p` | `float` | `0.5` | Probability of applying MixStyle on a given forward pass. |
+| `alpha` | `float` | `0.1` | Beta distribution parameter. Smaller values produce mixing closer to the original style. |
+| `stages` | `list[int]` | `[0, 1]` | Encoder stage indices to hook. Early stages carry more domain/style information. |
+
+:::tip Choosing stages
+Hook only the earliest stages (`[0, 1]` or just `[0]`). Later stages encode semantic content that should not be mixed. For ResNet-style encoders, stages 0 and 1 correspond to the first two residual groups.
+:::
+
+#### Example Config
+
+```yaml
+callbacks:
+  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks.MixStyleCallback
+    p: 0.5
+    alpha: 0.1
+    stages: [0, 1]
+```
+
+---
+
 ### `WarmupCallback`
 
 **Import path**

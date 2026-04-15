@@ -1,5 +1,53 @@
 # Unreleased
 
+## RandomCropSegmentationDataset
+
+- Added `RandomCropSegmentationDataset`: reads large GeoTIFF images on-the-fly using rasterio windowed reads instead of pre-generating tiles on disk. Eliminates the disk-space overhead of a tile library and allows crop size, augmentation, and sampling strategy to be changed without reprocessing data.
+- Per-worker LRU cache (`_RasterioLRUCache`) keeps a configurable number of open `DatasetReader` handles (`lru_cache_size`, default `64`) to avoid repeated rasterio open/close overhead.
+- `class_balanced_sampling`: weights image selection by inverse class frequency so images containing rare classes are sampled more often. Computed once at dataset initialisation from mask histograms in the CSV.
+- Class-aware `CutMix` (`cutmix_prob`, `cutmix_alpha`): pastes a rectangular region from a second crop chosen to maximise class diversity.
+- `ClassMix` (`classmix_prob`): copies a randomly selected class region from a second image and pastes it onto the primary crop; particularly effective for rare classes.
+- `soft_labels` mode: returns float masks in `[0, 1]` for label-noise and probabilistic annotation workflows. The `_shared_step` training loop detects soft labels automatically and uses the appropriate loss path.
+- `grid_mode` / `grid_step`: switches from random crop positions to a deterministic sliding-window grid for reproducible validation coverage and pseudo-labelling. `configure_optimizers` accounts for grid mode when computing `steps_per_epoch` for `OneCycleLR`.
+- Added `RandomCropSegmentationDatasetConfig` dataclass.
+
+## Mixture of Experts Models
+
+- Added `UPerNetMoE` (`custom_models/upernet_moe.py`): UPerNet variant that replaces fusion and/or FPN convolutions with `MoEConv2dReLU` blocks. Supports `token_choice` (each token picks top-k experts) and `expert_choice` (each expert picks top-k tokens) routing, configurable noise injection, capacity factor, and an optional shared dense expert. Load-balancing auxiliary loss is automatically detected and added to the training loss in `_shared_step`.
+- Added `UPerNetMEDoE` (`custom_models/upernet_medoe.py`): extends `UPerNetMoE` with structured expert dropout during training (randomly drops a fraction of experts per forward pass) to improve regularisation and reduce reliance on any single expert. `_shared_step` automatically logs `extra/train_medoe_expert_utilization` and `extra/train_medoe_expert_entropy` when a MEDoE model is detected.
+
+## Dual-Head Training
+
+- Added `UPerNetDualHead` (`custom_models/upernet_dual_head.py`): UPerNet with two independent decoders sharing a single encoder. Head A is supervised with hard labels (integer class indices); Head B is supervised with soft labels (float probabilities). A consistency loss couples the two heads during training. `inference_head` controls which head is active at inference time: `"A"`, `"B"`, or `"average"` (default).
+
+## TTA improvements
+
+- Added `tta_mode` compact interface: passing `tta_mode: "d4"` or `tta_mode: "flip"` to any inference processor or to `test_step` automatically selects the corresponding augmentation preset (`d4` = all 8 D4 symmetries; `flip` = 4 flip/rotation combinations), without listing augmentations explicitly.
+- `SingleImageInfereceProcessor` now accepts `tta_mode` as an alias for `use_tta=True` + the corresponding augmentations list. Backward-compatible with the existing `use_tta` + `tta_augmentations` interface.
+- `MultiClassInferenceProcessor` now accepts `tta_mode` (replaces the previous `use_tta` parameter on that class).
+- `_get_tta_augmentations()` in `Model` checks `cfg.tta_mode` first; falls back to `cfg.use_tta` + `cfg.tta_augmentations` for backward compatibility.
+
+## MultiClassInferenceProcessor improvements
+
+- Added striped inference (`make_inference_striped`): very large images are automatically split into horizontal stripes when pixel count exceeds `striped_threshold_pixels` (default 50 MP), processed in parallel via `ThreadPoolExecutor`, and reassembled in-memory. Stripe height is configurable via `stripe_height` (default 4096 px).
+- Added confidence map output: `confidence_mode` (`"max_prob"` or `"entropy"`) computes per-pixel confidence scores alongside the class prediction. Saved to `output_probs_dir` when provided.
+- Added `tile_weight` parameter (passed through to `AbstractInferenceProcessor`) to control how overlapping tile predictions are merged.
+- `process()` override: automatically routes each image to the striped or standard inference path based on image size.
+
+## Callbacks
+
+- Added `EMACallback`: maintains an exponential moving average of model weights (configurable `decay`). During validation the shadow EMA weights are swapped in so validation metrics reflect the averaged model; the original weights are restored immediately after. Checkpoints saved during a validation epoch contain the EMA weights.
+- Added `MixStyleCallback`: applies MixStyle feature-level domain augmentation via forward hooks on selected encoder stages. `stages` controls which encoder stage indices receive the hook; `p` and `alpha` control application probability and Beta distribution parameter respectively.
+
+## LR Warmup
+
+- Added `warmup_epochs` support in `hyperparameters`: a linear LR warmup is prepended to any scheduler (except `OneCycleLR`, which has its own warmup via `pct_start`). The framework automatically subtracts `warmup_epochs` from `T_max` (or equivalent period parameters) so the total scheduled duration remains correct.
+
+## Inference pipeline
+
+- `predict_from_batch.py` updated: when `inference_processor` is present in the config, batch prediction is routed through `instantiate_inference_processor`, enabling sliding-window, striped, and TTA inference modes. The legacy `trainer.predict()` path is preserved for backward compatibility.
+- `InferenceProcessorConfig` and `PredictSingleImageConfig` updated with new fields: `tta_mode`, `tile_weight`, `confidence_mode`, `striped_threshold_pixels`, `stripe_height`, `output_probs_dir`.
+
 ## Domain Adaptation
 
 - Added initial domain adaptation module (`domain_adaptation/`) with an extensible base class (`BaseDomainAdaptationMethod`), feature hook extraction (`feature_hooks.py`), adaptation schedulers (`schedulers.py`), and a monitoring callback (`callbacks/monitor_callback.py`).

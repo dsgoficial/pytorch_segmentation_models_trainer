@@ -370,6 +370,42 @@ This sets `requires_grad=False` on all parameters of `model.encoder`. To unfreez
 
 ---
 
+## LR Warmup
+
+A linear learning rate warmup can be prepended to any scheduler (except `OneCycleLR`, which has its own warmup logic) by setting `warmup_epochs` inside `hyperparameters`. During warmup the LR rises linearly from 1% of the base rate to 100% over the configured number of epochs, then the main scheduler takes over.
+
+### LR Warmup Config
+
+```yaml
+hyperparameters:
+  batch_size: 8
+  warmup_epochs: 5     # linear warmup for 5 epochs, then hand off to main scheduler
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: 95          # automatically reduced by warmup_epochs
+      eta_min: 1.0e-6
+    interval: epoch
+    name: cosine_lr
+```
+
+The framework automatically subtracts `warmup_epochs` from `T_max` (or equivalent period parameters) so the total scheduled duration stays at `epochs` as configured.
+
+:::note OneCycleLR
+`warmup_epochs` is ignored when `OneCycleLR` is used — that scheduler has its own built-in warm-up phase via its `pct_start` parameter.
+:::
+
+:::tip When to use warmup
+Warmup is especially helpful when:
+
+- Using large batch sizes (stable gradient estimates develop gradually).
+- Fine-tuning a pretrained encoder that would otherwise be disrupted by a high initial LR.
+- Combined with `EMACallback`, where early EMA contamination from large weight swings is undesirable.
+:::
+
+---
+
 ## Accumulating Gradients
 
 Gradient accumulation simulates a larger effective batch size without requiring more GPU memory:

@@ -10,10 +10,10 @@ This guide explains how to prepare data and configure the `SegmentationDataset` 
 
 All dataset classes in this project use a CSV file as their index. Each row describes one training sample. The minimal required columns for segmentation are `image` and `mask`.
 
-| Column  | Description                                             |
-|---------|---------------------------------------------------------|
+| Column | Description |
+| --- | --- |
 | `image` | Path to the input image (absolute or relative to `root_dir`) |
-| `mask`  | Path to the corresponding segmentation mask             |
+| `mask` | Path to the corresponding segmentation mask |
 
 Paths may be absolute or relative. When `root_dir` is provided in the dataset config, relative paths are resolved against it.
 
@@ -63,13 +63,13 @@ For GeoTIFF files with more than three bands or with a specific band ordering, a
 
 Masks must be **single-channel (grayscale) PNG** files where each pixel value encodes a class:
 
-| Pixel value | Meaning                          |
-|-------------|----------------------------------|
-| `0`         | Background                       |
-| `1`         | Class 1                          |
-| `2`         | Class 2                          |
-| `…`         | Additional classes               |
-| `255`       | Foreground (binary segmentation) |
+| Pixel value | Meaning |
+| --- | --- |
+| `0` | Background |
+| `1` | Class 1 |
+| `2` | Class 2 |
+| `…` | Additional classes |
+| `255` | Foreground (binary segmentation) |
 
 When `n_classes=2` (the default), the dataset automatically binarises the mask: any non-zero value becomes `1`, and zero stays `0`. For multi-class masks, set `n_classes` to the actual number of classes and pixel values should match class indices directly.
 
@@ -79,32 +79,32 @@ When `n_classes=2` (the default), the dataset automatically binarises the mask: 
 
 ### Constructor Parameters
 
-| Parameter                    | Type                   | Default  | Description                                                                 |
-|------------------------------|------------------------|----------|-----------------------------------------------------------------------------|
-| `input_csv_path`             | `Path`                 | required | Path to the CSV index file                                                  |
-| `root_dir`                   | `str`                  | `None`   | Root directory prepended to relative paths in the CSV                       |
-| `augmentation_list`          | `list`                 | `None`   | List of albumentations transforms                                           |
-| `data_loader`                | config object          | `None`   | DataLoader keyword arguments                                                |
-| `image_key`                  | `str`                  | `"image"` | CSV column name for the image path                                         |
-| `mask_key`                   | `str`                  | `"mask"` | CSV column name for the mask path                                           |
-| `n_first_rows_to_read`       | `int`                  | `None`   | Limit the number of CSV rows read (useful for quick experiments)            |
-| `n_classes`                  | `int`                  | `2`      | Number of segmentation classes                                              |
-| `selected_bands`             | `List[int]`            | `None`   | 1-based list of band indices to read (e.g. `[1, 2, 3]`)                    |
-| `use_rasterio`               | `bool`                 | `False`  | Use rasterio instead of PIL for image loading                               |
-| `image_dtype`                | `str`                  | `"uint8"` | Data type for image interpretation when using rasterio. Accepted values: `"uint8"`, `"uint16"`, `"float32"`, `"native"`. See [Image Dtype](#image-dtype) below. |
-| `reset_augmentation_function`| `bool`                 | `False`  | Deep-copy the transform on each call to prevent albumentations memory leaks |
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `input_csv_path` | `Path` | required | Path to the CSV index file |
+| `root_dir` | `str` | `None` | Root directory prepended to relative paths in the CSV |
+| `augmentation_list` | `list` | `None` | List of albumentations transforms |
+| `data_loader` | config object | `None` | DataLoader keyword arguments |
+| `image_key` | `str` | `"image"` | CSV column name for the image path |
+| `mask_key` | `str` | `"mask"` | CSV column name for the mask path |
+| `n_first_rows_to_read` | `int` | `None` | Limit the number of CSV rows read (useful for quick experiments) |
+| `n_classes` | `int` | `2` | Number of segmentation classes |
+| `selected_bands` | `List[int]` | `None` | 1-based list of band indices to read (e.g. `[1, 2, 3]`) |
+| `use_rasterio` | `bool` | `False` | Use rasterio instead of PIL for image loading |
+| `image_dtype` | `str` | `"uint8"` | Data type for image interpretation when using rasterio. Accepted values: `"uint8"`, `"uint16"`, `"float32"`, `"native"`. See [Image Dtype](#image-dtype) below. |
+| `reset_augmentation_function` | `bool` | `False` | Deep-copy the transform on each call to prevent albumentations memory leaks |
 
 ### `data_loader` Sub-Config
 
 The `data_loader` config block is passed directly as keyword arguments to PyTorch's `DataLoader`. Supported fields:
 
-| Field         | Type   | Default | Description                                          |
-|---------------|--------|---------|------------------------------------------------------|
-| `shuffle`     | `bool` | `true`  | Shuffle samples every epoch                          |
-| `num_workers` | `int`  | `4`     | Number of parallel data loading workers              |
-| `pin_memory`  | `bool` | `true`  | Pin memory for faster GPU transfer                   |
-| `batch_size`  | `int`  | `8`     | Number of samples per batch                          |
-| `drop_last`   | `bool` | `false` | Drop the last incomplete batch                       |
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `shuffle` | `bool` | `true` | Shuffle samples every epoch |
+| `num_workers` | `int` | `4` | Number of parallel data loading workers |
+| `pin_memory` | `bool` | `true` | Pin memory for faster GPU transfer |
+| `batch_size` | `int` | `8` | Number of samples per batch |
+| `drop_last` | `bool` | `false` | Drop the last incomplete batch |
 
 ## Augmentation Pipeline
 
@@ -153,7 +153,7 @@ Setting `use_rasterio: true` also works for standard 3-band GeoTIFFs when you ne
 The `image_dtype` parameter controls how the pixel values are interpreted after loading via rasterio. It only affects the rasterio code path (i.e. when `use_rasterio: true` or `selected_bands` is set).
 
 | Value | numpy dtype | Automatic normalization (no-transform path) | Typical use case |
-|-------|-------------|---------------------------------------------|------------------|
+| --- | --- | --- | --- |
 | `"uint8"` (default) | `np.uint8` | divided by `255.0` | Standard RGB / 8-bit GeoTIFF |
 | `"uint16"` | `np.uint16` | divided by `65535.0` | 16-bit satellite imagery (Sentinel-2, Landsat, WorldView) |
 | `"float32"` | `np.float32` | no division | Imagery already stored as normalized floats |
@@ -181,6 +181,7 @@ augmentation_list:
     max_pixel_value: 1.0   # values are already in [0, 1] after ToFloat
   - _target_: albumentations.pytorch.ToTensorV2
 ```
+
 :::
 
 ## Full YAML Configuration Example
@@ -328,15 +329,15 @@ train_dataset:
 
 `__getitem__` returns a dictionary with the following keys:
 
-| Key     | Shape           | dtype            | Description                              |
-|---------|-----------------|------------------|------------------------------------------|
-| `image` | `(C, H, W)`     | `torch.float32`  | Normalised image tensor                  |
-| `mask`  | `(H, W)`        | `torch.int64`    | Class-index mask                         |
+| Key | Shape | dtype | Description |
+| --- | --- | --- | --- |
+| `image` | `(C, H, W)` | `torch.float32` | Normalised image tensor |
+| `mask` | `(H, W)` | `torch.int64` | Class-index mask |
 
 When `augmentation_list` is `null`, the image is automatically converted to a `(C, H, W)` float tensor. The normalization factor depends on `image_dtype`:
 
 | `image_dtype` | Automatic scaling |
-|---------------|-------------------|
+| --- | --- |
 | `"uint8"` | divided by `255.0` → `[0, 1]` |
 | `"uint16"` | divided by `65535.0` → `[0, 1]` |
 | `"float32"` | no scaling applied |
@@ -361,7 +362,7 @@ Files present in only one folder (or in a different subfolder) are silently excl
 
 ### Folder Structure Example
 
-```
+```text
 /data/my_dataset/
 ├── images/
 │   ├── area_a/
@@ -407,7 +408,7 @@ ds = SegmentationDatasetFromFolder(
 )
 ```
 
-### Multispectral Support
+### Multispectral Support (SegmentationDatasetFromFolder)
 
 All parameters of `SegmentationDataset` are available, including `use_rasterio`, `selected_bands`, and `image_dtype`:
 
@@ -469,7 +470,8 @@ except ValueError as e:
 ### When to Use Each Approach
 
 | Scenario | Recommended class |
-|----------|-------------------|
+| --- | --- |
 | Pre-existing CSV index | `SegmentationDataset` |
 | Structured folder hierarchy, no CSV needed | `SegmentationDatasetFromFolder` |
-| Large images that require on-the-fly cropping | `RandomCropSegmentationDataset` |
+| Large full-scene images, on-the-fly random cropping | [`RandomCropSegmentationDataset`](../advanced/random-crop-dataset.md) |
+| Systematic sliding-window evaluation | `RasterPatchDataset` |

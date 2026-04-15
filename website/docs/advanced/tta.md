@@ -52,7 +52,30 @@ The eight supported augmentations form the **D4 dihedral group** — all symmetr
 
 ## TTA in inference (`predict`)
 
-Add `use_tta: true` and `tta_augmentations` to the `inference_processor` block of your predict YAML:
+There are two TTA interfaces depending on the processor class you are using.
+
+### `MultiClassInferenceProcessor` — compact `tta_mode` interface
+
+Use the `tta_mode` field for the cleanest config. Two presets are available:
+
+| `tta_mode` | Passes | Coverage |
+| --- | --- | --- |
+| `"d4"` | 8× | All 8 dihedral symmetries (4 rotations × 2 flips) |
+| `"flip"` | 4× | Identity + horizontal flip + 180° rotation + vertical flip |
+
+```yaml title="configs/predict_multiclass_tta.yaml"
+inference_processor:
+  _target_: pytorch_segmentation_models_trainer.tools.inference.inference_processors.MultiClassInferenceProcessor
+  model_input_shape: [512, 512]
+  step_shape: [256, 256]
+  num_classes: 5
+  tta_mode: d4          # or: flip
+  tile_weight: gaussian # optional: mean | pyramid | gaussian
+```
+
+### `SingleImageInfereceProcessor` — explicit `use_tta` interface
+
+For fine-grained control over which augmentations are applied, use `use_tta: true` with an explicit `tta_augmentations` list. `SingleImageInfereceProcessor` also accepts `tta_mode` as a convenience alias.
 
 ```yaml title="configs/predict_with_tta.yaml"
 checkpoint_path: /checkpoints/unet_best.ckpt
@@ -73,17 +96,19 @@ inference_processor:
   _target_: pytorch_segmentation_models_trainer.tools.inference.inference_processors.SingleImageInfereceProcessor
   model_input_shape: [448, 448]
   step_shape: [224, 224]
-  # ── TTA ──────────────────────────────────────────────────────────────────
-  use_tta: true
-  tta_augmentations:
-    - rot0          # original image (identity)
-    - rot90         # 90° counter-clockwise rotation
-    - rot180        # 180° rotation
-    - rot270        # 270° counter-clockwise rotation
-    - flip_h        # horizontal flip (left-right mirror)
-    - flip_v        # vertical flip (up-down mirror)
-    - flip_h_rot90  # horizontal flip + 90° counter-clockwise rotation
-    - flip_v_rot90  # vertical flip + 90° counter-clockwise rotation
+  # ── Option A: compact preset ─────────────────────────────────────────────
+  tta_mode: d4
+  # ── Option B: explicit list ──────────────────────────────────────────────
+  # use_tta: true
+  # tta_augmentations:
+  #   - rot0
+  #   - rot90
+  #   - rot180
+  #   - rot270
+  #   - flip_h
+  #   - flip_v
+  #   - flip_h_rot90
+  #   - flip_v_rot90
   # ─────────────────────────────────────────────────────────────────────────
 
 export_strategy:
@@ -93,41 +118,34 @@ export_strategy:
 inference_threshold: 0.5
 ```
 
-The same parameters work for `MultiClassInferenceProcessor`:
-
-```yaml
-inference_processor:
-  _target_: pytorch_segmentation_models_trainer.tools.inference.inference_processors.MultiClassInferenceProcessor
-  model_input_shape: [512, 512]
-  step_shape: [256, 256]
-  num_classes: 5
-  use_tta: true
-  tta_augmentations:
-    - rot0     # original image (identity)
-    - rot90    # 90° counter-clockwise rotation
-    - rot180   # 180° rotation
-    - rot270   # 270° counter-clockwise rotation
-```
-
 ---
 
 ## TTA in the test step (`trainer.test()`)
 
-To enable TTA during model evaluation, add `use_tta` directly to the training / evaluation config (at the same level as the model):
+To enable TTA during model evaluation, add `tta_mode` (compact) or `use_tta` (explicit) directly to the training / evaluation config at the top level:
+
+**Option A — compact preset (recommended):**
 
 ```yaml title="configs/train_with_tta_eval.yaml"
 # ... other training settings ...
 
-# ── TTA for test_step ────────────────────────────────────────────────────────
-use_tta: true
-tta_augmentations:
-  - rot0     # original image (identity)
-  - rot90    # 90° counter-clockwise rotation
-  - rot180   # 180° rotation
-  - rot270   # 270° counter-clockwise rotation
+tta_mode: d4   # or: flip
 ```
 
-When `use_tta: true`, `test_step` automatically applies the augmentations to each batch, averages the de-augmented predictions, and uses the result for loss and metric computation.
+**Option B — explicit augmentation list:**
+
+```yaml title="configs/train_with_tta_eval.yaml"
+# ... other training settings ...
+
+use_tta: true
+tta_augmentations:
+  - rot0
+  - rot90
+  - rot180
+  - rot270
+```
+
+`tta_mode` takes precedence over `use_tta` when both are set. When either is active, `test_step` applies the augmentations to each batch, averages the de-augmented predictions, and uses the result for loss and metric computation.
 
 :::note
 TTA in the test step **does not affect** training (`training_step`) or validation (`validation_step`) — it is activated exclusively during `trainer.test()`.
