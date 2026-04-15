@@ -985,11 +985,20 @@ class Model(pl.LightningModule):
     def _get_tta_augmentations(self) -> Optional[List[str]]:
         """Return the TTA augmentation list from config, or None if TTA is off.
 
-        Reads ``cfg.use_tta`` (bool) and ``cfg.tta_augmentations`` (list of
-        strings).  Falls back to the four standard rotations when
-        ``tta_augmentations`` is not set.
+        Checks ``cfg.tta_mode`` first (MultiClassInferenceProcessor-style
+        interface), then falls back to ``cfg.use_tta`` + ``cfg.tta_augmentations``
+        (SingleImageInfereceProcessor-style interface).
 
-        YAML example::
+        ``tta_mode`` values:
+            - ``"d4"``   — all 8 dihedral symmetries (4 rotations × 2 flips)
+            - ``"flip"`` — identity + hflip + rot180 + vflip (4 passes)
+            - ``None``   — disabled (fall through to use_tta)
+
+        YAML example — tta_mode interface::
+
+            tta_mode: d4   # or: flip
+
+        YAML example — use_tta interface::
 
             use_tta: true
             tta_augmentations:
@@ -997,11 +1006,28 @@ class Model(pl.LightningModule):
               - rot90
               - rot180
               - rot270
-              - flip_h
-              - flip_v
-              - flip_h_rot90
-              - flip_v_rot90
         """
+        _TTA_MODE_MAP = {
+            "d4": [
+                "rot0",
+                "rot90",
+                "rot180",
+                "rot270",
+                "flip_h",
+                "flip_v",
+                "flip_h_rot90",
+                "flip_v_rot90",
+            ],
+            "flip": ["rot0", "flip_h", "rot180", "flip_v"],
+        }
+        tta_mode = getattr(self.cfg, "tta_mode", None)
+        if tta_mode is not None:
+            if tta_mode not in _TTA_MODE_MAP:
+                raise ValueError(
+                    f"tta_mode must be None, 'd4', or 'flip', got '{tta_mode}'"
+                )
+            return _TTA_MODE_MAP[tta_mode]
+
         use_tta = getattr(self.cfg, "use_tta", False)
         if not use_tta:
             return None

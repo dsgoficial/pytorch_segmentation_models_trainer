@@ -48,13 +48,22 @@ class InferenceProcessorConfig:
 
     Test Time Augmentation (TTA)
     ----------------------------
+    Two TTA interfaces are available depending on the processor class:
+
+    **MultiClassInferenceProcessor** — use ``tta_mode``:
+
+        ``tta_mode: "d4"``   — all 8 dihedral symmetries (4 rotations × 2 flips)
+        ``tta_mode: "flip"`` — horizontal + vertical flip (4 passes)
+        ``tta_mode: null``   — no TTA (default)
+
+    **SingleImageInfereceProcessor / SingleImageFromFrameFieldProcessor** — use ``use_tta``:
+
     When ``use_tta: true``, each tile is run through the model once per
-    augmentation listed in ``tta_augmentations``.  The predictions are
+    augmentation listed in ``tta_augmentations``. The predictions are
     de-augmented (reversed) and averaged before being handed to the
     TileMerger.
 
-    Available augmentations (D4 dihedral group — 8 symmetries of a square).
-    Use the names below literally in the ``tta_augmentations`` field:
+    Available augmentations (D4 dihedral group — 8 symmetries of a square):
 
     +------------------+-----------------------------------------------------+
     | Name             | Transformation                                      |
@@ -69,10 +78,27 @@ class InferenceProcessorConfig:
     | ``flip_v_rot90`` | Vertical flip + 90° counter-clockwise rotation      |
     +------------------+-----------------------------------------------------+
 
-    The default is the four 90° rotations (``rot0``, ``rot90``, ``rot180``,
-    ``rot270``).  List all 8 names to use the full D4 group.
+    Confidence maps (MultiClassInferenceProcessor only)
+    ---------------------------------------------------
+    ``confidence_mode: "basic"`` — saves max-probability map per pixel.
+    ``confidence_mode: "full"``  — saves max_prob, entropy, and margin maps.
 
-    YAML example — 4 rotations (default)::
+    Striped inference (MultiClassInferenceProcessor only)
+    -----------------------------------------------------
+    Images larger than ``striped_threshold_pixels`` are processed in horizontal
+    stripes of height ``stripe_height`` to avoid OOM on large/BigTIFF inputs.
+
+    YAML example — MultiClassInferenceProcessor with D4 TTA::
+
+        inference_processor:
+          _target_: ...MultiClassInferenceProcessor
+          model_input_shape: [512, 512]
+          step_shape: [256, 256]
+          num_classes: 5
+          tta_mode: d4
+          tile_weight: gaussian
+
+    YAML example — SingleImageInfereceProcessor with rotation TTA::
 
         inference_processor:
           _target_: ...SingleImageInfereceProcessor
@@ -80,40 +106,42 @@ class InferenceProcessorConfig:
           step_shape: [224, 224]
           use_tta: true
           tta_augmentations:
-            - rot0     # original image (identity)
-            - rot90    # 90° counter-clockwise rotation
-            - rot180   # 180° rotation
-            - rot270   # 270° counter-clockwise rotation
-
-    YAML example — full D4 group (8 augmentations)::
-
-        inference_processor:
-          use_tta: true
-          tta_augmentations:
-            - rot0          # original image (identity)
-            - rot90         # 90° counter-clockwise rotation
-            - rot180        # 180° rotation
-            - rot270        # 270° counter-clockwise rotation
-            - flip_h        # horizontal flip (left-right mirror)
-            - flip_v        # vertical flip (up-down mirror)
-            - flip_h_rot90  # horizontal flip + 90° counter-clockwise rotation
-            - flip_v_rot90  # vertical flip + 90° counter-clockwise rotation
+            - rot0
+            - rot90
+            - rot180
+            - rot270
     """
 
     _target_: str = MISSING
     model_input_shape: Optional[List[int]] = None
     step_shape: Optional[List[int]] = None
+
+    # ── TTA for SingleImageInfereceProcessor / SingleImageFromFrameFieldProcessor ──
     use_tta: bool = False
     # Default: four 90° rotations.
     # Add flip_h, flip_v, flip_h_rot90, flip_v_rot90 for the full D4 group.
     tta_augmentations: List[str] = field(
         default_factory=lambda: [
-            "rot0",    # original image (identity)
-            "rot90",   # 90° counter-clockwise rotation
-            "rot180",  # 180° rotation
-            "rot270",  # 270° counter-clockwise rotation
+            "rot0",
+            "rot90",
+            "rot180",
+            "rot270",
         ]
     )
+
+    # ── TTA for MultiClassInferenceProcessor ──────────────────────────────────
+    # None = no TTA, "d4" = 8 dihedral transforms, "flip" = 4 flip transforms
+    tta_mode: Optional[str] = None
+
+    # ── MultiClassInferenceProcessor extras ───────────────────────────────────
+    # Tile weighting: "mean" | "pyramid" | "gaussian"
+    tile_weight: str = "mean"
+    # Confidence maps: None | "basic" | "full"
+    confidence_mode: Optional[str] = None
+    # Striped inference for large images
+    striped_threshold_pixels: int = 50_000_000
+    stripe_height: int = 4096
+    output_probs_dir: Optional[str] = None
 
 
 @dataclass
@@ -186,20 +214,21 @@ class PredictSingleImageConfig:
     save_inference: bool = True
 
     # ── Test Time Augmentation for the model test_step ────────────────────────
-    # When use_tta=True, test_step runs the model under each augmentation listed
-    # below, reverses the transformation, and averages the predictions.
-    # Valid names are the same as in InferenceProcessorConfig.tta_augmentations.
+    # use_tta / tta_augmentations: applies to SingleImageInfereceProcessor-style
+    # augmentation strings (rot0, rot90, flip_h, …).
+    # tta_mode: applies to MultiClassInferenceProcessor-style ("d4" or "flip").
+    # Only one interface is active at a time; tta_mode takes precedence.
     use_tta: bool = False
-    # Default: four 90° rotations.
-    # Add flip_h, flip_v, flip_h_rot90, flip_v_rot90 for the full D4 group.
     tta_augmentations: List[str] = field(
         default_factory=lambda: [
-            "rot0",    # original image (identity)
-            "rot90",   # 90° counter-clockwise rotation
-            "rot180",  # 180° rotation
-            "rot270",  # 270° counter-clockwise rotation
+            "rot0",
+            "rot90",
+            "rot180",
+            "rot270",
         ]
     )
+    # None = no TTA, "d4" = 8 dihedral transforms, "flip" = 4 flip transforms
+    tta_mode: Optional[str] = None
 
 
 # Register configurations with Hydra

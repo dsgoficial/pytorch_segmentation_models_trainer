@@ -200,6 +200,21 @@ class AbstractInferenceProcessor(ABC):
 
 
 class SingleImageInfereceProcessor(AbstractInferenceProcessor):
+    # Map tta_mode strings to tta_augmentations lists (same interface as MultiClass)
+    _TTA_MODE_AUGMENTATIONS = {
+        "d4": [
+            "rot0",
+            "rot90",
+            "rot180",
+            "rot270",
+            "flip_h",
+            "flip_v",
+            "flip_h_rot90",
+            "flip_v_rot90",
+        ],
+        "flip": ["rot0", "flip_h", "rot180", "flip_v"],
+    }
+
     def __init__(
         self,
         model,
@@ -218,7 +233,17 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
         use_tta: bool = False,
         tta_augmentations: Optional[List[str]] = None,
         tile_weight="mean",
+        tta_mode: Optional[str] = None,
     ):
+        # tta_mode is a convenience alias: "d4" or "flip" automatically sets
+        # use_tta=True and selects the matching tta_augmentations preset.
+        if tta_mode is not None:
+            if tta_mode not in self._TTA_MODE_AUGMENTATIONS:
+                raise ValueError(
+                    f"tta_mode must be None, 'd4', or 'flip', got '{tta_mode}'"
+                )
+            use_tta = True
+            tta_augmentations = self._TTA_MODE_AUGMENTATIONS[tta_mode]
         super(SingleImageInfereceProcessor, self).__init__(
             model,
             device,
