@@ -1,12 +1,57 @@
 # Unreleased
 
+## Domain Adaptation
+
+- Added initial domain adaptation module (`domain_adaptation/`) with an extensible base class (`BaseDomainAdaptationMethod`), feature hook extraction (`feature_hooks.py`), adaptation schedulers (`schedulers.py`), and a monitoring callback (`callbacks/monitor_callback.py`).
+- Added `DomainAdaptationModel` (inherits `Model`) that orchestrates source/target dataloaders, adaptation loss weighting, and per-epoch scheduler stepping.
+- Added `DomainAdaptationConfig` dataclass in `config_definitions/domain_adaptation_config.py`.
+- Added comprehensive test suite for domain adaptation (`test_base_method.py`, `test_domain_adaptation_config.py`, `test_domain_adaptation_model.py`, `test_feature_hooks.py`, `test_schedulers.py`).
+- Added documentation: user guide (`advanced/domain-adaptation.md`), config reference (`advanced/domain-adaptation-config-reference.md`), and implementing custom methods guide (`advanced/domain-adaptation-implementing-methods.md`).
+
+## Test Time Augmentation (TTA)
+
+- Added `tools/tta/tta.py` implementing TTA with all 8 symmetries of the D4 dihedral group (4 rotations × 2 flips). Each augmentation has an exact inverse so predictions are de-augmented and averaged with no spatial artifacts.
+- Added `apply_tta()` helper for applying TTA to any segmentation model callable.
+- Exposed `use_tta` and `tta_augmentations` fields on all inference processor classes and `InferenceProcessorConfig`/`PredictSingleImageConfig`. `SingleImageFromFrameFieldProcessor` automatically skips the `crossfield` output during TTA de-augmentation.
+- `test_step()` in `Model` now applies TTA when `cfg.use_tta=True`.
+- Added TTA user guide (`website/docs/advanced/tta.md`) and inference documentation section.
+
+## Transformer & Foundation Model Support
+
+- Added `HuggingFaceSegmentationWrapper` (`custom_models/huggingface_models.py`): loads any `AutoModelForSemanticSegmentation` from the Hub or local path, bypasses the HF processor, and upsamples logits back to input resolution.
+- Added `TimmEncoderWithSMPDecoder` (`custom_models/timm_models.py`): combines a `timm` `features_only` backbone with SMP UNet/FPN/PAN decoders.
+- Added `TerraTorchSegmentationWrapper` (`custom_models/terratorch_models.py`): bridges TerraTorch foundation model encoders (Prithvi, Clay, SatMAE) with a linear or FPN segmentation head; supports single- and multi-temporal inputs.
+- Added `ModelOutputAdapter` (`custom_models/transformer_adapters.py`): normalises any model output (HF dataclass, dict, tuple, or plain tensor) to a `(B, C, H, W)` tensor with optional bilinear upsampling.
+- Added LoRA / PEFT fine-tuning support (`fine_tuning/lora_utils.py`): `apply_fine_tuning_strategy()` supports `full`, `freeze_backbone`, `linear_probe`, and `lora` strategies; `LoraAdapterConfig` and `FineTuningConfig` dataclasses added; `merge_lora_weights()` for deployment.
+- `predict.py` now auto-merges LoRA adapter weights before inference; a `keep_lora_adapters` flag skips the merge for fine-tuning resumption.
+- Hardened training loop in `Model`: `_unpack_batch()` replaces fragile `batch.values()` unpacking with configurable `image_key`/`mask_key`; `set_encoder_trainable()` no longer assumes a `.encoder` attribute; `_prepare_preds_for_metrics()` guards metric calls against malformed outputs.
+- Added 6 example YAML configs: `smp_mit_b2.yaml`, `smp_tu_convnext.yaml`, `segformer_hf.yaml`, `segformer_lora.yaml`, `vit_linear_probe.yaml`, `prithvi_terratorch.yaml`.
+- Added `[transformers]` pip extras group and a dedicated CI job for the transformer test suite.
+
+## RasterPatchDataset
+
+- Added `RasterPatchDataset` (`dataset_loader/raster_patch_dataset.py`): scans image/mask directory pairs recursively and exposes every `patch_size × patch_size` window (with configurable stride) as an independent dataset item. Global index to `(image, row, col)` mapping runs in O(log N) via `bisect` over cumulative patch counts; rasterio windowed reads ensure full images never enter RAM.
+- Supports augmentations, `selected_bands`, `image_dtype`, `mask_extension`, `n_classes` (binary binarisation when `n_classes=2`), and `reset_augmentation_function`.
+- Emits `UserWarning` for orphaned mask files (mask without a corresponding image) to surface dataset misconfiguration.
+- Added `RasterPatchDatasetConfig` dataclass and example YAML (`conf/examples/raster_patch_segmentation.yaml`).
+
+## Dataset improvements
+
 - Added `test_dataset` support with `test_step()`, `test_dataloader()`, and `test_metrics` (prefixed `test/`) in `Model` and `FrameFieldSegmentationPLModel`. `trainer.test()` is now called automatically after `trainer.fit()` when `test_dataset` is present in the config. This completes the three-way dataset split: `train_dataset` → training loop; `val_dataset` → per-epoch monitoring during fit; `test_dataset` → final held-out evaluation after fit.
-- Added `test_dataset` field to `TrainConfig` dataclass and `test_dataset` block to all example YAML configs (`smp_mit_b2.yaml`, `segformer_hf.yaml`, `segformer_lora.yaml`, `smp_tu_convnext.yaml`, `vit_linear_probe.yaml`, `prithvi_terratorch.yaml`).
+- Added `test_dataset` field to `TrainConfig` dataclass and `test_dataset` block to all example YAML configs.
+- Added `SegmentationDatasetFromFolder`: a new dataset class that discovers image/mask pairs recursively from two root folders, without requiring a CSV file. Matching is done by relative subfolder path and file stem. Supports all parameters of `SegmentationDataset`. Raises `ValueError` when no valid pairs are found.
+- `SegmentationDataset.__init__` now accepts an optional `df` parameter (pre-built `pd.DataFrame`) in addition to `input_csv_path`, enabling programmatic dataset creation without a CSV file on disk. Fully backwards-compatible.
+- Added configurable `image_dtype` field to `SegmentationDataset`, `RandomCropSegmentationDataset`, and their configs, accepting `uint8` (default), `uint16`, `float32`, or `native`. Auto-normalization scales correctly per dtype (`/255`, `/65535`, or no division). Fully backwards-compatible.
+
+## Inference improvements
+
+- Added `normalize_max_value` parameter to all inference processor classes (`AbstractInferenceProcessor` and all subclasses), exposing Albumentations' `max_pixel_value` for the normalization step. Default `None` preserves the previous behaviour (`255.0`). Use `normalize_max_value: 65535.0` for uint16 imagery or `1.0` for pre-normalized float32.
+
+## Bug fixes
+
 - Fixed bug in `Model.__init__`: `gpu_val_transform` and `gpu_train_transform` were accessed via `cfg.val_dataset`/`cfg.train_dataset` without checking if those keys exist, causing `AttributeError` when the corresponding dataset config was omitted.
 - Fixed `val_dataloader()` to return `None` gracefully when `val_ds` is `None` (i.e. `val_dataset` absent from config), allowing training-only runs without a validation loop.
 - Removed the orphan `set_test_dataset()` method from `FrameFieldSegmentationPLModel` (superseded by the new `test_ds` attribute set in `Model.__init__`).
-- Added `SegmentationDatasetFromFolder`: a new dataset class that discovers image/mask pairs recursively from two root folders, without requiring a CSV file. Matching is done by relative subfolder path and file stem. Supports all parameters of `SegmentationDataset` (augmentations, rasterio, band selection, `image_dtype`). Raises `ValueError` when no valid pairs are found.
-- `SegmentationDataset.__init__` now accepts an optional `df` parameter (pre-built `pd.DataFrame`) in addition to `input_csv_path`, enabling programmatic dataset creation without a CSV file on disk. Fully backwards-compatible.
 
 # Version 1.0.1
 
