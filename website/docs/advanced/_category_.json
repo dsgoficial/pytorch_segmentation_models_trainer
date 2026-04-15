@@ -4,8 +4,8 @@
   "link": {
     "type": "generated-index",
     "title": "Advanced Features",
-    "description": "Frame field models, Polygon-RNN, object detection, and polygonization.",
-    "keywords": ["frame-field", "polygon-rnn", "object-detection", "polygonization"]
+    "description": "Frame field models, Polygon-RNN, object detection, polygonization, and domain adaptation.",
+    "keywords": ["frame-field", "polygon-rnn", "object-detection", "polygonization", "domain-adaptation"]
   },
   "collapsed": true
 }
