@@ -222,6 +222,7 @@ class SegLoss(Loss):
         mixup_alpha: float = 0.5,
         use_label_smooth: bool = False,
         smooth_factor: float = 0.0,
+        ignore_index: int = 255,
     ):
         """
         :param name:
@@ -237,6 +238,7 @@ class SegLoss(Loss):
         self.use_mixup = use_mixup
         self.use_label_smooth = use_label_smooth
         self.smooth_factor = smooth_factor
+        self.ignore_index = ignore_index
         if n_classes == 2:
             self.cross_entropy_func = (
                 F.binary_cross_entropy
@@ -245,10 +247,14 @@ class SegLoss(Loss):
             )
         else:
             self.cross_entropy_func = torch.nn.CrossEntropyLoss(
-                label_smoothing=smooth_factor
+                label_smoothing=smooth_factor, ignore_index=ignore_index
             )
         if use_label_smooth:
-            self.cross_entropy_func = loss.smooth_cross_entropy_loss
+            self.cross_entropy_func = partial(
+                loss.smooth_cross_entropy_loss,
+                smoothing=smooth_factor,
+                ignore_index=ignore_index,
+            )
         if use_mixup:
             self.mixup_func = loss.MixUpAugmentationLoss(
                 self.cross_entropy_func, mixup_alpha

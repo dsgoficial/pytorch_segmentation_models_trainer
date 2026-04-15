@@ -109,7 +109,7 @@ def instantiate_dataloaders(cfg):
     ]
 
 
-@hydra.main()
+@hydra.main(config_path=None, version_base="1.2")
 def predict_mod_polymapper_from_batch(cfg: DictConfig):
     logger.info(
         "Starting the prediction of a model with the following configuration: \n%s",

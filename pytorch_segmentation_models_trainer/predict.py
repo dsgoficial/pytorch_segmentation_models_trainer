@@ -32,6 +32,9 @@ from tqdm import tqdm
 from pytorch_segmentation_models_trainer.tools.inference.inference_processors import (
     AbstractInferenceProcessor,
 )
+from pytorch_segmentation_models_trainer.tools.inference.export_inference import (
+    ConfidenceExportStrategy,
+)
 from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import (
     TemplatePolygonizerProcessor,
 )
@@ -64,12 +67,16 @@ def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
         inference_mode=True,
         map_location=map_location,
         weights_only=False,
+        strict=False,
     )
     model = pl_model.model
+    del pl_model  # free duplicate weights (EMA + original) from checkpoint
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     # Merge LoRA adapter weights (if any) before inference so that the model
-    # runs without the PEFT wrapper overhead.  Set merge_lora=false in config
-    # to keep adapters active (e.g. for continued fine-tuning).
+    # runs without the PEFT wrapper overhead.  Set keep_lora_adapters=true in
+    # config to keep adapters active (e.g. for continued fine-tuning).
     should_merge = not bool(getattr(cfg, "keep_lora_adapters", False))
     if should_merge and is_peft_model(model):
         logger.info("Merging LoRA adapter weights before inference.")
@@ -106,6 +113,14 @@ def instantiate_inference_processor(cfg: DictConfig) -> AbstractInferenceProcess
         obj_params["normalize_mean"] = cfg.inference_processor.normalize_mean
     if "normalize_std" in cfg.inference_processor:
         obj_params["normalize_std"] = cfg.inference_processor.normalize_std
+    if "tta_mode" in cfg.inference_processor:
+        obj_params["tta_mode"] = cfg.inference_processor.tta_mode
+    if "confidence_mode" in cfg.inference_processor:
+        obj_params["confidence_mode"] = cfg.inference_processor.confidence_mode
+        if "export_strategy" in cfg:
+            obj_params["confidence_export_strategy"] = ConfidenceExportStrategy(
+                output_file_path=cfg.export_strategy.output_file_path
+            )
     obj_params.pop("_target_")
     for key, value in obj_params.items():
         if isinstance(value, omegaconf.listconfig.ListConfig):
@@ -119,7 +134,7 @@ def get_images(cfg: DictConfig) -> List[str]:
     return image_reader.get_images()
 
 
-@hydra.main()
+@hydra.main(config_path=None, version_base="1.2")
 def predict(cfg: DictConfig):
     logger.info(
         "Starting the prediction of a model with the following configuration: \n%s",
