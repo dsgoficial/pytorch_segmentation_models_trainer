@@ -42,14 +42,22 @@ A Python script (`scripts/generate_schema.py`) introspects the installed version
 
 ## Features
 
-- **Multiple Architectures**: UNet, DeepLabV3Plus, FPN, PSPNet with various encoders (ResNet34/101/152, EfficientNet, etc.)
-- **Multispectral Support**: Native handling of 3, 4, 6, and 12-band satellite imagery
-- **Transfer Learning**: Automatic weight adaptation from ImageNet pretrained models for multispectral data
-- **Flexible Loss Functions**: Compound loss system with dynamic weight scheduling, supporting BCE, Dice, Focal, and custom losses
-- **Advanced Inference**: Sliding window inference with configurable overlap for large imagery processing
+- **Multiple Architectures**: UNet, UNet++, DeepLabV3+, FPN, PSPNet, PAN, LinkNet, MANet via `segmentation_models_pytorch`; HRNet+OCR, UPerNet variants, custom UNet implementations
+- **Foundation Model Integration**: HuggingFace Transformers (SegFormer, Mask2Former), TerraTorch multispectral models, TIMM encoders
+- **Multispectral Support**: Native handling of 3, 4, 6, and 12-band satellite imagery with automatic weight adaptation
+- **Transfer Learning**: Automatic weight adaptation from ImageNet pretrained models for multispectral data (mean, random, copy_first strategies)
+- **Flexible Loss Functions**: Compound loss system with dynamic weight scheduling, supporting BCE, Dice, Focal, Label Smoothing, Knowledge Distillation, and custom losses
+- **Evidential Deep Learning**: Built-in uncertainty quantification via Dirichlet-based evidential models (`EvidentialWrapper`, EDL losses, uncertainty map export)
+- **Domain Adaptation**: Plugin-based domain adaptation infrastructure with feature hooks and multiple DA schedulers
+- **Fine-tuning Strategies**: Full training, freeze backbone, linear probe, and LoRA (Low-Rank Adaptation) via PEFT
+- **Geometry-Aware Training**: Frame field (crossfield) model for boundary and polygon prediction with alignment/smoothness losses
+- **Polygon Extraction**: RNN-based polygon boundary tracing, template-based polygonization, frame field polygon generation
+- **Mixture of Experts**: MoE layers and UPerNet+MoE variants for dynamic expert routing in the decoder
+- **Advanced Inference**: Sliding window inference with configurable overlap and Test-Time Augmentation (TTA)
 - **Comprehensive Evaluation**: Multi-experiment evaluation pipeline with spatial alignment and parallel processing
-- **Hydra Configuration**: Full configuration composition and management with YAML
+- **Hydra Configuration**: Full configuration composition and management with typed YAML dataclasses
 - **Geospatial Tools**: Built-in support for GeoTIFF, coordinate systems, and PostGIS integration
+- **GPU Augmentations**: Kornia-based on-GPU transforms for faster training pipelines
 
 ## Installation
 
@@ -204,7 +212,7 @@ pl_trainer:
   devices: -1  # Use all available GPUs
   precision: "16-mixed"  # Mixed precision training
   default_root_dir: /experiments/${backbone.name}_${hyperparameters.model_name}
-  
+
 # Metrics
 metrics:
   - _target_: torchmetrics.JaccardIndex
@@ -290,12 +298,12 @@ loss_params:
         dice_coef: 0.3
         weight: 10.0
         name: seg_loss
-      
+
       # Boundary Loss (optional)
       - _target_: pytorch_segmentation_models_trainer.custom_losses.boundary_loss.BoundaryLoss
         weight: 1.0
         name: boundary_loss
-    
+
     # Dynamic weight scheduling
     weight_schedules:
       seg_loss:
@@ -305,7 +313,7 @@ loss_params:
         type: epoch_threshold
         epoch_thresholds: [0, 20, 50]
         values: [0.0, 1.0, 2.0]
-    
+
     # Normalization
     normalize_losses: true
     normalization_params:
@@ -341,17 +349,17 @@ inference_image_reader:
 inference_processor:
   _target_: pytorch_segmentation_models_trainer.tools.inference.inference_processors.MultiClassInferenceProcessor
   num_classes: 6
-  
+
   # Sliding window parameters
   model_input_shape: [512, 512]
   step_shape: [384, 384]  # 25% overlap (512 - 384 = 128)
-  
+
   # Export strategy
   export_strategy:
     _target_: pytorch_segmentation_models_trainer.tools.inference.export_strategies.ExportToGeoTiff
     compress: lzw
     tiled: true
-    
+
   # Normalization (must match training)
   normalize_mean: [0.485, 0.456, 0.406]
   normalize_std: [0.229, 0.224, 0.225]
@@ -372,7 +380,7 @@ experiments:
     predict_config: configs/predict_unet_r34.yaml
     checkpoint_path: /experiments/unet_r34/best.ckpt
     output_folder: /evaluations/unet_r34_predictions
-  
+
   - name: deeplabv3_resnet101_12band
     predict_config: configs/predict_deeplabv3_r101.yaml
     checkpoint_path: /experiments/deeplabv3_r101/best.ckpt
@@ -382,7 +390,7 @@ experiments:
 evaluation_dataset:
   # Option 1: Use existing CSV
   input_csv_path: /data/test.csv
-  
+
   # Option 2: Build CSV from folders
   build_csv_from_folders:
     enabled: true
@@ -430,7 +438,7 @@ visualization:
 pipeline_options:
   skip_existing_predictions: false
   skip_existing_metrics: false
-  
+
   # Parallel inference
   parallel_inference:
     enabled: true
@@ -482,6 +490,110 @@ csv_path = build_csv_from_folders(
 - **PAN**: Path Aggregation Network
 - **LinkNet**: Efficient architecture for real-time segmentation
 - **MANet**: Multi-scale Attention Network
+
+### Custom / Extended Architectures
+
+- **HRNet + OCR**: High-Resolution Network with Object-Contextual Representations head
+- **UPerNet**: Unified Perceptual Parsing Network with standard, MoE, MedoE, and Dual-Head variants
+- **SegFormer / Mask2Former**: via HuggingFace Transformers
+- **TerraTorch models**: multispectral satellite foundation models
+- **TIMM encoders**: any encoder available in the `timm` library
+- **EvidentialWrapper**: wraps any segmentation model to produce Dirichlet evidence and uncertainty maps
+- **PolygonRNN**: RNN-based boundary tracing for polygon generation
+- **ModPolyMapper**: polygon-to-map generation pipeline
+
+## Fine-tuning Strategies
+
+The framework supports multiple fine-tuning strategies selectable via configuration:
+
+| Strategy | Description |
+| --- | --- |
+| `full` | All parameters are trainable (default) |
+| `freeze_backbone` | Only the decoder and head are trained |
+| `linear_probe` | Only the final classification layer is trained |
+| `lora` | Low-Rank Adaptation (LoRA) via PEFT — efficient parameter fine-tuning |
+
+```yaml
+fine_tuning:
+  strategy: lora          # full | freeze_backbone | linear_probe | lora
+  lora_rank: 16
+  lora_alpha: 32
+  lora_target_modules: ["query", "value"]
+```
+
+## Evidential Deep Learning
+
+The framework includes a full evidential deep learning pipeline for uncertainty quantification based on Dirichlet distributions.
+
+### Components
+
+- **EvidentialWrapper**: wraps any segmentation model — converts logits to evidence, alpha, and uncertainty outputs
+- **EDL Losses**: `EvidentialMSELoss` (MSE integrated over Dirichlet) and `EvidentialKLLoss` (KL divergence regularizer)
+- **EDL Callbacks**: monitor uncertainty metrics during training
+- **EDL Inference Processor**: generates uncertainty maps alongside predictions
+
+```yaml
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.model.Model
+
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.edl_wrapper.EvidentialWrapper
+  base_model:
+    _target_: segmentation_models_pytorch.Unet
+    encoder_name: resnet34
+    encoder_weights: imagenet
+    in_channels: 3
+    classes: 6
+
+loss_params:
+  compound_loss:
+    losses:
+      - _target_: pytorch_segmentation_models_trainer.custom_losses.edl_loss.EvidentialMSELoss
+        weight: 1.0
+      - _target_: pytorch_segmentation_models_trainer.custom_losses.edl_loss.EvidentialKLLoss
+        weight: 0.1
+        annealing_step: 10
+```
+
+## Domain Adaptation
+
+A plugin-based domain adaptation infrastructure allows adding DA methods without modifying the model code.
+
+- **Feature Hooks**: `FeatureExtractorHook` captures intermediate feature maps from any layer
+- **DA Schedulers**: Constant, Linear, and DANN (adversarial) weight schedulers
+- **Plugin Architecture**: DA methods are decoupled from the main model and injected at training time
+- **Dual DataLoader Support**: handles source and target domain datasets simultaneously
+
+```yaml
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.domain_adaptation_model.DomainAdaptationModel
+
+domain_adaptation:
+  method:
+    _target_: pytorch_segmentation_models_trainer.domain_adaptation.methods.MyDAMethod
+  scheduler:
+    _target_: pytorch_segmentation_models_trainer.domain_adaptation.schedulers.DANNScheduler
+    max_epochs: ${hyperparameters.epochs}
+```
+
+## Frame Field (Geometry-Aware Boundaries)
+
+The `FrameFieldModel` produces both a segmentation mask and a crossfield (frame field) output, enabling geometry-aware training and high-quality polygon extraction.
+
+### Losses
+
+- `CrossfieldAlignLoss` — aligns the field with predicted boundaries
+- `CrossfieldAlign90Loss` — enforces 90-degree corner alignment
+- `CrossfieldSmoothLoss` — penalizes field discontinuities
+- `SegEdgeInteriorLoss` — combined segmentation edge and interior loss
+
+### Polygon Extraction
+
+Predictions can be post-processed into vector polygons via:
+
+- Template-based polygonization
+- Frame field–guided polygon tracing
+- Skeletonization for centerline extraction
 
 ## Dataset Preparation
 
@@ -585,9 +697,21 @@ inference_processor:
 ```
 
 Performance considerations:
+
 - **0% overlap** (`step_shape = model_input_shape`): Fastest, may have artifacts at tile boundaries
 - **25% overlap** (`step_shape = [384, 384]` for 512×512): Good balance
 - **50% overlap** (`step_shape = [256, 256]` for 512×512): Higher quality, ~4× slower
+
+### Test-Time Augmentation (TTA)
+
+TTA can be enabled in both the training `test_step` and the inference processor:
+
+```yaml
+inference_processor:
+  tta_mode: true  # Enables rotation + flip TTA with averaged outputs
+```
+
+Supported TTA transforms: horizontal flip, vertical flip, 90°/180°/270° rotations, and combinations.
 
 ### Inference with Normalization
 
@@ -610,16 +734,16 @@ def compute_normalization_stats(image_paths, bands=[0, 1, 2]):
     """Compute mean and std for dataset normalization."""
     means = []
     stds = []
-    
+
     for img_path in tqdm(image_paths):
         with rasterio.open(img_path) as src:
             img = src.read(bands)
             means.append(img.mean(axis=(1, 2)))
             stds.append(img.std(axis=(1, 2)))
-    
+
     mean = np.array(means).mean(axis=0)
     std = np.array(stds).mean(axis=0)
-    
+
     return mean.tolist(), std.tolist()
 ```
 
@@ -628,6 +752,7 @@ def compute_normalization_stats(image_paths, bands=[0, 1, 2]):
 ### Comprehensive Evaluation Pipeline
 
 The evaluation pipeline supports:
+
 - Multiple experiments comparison
 - Automatic CSV generation from image folders
 - Spatial alignment of predictions and ground truth
@@ -645,6 +770,7 @@ python -m pytorch_segmentation_models_trainer.evaluate_experiments \
 ### Metrics
 
 Supported metrics via `torchmetrics`:
+
 - Intersection over Union (IoU / Jaccard Index)
 - F1 Score
 - Accuracy
@@ -687,7 +813,7 @@ class CustomLoss(BaseLoss):
     def __init__(self, weight=1.0, **kwargs):
         super().__init__(weight=weight, **kwargs)
         self.criterion = nn.CrossEntropyLoss()
-    
+
     def forward(self, pred, batch):
         return self.criterion(pred['seg'], batch['mask'])
 ```
@@ -747,56 +873,110 @@ callbacks:
     class_names: ["Background", "Building", "Road", "Tree", "Water", "Car"]
 ```
 
+### EMA (Exponential Moving Average)
+
+Stabilize training with weight averaging:
+
+```yaml
+callbacks:
+  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks.EMACallback
+    decay: 0.999
+```
+
+### PolyOptimizer with Gradient Centralization
+
+Custom optimizer with polynomial learning rate decay and gradient centralization for improved convergence:
+
+```yaml
+optimizer:
+  - _target_: pytorch_segmentation_models_trainer.optimizers.poly_optimizers.PolyOptimizer
+    lr: ${hyperparameters.max_lr}
+    weight_decay: 0.0001
+    max_step: 50000
+    momentum: 0.9
+```
+
 ## Project Structure
 
-```
+```text
 pytorch_segmentation_models_trainer/
 ├── pytorch_segmentation_models_trainer/
 │   ├── model_loader/          # Model and Lightning module wrappers
-│   ├── dataset_loader/        # Dataset classes
+│   │   ├── model.py           # Core Model (segmentation, TTA, metrics)
+│   │   ├── frame_field_model.py    # Geometry-aware boundary model
+│   │   ├── domain_adaptation_model.py
+│   │   └── detection_model.py
+│   ├── dataset_loader/        # Dataset classes (CSV-based, raster patches)
 │   ├── custom_losses/         # Loss functions
-│   ├── custom_callbacks/      # Training callbacks
+│   │   ├── base_loss.py       # BaseLoss, MultiLoss (compound), SegLoss
+│   │   ├── edl_loss.py        # Evidential DL losses
+│   │   ├── loss.py            # KD, MixUp, LabelSmoothing, Dual-Head losses
+│   │   └── crossfield_losses.py
+│   ├── custom_callbacks/      # Training callbacks (visualization, EMA, etc.)
+│   ├── custom_models/         # Model architectures
+│   │   ├── edl_wrapper.py     # EvidentialWrapper
+│   │   ├── huggingface_models.py  # SegFormer, Mask2Former
+│   │   ├── terratorch_models.py   # Multispectral foundation models
+│   │   ├── timm_models.py     # TIMM encoder wrappers
+│   │   ├── hrnet_models/      # HRNet + OCR
+│   │   ├── upernet_moe.py     # UPerNet + Mixture of Experts
+│   │   └── upernet_dual_head.py
+│   ├── custom_metrics/        # Custom metric implementations
+│   ├── domain_adaptation/     # Domain adaptation methods and schedulers
+│   ├── fine_tuning/           # LoRA and parameter freezing strategies
+│   ├── optimizers/            # PolyOptimizer, gradient centralization
 │   ├── tools/
-│   │   ├── inference/         # Inference processors
-│   │   ├── evaluation/        # Evaluation pipeline
-│   │   ├── mask_building/     # Mask generation from vectors
+│   │   ├── inference/         # Sliding window processors, TTA, export
+│   │   ├── evaluation/        # Multi-experiment evaluation pipeline
+│   │   ├── mask_building/     # Mask generation from vector data
+│   │   ├── polygonization/    # Frame field and RNN polygon extraction
+│   │   ├── tta/               # Test-time augmentation
+│   │   ├── visualization/     # Plot utilities
 │   │   └── data_handlers/     # Raster and vector I/O
-│   ├── utils/                 # Utility functions
-│   ├── train.py              # Training script
-│   ├── predict.py            # Inference script
-│   ├── main.py               # CLI entry point
+│   ├── utils/                 # Utility functions (math, model, OS)
+│   ├── config_definitions/    # Typed Hydra dataclass configs
+│   ├── train.py               # Training entry point
+│   ├── predict.py             # Inference entry point
+│   ├── main.py                # CLI entry point
 │   └── evaluate_experiments.py  # Evaluation pipeline
 ├── configs/                   # Configuration files
 │   ├── train/
 │   ├── predict/
 │   └── evaluation/
-├── config_definitions/        # Typed config dataclasses
+├── conf/                      # Hydra default configs
 ├── tests/                     # Unit tests
+├── web/                       # Config Builder web interface (React)
+│   └── src/assets/schema.json # Auto-generated from installed libraries
+├── scripts/
+│   └── generate_schema.py     # Schema generation for Config Builder
 └── setup.py
 ```
-
 
 ## Troubleshooting
 
 ### CUDA Out of Memory
+
 - Reduce `batch_size`
 - Enable `gradient_checkpointing` in model config
 - Use mixed precision: `pl_trainer.precision="16-mixed"`
 - Reduce `num_workers` in dataloader
 
 ### Slow Training
+
 - Increase `num_workers` in dataloader
 - Enable mixed precision
 - Use GPU augmentations instead of CPU
 - Check I/O bottlenecks with profiling
 
 ### Poor Convergence
+
 - Adjust learning rate
 - Increase model capacity
 - Add more augmentations
 - Check data quality and class balance
 
 ### Inference Memory Issues
+
 - Reduce `batch_size` in inference config
 - Use smaller sliding window `model_input_shape`
 - Process images one at a time
@@ -830,6 +1010,7 @@ If you use this framework in your research, please cite:
 ## Contributing
 
 Contributions are welcome! Please:
+
 1. Fork the repository
 2. Create a feature branch
 3. Add tests for new functionality
