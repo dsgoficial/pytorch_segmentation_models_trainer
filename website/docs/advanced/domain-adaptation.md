@@ -234,7 +234,36 @@ Available schedulers:
 
 ---
 
+## Built-in Methods
+
+The framework ships ready-to-use DA method implementations. You can use them directly from config without writing any Python code.
+
+### DANN — Domain Adversarial Neural Network
+
+Adapts the encoder to produce domain-invariant features via a Gradient Reversal Layer and a domain classifier.
+
+```yaml
+domain_adaptation:
+  feature_layers:
+    - encoder
+  method:
+    _target_: pytorch_segmentation_models_trainer.domain_adaptation.methods.dann.DANNMethod
+    feature_layer: encoder
+    in_channels: 512          # last value of model.encoder.out_channels
+    hidden_size: 1024
+    discriminator_lr: 1.0e-4
+    lambda_da: 1.0
+    lambda_schedule:
+      _target_: pytorch_segmentation_models_trainer.domain_adaptation.schedulers.DANNScheduler
+      gamma: 10.0
+```
+
+See the [DANN guide](dann-method.md) for the full parameter reference, how to find `in_channels` for your encoder, and guidance on monitoring adaptation.
+
+---
+
 ## Next Steps
 
+- [DANN — Gradient Reversal](dann-method.md) — built-in DANN method, full guide
 - [Implementing a DA Method](domain-adaptation-implementing-methods.md) — how to write your own method class
 - [Configuration Reference](domain-adaptation-config-reference.md) — all available config fields

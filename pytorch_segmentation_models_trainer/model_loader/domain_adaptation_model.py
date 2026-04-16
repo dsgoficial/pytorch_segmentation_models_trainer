@@ -433,12 +433,20 @@ class DomainAdaptationModel(Model):
     def _get_lambda_da(self) -> float:
         """Return the current DA loss weight.
 
-        Checks for a ``lambda_schedule`` attribute on the method first
-        (allowing per-method scheduling). Falls back to ``method.lambda_da``.
+        Prefers ``method._current_lambda`` when present (set by
+        ``DANNMethod`` and any other method that caches its lambda). This
+        ensures that methods running at batch granularity (``step_mode="batch"``)
+        return the most recently computed value rather than re-querying the
+        schedule at epoch resolution.
+
+        Falls back to querying ``method.lambda_schedule`` at epoch level, and
+        then to the constant ``method.lambda_da``.
 
         Returns:
             Scalar float to multiply the DA loss by.
         """
+        if hasattr(self.method, "_current_lambda"):
+            return self.method._current_lambda
         if hasattr(self.method, "lambda_schedule"):
             max_epochs = self.trainer.max_epochs if self.trainer else 1
             return self.method.lambda_schedule.get_lambda(
@@ -620,6 +628,21 @@ class DomainAdaptationModel(Model):
 
     def on_train_epoch_start(self) -> None:
         self.method.on_train_epoch_start(self, self.current_epoch)
+
+    def on_train_batch_start(self, batch, batch_idx: int) -> None:
+        """Forward the batch-start event to the DA method.
+
+        Passes ``trainer.num_training_batches`` so the method can compute
+        global progress when running in ``step_mode="batch"``.
+
+        Args:
+            batch: The current batch (unused here; passed by Lightning).
+            batch_idx: Index of the current batch within the epoch.
+        """
+        num_batches = (
+            getattr(self.trainer, "num_training_batches", 1) if self.trainer else 1
+        )
+        self.method.on_train_batch_start(self, batch_idx, num_batches)
 
     def on_train_epoch_end(self) -> None:
         self.method.on_train_epoch_end(self, self.current_epoch)

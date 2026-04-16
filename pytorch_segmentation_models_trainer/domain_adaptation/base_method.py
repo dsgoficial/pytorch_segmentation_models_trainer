@@ -192,6 +192,24 @@ class BaseDomainAdaptationMethod(nn.Module):
             epoch: Current epoch index (0-based).
         """
 
+    def on_train_batch_start(
+        self,
+        pl_module: "DomainAdaptationModel",
+        batch_idx: int,
+        num_batches: int,
+    ) -> None:
+        """Called at the start of each training batch.
+
+        Override this hook to update per-batch state, such as a lambda
+        scheduler running at batch granularity instead of epoch granularity.
+
+        Args:
+            pl_module: The owning ``DomainAdaptationModel`` instance.
+            batch_idx: Index of the current batch within the epoch (0-based).
+            num_batches: Total number of batches per epoch
+                (``trainer.num_training_batches``).
+        """
+
     def on_train_epoch_end(
         self, pl_module: "DomainAdaptationModel", epoch: int
     ) -> None:

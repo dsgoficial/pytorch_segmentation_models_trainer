@@ -32,6 +32,15 @@ class BaseLambdaScheduler(nn.Module):
     Schedulers are ``nn.Module`` subclasses so they can be instantiated via
     Hydra and owned by a ``BaseDomainAdaptationMethod``.
 
+    The ``get_lambda`` interface is granularity-agnostic: ``step`` and
+    ``total_steps`` can refer to either epoch-level or batch-level counters.
+    This allows the same scheduler class to be used for both update modes:
+
+    * **Epoch mode** (default): ``step=current_epoch``,
+      ``total_steps=max_epochs``
+    * **Batch mode**: ``step=global_batch_index``,
+      ``total_steps=max_epochs * batches_per_epoch``
+
     Usage inside a method::
 
         class MyMethod(BaseDomainAdaptationMethod):
@@ -41,16 +50,18 @@ class BaseLambdaScheduler(nn.Module):
 
             def compute_da_loss(self, ...):
                 # get current lambda from DomainAdaptationModel
-                lam = self.lambda_schedule.get_lambda(epoch, total_epochs)
+                lam = self.lambda_schedule.get_lambda(step, total_steps)
                 ...
     """
 
-    def get_lambda(self, epoch: int, total_epochs: int) -> float:
+    def get_lambda(self, step: int, total_steps: int) -> float:
         """Return the lambda value for the given training progress.
 
         Args:
-            epoch: Current epoch index (0-based).
-            total_epochs: Total number of training epochs (``trainer.max_epochs``).
+            step: Current step index (0-based). Can be an epoch index or a
+                global batch index depending on the update granularity.
+            total_steps: Total number of steps. Can be ``max_epochs`` or
+                ``max_epochs * batches_per_epoch``.
 
         Returns:
             Lambda scalar in the range appropriate for the scheduler.
@@ -60,9 +71,9 @@ class BaseLambdaScheduler(nn.Module):
         """
         raise NotImplementedError(f"{type(self).__name__} must implement get_lambda()")
 
-    def forward(self, epoch: int, total_epochs: int) -> float:
+    def forward(self, step: int, total_steps: int) -> float:
         """Alias for ``get_lambda`` so the scheduler can be called directly."""
-        return self.get_lambda(epoch, total_epochs)
+        return self.get_lambda(step, total_steps)
 
 
 class ConstantScheduler(BaseLambdaScheduler):
@@ -82,7 +93,7 @@ class ConstantScheduler(BaseLambdaScheduler):
         super().__init__()
         self.value = value
 
-    def get_lambda(self, epoch: int, total_epochs: int) -> float:
+    def get_lambda(self, step: int, total_steps: int) -> float:
         return self.value
 
 
@@ -108,10 +119,10 @@ class LinearScheduler(BaseLambdaScheduler):
         self.start_value = start_value
         self.end_value = end_value
 
-    def get_lambda(self, epoch: int, total_epochs: int) -> float:
-        if total_epochs <= 1:
+    def get_lambda(self, step: int, total_steps: int) -> float:
+        if total_steps <= 1:
             return self.end_value
-        progress = epoch / (total_epochs - 1)
+        progress = step / (total_steps - 1)
         return self.start_value + progress * (self.end_value - self.start_value)
 
 
@@ -124,8 +135,8 @@ class DANNScheduler(BaseLambdaScheduler):
 
         \\lambda = \\frac{2}{1 + \\exp(-\\gamma \\cdot p)} - 1
 
-    where :math:`p = \\text{epoch} / (\\text{total\_epochs} - 1)` is the
-    training progress in ``[0, 1]``.
+    where ``p = step / (total_steps - 1)`` is the training progress in
+    ``[0, 1]``.
 
     This schedule starts near 0, grows slowly, then accelerates toward 1,
     allowing the feature extractor to stabilize before the adversarial
@@ -150,8 +161,8 @@ class DANNScheduler(BaseLambdaScheduler):
         super().__init__()
         self.gamma = gamma
 
-    def get_lambda(self, epoch: int, total_epochs: int) -> float:
-        if total_epochs <= 1:
+    def get_lambda(self, step: int, total_steps: int) -> float:
+        if total_steps <= 1:
             return 1.0
-        progress = epoch / (total_epochs - 1)
+        progress = step / (total_steps - 1)
         return 2.0 / (1.0 + math.exp(-self.gamma * progress)) - 1.0

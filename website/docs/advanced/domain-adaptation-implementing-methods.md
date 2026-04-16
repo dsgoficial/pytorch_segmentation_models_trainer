@@ -123,91 +123,101 @@ method:
 
 ## Example 2 — DANN with Gradient Reversal
 
-Uses intermediate feature maps and a discriminator network.
+:::tip Built-in available
+The framework ships a production-ready `DANNMethod` — you do not need to implement this yourself. See the dedicated [DANN guide](dann-method.md) for usage and configuration.
+:::
+
+The example below shows the key concepts so you understand how to build a similar method from scratch, or how to extend `DANNMethod` for a custom variant.
 
 ```python
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
+from pytorch_segmentation_models_trainer.domain_adaptation.methods.gradient_reversal import (
+    GradientReversalLayer,
+)
 
 
-class GradientReversal(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, x, alpha):
-        ctx.alpha = alpha
-        return x
-
-    @staticmethod
-    def backward(ctx, grad):
-        return -ctx.alpha * grad, None
-
-
-class DANNMethod(BaseDomainAdaptationMethod):
-    """Domain-Adversarial Neural Network (Ganin et al., 2016)."""
+class MyCustomDANNVariant(BaseDomainAdaptationMethod):
+    """DANN variant with custom discriminator architecture."""
 
     requires_features = True   # needs intermediate feature maps
 
-    def __init__(self, feature_dim=256, hidden_dim=1024, **kwargs):
+    def __init__(self, in_channels=512, hidden_size=1024, discriminator_lr=1e-4, **kwargs):
         super().__init__(**kwargs)
-        self.discriminator = nn.Sequential(
+        # GradientReversalLayer is provided by the framework — no need to
+        # re-implement torch.autograd.Function manually.
+        self.grl = GradientReversalLayer(lambda_=0.0)
+        self.domain_classifier = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
-            nn.Linear(feature_dim, hidden_dim),
+            nn.Linear(in_channels, hidden_size),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(hidden_size, 2),   # source=0, target=1
         )
-        self.lambda_schedule = None   # set from config if desired
+        self._discriminator_lr = discriminator_lr
 
     def compute_da_loss(
         self, source_batch, target_batch,
         source_output, target_output,
         source_features, target_features, **kwargs
     ):
-        # Use the feature map captured by FeatureExtractorHook
-        src_feat = source_features["encoder.layer3"]   # matches cfg.feature_layers
-        tgt_feat = target_features["encoder.layer3"]
+        src_feat = source_features["encoder"]   # matches cfg.feature_layers
+        tgt_feat = target_features["encoder"]
 
-        alpha = self.lambda_da   # or use self.lambda_schedule if configured
-
-        # Gradient reversal — forward is identity, backward reverses gradient
-        src_rev = GradientReversal.apply(src_feat, alpha)
-        tgt_rev = GradientReversal.apply(tgt_feat, alpha)
-
-        src_pred = self.discriminator(src_rev)
-        tgt_pred = self.discriminator(tgt_rev)
-
-        labels = torch.cat([
-            torch.zeros(len(src_pred), device=src_pred.device),
-            torch.ones(len(tgt_pred), device=tgt_pred.device),
+        features = torch.cat([src_feat, tgt_feat], dim=0)
+        domain_labels = torch.cat([
+            torch.zeros(src_feat.shape[0], dtype=torch.long, device=src_feat.device),
+            torch.ones(tgt_feat.shape[0], dtype=torch.long, device=tgt_feat.device),
         ])
-        loss = F.binary_cross_entropy_with_logits(
-            torch.cat([src_pred, tgt_pred]).squeeze(), labels
+
+        loss = nn.CrossEntropyLoss()(
+            self.domain_classifier(self.grl(features)),
+            domain_labels,
         )
         return DomainAdaptationLossOutput(
             loss=loss,
             log_dict={"dann_loss": loss.item()},
         )
 
+    def on_train_epoch_start(self, pl_module, epoch):
+        # Update GRL lambda from schedule each epoch
+        if hasattr(self, "lambda_schedule"):
+            lam = self.lambda_schedule.get_lambda(epoch, pl_module.trainer.max_epochs)
+            self.grl.set_lambda(lam)
+
     def get_extra_parameter_groups(self):
-        # discriminator can use a higher LR than the encoder
-        return [{"params": self.discriminator.parameters(), "lr": 1e-3}]
+        return [{"params": list(self.domain_classifier.parameters()),
+                 "lr": self._discriminator_lr}]
 ```
 
 Config:
 
 ```yaml
-method:
-  _target_: my_package.methods.DANNMethod
-  lambda_da: 1.0
-  feature_dim: 256
-  hidden_dim: 1024
-  lambda_schedule:
-    _target_: pytorch_segmentation_models_trainer.domain_adaptation.schedulers.DANNScheduler
-    gamma: 10.0
-
-feature_layers:
-  - encoder.layer3
+domain_adaptation:
+  feature_layers:
+    - encoder
+  method:
+    _target_: my_package.methods.MyCustomDANNVariant
+    in_channels: 512
+    hidden_size: 1024
+    discriminator_lr: 1.0e-4
+    lambda_da: 1.0
+    lambda_schedule:
+      _target_: pytorch_segmentation_models_trainer.domain_adaptation.schedulers.DANNScheduler
+      gamma: 10.0
 ```
+
+To use the built-in `DANNMethod` instead, replace the `_target_` with:
+
+```yaml
+method:
+  _target_: pytorch_segmentation_models_trainer.domain_adaptation.methods.dann.DANNMethod
+  feature_layer: encoder
+  in_channels: 512
+```
+
+See the [DANN guide](dann-method.md) for the full parameter reference.
 
 ---
 

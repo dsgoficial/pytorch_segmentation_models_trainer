@@ -1,0 +1,216 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: DANN (Domain Adversarial Neural Network) for semantic segmentation
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# Use this config to adapt a segmentation network trained on a source domain
+# to a target domain using the Gradient Reversal Layer strategy from:
+#
+#   Ganin, Y. & Lempitsky, V. "Unsupervised Domain Adaptation by
+#   Backpropagation." ICML 2015.
+#
+# The target dataset does NOT need masks — only images are used for the
+# adversarial domain alignment loss.
+#
+# QUICK START
+# -----------
+# 1. Set pretrained_checkpoint.path to your source-domain checkpoint.
+# 2. Set feature_layer and in_channels to match your encoder:
+#       resnet34  → feature_layer: encoder, in_channels: 512
+#       resnet50  → feature_layer: encoder, in_channels: 2048
+#       mit_b2    → feature_layer: encoder, in_channels: 512
+#    To check: print(model.encoder.out_channels) — use the last value.
+# 3. Point source_dataset / target_dataset at your CSV files.
+# 4. Run: python -m pytorch_segmentation_models_trainer.train \
+#         --config-name dann_domain_adaptation
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+backbone:
+  name: resnet34
+  input_width: 512
+  input_height: 512
+
+hyperparameters:
+  model_name: unet_resnet34_dann
+  backbone: resnet34
+  batch_size: 8
+  epochs: 50
+  max_lr: 1.0e-4
+  classes: 2
+
+# ── Segmentation model ────────────────────────────────────────────────────────
+# Any model supported by the framework works here. The encoder name must match
+# in_channels in domain_adaptation.method below.
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet34
+  encoder_weights: null       # weights loaded from pretrained_checkpoint
+  in_channels: 3
+  classes: ${hyperparameters.classes}
+
+# ── Segmentation loss (source domain only) ───────────────────────────────────
+loss:
+  _target_: torch.nn.CrossEntropyLoss
+
+# ── Optimizer ─────────────────────────────────────────────────────────────────
+# Controls the encoder + decoder. The domain classifier uses discriminator_lr
+# configured separately in domain_adaptation.method below.
+optimizer:
+  _target_: torch.optim.Adam
+  lr: ${hyperparameters.max_lr}
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: ${hyperparameters.epochs}
+      eta_min: 1.0e-7
+    interval: epoch
+    frequency: 1
+
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+  precision: "16-mixed"
+
+# ── Domain adaptation ─────────────────────────────────────────────────────────
+domain_adaptation:
+
+  # Layer whose output is used for domain alignment.
+  # Must be a dot-separated attribute path on the model, e.g. "encoder".
+  # This list is consumed by FeatureExtractorHook; it must contain exactly
+  # the same string as method.feature_layer.
+  feature_layers:
+    - encoder
+
+  method:
+    _target_: pytorch_segmentation_models_trainer.domain_adaptation.methods.dann.DANNMethod
+
+    # Name of the hooked layer — must match feature_layers above.
+    feature_layer: encoder
+
+    # Channels of the encoder output (last element of encoder.out_channels).
+    # resnet18/34 → 512 | resnet50/101 → 2048 | mit_b2 → 512
+    in_channels: 512
+
+    # Domain classifier MLP hidden layer width.
+    hidden_size: 1024
+
+    # Learning rate for the domain classifier only.
+    # The classifier starts from random weights, so it benefits from a
+    # slightly higher LR than the pretrained encoder.
+    discriminator_lr: 1.0e-4
+
+    # Overall weight of the domain loss: total = seg_loss + lambda_da * da_loss.
+    lambda_da: 1.0
+
+    # DANN annealing schedule: lambda ramps from ~0 to 1 following
+    # 2 / (1 + exp(-gamma * p)) - 1 where p = epoch / max_epochs.
+    # gamma=10 is the value used in the original Ganin & Lempitsky paper.
+    lambda_schedule:
+      _target_: pytorch_segmentation_models_trainer.domain_adaptation.schedulers.DANNScheduler
+      gamma: 10.0
+
+  # Warm-start from a checkpoint trained on the source domain.
+  # Remove this block to train from scratch.
+  pretrained_checkpoint:
+    path: /checkpoints/source_model.ckpt
+    source_format: pytorch_lightning   # or "pytorch" for plain .pt files
+    strict_loading: true
+
+  # ── Source domain (labeled) ───────────────────────────────────────────────
+  source_dataset:
+    _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+    input_csv_path: /data/source/train.csv
+    root_dir: /data/source
+    augmentation_list:
+      - _target_: albumentations.Resize
+        height: ${backbone.input_height}
+        width: ${backbone.input_width}
+      - _target_: albumentations.HorizontalFlip
+        p: 0.5
+      - _target_: albumentations.Normalize
+        mean: [0.485, 0.456, 0.406]
+        std: [0.229, 0.224, 0.225]
+      - _target_: albumentations.pytorch.ToTensorV2
+    data_loader:
+      batch_size: ${hyperparameters.batch_size}
+      num_workers: 4
+      shuffle: true
+      pin_memory: true
+      drop_last: true
+
+  # ── Target domain (unlabeled — masks not required) ────────────────────────
+  target_dataset:
+    _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+    input_csv_path: /data/target/train.csv
+    root_dir: /data/target
+    augmentation_list:
+      - _target_: albumentations.Resize
+        height: ${backbone.input_height}
+        width: ${backbone.input_width}
+      - _target_: albumentations.HorizontalFlip
+        p: 0.5
+      - _target_: albumentations.Normalize
+        mean: [0.485, 0.456, 0.406]
+        std: [0.229, 0.224, 0.225]
+      - _target_: albumentations.pytorch.ToTensorV2
+    data_loader:
+      batch_size: ${hyperparameters.batch_size}
+      num_workers: 4
+      shuffle: true
+      pin_memory: true
+      drop_last: true
+
+  # ── Validation datasets (optional) ────────────────────────────────────────
+  # source_val_dataset: monitors catastrophic forgetting on source domain.
+  # target_val_dataset: monitors adaptation progress on target domain.
+  # Remove either block to skip that domain's validation.
+  source_val_dataset:
+    _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+    input_csv_path: /data/source/val.csv
+    root_dir: /data/source
+    augmentation_list:
+      - _target_: albumentations.Resize
+        height: ${backbone.input_height}
+        width: ${backbone.input_width}
+      - _target_: albumentations.Normalize
+        mean: [0.485, 0.456, 0.406]
+        std: [0.229, 0.224, 0.225]
+      - _target_: albumentations.pytorch.ToTensorV2
+    data_loader:
+      batch_size: ${hyperparameters.batch_size}
+      num_workers: 4
+      shuffle: false
+      pin_memory: true
+      drop_last: false
+
+  target_val_dataset:
+    _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+    input_csv_path: /data/target/val.csv
+    root_dir: /data/target
+    augmentation_list:
+      - _target_: albumentations.Resize
+        height: ${backbone.input_height}
+        width: ${backbone.input_width}
+      - _target_: albumentations.Normalize
+        mean: [0.485, 0.456, 0.406]
+        std: [0.229, 0.224, 0.225]
+      - _target_: albumentations.pytorch.ToTensorV2
+    data_loader:
+      batch_size: ${hyperparameters.batch_size}
+      num_workers: 4
+      shuffle: false
+      pin_memory: true
+      drop_last: false
+
+# ── Metrics (evaluated on validation sets) ────────────────────────────────────
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${hyperparameters.classes}
+  - _target_: torchmetrics.F1Score
+    task: multiclass
+    num_classes: ${hyperparameters.classes}
