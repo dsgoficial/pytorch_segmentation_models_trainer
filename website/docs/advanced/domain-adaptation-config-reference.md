@@ -9,10 +9,81 @@ Full reference for all fields in the `domain_adaptation` config section used by 
 
 ---
 
+## Config skeleton
+
+The snippet below shows the top-level structure of a complete DA training config. Two model-related keys coexist and serve different purposes:
+
+- **`pl_model`** — tells `train.py` which `LightningModule` subclass to instantiate. For domain adaptation this must always be `DomainAdaptationModel`.
+- **`model`** — the segmentation network (`nn.Module`) consumed by `Model.get_model()`. It is the same key used in standard (non-DA) training configs.
+
+```yaml
+# ── LightningModule ──────────────────────────────────────────────────────────
+# Tells train.py to instantiate DomainAdaptationModel instead of the default Model.
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.domain_adaptation_model.DomainAdaptationModel
+
+# ── Segmentation network (nn.Module) ─────────────────────────────────────────
+# Same key used in standard segmentation configs — read by Model.get_model().
+# DomainAdaptationModel forwards both source and target batches through this network.
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet50
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: 2
+
+# ── Segmentation loss (source domain only) ───────────────────────────────────
+loss:
+  _target_: torch.nn.CrossEntropyLoss
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+
+hyperparameters:
+  batch_size: 8
+  epochs: 50
+
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+
+# ── DA-specific config ───────────────────────────────────────────────────────
+domain_adaptation:
+  method:
+    _target_: my_package.methods.MyDAMethod
+    lambda_da: 1.0
+
+  source_dataset:
+    _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+    input_csv_path: /data/source/train.csv
+    data_loader:
+      batch_size: ${hyperparameters.batch_size}
+      num_workers: 4
+      shuffle: true
+
+  target_dataset:
+    _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+    input_csv_path: /data/target/train.csv  # masks not required for UDA
+    data_loader:
+      batch_size: ${hyperparameters.batch_size}
+      num_workers: 4
+      shuffle: true
+
+  source_val_dataset: null   # optional — omit to disable forgetting monitoring
+  target_val_dataset: null   # optional — omit to disable target evaluation
+  feature_layers: []         # optional — only needed when method.requires_features=True
+  pretrained_checkpoint: null  # optional — warm-start from an existing checkpoint
+```
+
+---
+
 ## Top-level config keys
 
 | Key | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `pl_model._target_` | string | yes | Must be `pytorch_segmentation_models_trainer.model_loader.domain_adaptation_model.DomainAdaptationModel` |
 | `model` | dict | yes | Segmentation network config (same as standard training) |
 | `loss` | dict | yes | Segmentation loss config (applied to source domain only) |
@@ -42,7 +113,7 @@ domain_adaptation:
 ```
 
 | Field | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `_target_` | string | — | Fully-qualified class name of the method |
 | `lambda_da` | float | `1.0` | Global DA loss weight: `total = seg_loss + lambda_da * da_loss`. Used as fallback when no `lambda_schedule` is set on the method |
 
@@ -68,7 +139,7 @@ domain_adaptation:
 ```
 
 | Field | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `_target_` | string | — | Dataset class to instantiate |
 | `input_csv_path` | string | — | Path to the CSV listing image/mask pairs |
 | `data_loader.batch_size` | int | `8` | Samples per batch |
@@ -151,7 +222,7 @@ domain_adaptation:
 ```
 
 | Field | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `path` | string | — | Absolute path to the checkpoint file |
 | `source_format` | string | `pytorch_lightning` | `"pytorch_lightning"`: reads `ckpt["state_dict"]` and strips `"model."` prefix. `"pytorch"`: reads file directly as state dict |
 | `strict_loading` | bool | `true` | Passed to `load_state_dict(strict=...)`. Set `false` for partial loads |
@@ -177,7 +248,7 @@ lambda_schedule:
 ```
 
 | Field | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `value` | `1.0` | Constant lambda |
 
 ---
@@ -194,7 +265,7 @@ lambda_schedule:
 ```
 
 | Field | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `start_value` | `0.0` | Lambda at epoch 0 |
 | `end_value` | `1.0` | Lambda at the final epoch |
 
@@ -211,7 +282,7 @@ lambda_schedule:
 ```
 
 | Field | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `gamma` | `10.0` | Steepness of the growth curve. Higher = faster transition |
 
 ---
@@ -230,7 +301,7 @@ callbacks:
 ```
 
 | Field | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `num_classes` | — | Number of segmentation classes (required) |
 | `class_names` | `["Class 0", …]` | Class names for logging |
 | `log_every_n_epochs` | `1` | How often to evaluate both domains |
