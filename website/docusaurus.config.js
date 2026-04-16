@@ -30,6 +30,20 @@ const config = {
     locales: ['en'],
   },
 
+  themes: [
+    [
+      // @ts-ignore -- string theme name is valid at runtime; @docusaurus/types tuple type is too strict here
+      '@easyops-cn/docusaurus-search-local',
+      /** @type {import('@easyops-cn/docusaurus-search-local').PluginOptions} */
+      ({
+        hashed: true,
+        language: ['en'],
+        highlightSearchTermsOnTargetPage: true,
+        explicitSearchResultPath: true,
+      }),
+    ],
+  ],
+
   presets: [
     [
       'classic',
