@@ -794,6 +794,23 @@ class Model(pl.LightningModule):
 
         predicted_masks = self(images)
 
+        # EDL: model returns a dict — extract probs for metrics, keep dict for loss
+        _edl_output = isinstance(predicted_masks, dict) and "alpha" in predicted_masks
+        if _edl_output:
+            predicted_masks_for_metrics = predicted_masks["probs"]
+            # Log mean uncertainty for diagnostics
+            uncertainty = predicted_masks["uncertainty"].mean()
+            self.log(
+                f"edl/{prefix}_uncertainty",
+                uncertainty,
+                on_step=is_train,
+                on_epoch=True,
+                prog_bar=False,
+                sync_dist=True,
+            )
+        else:
+            predicted_masks_for_metrics = predicted_masks
+
         # Dual-head loss: pass epoch for consistency warmup
         if self._is_dual_head:
             loss = self.loss_function(predicted_masks, masks, epoch=self.current_epoch)
@@ -953,14 +970,16 @@ class Model(pl.LightningModule):
         # Compute and log metrics
         metrics_attr = f"{prefix}_metrics"
         if hasattr(self, metrics_attr):
-            metrics = getattr(self, metrics_attr)(predicted_masks, hard_masks)
+            metrics = getattr(self, metrics_attr)(
+                predicted_masks_for_metrics, hard_masks
+            )
             self.log_dict(
                 metrics, on_step=is_train, on_epoch=True, prog_bar=False, sync_dist=True
             )
 
         # Per-class IoU (validation only)
         if not is_train and self._per_class_iou is not None:
-            per_class = self._per_class_iou(predicted_masks, hard_masks)
+            per_class = self._per_class_iou(predicted_masks_for_metrics, hard_masks)
             for i, name in enumerate(self._class_names):
                 self.log(
                     f"val_iou/{name}",

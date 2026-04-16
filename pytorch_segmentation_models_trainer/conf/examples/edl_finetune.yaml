@@ -1,0 +1,152 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: Evidential Deep Learning — fine-tuning from pre-trained weights
+#
+# Use this config when loading an existing checkpoint trained with Softmax.
+# The encoder starts frozen so only the interpretation of its features changes.
+#
+# Warm-up protocol (3-phase):
+#   Phase 1 — Epochs 0-4 :  encoder frozen, KL weight = 0
+#                           → calibrate Dirichlet head without disturbing features
+#   Phase 2 — Epochs 5-14:  last 2 encoder stages unfreeze, KL ramps 0 → 0.5
+#                           → start adapting encoder features
+#   Phase 3 — Epoch 15+  :  full encoder unfrozen, KL = 1.0
+#                           → full evidential training
+#
+# Key differences from edl_from_scratch.yaml:
+#   freeze_encoder: true   → encoder protected during initial calibration
+#   encoder_weights: imagenet (or your checkpoint) → pre-trained features
+#   shorter total epochs   → fewer epochs needed since features already good
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+backbone:
+  name: resnet50
+  input_width: 512
+  input_height: 512
+
+hyperparameters:
+  model_name: edl_unet_resnet50_finetune
+  batch_size: 8
+  epochs: 50
+  max_lr: 5.0e-4   # lower LR for fine-tuning
+  classes: 5   # <-- must match your checkpoint's number of classes
+
+# ── Model ──────────────────────────────────────────────────────────────────
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.edl_wrapper.EvidentialWrapper
+  freeze_encoder: true   # encoder frozen during Phase 1 (warm-up)
+  model:
+    _target_: segmentation_models_pytorch.Unet
+    encoder_name: ${backbone.name}
+    encoder_weights: imagenet  # or null to load from a checkpoint
+    in_channels: 3
+    classes: ${hyperparameters.classes}
+
+# ── Loss ───────────────────────────────────────────────────────────────────
+loss_params:
+  compound_loss:
+    epoch_thresholds: [0, 5, 15, 50]
+    losses:
+      - loss:
+          _target_: pytorch_segmentation_models_trainer.custom_losses.edl_loss.EvidentialMSELoss
+          name: edl_mse
+          num_classes: ${hyperparameters.classes}
+        weight: 1.0
+      - loss:
+          _target_: pytorch_segmentation_models_trainer.custom_losses.edl_loss.EvidentialKLLoss
+          name: edl_kl
+          num_classes: ${hyperparameters.classes}
+        weight: [0.0, 0.05, 0.5, 1.0]  # fast annealing for fine-tuning
+
+# ── Optimizer & Scheduler ──────────────────────────────────────────────────
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1.0e-4
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: ${hyperparameters.epochs}
+      eta_min: 1.0e-7
+    interval: epoch
+    frequency: 1
+
+# ── Callbacks ──────────────────────────────────────────────────────────────
+callbacks:
+  # Controls the 3-phase encoder freeze schedule described above.
+  # warmup_epochs=5      → encoder stays frozen for first 5 epochs
+  # partial_unfreeze_epoch=15 → last 2 encoder stages unfreeze at epoch 5,
+  #                             full encoder at epoch 15
+  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.edl_callbacks.EvidentialWarmupCallback
+    warmup_epochs: 5
+    freeze_encoder: true   # must match model.freeze_encoder above
+    partial_unfreeze_epoch: 15
+
+  # Logs diagnostic grid every 5 epochs.
+  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.edl_callbacks.EvidentialUncertaintyVisualizationCallback
+    num_images: 4
+    log_every_n_epochs: 5
+    norm_params:
+      mean: [0.485, 0.456, 0.406]
+      std:  [0.229, 0.224, 0.225]
+
+# ── Trainer ────────────────────────────────────────────────────────────────
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+  precision: "16-mixed"
+
+# ── Datasets ───────────────────────────────────────────────────────────────
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/train.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width:  ${backbone.input_width}
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std:  [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/val.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width:  ${backbone.input_width}
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std:  [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
+# ── Metrics ────────────────────────────────────────────────────────────────
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${hyperparameters.classes}
+  - _target_: torchmetrics.F1Score
+    task: multiclass
+    num_classes: ${hyperparameters.classes}
+    average: macro
