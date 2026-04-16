@@ -1,5 +1,7 @@
 # pytorch_segmentation_models_trainer
 
+<img width="2811" height="1386" alt="pytorch_smt_logo" src="https://github.com/user-attachments/assets/4e6a5dad-4014-4ea0-aa4a-0c551ab4bed4" />
+
 
 [![Torch](https://img.shields.io/badge/-PyTorch-red?logo=pytorch&labelColor=gray)](https://pytorch.org/get-started/locally/)
 [![Pytorch Lightning](https://img.shields.io/badge/code-Lightning-blueviolet?logo=pytorchlightning&labelColor=gray)](https://pytorchlightning.ai/)
