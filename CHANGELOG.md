@@ -60,7 +60,23 @@
 - `predict_from_batch.py` updated: when `inference_processor` is present in the config, batch prediction is routed through `instantiate_inference_processor`, enabling sliding-window, striped, and TTA inference modes. The legacy `trainer.predict()` path is preserved for backward compatibility.
 - `InferenceProcessorConfig` and `PredictSingleImageConfig` updated with new fields: `tta_mode`, `tile_weight`, `confidence_mode`, `striped_threshold_pixels`, `stripe_height`, `output_probs_dir`.
 
-## Domain Adaptation
+## Domain Adaptation — DANN with Gradient Reversal
+
+- Added `GradientReversalFunction` and `GradientReversalLayer` (`domain_adaptation/methods/gradient_reversal.py`): a `torch.autograd.Function` implementing the identity forward pass with gradient negation in backward, wrapped in a parameter-free `nn.Module` with a `set_lambda()` method.
+- Added `DomainClassifier` (`domain_adaptation/methods/dann.py`): resolution-agnostic MLP domain classifier using `AdaptiveAvgPool2d(1)` so it works with any encoder spatial size.
+- Added `DANNMethod` (`domain_adaptation/methods/dann.py`): full DANN implementation via `BaseDomainAdaptationMethod`. Features: `requires_features=True`, configurable `feature_layer`, dedicated `discriminator_lr` parameter group, and GRL lambda initialized to 0 to avoid adversarial pressure at epoch 0.
+- Added `step_mode` parameter to `DANNMethod` (`"epoch"` or `"batch"`): controls the granularity at which the lambda schedule is applied. `"batch"` mode updates λ every training step via the new `on_train_batch_start` hook, producing smoother growth closer to the original Ganin et al. implementation; `"epoch"` (default) updates once per epoch.
+- Added `_current_lambda` attribute to `DANNMethod`: caches the most recently computed lambda so `DomainAdaptationModel._get_lambda_da()` always returns the correct value regardless of update granularity.
+- Added `on_train_batch_start` lifecycle hook to `BaseDomainAdaptationMethod` (no-op default) and forwarded it in `DomainAdaptationModel.on_train_batch_start`.
+- Updated `DomainAdaptationModel._get_lambda_da()` to prefer `method._current_lambda` when present, falling back to the epoch-level schedule query.
+- Refactored `BaseLambdaScheduler.get_lambda` signature from `(epoch, total_epochs)` to `(step, total_steps)` — the same formula, now granularity-agnostic. All scheduler subclasses (`ConstantScheduler`, `LinearScheduler`, `DANNScheduler`) updated accordingly.
+- Added full working example config (`conf/examples/dann_domain_adaptation.yaml`) for U-Net ResNet-34 with DANN.
+- Added test suite for GRL (`tests/test_gradient_reversal.py`, 17 tests) and DANN (`tests/test_dann_method.py`, 49 tests including 12 new `TestDANNMethodStepMode` tests).
+- Added dedicated DANN user guide (`website/docs/advanced/dann-method.md`) covering mechanism, `in_channels` lookup table, full config reference, `step_mode` guidance, monitoring, and limitations.
+- Updated `website/docs/advanced/domain-adaptation.md` with a "Built-in Methods" section linking to the DANN guide.
+- Updated `website/docs/advanced/domain-adaptation-implementing-methods.md` Example 2 to use the built-in `GradientReversalLayer` and add a callout pointing to the dedicated DANN guide.
+
+## Domain Adaptation — Initial structure
 
 - Added initial domain adaptation module (`domain_adaptation/`) with an extensible base class (`BaseDomainAdaptationMethod`), feature hook extraction (`feature_hooks.py`), adaptation schedulers (`schedulers.py`), and a monitoring callback (`callbacks/monitor_callback.py`).
 - Added `DomainAdaptationModel` (inherits `Model`) that orchestrates source/target dataloaders, adaptation loss weighting, and per-epoch scheduler stepping.
