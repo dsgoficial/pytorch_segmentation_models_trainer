@@ -37,6 +37,9 @@ from pytorch_segmentation_models_trainer.tools.tta.tta import (
     ROTATION_AUGMENTATIONS as _DEFAULT_TTA_AUGMENTATIONS,
     apply_tta,
 )
+from pytorch_segmentation_models_trainer.utils.mc_dropout_utils import (
+    compute_uncertainty,
+)
 from typing import Any, Dict, FrozenSet, List, Optional, Union
 
 import albumentations as A
@@ -447,6 +450,9 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         striped_threshold_pixels=50_000_000,
         stripe_height=4096,
         output_probs_dir=None,
+        export_uncertainty_map: bool = False,
+        uncertainty_mode: str = "entropy",
+        output_uncertainty_dir: Optional[str] = None,
     ):
         super().__init__(
             model=model,
@@ -481,6 +487,16 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
             )
         self.confidence_mode = confidence_mode
         self.confidence_export_strategy = confidence_export_strategy
+        if uncertainty_mode not in ("entropy", "mutual_information"):
+            raise ValueError(
+                f"uncertainty_mode must be 'entropy' or 'mutual_information', "
+                f"got '{uncertainty_mode}'"
+            )
+        self.export_uncertainty_map = export_uncertainty_map
+        self.uncertainty_mode = uncertainty_mode
+        self.output_uncertainty_dir = output_uncertainty_dir
+        if output_uncertainty_dir is not None:
+            os.makedirs(output_uncertainty_dir, exist_ok=True)
 
     # ---- TTA helpers (operate on torch tensors [B, C, H, W]) ----
 
@@ -515,9 +531,21 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         tiler: ImageSlicer,
         merger_dict: Dict[str, TileMerger],
     ):
-        """Predict with optional TTA — average logits across transforms."""
+        """Predict with optional TTA — average logits across transforms.
+
+        When ``export_uncertainty_map=True`` and TTA is active, per-sample
+        softmax probabilities are kept to compute uncertainty via
+        ``compute_uncertainty()``.  The "seg" merger still receives mean logits
+        (identical to the non-uncertainty path) to preserve backwards
+        compatibility.
+        """
         transforms = self._get_tta_transforms()
         n_tta = len(transforms)
+        compute_unc = (
+            self.export_uncertainty_map
+            and "uncertainty" in merger_dict
+            and n_tta > 1
+        )
 
         with torch.no_grad():
             for tiles_batch, coords_batch in DataLoader(
@@ -532,8 +560,30 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
                     # No TTA — fast path (original behavior)
                     with autocast():
                         pred_batch = self.model(tiles_batch)
+                elif compute_unc:
+                    # TTA with uncertainty: keep per-sample probs for uncertainty,
+                    # accumulate logits separately for the seg merger.
+                    logits_sum = None
+                    samples_probs = []
+                    for rot, flip in transforms:
+                        aug = self._apply_transform(tiles_batch, rot, flip)
+                        with autocast():
+                            pred = self.model(aug).float()
+                        del aug
+                        pred = self._invert_transform(pred, rot, flip)
+                        logits_sum = pred if logits_sum is None else logits_sum + pred
+                        samples_probs.append(torch.softmax(pred, dim=1))
+                        del pred
+                    pred_batch = logits_sum / n_tta
+                    del logits_sum
+                    samples_tensor = torch.stack(samples_probs)  # [T, B, C, H, W]
+                    del samples_probs
+                    unc = compute_uncertainty(samples_tensor, self.uncertainty_mode)
+                    del samples_tensor
+                    merger_dict["uncertainty"].integrate_batch(unc, coords_batch)
+                    del unc
                 else:
-                    # TTA: accumulate logits from all transforms
+                    # TTA without uncertainty — fast path (original behavior)
                     accum = None
                     for rot, flip in transforms:
                         aug = self._apply_transform(tiles_batch, rot, flip)
@@ -550,14 +600,31 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
                 self.integrate_batch(pred_batch, coords_batch, merger_dict)
                 del tiles_batch, pred_batch
 
+    def get_merger_dict(self, tiler: ImageSlicer) -> Dict[str, TileMerger]:
+        mergers = {
+            "seg": TileMerger(
+                tiler.target_shape, self.num_classes, tiler.weight, device=self.device
+            )
+        }
+        if self.export_uncertainty_map and self.tta_mode is not None:
+            mergers["uncertainty"] = TileMerger(
+                tiler.target_shape, 1, tiler.weight, device=self.device
+            )
+        return mergers
+
     def merge_masks(self, tiler: ImageSlicer, merger_dict: Dict[str, TileMerger]):
-        """Argmax after weighted tile merge."""
+        """Argmax after weighted tile merge, plus optional uncertainty extraction."""
         merged_probs = to_numpy(merger_dict["seg"].merge())  # [num_classes, H, W]
         class_indices = np.argmax(merged_probs, axis=0)  # [H, W]
         class_indices = tiler.crop_to_orignal_size(class_indices)
         if class_indices.ndim == 2:
             class_indices = class_indices[..., np.newaxis]
-        return {"seg": class_indices}
+        result = {"seg": class_indices}
+        if "uncertainty" in merger_dict:
+            unc_merged = to_numpy(merger_dict["uncertainty"].merge())  # [1, H, W]
+            unc_merged = np.moveaxis(unc_merged, 0, -1)  # [H, W, 1]
+            result["uncertainty"] = tiler.crop_to_orignal_size(unc_merged)
+        return result
 
     def make_inference_with_probs(self, image):
         """Run inference returning class predictions, softmax probabilities,
@@ -969,6 +1036,68 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
 
         logger.info(f"Striped inference complete: {output_seg_path}")
 
+    def _save_uncertainty_raster(
+        self,
+        uncertainty_map: np.ndarray,
+        reference_profile: dict,
+        image_path: str,
+        suffix: str = "_uncertainty",
+    ) -> None:
+        """Save a single-band float32 GeoTIFF of the uncertainty map.
+
+        The output file is written to ``output_uncertainty_dir`` (if set) or
+        to the same directory as the export strategy output.  The filename is
+        ``{image_stem}{suffix}.tif``.
+
+        Args:
+            uncertainty_map: ``[H, W, 1]`` or ``[H, W]`` float32 array.
+            reference_profile: Rasterio profile from the source image (used
+                to copy CRS and spatial transform).
+            image_path: Path to the source image (used to derive the stem).
+            suffix: Filename suffix before ``.tif`` (default ``"_uncertainty"``).
+        """
+        stem = Path(image_path).stem
+
+        if self.output_uncertainty_dir is not None:
+            out_dir = Path(self.output_uncertainty_dir)
+        elif self.export_strategy is not None and hasattr(
+            self.export_strategy, "output_file_path"
+        ):
+            out_dir = Path(self.export_strategy.output_file_path)
+        else:
+            out_dir = Path(image_path).parent
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+        output_path = out_dir / f"{stem}{suffix}.tif"
+
+        unc = uncertainty_map
+        if unc.ndim == 3:
+            unc = unc[:, :, 0]
+
+        profile = reference_profile.copy()
+        profile.update(
+            {
+                "count": 1,
+                "dtype": "float32",
+                "compress": "deflate",
+                "nodata": -1.0,
+                "predictor": 3,
+            }
+        )
+        profile.pop("blockxsize", None)
+        profile.pop("blockysize", None)
+        profile.pop("tiled", None)
+
+        with rasterio.open(output_path, "w", **profile) as dst:
+            dst.write(unc.astype("float32"), 1)
+
+        logger.info(
+            "Uncertainty raster saved → %s  (min=%.4f, max=%.4f)",
+            output_path,
+            float(unc.min()),
+            float(unc.max()),
+        )
+
     def save_inference(
         self,
         image_path,
@@ -978,11 +1107,16 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         output_dict,
         apply_threshold=True,
     ):
-        """
-        Save single-band image with class indices (no threshold!)
-        """
-        # inference["seg"] is already [H, W] with values 0, 1, 2, ..., num_classes-1
+        """Save single-band class-index image and optional uncertainty raster."""
+        # Save uncertainty raster alongside the segmentation if present
+        if self.export_uncertainty_map and "uncertainty" in inference:
+            self._save_uncertainty_raster(
+                uncertainty_map=inference["uncertainty"],
+                reference_profile=profile,
+                image_path=image_path,
+            )
 
+        # inference["seg"] is already [H, W, 1] with values 0, 1, ..., num_classes-1
         # Update profile to 1 band, dtype uint8
         profile["count"] = 1
         profile["dtype"] = "uint8"
@@ -991,7 +1125,7 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
 
         if self.export_strategy is not None:
             output_dict["inference"].append(
-                self.export_strategy.save_inference(inference, profile)
+                self.export_strategy.save_inference({"seg": inference.get("seg", inference)}, profile)
             )
 
 
