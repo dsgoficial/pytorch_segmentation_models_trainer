@@ -1,0 +1,61 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: Monte Carlo Dropout inference
+#
+# This config runs sliding-window inference with n_samples=10 stochastic
+# forward passes per tile.  The mean prediction is used for segmentation;
+# the per-pixel uncertainty is exported as a float32 GeoTIFF alongside the
+# class-index output.
+#
+# REQUIREMENT: the model must have Dropout layers configured.
+# For SMP models, set decoder_dropout: 0.2 (or any value > 0).
+# If the model has no Dropout layers, all samples will be identical and
+# the uncertainty map will be zero everywhere.
+#
+# uncertainty_mode choices:
+#   entropy            — predictive entropy H[p̄]; total uncertainty (default)
+#   mutual_information — BALD; epistemic uncertainty only (sample disagreement)
+#
+# export_uncertainty_map: false  → only compute mean prediction (faster)
+# export_uncertainty_map: true   → also export _mc_uncertainty.tif per image
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+# ── Model ──────────────────────────────────────────────────────────────────
+# The model must be loaded from a checkpoint trained with Dropout configured.
+# decoder_dropout: 0.2 activates Dropout2d layers inside the SMP UNet decoder.
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet50
+  encoder_weights: null   # loaded from checkpoint
+  in_channels: 3
+  classes: 5
+  decoder_dropout: 0.2    # <-- required for MC Dropout to produce variance
+
+# ── MC Dropout inference processor ─────────────────────────────────────────
+inference_processor:
+  _target_: pytorch_segmentation_models_trainer.tools.inference.mc_dropout_inference_processor.MCDropoutInferenceProcessor
+  n_samples: 10                   # number of stochastic forward passes per tile
+  uncertainty_mode: entropy       # "entropy" or "mutual_information"
+  export_uncertainty_map: true    # set false to skip uncertainty computation
+  num_classes: 5
+  model_input_shape: [512, 512]
+  step_shape: [256, 256]          # overlap = model_input_shape - step_shape
+  tile_weight: gaussian           # gaussian importance map reduces border artifacts
+  # output_uncertainty_dir: /results/uncertainty   # optional separate directory
+
+# ── Normalization ──────────────────────────────────────────────────────────
+normalize_mean: [0.485, 0.456, 0.406]
+normalize_std: [0.229, 0.224, 0.225]
+
+# ── Inference paths ────────────────────────────────────────────────────────
+# These are typically overridden on the command line:
+#   python -m pytorch_segmentation_models_trainer.predict \
+#     --config-name mc_dropout_inference \
+#     model_path=/path/to/checkpoint.ckpt \
+#     image_path=/path/to/image.tif \
+#     output_path=/results/prediction.tif
+model_path: ???
+image_path: ???
+output_path: ???
