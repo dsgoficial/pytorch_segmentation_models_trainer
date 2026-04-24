@@ -39,6 +39,7 @@ from pytorch_segmentation_models_trainer.tools.tta.tta import (
     apply_tta,
 )
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import _worker_init_fn
+from pytorch_segmentation_models_trainer.utils.seed_utils import set_training_seed
 
 logger = logging.getLogger(__name__)
 
@@ -631,6 +632,15 @@ class Model(pl.LightningModule):
 
         return [optimizer], scheduler_list
 
+    def _make_dataloader_generator(self) -> Optional[torch.Generator]:
+        """Return a seeded Generator when cfg.seed is present, else None."""
+        seed = self.cfg.get("seed", None)
+        if seed is None:
+            return None
+        g = torch.Generator()
+        g.manual_seed(int(seed) % (2**32))
+        return g
+
     def train_dataloader(self):
         return DataLoader(
             self.train_ds,
@@ -650,6 +660,7 @@ class Model(pl.LightningModule):
             if "persistent_workers" in self.cfg.train_dataset.data_loader
             else False,
             worker_init_fn=_worker_init_fn,
+            generator=self._make_dataloader_generator(),
         )
 
     def val_dataloader(self):
@@ -675,6 +686,7 @@ class Model(pl.LightningModule):
             if "persistent_workers" in self.cfg.val_dataset.data_loader
             else False,
             worker_init_fn=_worker_init_fn,
+            generator=self._make_dataloader_generator(),
         )
 
     def test_dataloader(self):
@@ -699,6 +711,7 @@ class Model(pl.LightningModule):
             persistent_workers=self.cfg.test_dataset.data_loader.persistent_workers
             if "persistent_workers" in self.cfg.test_dataset.data_loader
             else False,
+            generator=self._make_dataloader_generator(),
         )
 
     def _compute_loss(

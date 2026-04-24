@@ -34,6 +34,7 @@ from pytorch_lightning import Trainer
 
 from pytorch_segmentation_models_trainer.model_loader.model import Model
 from pytorch_segmentation_models_trainer.utils.os_utils import import_module_from_cfg
+from pytorch_segmentation_models_trainer.utils.seed_utils import set_training_seed
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,22 @@ logger = logging.getLogger(__name__)
 @hydra.main(config_path=None, version_base="1.2")
 def train(cfg: DictConfig):
     """Trains the model.
+
     Args:
-        cfg (DictConfig): hydra yaml config
+        cfg (DictConfig): hydra yaml config.  When ``cfg.seed`` is set, all
+            randomness sources (PyTorch, NumPy, Python ``random``, CUDA, and
+            the DataLoader shuffle sampler) are seeded before any model or
+            dataset is created.  Set ``cfg.deterministic_cudnn: true`` to
+            also force deterministic CuDNN algorithms (slower but fully
+            reproducible on GPU).
 
     Returns:
         Trainer: trainer monitoring object
     """
+    seed = cfg.get("seed", None)
+    if seed is not None:
+        set_training_seed(seed, deterministic_cudnn=cfg.get("deterministic_cudnn", False))
+
     logger.info(
         "Starting the training of a model with the following configuration: \n%s",
         OmegaConf.to_yaml(cfg),

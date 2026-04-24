@@ -1,0 +1,135 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: Reproducible Training with a Fixed Seed
+# ──────────────────────────────────────────────────────────────────────────────
+# This config demonstrates how to make training fully reproducible by setting
+# a global seed.  Every run with the same seed, dataset, and hardware
+# configuration will produce identical results.
+#
+# Sources of randomness controlled by `seed`
+# -------------------------------------------
+#   * Python `random` module         — Albumentations stochastic transforms
+#   * NumPy `np.random`              — crop sampling, CutMix, ClassMix,
+#                                      class-balanced image selection
+#   * PyTorch CPU `torch`            — weight initialisation, Dropout
+#   * PyTorch CUDA `torch.cuda`      — GPU kernels
+#   * `PYTHONHASHSEED` env var       — dict/set ordering edge cases
+#   * DataLoader shuffle sampler     — via seeded torch.Generator
+#   * DataLoader workers             — _worker_init_fn seeds numpy + random
+#                                      using torch.initial_seed() (= seed + worker_id)
+#
+# Optional: `deterministic_cudnn: true`
+# ──────────────────────────────────────
+# Forces `torch.backends.cudnn.deterministic = True` and disables
+# `cudnn.benchmark`.  This eliminates CuDNN algorithm selection randomness
+# but can reduce GPU throughput.  Leave `false` unless debugging a
+# gradient-level numerical issue.
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+# ── Reproducibility ──────────────────────────────────────────────────────────
+seed: 42
+deterministic_cudnn: false   # set to true for fully deterministic GPU ops
+
+# ── Backbone ─────────────────────────────────────────────────────────────────
+backbone:
+  name: mit_b2
+  input_width: 512
+  input_height: 512
+
+# ── Hyperparameters ──────────────────────────────────────────────────────────
+hyperparameters:
+  model_name: unet_mit_b2_seed42
+  backbone: mit_b2
+  batch_size: 8
+  epochs: 50
+  max_lr: 6e-5
+  classes: 2
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: mit_b2
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: ${hyperparameters.classes}
+  decoder_channels: [256, 128, 64, 32, 16]
+
+# ── Loss ─────────────────────────────────────────────────────────────────────
+loss:
+  _target_: segmentation_models_pytorch.losses.DiceLoss
+  mode: multiclass
+  from_logits: true
+
+# ── Optimizer ────────────────────────────────────────────────────────────────
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1e-4
+
+# ── Scheduler ────────────────────────────────────────────────────────────────
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: ${hyperparameters.epochs}
+      eta_min: 1e-7
+    interval: epoch
+    frequency: 1
+
+# ── PyTorch Lightning Trainer ─────────────────────────────────────────────────
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+  precision: "16-mixed"
+
+# ── Datasets ─────────────────────────────────────────────────────────────────
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/train.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width: ${backbone.input_width}
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/val.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width: ${backbone.input_width}
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
+# ── Metrics ───────────────────────────────────────────────────────────────────
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${hyperparameters.classes}
+  - _target_: torchmetrics.F1Score
+    task: multiclass
+    num_classes: ${hyperparameters.classes}

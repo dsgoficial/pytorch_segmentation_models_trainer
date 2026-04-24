@@ -1,5 +1,16 @@
 # Unreleased
 
+## Reproducibility (Training Seed)
+
+- Added `seed: Optional[int]` and `deterministic_cudnn: bool` fields to the `TrainConfig` dataclass (`config_definitions/train_config.py`). Both default to `None` / `False` so all existing configs are fully backward-compatible.
+- Added `set_training_seed(seed, deterministic_cudnn=False)` utility function (`utils/seed_utils.py`). A single call seeds all randomness sources before model or dataset creation: Python `random`, NumPy `np.random`, `torch.manual_seed`, `torch.cuda.manual_seed_all`, and `PYTHONHASHSEED`. Optionally sets `torch.backends.cudnn.deterministic = True` and `torch.backends.cudnn.benchmark = False`. Returns a `torch.Generator` seeded with the same value for use in DataLoaders.
+- Modified `train()` (`train.py`) to call `set_training_seed` as the very first operation when `cfg.seed` is present, ensuring model weight initialisation (SMP, timm, HuggingFace, custom architectures) is also reproducible.
+- Modified `_worker_init_fn` (`dataset_loader/dataset.py`) to additionally seed Python's `random` module alongside NumPy. Since PyTorch sets `torch.initial_seed() = global_seed + worker_id` per worker automatically, both seeds are deterministic and unique per worker once a global seed is set.
+- Modified `Model.train_dataloader`, `Model.val_dataloader`, and `Model.test_dataloader` (`model_loader/model.py`) to pass a `torch.Generator().manual_seed(cfg.seed)` to each `DataLoader` when `cfg.seed` is set, making the shuffle sampler sequence reproducible. Added `Model._make_dataloader_generator()` helper method.
+- Added reference YAML config `conf/examples/reproducible_training.yaml` with inline comments explaining every field and listing all controlled randomness sources.
+- Added reproducibility block (commented) to `conf/examples/smp_mit_b2.yaml` so users can enable it in one line.
+- Added user documentation `website/docs/user-guide/reproducibility.md` covering the `seed` field, `deterministic_cudnn` trade-offs, Python API usage, and known limitations.
+
 ## MC Dropout (test-time uncertainty)
 
 - Added `mc_dropout_utils.py` (`utils/mc_dropout_utils.py`): three pure utility functions with no inference-framework dependency. `enable_mc_dropout(model)` sets all `Dropout` / `Dropout2d` / `Dropout3d` layers to train mode while leaving the rest of the model in eval mode (BatchNorm keeps running statistics, only dropout randomness is re-enabled). `warn_if_no_dropout(model)` emits a `UserWarning` if the model has no dropout layers — in that case all T samples are identical and uncertainty is zero. `compute_uncertainty(samples, mode)` accepts a `[T, B, C, H, W]` tensor of softmax probabilities and returns `[B, 1, H, W]` uncertainty: `"entropy"` computes predictive entropy of the mean distribution (total uncertainty); `"mutual_information"` computes BALD — the difference between the entropy of the mean and the mean of the individual entropies (epistemic uncertainty only).

@@ -19,7 +19,7 @@
  ****
 """
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 import torch
 from omegaconf import MISSING
@@ -127,3 +127,5 @@ class TrainConfig:
     val_dataset: DatasetConfig = field(default_factory=DatasetConfig)
     test_dataset: DatasetConfig = field(default_factory=DatasetConfig)
     metrics: List[MetricConfig] = MISSING
+    seed: Optional[int] = None
+    deterministic_cudnn: bool = False
