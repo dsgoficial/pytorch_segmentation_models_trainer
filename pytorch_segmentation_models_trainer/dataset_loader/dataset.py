@@ -679,14 +679,23 @@ def _suppress_gdal_crs_warnings():
 
 
 def _worker_init_fn(worker_id):
-    """Seed numpy random per DataLoader worker to avoid duplicate crops.
+    """Seed per-worker randomness sources to avoid duplicate augmentations.
 
-    PyTorch seeds torch.manual_seed per worker but NOT numpy. Without this,
-    all workers using np.random produce identical crop sequences when using
-    spawn (Windows) or fork start methods.
+    PyTorch seeds ``torch.manual_seed`` per worker automatically, but does
+    NOT seed NumPy or Python's ``random`` module.  Without this function all
+    workers produce identical augmentation sequences under ``spawn`` (Windows)
+    or ``fork`` start methods.
+
+    When a global seed has been set via :func:`set_training_seed` before
+    training, ``torch.initial_seed()`` is deterministic per worker
+    (``global_seed + worker_id``), making the entire augmentation pipeline
+    reproducible.
     """
+    import random as _random
+
     worker_seed = torch.initial_seed() % (2**32)
     np.random.seed(worker_seed)
+    _random.seed(worker_seed)
 
 
 class _RasterioLRUCache:

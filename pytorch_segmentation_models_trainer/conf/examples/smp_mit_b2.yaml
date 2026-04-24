@@ -12,6 +12,17 @@
 defaults:
   - _self_
 
+# ── Reproducibility (optional) ───────────────────────────────────────────────
+# Uncomment `seed` to make runs fully reproducible.  All randomness sources
+# (PyTorch, NumPy, Python random, CUDA, DataLoader shuffle) are seeded before
+# model creation.  Set `deterministic_cudnn: true` for full GPU determinism at
+# the cost of slower convolutions.  See conf/examples/reproducible_training.yaml
+# for a fully-annotated example.
+#
+# seed: 42
+# deterministic_cudnn: false
+# ─────────────────────────────────────────────────────────────────────────────
+
 backbone:
   name: mit_b2
   input_width: 512
