@@ -18,10 +18,15 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
       with:
-        python-version: 3.12
+        enable-cache: true
+        cache-dependency-glob: "pyproject.toml"
+
+    - name: Set up Python 3.12
+      run: uv python install 3.12
+
     - uses: satackey/action-docker-layer-caching@v0.0.11
       # Ignore the failure of a step and avoid terminating the job.
       continue-on-error: true
@@ -29,33 +34,20 @@ jobs:
       with:
         postgresql version: 'latest'
         postgresql password: 'postgres'
-        postgresql user: 'postgres'  # This optional environment variable is used in conjunction with postgresql password to set a user and its password. This variable will create the specified user with superuser power and a database with the same name. If it is not specified, then the default user of 'postgres' will be used.
-        postgresql db: 'test_db'  # This optional environment variable can be used to define a different name for the default database that is created when the image is first started. If it is not specified, then the value of postgresql user will be used.
-    - name: Get pip cache dir
-      id: pip-cache
-      run: |
-        echo "::set-output name=dir::$(pip cache dir)"
-    - name: pip cache
-      uses: actions/cache@v4
-      with:
-        path: ${{ steps.pip-cache.outputs.dir }}
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
+        postgresql user: 'postgres'
+        postgresql db: 'test_db'
+
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install flake8 pytest parameterized coverage pytest-timeout
-        if [ -f requirements.txt ]; then pip install --upgrade --upgrade-strategy eager -r requirements.txt; fi
-        pip install .
-        pip uninstall opencv-python opencv-python-headless -y || true
-        pip install opencv-python-headless
+        uv sync --all-extras --dev
+        uv pip install opencv-python-headless
+
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        uv run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        uv run flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Cache downloaded models
       uses: actions/cache@v4
       id: cache
@@ -123,7 +115,7 @@ jobs:
   # training loop, and the updated inference pipeline.
   #
   # Install the optional extras with:
-  #   pip install pytorch_segmentation_models_trainer[transformers]
+  #   uv sync --extra transformers
   # ──────────────────────────────────────────────────────────────────────────
   test-transformers:
     runs-on: ubuntu-latest
@@ -132,45 +124,25 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+        cache-dependency-glob: "pyproject.toml"
 
     - name: Set up Python 3.12
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
-
-    - name: Get pip cache dir
-      id: pip-cache
-      run: echo "::set-output name=dir::$(pip cache dir)"
-
-    - name: pip cache
-      uses: actions/cache@v4
-      with:
-        path: ${{ steps.pip-cache.outputs.dir }}
-        key: ${{ runner.os }}-pip-transformers-${{ hashFiles('**/requirements.txt', '**/setup.py') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-transformers-
-          ${{ runner.os }}-pip-
+      run: uv python install 3.12
 
     # CPU-only PyTorch keeps the image small and the job fast.
-    - name: Install PyTorch (CPU)
+    - name: Install dependencies (CPU)
       run: |
-        python -m pip install --upgrade pip
-        pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-
-    # Install the package with the [transformers] extras group.
-    # This brings in: transformers, peft, timm (+ all base requirements).
-    - name: Install package with transformer extras
-      run: |
-        pip install flake8 pytest coverage pytest-timeout
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        pip install ".[transformers]"
-        # OpenCV headless to avoid GUI deps on the runner
-        pip uninstall opencv-python opencv-python-headless -y || true
-        pip install opencv-python-headless
+        uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+        uv sync --extra transformers --dev
+        uv pip install opencv-python-headless
 
     - name: Lint new files with flake8
       run: |
-        flake8 \
+        uv run flake8 \
           pytorch_segmentation_models_trainer/custom_models/transformer_adapters.py \
           pytorch_segmentation_models_trainer/custom_models/huggingface_models.py \
           pytorch_segmentation_models_trainer/custom_models/timm_models.py \
@@ -178,7 +150,7 @@ jobs:
           pytorch_segmentation_models_trainer/fine_tuning/ \
           pytorch_segmentation_models_trainer/config_definitions/fine_tuning_config.py \
           --count --select=E9,F63,F7,F82 --show-source --statistics
-        flake8 \
+        uv run flake8 \
           pytorch_segmentation_models_trainer/custom_models/transformer_adapters.py \
           pytorch_segmentation_models_trainer/custom_models/huggingface_models.py \
           pytorch_segmentation_models_trainer/custom_models/timm_models.py \
@@ -189,7 +161,7 @@ jobs:
 
     - name: Run transformer test suite
       run: |
-        coverage run \
+        uv run coverage run \
           --source pytorch_segmentation_models_trainer \
           --omit pytorch_segmentation_models_trainer/custom_models/sync_bn/* \
           -m pytest \
@@ -207,8 +179,8 @@ jobs:
     - name: Coverage report
       if: success()
       run: |
-        coverage report
-        coverage xml
+        uv run coverage report
+        uv run coverage xml
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4

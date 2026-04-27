@@ -19,16 +19,6 @@ title: Installation
 pip install pytorch_segmentation_models_trainer
 ```
 
-:::warning GPU Acceleration
-If you want GPU acceleration and are not using Docker, install `pytorch_scatter` first:
-
-```bash
-pip install torch-scatter -f https://data.pyg.org/whl/torch-1.12.0+cu113.html
-```
-
-Replace `cu113` with your CUDA version (cu102, cu113, cu116, etc.)
-:::
-
 ### Option 2: From Source
 
 ```bash

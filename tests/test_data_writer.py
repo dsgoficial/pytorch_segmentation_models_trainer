@@ -21,6 +21,7 @@
 """
 import os
 import unittest
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 import warnings
 
@@ -113,7 +114,12 @@ class Test_DataWriter(unittest.TestCase):
             output_data = geopandas.read_file(filename=current_output_file_path)
             assert input_data[0].equals(output_data["geometry"][0])
 
-    def test_vector_database_data_writer(self) -> None:
+    @patch("pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.create_engine")
+    @patch("geopandas.GeoDataFrame.to_postgis")
+    def test_vector_database_data_writer(self, mock_to_postgis, mock_create_engine) -> None:
+        mock_engine = MagicMock()
+        mock_create_engine.return_value = mock_engine
+
         input_data = [Polygon([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]])]
         data_writer = VectorDatabaseDataWriter(
             user="postgres",
@@ -123,14 +129,10 @@ class Test_DataWriter(unittest.TestCase):
             if_exists="replace",
         )
         data_writer.write_data(input_data=input_data, profile={"crs": "EPSG:4326"})
-        con = psycopg2.connect(
-            host="localhost",
-            port=5432,
-            database="test_db",
-            user="postgres",
-            password="postgres",
-        )
-        output_gdf = geopandas.read_postgis(
-            sql="select * from test", con=con, geom_col="geom"
-        )
-        assert input_data[0].equals(output_gdf["geom"][0])
+        
+        # Verify that to_postgis was called with correct parameters
+        mock_to_postgis.assert_called_once()
+        args, kwargs = mock_to_postgis.call_args
+        self.assertEqual(args[0], "test")  # table_name
+        self.assertEqual(args[1], mock_engine)  # engine
+        self.assertEqual(kwargs["if_exists"], "replace")

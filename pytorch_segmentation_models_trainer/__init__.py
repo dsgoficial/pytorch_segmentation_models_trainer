@@ -4,7 +4,7 @@ import sys
 # Windows: corrigir conflito de DLLs entre PyTorch (fbgemm.dll) e GDAL/rasterio.
 # O conda coloca DLLs do GDAL no PATH que conflitam com dependencias do torch.
 # Solucao: adicionar torch/lib ao DLL search path e importar torch ANTES de
-# qualquer modulo que possa carregar GDAL (rasterio, fiona, etc).
+# qualquer modulo que possa carregar GDAL (rasterio, etc).
 if sys.platform == "win32":
     # Allow coexistence of libomp.dll (torch) and libiomp5md.dll (conda/MKL)
     os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"

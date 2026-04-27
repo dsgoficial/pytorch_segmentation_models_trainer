@@ -30,21 +30,24 @@ jobs:
         uses: actions/checkout@v4
 
       # ── Etapa 1: Python → gera schema.json ──────────────────────────────────
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
         with:
-          python-version: '3.11'
-          cache: pip
+          enable-cache: true
+
+      - name: Setup Python
+        run: uv python install 3.11
 
       - name: Install Python dependencies for schema generation
         run: |
-          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install segmentation-models-pytorch albumentations torchmetrics
+          uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          uv pip install segmentation-models-pytorch albumentations torchmetrics pydantic-settings
 
       - name: Generate schema.json
-        run: python scripts/generate_schema.py
+        run: uv run scripts/generate_schema.py
 
       # ── Etapa 2: Node.js → build Config Builder (React/Vite) ────────────────
+...
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:

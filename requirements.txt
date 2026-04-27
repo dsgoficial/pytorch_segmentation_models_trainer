@@ -14,13 +14,12 @@ scipy
 numpy
 pytorch_toolbelt==0.4.3
 descartes==1.1.0
-fiona>=1.8.20
+pyogrio>=0.7.2
 psycopg2-binary
 shapely>=2.0.0
 geopandas>=1.1.0
 geoalchemy2>=0.13.0
 rasterio
-numba
 sahi>=0.10.4
 skan>=0.11.0
 tqdm

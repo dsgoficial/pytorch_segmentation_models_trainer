@@ -38,8 +38,8 @@ Não espere o usuário pedir cada um separadamente:
 
 ## Testes
 
-- Ambiente: `.venv/` na raiz (Python 3.12). Sempre ativar antes de rodar.
-- Comando padrão: `source .venv/bin/activate && python -m pytest tests/ -v --tb=short`
+- Ambiente: Gerenciado pelo `uv`.
+- Comando padrão: `uv run pytest tests/ -v --tb=short`
 - Ignorar por padrão (lentos / rede / segfault conhecido):
   - `tests/test_detection_model.py` — segfault conhecido
   - `tests/test_inference.py` — baixa modelos da rede

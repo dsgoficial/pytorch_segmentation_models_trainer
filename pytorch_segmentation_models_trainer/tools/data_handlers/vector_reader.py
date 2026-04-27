@@ -28,7 +28,6 @@ from dataclasses import MISSING, dataclass
 from enum import Enum
 from pathlib import Path
 
-import fiona
 import geopandas
 import numpy as np
 import psycopg2
@@ -344,7 +343,7 @@ def save_to_file(polygons, base_filepath, name, driver=None, crs=None):
     driver = "GeoJSON" if driver is None else driver
     if driver not in suffix_dict:
         raise TypeError(
-            f"Invalid driver. Supported drivers are: {', '.join(fiona.supported_drivers.keys())}"
+            f"Invalid driver '{driver}'. Supported drivers are: {', '.join(suffix_dict.keys())}"
         )
     geoseries = geopandas.GeoSeries(polygons, crs=crs)
     gdf = geopandas.GeoDataFrame.from_features(geoseries, crs=crs)

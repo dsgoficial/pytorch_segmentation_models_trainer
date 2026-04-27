@@ -27,6 +27,8 @@ import numpy as np
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+import pandas as pd
+import geopandas as gpd
 from geopandas import GeoDataFrame, GeoSeries
 from omegaconf import MISSING
 import rasterio
@@ -107,10 +109,19 @@ class VectorFileDataWriter(AbstractDataWriter):
         gdf = GeoDataFrame.from_features(geoseries, crs=profile["crs"])
         if len(gdf) == 0:
             return
-        if not os.path.isfile(output_file_path) and self.mode == "a":
-            gdf.to_file(output_file_path, driver=self.driver)
+        if not os.path.isfile(output_file_path) or self.mode != "a":
+            gdf.to_file(
+                output_file_path,
+                driver=self.driver,
+                mode="w" if self.mode == "a" else self.mode,
+            )
         else:
-            gdf.to_file(output_file_path, driver=self.driver, mode=self.mode)
+            if self.driver == "GeoJSON":
+                existing_gdf = gpd.read_file(output_file_path)
+                gdf = pd.concat([existing_gdf, gdf], ignore_index=True)
+                gdf.to_file(output_file_path, driver=self.driver, mode="w")
+            else:
+                gdf.to_file(output_file_path, driver=self.driver, mode=self.mode)
 
 
 @dataclass
@@ -136,10 +147,19 @@ class BatchVectorFileDataWriter(VectorFileDataWriter):
         current_file_path = (
             pathlib.Path(self.output_file_folder) / self._get_current_file_path()
         )
-        if not os.path.isfile(current_file_path) and self.mode == "a":
-            gdf.to_file(current_file_path, driver=self.driver)
+        if not os.path.isfile(current_file_path) or self.mode != "a":
+            gdf.to_file(
+                current_file_path,
+                driver=self.driver,
+                mode="w" if self.mode == "a" else self.mode,
+            )
         else:
-            gdf.to_file(current_file_path, driver=self.driver, mode=self.mode)
+            if self.driver == "GeoJSON":
+                existing_gdf = gpd.read_file(current_file_path)
+                gdf = pd.concat([existing_gdf, gdf], ignore_index=True)
+                gdf.to_file(current_file_path, driver=self.driver, mode="w")
+            else:
+                gdf.to_file(current_file_path, driver=self.driver, mode=self.mode)
         self.current_index += 1
 
 
