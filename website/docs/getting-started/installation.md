@@ -7,19 +7,32 @@ title: Installation
 
 ## Requirements
 
-- Python 3.7+
-- PyTorch 1.9+
-- CUDA 10.2+ (for GPU acceleration)
+- Python 3.12+
+- PyTorch 2.0+
+- CUDA 11.8+ (for GPU acceleration)
 
 ## Quick Install
 
-### Option 1: PyPI (Recommended)
+### Option 1: Using uv (Recommended)
+
+[uv](https://docs.astral.sh/uv/) is an extremely fast Python package and project manager, written in Rust. It is the recommended way to manage this project.
+
+```bash
+# Clone the repository
+git clone https://github.com/phborba/pytorch_segmentation_models_trainer.git
+cd pytorch_segmentation_models_trainer
+
+# Install dependencies and create a virtual environment
+uv sync
+```
+
+### Option 2: PyPI
 
 ```bash
 pip install pytorch_segmentation_models_trainer
 ```
 
-### Option 2: From Source
+### Option 3: From Source (pip)
 
 ```bash
 git clone https://github.com/phborba/pytorch_segmentation_models_trainer.git
@@ -27,7 +40,7 @@ cd pytorch_segmentation_models_trainer
 pip install -e .
 ```
 
-### Option 3: Docker (Easiest for GPU)
+### Option 4: Docker (Easiest for GPU)
 
 We provide pre-built Docker images with all dependencies:
 
@@ -145,7 +158,7 @@ AssertionError: Torch not compiled with CUDA support
 
 **Solution**: Install PyTorch with CUDA:
 ```bash
-pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu113
+pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu118
 ```
 
 ### Import Errors
@@ -154,7 +167,7 @@ pip install torch torchvision --extra-index-url https://download.pytorch.org/whl
 
 **Solution**: Install pytorch-scatter for your CUDA version:
 ```bash
-pip install torch-scatter -f https://data.pyg.org/whl/torch-1.12.0+cu113.html
+pip install torch-scatter -f https://data.pyg.org/whl/torch-2.0.0+cu118.html
 ```
 
 **Problem**: `ImportError: cannot import name 'instantiate'`
@@ -166,11 +179,10 @@ pip install --upgrade hydra-core
 
 ## Tips
 
-1. **Use virtual environments**:
+1. **Use uv (Highly Recommended)**:
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install pytorch_segmentation_models_trainer
+   uv sync
+   source .venv/bin/activate
    ```
 
 2. **Check your CUDA version**:

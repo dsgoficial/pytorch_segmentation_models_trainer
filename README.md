@@ -61,7 +61,24 @@ A Python script (`scripts/generate_schema.py`) introspects the installed version
 
 ## Installation
 
-### From Source
+### Using uv (Recommended)
+
+```bash
+# Clone the repository
+git clone https://github.com/dsgoficial/pytorch_segmentation_models_trainer.git
+cd pytorch_segmentation_models_trainer
+
+# Install dependencies and create a virtual environment
+uv sync
+```
+
+### Using pip
+
+```bash
+pip install pytorch-segmentation-models-trainer
+```
+
+### From Source (pip)
 
 ```bash
 # Clone the repository
@@ -78,17 +95,12 @@ pip install -e .
 docker pull phborba/pytorch_segmentation_models_trainer:latest
 ```
 
-### Using pip
-
-```bash
-pip install pytorch-segmentation-models-trainer
-```
-
 ### Dependencies
 
 Core dependencies include:
+- Python >= 3.12
 - PyTorch >= 2.0
-- PyTorch Lightning >= 2.0
+- PyTorch Lightning >= 2.4
 - Hydra >= 1.3
 - segmentation_models_pytorch
 - rasterio (for geospatial data)
