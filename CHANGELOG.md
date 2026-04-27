@@ -1,5 +1,12 @@
 # Unreleased
 
+## Installation & Environment
+
+- Migrated to `uv` as the primary project and dependency manager.
+- Added `uv sync` as the recommended installation method in `README.md` and documentation.
+- Updated project requirements to Python 3.12+ and PyTorch 2.0+ (Lightning 2.4+).
+- Updated website documentation (`website/docs/getting-started/installation.md`) with comprehensive `uv` installation guide and updated troubleshooting for CUDA 11.8.
+
 ## Reproducibility (Training Seed)
 
 - Added `seed: Optional[int]` and `deterministic_cudnn: bool` fields to the `TrainConfig` dataclass (`config_definitions/train_config.py`). Both default to `None` / `False` so all existing configs are fully backward-compatible.
