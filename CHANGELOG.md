@@ -2,6 +2,8 @@
 
 ## Bug fixes
 
+- Fixed `tests/test_build_mask.py::Test_BuildMask::test_build_output_dirs_raises_exception`: changed the output path to be a sub-directory of the input path in the test, ensuring the path validation logic in `build_destination_dirs` is correctly triggered and the expected exception is raised.
+- Fixed `tests/test_configs/predict.yaml` Hydra composition: added the `@_global_` package override to the `train_config_used_in_predict_test` default inclusion. This ensures the configuration fields are merged into the root scope, allowing `train_dataset.input_csv_path` to be successfully overridden during prediction tests.
 - Fixed `NameError: name 'DictConfig' is not defined` in `dataset_loader/dataset.py` (`load_augmentation_object`): `DictConfig` was used but not imported from `omegaconf`, causing all augmentation loading to silently fall back to raw OmegaConf objects and crash with `albumentations >= 2.x` when `A.Compose` tried to access `.available_keys` on them.
 - Fixed `Model._unpack_batch` (`model_loader/model.py`) to respect the `image_key` and `mask_key` config fields (was hardcoded to `"image"` / `"mask"`). Also propagated the fix to `_shared_step` so training/validation steps honour custom keys end-to-end.
 - Fixed `ValueError: prefetch_factor option could only be specified in multiprocessing` in `Model.train_dataloader`, `val_dataloader`, and `test_dataloader`: when `num_workers=0`, `prefetch_factor` is now set to `None` as required by PyTorch's DataLoader API.

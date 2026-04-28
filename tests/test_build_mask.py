@@ -129,7 +129,7 @@ class Test_BuildMask(BasicTestCase):
                     np.testing.assert_allclose(np.array(v1), np.array(v2), atol=atol)
 
     def test_build_output_dirs_raises_exception(self):
-        output_base_path = os.path.join(self.output_dir, "replicated_dirs")
+        output_base_path = os.path.join(root_dir, "replicated_dirs")
         with self.assertRaises(Exception) as context:
             build_destination_dirs(
                 input_base_path=root_dir, output_base_path=output_base_path

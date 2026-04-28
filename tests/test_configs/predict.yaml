@@ -96,4 +96,4 @@ inference_image_reader:
   n_first_rows_to_read: 2
 
 defaults:
-  - train_config_used_in_predict_test
+  - train_config_used_in_predict_test@_global_
