@@ -22,15 +22,11 @@ jobs:
     - name: Set up Python
       run: uv python install 3.12
     
-    - name: Install dependencies
-      run: |
-        uv pip install twine
-    
     - name: Build package
       run: uv build
-    
+
     - name: Publish to PyPI
       env:
         TWINE_USERNAME: __token__
         TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-      run: uv run twine upload dist/*
+      run: uv run --with twine twine upload dist/*

@@ -98,9 +98,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["pytorch_segmentation_models_trainer"]
 
-[tool.uv]
-managed = true
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest",
     "coverage",
     "flake8",
