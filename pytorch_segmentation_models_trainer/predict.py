@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 import logging
 from typing import List
 
@@ -52,15 +53,28 @@ def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
 
     # Determine the best map location
     if torch.cuda.is_available():
+        device_count = torch.cuda.device_count()
         if "devices" not in cfg.pl_trainer:
-            map_location = f"cuda:0"
+            map_location = "cuda:0"
         elif cfg.pl_trainer.devices == -1:
-            map_location = f"cuda:0"
+            map_location = "cuda:0"
         else:
             if isinstance(cfg.pl_trainer.devices, int):
-                map_location = f"cuda:{cfg.pl_trainer.devices}"
+                # If devices=1, we want cuda:0. If devices=2, we might want cuda:0 or cuda:1 depending on context.
+                # However, for loading a single model, cuda:0 is usually the safest default if we only have 1 device requested or available.
+                device_idx = (
+                    cfg.pl_trainer.devices
+                    if cfg.pl_trainer.devices < device_count
+                    else 0
+                )
+                map_location = f"cuda:{device_idx}"
             else:
-                map_location = f"cuda:{cfg.pl_trainer.devices[0]}"
+                device_idx = (
+                    cfg.pl_trainer.devices[0]
+                    if cfg.pl_trainer.devices[0] < device_count
+                    else 0
+                )
+                map_location = f"cuda:{device_idx}"
     else:
         map_location = "cpu"
 

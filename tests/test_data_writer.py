@@ -19,6 +19,7 @@
  *                                                                         *
  ****
 """
+
 import os
 import unittest
 from unittest.mock import MagicMock, patch
@@ -81,7 +82,7 @@ class Test_DataWriter(unittest.TestCase):
             "suffix": ".tif",
         }
         output_file_path = os.path.join(self.output_dir, "output.tif")
-        data_writer = RasterDataWriter(output_file_path=self.output_dir)
+        data_writer = RasterDataWriter(output_file_path=output_file_path)
         data_writer.write_data(input_data=input_data, profile=profile)
         assert os.path.isfile(output_file_path)
         with rasterio.open(output_file_path, "r") as raster_ds:
@@ -114,9 +115,13 @@ class Test_DataWriter(unittest.TestCase):
             output_data = geopandas.read_file(filename=current_output_file_path)
             assert input_data[0].equals(output_data["geometry"][0])
 
-    @patch("pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.create_engine")
+    @patch(
+        "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.create_engine"
+    )
     @patch("geopandas.GeoDataFrame.to_postgis")
-    def test_vector_database_data_writer(self, mock_to_postgis, mock_create_engine) -> None:
+    def test_vector_database_data_writer(
+        self, mock_to_postgis, mock_create_engine
+    ) -> None:
         mock_engine = MagicMock()
         mock_create_engine.return_value = mock_engine
 
@@ -129,7 +134,7 @@ class Test_DataWriter(unittest.TestCase):
             if_exists="replace",
         )
         data_writer.write_data(input_data=input_data, profile={"crs": "EPSG:4326"})
-        
+
         # Verify that to_postgis was called with correct parameters
         mock_to_postgis.assert_called_once()
         args, kwargs = mock_to_postgis.call_args

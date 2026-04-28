@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 from copy import deepcopy
 import json
 import pathlib
@@ -70,11 +71,11 @@ class RasterDataWriter(AbstractDataWriter):
             else output_profile["count"]
         )
         p = Path(self.output_file_path)
-        if not p.exists():
-            p.mkdir(parents=True, exist_ok=True)
-        input_name = output_profile.pop("input_name")
-        suffix = output_profile.pop("suffix")
-        with rasterio.open(p / f"{input_name}{suffix}", "w", **output_profile) as out:
+        if not p.parent.exists():
+            p.parent.mkdir(parents=True, exist_ok=True)
+        output_profile.pop("input_name", None)
+        output_profile.pop("suffix", None)
+        with rasterio.open(p, "w", **output_profile) as out:
             out.write(reshape_as_raster(input_data))
 
 

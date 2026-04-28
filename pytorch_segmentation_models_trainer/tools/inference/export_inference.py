@@ -107,7 +107,10 @@ class ConfidenceExportStrategy:
                 ``input_name`` and ``suffix`` keys).
         """
         subfolder = os.path.join(self.output_file_path, f"confidence_{metric_name}")
-        writer = RasterDataWriter(output_file_path=subfolder)
+        input_name = profile.get("input_name", "")
+        suffix = profile.get("suffix", ".tif")
+        output_file_path = os.path.join(subfolder, f"{input_name}{suffix}")
+        writer = RasterDataWriter(output_file_path=output_file_path)
         writer.write_data(data, profile)
 
 
