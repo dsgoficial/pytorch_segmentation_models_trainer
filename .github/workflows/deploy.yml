@@ -40,6 +40,7 @@ jobs:
 
       - name: Install Python dependencies for schema generation
         run: |
+          uv venv
           uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           uv pip install segmentation-models-pytorch albumentations torchmetrics pydantic-settings
 
@@ -47,7 +48,6 @@ jobs:
         run: uv run scripts/generate_schema.py
 
       # ── Etapa 2: Node.js → build Config Builder (React/Vite) ────────────────
-...
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
