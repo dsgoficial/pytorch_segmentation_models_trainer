@@ -145,3 +145,5 @@ htmlcov/
 
 *.pth
 *.ckpt
+
+.claude/
