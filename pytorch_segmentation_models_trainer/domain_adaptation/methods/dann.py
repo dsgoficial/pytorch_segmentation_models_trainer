@@ -21,7 +21,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Literal, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
+
+if TYPE_CHECKING:
+    from pytorch_segmentation_models_trainer.model_loader.domain_adaptation_model import DomainAdaptationModel
 
 import torch
 import torch.nn as nn
