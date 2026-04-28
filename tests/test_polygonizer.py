@@ -41,6 +41,8 @@ def geom_almost_equals(this, that, tolerance=0.01):
     representation changes across library versions.
     """
     return this.geom_equals_exact(that, tolerance=tolerance).all()
+
+
 from hydra import compose, initialize
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
     VectorFileDataWriter,
@@ -67,23 +69,21 @@ frame_field_root_dir = os.path.join(
 )
 
 device = "cpu"
+from tests.utils import BasicTestCase
+
+current_dir = os.path.dirname(__file__)
+...
 
 
-class Test_Polygonize(unittest.TestCase):
+class Test_Polygonize(BasicTestCase):
     def setUp(self):
-        warnings.simplefilter("ignore", category=ImportWarning)
-        warnings.simplefilter("ignore", category=DeprecationWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
-        warnings.simplefilter("ignore", category=UserWarning)
-        self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
+        super().setUp()
+        self.output_dir = self.make_temp_dir()
         self.frame_field_ds = self.get_frame_field_ds()
         with rasterio.open(self.frame_field_ds[0]["path"], "r") as raster_ds:
             self.crs = raster_ds.crs
             self.profile = raster_ds.profile
             self.transform = raster_ds.transform
-
-    def tearDown(self):
-        remove_folder(self.output_dir)
 
     def get_frame_field_ds(self):
         csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")

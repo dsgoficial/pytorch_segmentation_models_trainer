@@ -47,18 +47,16 @@ detection_root_dir = os.path.join(root_dir, "data", "detection_data")
 convert_dataset_dir = os.path.join(
     current_dir, "testing_data", "expected_outputs", "convert_dataset"
 )
+from tests.utils import BasicTestCase
+
+current_dir = os.path.dirname(__file__)
+...
 
 
-class Test_ConvertDataset(unittest.TestCase):
+class Test_ConvertDataset(BasicTestCase):
     def setUp(self) -> None:
-        warnings.simplefilter("ignore", category=ImportWarning)
-        warnings.simplefilter("ignore", category=DeprecationWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
-        warnings.simplefilter("ignore", category=UserWarning)
-        self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
-
-    def tearDown(self):
-        remove_folder(self.output_dir)
+        super().setUp()
+        self.output_dir = self.make_temp_dir()
 
     @parameterized.expand(
         [(None,), ([f"+conversion_strategy.write_output_files=False"],)]

@@ -19,6 +19,7 @@
  *                                                                         *
  ****
 """
+
 import gc
 import os
 import shutil
@@ -107,14 +108,6 @@ class BasicTestCase(unittest.TestCase):
         for tmp_dir in self._temp_dirs:
             if os.path.exists(tmp_dir):
                 shutil.rmtree(tmp_dir)
-        outputs_path = os.path.join(os.path.dirname(__file__), "..", "outputs")
-        if os.path.exists(outputs_path):
-            shutil.rmtree(outputs_path)
-        lightning_logs_path = os.path.join(
-            os.path.dirname(__file__), "..", "lightning_logs"
-        )
-        if os.path.exists(lightning_logs_path):
-            shutil.rmtree(lightning_logs_path)
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -126,23 +119,23 @@ class CustomTestCase(BasicTestCase):
         current_dir = os.path.dirname(__file__)
         self.root_dir = os.path.join(current_dir, "testing_data", "data")
         image_list = get_file_list(os.path.join(self.root_dir, "images"), ".png")
-        label_list = get_file_list(os.path.join(self.root_dir, "labels"), ".png")
         label_list = get_file_list(
             os.path.join(current_dir, "testing_data", "data", "labels"), ".png"
         )
+
+        # Use a temporary directory for CSV files to avoid race conditions in parallel tests
+        temp_dir = self.make_temp_dir()
         self.csv_ds_file = create_csv_file(
-            os.path.join(current_dir, "testing_data", "csv_train_ds.csv"),
+            os.path.join(temp_dir, "csv_train_ds.csv"),
             image_list[0:5],
             label_list[0:5],
         )
         self.csv_ds_file_without_root = create_csv_file(
-            os.path.join(current_dir, "testing_data", "csv_train_ds_without_root.csv"),
+            os.path.join(temp_dir, "csv_train_ds_without_root.csv"),
             image_list[0:5],
             label_list[0:5],
             root_to_be_removed=self.root_dir,
         )
 
     def tearDown(self):
-        os.remove(self.csv_ds_file)
-        os.remove(self.csv_ds_file_without_root)
         super(CustomTestCase, self).tearDown()

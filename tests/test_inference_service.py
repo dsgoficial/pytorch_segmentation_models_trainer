@@ -19,9 +19,9 @@
  *                                                                         *
  ****
 """
+
 from collections import OrderedDict
 import os
-import unittest
 from pathlib import Path
 from unittest.mock import Mock
 import warnings
@@ -54,9 +54,9 @@ from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import
 )
 from pytorch_segmentation_models_trainer.utils.os_utils import (
     create_folder,
-    remove_folder,
 )
 from tests.mock_utils import create_dummy_checkpoint
+from tests.utils import BasicTestCase
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, "testing_data")
@@ -70,10 +70,9 @@ device = "cpu"
 pretrained_checkpoints_download_links = {
     "frame_field_resnet152_unet_200_epochs": "https://github.com/phborba/pytorch_smt_pretrained_weights/releases/download/v0.1/frame_field_resnet152_unet_200_epochs.ckpt"
 }
-output_dir = create_folder(os.path.join(root_dir, "test_output"))
 
 
-def get_asm_polygonizer():
+def get_asm_polygonizer(output_dir):
     config = ASMConfig()
     data_writer = VectorFileDataWriter(
         output_file_folder=output_dir, output_file_name="asm_polygonizer.geojson"
@@ -88,7 +87,7 @@ def get_frame_field_ds(with_center_crop=False):
         else "frame_field_dataset_with_center_crop.yaml"
     )
     csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
-    with initialize(config_path="./test_configs"):
+    with initialize(config_path="./test_configs", version_base=None):
         cfg = compose(
             config_name=config_name,
             overrides=[
@@ -122,34 +121,32 @@ def get_checkpoint_file(file_name):
     return checkpoint_file_path
 
 
-def get_settings_override():
+def get_settings_override(output_dir):
     inference_processor = SingleImageFromFrameFieldProcessor(
         model=get_model_for_eval(),
         device=device,
         batch_size=1,
         export_strategy=None,
         mask_bands=2,
-        polygonizer=get_asm_polygonizer(),
+        polygonizer=get_asm_polygonizer(output_dir),
     )
     inference_processor.polygonizer.data_writer = None
     return inference_processor
 
 
-client = TestClient(app)
-app.dependency_overrides[get_inference_processor] = get_settings_override
-
-
-class Test_InferenceService(unittest.TestCase):
+class Test_InferenceService(BasicTestCase):
     def setUp(self):
-        warnings.simplefilter("ignore", category=ImportWarning)
-        warnings.simplefilter("ignore", category=DeprecationWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
-        warnings.simplefilter("ignore", category=UserWarning)
-        self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
+        super().setUp()
+        self.output_dir = self.make_temp_dir()
         self.frame_field_ds = get_frame_field_ds()
+        app.dependency_overrides[get_inference_processor] = (
+            lambda: get_settings_override(self.output_dir)
+        )
+        self.client = TestClient(app)
 
     def tearDown(self):
-        remove_folder(output_dir)
+        app.dependency_overrides.clear()
+        super().tearDown()
 
     @parameterized.expand(
         [
@@ -170,7 +167,9 @@ class Test_InferenceService(unittest.TestCase):
     )
     def test_inference_from_service(self, polygonizer) -> None:
         file_path = self.frame_field_ds[0]["path"]
-        response = client.post(f"/polygonize/?file_path={file_path}", json=polygonizer)
+        response = self.client.post(
+            f"/polygonize/?file_path={file_path}", json=polygonizer
+        )
         self.assertEqual(response.status_code, 200)
         self.assertGreater(len(response.json()["features"]), 0)
 
@@ -192,7 +191,7 @@ class Test_InferenceService(unittest.TestCase):
     )
     def test_inference_from_service_with_image_payload(self, polygonizer) -> None:
         filename = self.frame_field_ds[0]["path"]
-        response = client.post(
+        response = self.client.post(
             f"/polygonize_image/",
             json=polygonizer,
             files={"file": ("filename", open(filename, "rb"), "image/tiff")},

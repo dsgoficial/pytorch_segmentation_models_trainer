@@ -19,12 +19,11 @@
  *                                                                         *
  ****
 """
+
 import os
-import unittest
 import warnings
 
 import hydra
-import matplotlib.pyplot as plt
 import numpy as np
 import skimage.io
 import torch
@@ -36,15 +35,7 @@ from pytorch_segmentation_models_trainer.tools.visualization.crossfield_plot imp
 from pytorch_segmentation_models_trainer.utils.frame_field_utils import (
     compute_crossfield_to_plot,
 )
-from pytorch_segmentation_models_trainer.utils.math_utils import (
-    compute_crossfield_c0c2,
-    compute_crossfield_uv,
-)
-from pytorch_segmentation_models_trainer.utils.os_utils import (
-    create_folder,
-    hash_file,
-    remove_folder,
-)
+from tests.utils import BasicTestCase
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, "testing_data")
@@ -53,23 +44,15 @@ frame_field_root_dir = os.path.join(
     current_dir, "testing_data", "data", "frame_field_data"
 )
 
-from matplotlib.testing.compare import compare_images
 
-
-class Test_Visualization(unittest.TestCase):
+class Test_Visualization(BasicTestCase):
     def setUp(self):
-        warnings.simplefilter("ignore", category=ImportWarning)
-        warnings.simplefilter("ignore", category=DeprecationWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
-        warnings.simplefilter("ignore", category=UserWarning)
-        self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
-
-    def tearDown(self):
-        remove_folder(self.output_dir)
+        super().setUp()
+        self.output_dir = self.make_temp_dir()
 
     def test_seg_display_real_example(self) -> None:
         csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
-        with initialize(config_path="./test_configs"):
+        with initialize(config_path="./test_configs", version_base=None):
             cfg = compose(
                 config_name="frame_field_dataset.yaml",
                 overrides=[

@@ -22,19 +22,16 @@
 
 import os
 import shutil
-import unittest
 
 from collections.abc import Iterable
 from pathlib import Path
-import warnings
 from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import (
     Executor,
 )
 from pytorch_segmentation_models_trainer.utils.os_utils import (
-    create_folder,
     hash_file,
-    remove_folder,
 )
+from tests.utils import BasicTestCase
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, "testing_data")
@@ -45,17 +42,10 @@ def copy_file(filepath, destination_folder):
     return shutil.copyfile(str(filepath), Path(destination_folder) / filepath.name)
 
 
-class Test_ProcessExecutor(unittest.TestCase):
+class Test_ProcessExecutor(BasicTestCase):
     def setUp(self):
-        warnings.simplefilter("ignore", category=ImportWarning)
-        warnings.simplefilter("ignore", category=DeprecationWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
-        warnings.simplefilter("ignore", category=UserWarning)
-        self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
-        create_folder(self.output_dir)
-
-    def tearDown(self):
-        remove_folder(self.output_dir)
+        super().setUp()
+        self.output_dir = self.make_temp_dir()
 
     def test_execute_process(self) -> None:
         directory_in_str = os.path.join(root_dir, "data", "images")

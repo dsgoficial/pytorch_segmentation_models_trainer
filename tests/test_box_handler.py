@@ -21,34 +21,23 @@
 """
 
 import os
-import unittest
-import warnings
 
 import numpy as np
 import torch
 from pytorch_segmentation_models_trainer.tools.detection.bbox_handler import (
     BboxTileMerger,
 )
-from pytorch_segmentation_models_trainer.utils.os_utils import (
-    create_folder,
-    remove_folder,
-)
 from pytorch_segmentation_models_trainer.tools.detection import bbox_handler
+from tests.utils import BasicTestCase
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, "testing_data")
 
 
-class Test_BoxHandler(unittest.TestCase):
+class Test_BoxHandler(BasicTestCase):
     def setUp(self) -> None:
-        warnings.simplefilter("ignore", category=ImportWarning)
-        warnings.simplefilter("ignore", category=DeprecationWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
-        warnings.simplefilter("ignore", category=UserWarning)
-        self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
-
-    def tearDown(self):
-        remove_folder(self.output_dir)
+        super().setUp()
+        self.output_dir = self.make_temp_dir()
 
     def test_shift_bbox(self) -> None:
         """
@@ -112,10 +101,10 @@ class Test_BoxHandler(unittest.TestCase):
         labels = torch.tensor([1, 1, 1])
         expected_bbox1 = torch.tensor([[0, 0, 10, 10], [1, 1, 5, 5], [5, 5, 12, 12]])
         expected_bbox2 = torch.tensor([[0, 0, 10, 10]])
-        (result_boxes1, _, __) = bbox_handler.nms_postprocess(
+        result_boxes1, _, __ = bbox_handler.nms_postprocess(
             bboxes, scores, labels, threshold=0.5, match_metric="IOU"
         )
-        (result_boxes2, _, __) = bbox_handler.nms_postprocess(
+        result_boxes2, _, __ = bbox_handler.nms_postprocess(
             bboxes, scores, labels, threshold=0.5, match_metric="IOS"
         )
         torch.testing.assert_close(result_boxes1, expected_bbox1)

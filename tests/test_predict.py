@@ -21,16 +21,12 @@
 """
 
 import os
-import subprocess
 from pathlib import Path
-import unittest
 import warnings
 
 import hydra
-import pytorch_lightning as pl
 import torch
 from hydra import compose, initialize
-from parameterized import parameterized
 from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
     FrameFieldModel,
 )
@@ -38,7 +34,6 @@ from pytorch_segmentation_models_trainer.predict import (
     instantiate_inference_processor,
     instantiate_model_from_checkpoint,
     instantiate_polygonizer,
-    predict,
 )
 from pytorch_segmentation_models_trainer.tools.inference.inference_processors import (
     AbstractInferenceProcessor,
@@ -48,10 +43,9 @@ from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import
 )
 from pytorch_segmentation_models_trainer.utils.os_utils import (
     create_folder,
-    remove_folder,
 )
 from tests.mock_utils import create_dummy_checkpoint
-
+from tests.utils import BasicTestCase
 
 config_name_list = ["predict.yaml"]
 
@@ -69,13 +63,10 @@ pretrained_checkpoints_download_links = {
 }
 
 
-class Test_Predict(unittest.TestCase):
+class Test_Predict(BasicTestCase):
     def setUp(self):
-        warnings.simplefilter("ignore", category=ImportWarning)
-        warnings.simplefilter("ignore", category=DeprecationWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
-        warnings.simplefilter("ignore", category=UserWarning)
-        self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
+        super().setUp()
+        self.output_dir = self.make_temp_dir()
         self.output_vector_file = os.path.join(self.output_dir, "output.geojson")
         self.output_file_name = "output.geojson"
         self.csv_ds_file = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
@@ -84,11 +75,8 @@ class Test_Predict(unittest.TestCase):
             "frame_field_resnet152_unet_200_epochs.ckpt"
         )
 
-    def tearDown(self):
-        remove_folder(self.output_dir)
-
     def get_frame_field_ds(self):
-        with initialize(config_path="./test_configs"):
+        with initialize(config_path="./test_configs", version_base=None):
             cfg = compose(
                 config_name="frame_field_dataset.yaml",
                 overrides=[
@@ -119,7 +107,7 @@ class Test_Predict(unittest.TestCase):
         )
 
     def test_instantiate_model_from_checkpoint(self):
-        with initialize(config_path="./test_configs"):
+        with initialize(config_path="./test_configs", version_base=None):
             cfg = compose(
                 config_name="predict.yaml",
                 overrides=[
@@ -133,7 +121,7 @@ class Test_Predict(unittest.TestCase):
         self.make_inference(torch.ones([2, 3, 224, 224]), model)
 
     def test_instantiate_polygonizer(self):
-        with initialize(config_path="./test_configs"):
+        with initialize(config_path="./test_configs", version_base=None):
             cfg = compose(
                 config_name="predict.yaml",
                 overrides=[
@@ -146,7 +134,7 @@ class Test_Predict(unittest.TestCase):
         self.assertIsInstance(polygonizer, TemplatePolygonizerProcessor)
 
     def test_instantiate_inference_processor(self):
-        with initialize(config_path="./test_configs"):
+        with initialize(config_path="./test_configs", version_base=None):
             cfg = compose(
                 config_name="predict.yaml",
                 overrides=[
@@ -157,30 +145,3 @@ class Test_Predict(unittest.TestCase):
             )
         inference_processor = instantiate_inference_processor(cfg)
         self.assertIsInstance(inference_processor, AbstractInferenceProcessor)
-
-    # @parameterized.expand(config_name_list)
-    # def test_run_predict_from_object(self, config_name: str) -> None:
-    #     with initialize(config_path="./test_configs"):
-    #         cfg = compose(
-    #             config_name=config_name,
-    #             overrides=[
-    #                 f"train_dataset.input_csv_path={self.csv_ds_file}",
-    #                 f"val_dataset.input_csv_path={self.csv_ds_file}",
-    #                 f"checkpoint_path={self.checkpoint_file_path}",
-    #                 f"inference_image_reader.input_csv_path={self.csv_ds_file}",
-    #                 f"inference_image_reader.root_dir={frame_field_root_dir}",
-    #                 f"polygonizer.data_writer.output_file_folder={self.output_dir}",
-    #                 f"polygonizer.data_writer.output_file_name={self.output_file_name}",
-    #                 f"export_strategy.output_folder={self.output_dir}",
-    #             ],
-    #         )
-    #         predict_obj = predict(cfg)
-    #         assert os.path.isfile(self.output_vector_file)
-    #         for i in range(cfg.inference_image_reader.n_first_rows_to_read):
-    #             name = Path(self.frame_field_ds[i]["path"]).stem
-    #             assert os.path.isfile(
-    #                 os.path.join(self.output_dir, f"seg_{name}_inference.tif")
-    #             )
-    #             assert os.path.isfile(
-    #                 os.path.join(self.output_dir, f"crossfield_{name}_inference.tif")
-    #             )

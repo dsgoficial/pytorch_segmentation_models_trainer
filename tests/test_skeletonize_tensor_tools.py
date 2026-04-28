@@ -19,27 +19,17 @@
  *                                                                         *
  ****
 """
-import os
-import unittest
-import warnings
 
+import os
 import numpy as np
 import skan
 import torch
-import matplotlib.pyplot as plt
-from matplotlib.testing.compare import compare_images
-from parameterized.parameterized import parameterized
 from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor_tools import (
     Paths,
     Skeleton,
-    plot_skeleton,
     skeletons_to_tensorskeleton,
-    tensorskeleton_to_skeletons,
 )
-from pytorch_segmentation_models_trainer.utils.os_utils import (
-    create_folder,
-    remove_folder,
-)
+from tests.utils import BasicTestCase
 
 
 def build_skeleton1():
@@ -64,18 +54,11 @@ current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, "testing_data")
 
 
-class Test_Skeletonize(unittest.TestCase):
+class Test_Skeletonize(BasicTestCase):
     def setUp(self):
-        warnings.simplefilter("ignore", category=ImportWarning)
-        warnings.simplefilter("ignore", category=DeprecationWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
-        warnings.simplefilter("ignore", category=UserWarning)
+        super().setUp()
         self.skan_skeletons_list = [build_skeleton1(), build_skeleton2()]
-        self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
-        return super().setUp()
-
-    def tearDown(self) -> None:
-        remove_folder(self.output_dir)
+        self.output_dir = self.make_temp_dir()
 
     def test_skeletonize(self) -> None:
         device = "cpu"

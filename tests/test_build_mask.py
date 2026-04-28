@@ -19,6 +19,7 @@
  *                                                                         *
  ****
 """
+
 import ast
 import os
 import unittest
@@ -58,7 +59,10 @@ root_dir = os.path.join(current_dir, "testing_data")
 suffix_dict = {"PNG": ".png", "GTiff": ".tif", "JPEG": ".jpg"}
 
 
-class Test_BuildMask(unittest.TestCase):
+from tests.utils import BasicTestCase
+
+
+class Test_BuildMask(BasicTestCase):
     @classmethod
     def setUpClass(cls):
         warnings.simplefilter("ignore", category=ImportWarning)
@@ -74,14 +78,9 @@ class Test_BuildMask(unittest.TestCase):
             cls.engine.dispose()
 
     def setUp(self):
-        self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
-        self.replicated_dir = create_folder(
-            os.path.join(root_dir, "..", "replicated_dirs")
-        )
-
-    def tearDown(self):
-        remove_folder(self.output_dir)
-        remove_folder(self.replicated_dir)
+        super().setUp()
+        self.output_dir = self.make_temp_dir()
+        self.replicated_dir = self.make_temp_dir()
 
     def assert_csv_equal(self, expected_csv, output_csv, atol=1e-5):
         def parse_if_list_string(val):
@@ -96,7 +95,8 @@ class Test_BuildMask(unittest.TestCase):
                     # Fallback: handle numpy space-separated format [1.2 3.4]
                     try:
                         inner = val[1:-1].strip()
-                        if not inner: return []
+                        if not inner:
+                            return []
                         return [float(x) for x in inner.split() if x]
                     except Exception:
                         return val
@@ -112,7 +112,11 @@ class Test_BuildMask(unittest.TestCase):
                     df[col] = df[col].apply(parse_if_list_string)
 
         # Check non-numerical columns normally
-        cols_to_check = [c for c in expected_df.columns if c not in ["bands_means", "bands_stds", "class_freq"]]
+        cols_to_check = [
+            c
+            for c in expected_df.columns
+            if c not in ["bands_means", "bands_stds", "class_freq"]
+        ]
         pd.testing.assert_frame_equal(
             expected_df[cols_to_check].reset_index(drop=True),
             output_df[cols_to_check].reset_index(drop=True),
@@ -170,11 +174,12 @@ class Test_BuildMask(unittest.TestCase):
             )
             csv_output = build_masks(cfg)
             self.assert_csv_equal(
-                os.path.join(expected_output_path, "dsg_dataset.csv"),
-                csv_output
+                os.path.join(expected_output_path, "dsg_dataset.csv"), csv_output
             )
 
-    @patch("pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.PostgisGeoDF")
+    @patch(
+        "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.PostgisGeoDF"
+    )
     def test_build_masks_from_postgis(self, mock_postgis_geodf):
         # Mocking PostgisGeoDF to return data from buildings.geojson
         mask_geo_df = FileGeoDF(
@@ -199,8 +204,7 @@ class Test_BuildMask(unittest.TestCase):
             )
             csv_output = build_masks(cfg)
             self.assert_csv_equal(
-                os.path.join(expected_output_path, "dsg_dataset.csv"),
-                csv_output
+                os.path.join(expected_output_path, "dsg_dataset.csv"), csv_output
             )
 
     def test_build_masks_coco(self):
@@ -227,7 +231,7 @@ class Test_BuildMask(unittest.TestCase):
             self.assert_csv_equal(
                 os.path.join(expected_output_path, "coco_dataset.csv"),
                 csv_output,
-                atol=0.1
+                atol=0.1,
             )
 
     def test_build_masks_coco_no_prebuild(self):
@@ -255,7 +259,7 @@ class Test_BuildMask(unittest.TestCase):
             self.assert_csv_equal(
                 os.path.join(expected_output_path, "coco_dataset.csv"),
                 csv_output,
-                atol=0.1
+                atol=0.1,
             )
 
     def test_merge_csv_datasets(self):
@@ -320,8 +324,7 @@ class Test_BuildMask(unittest.TestCase):
             )
             csv_output = build_masks(cfg)
         self.assert_csv_equal(
-            os.path.join(expected_output_path, "dsg_dataset.csv"),
-            csv_output
+            os.path.join(expected_output_path, "dsg_dataset.csv"), csv_output
         )
 
     def test_build_masks_with_bounding_boxes(self):
@@ -347,7 +350,7 @@ class Test_BuildMask(unittest.TestCase):
             csv_output = build_masks(cfg)
         self.assert_csv_equal(
             os.path.join(expected_output_path, "dsg_dataset_with_bboxes.csv"),
-            csv_output
+            csv_output,
         )
 
     def test_build_masks_with_polygons(self):
@@ -373,5 +376,5 @@ class Test_BuildMask(unittest.TestCase):
             csv_output = build_masks(cfg)
         self.assert_csv_equal(
             os.path.join(expected_output_path, "dsg_dataset_with_polygons.csv"),
-            csv_output
+            csv_output,
         )

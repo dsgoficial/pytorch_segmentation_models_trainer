@@ -19,10 +19,10 @@
  *                                                                         *
  ****
 """
+
 import json
 import os
 from pathlib import Path
-import unittest
 import warnings
 
 import albumentations as A
@@ -71,9 +71,9 @@ from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import
 )
 from pytorch_segmentation_models_trainer.utils.os_utils import (
     create_folder,
-    remove_folder,
 )
 from tests.mock_utils import create_dummy_checkpoint
+from tests.utils import BasicTestCase
 from unittest.mock import Mock
 
 current_dir = os.path.dirname(__file__)
@@ -93,13 +93,10 @@ pretrained_checkpoints_download_links = {
 }
 
 
-class Test_Inference(unittest.TestCase):
+class Test_Inference(BasicTestCase):
     def setUp(self):
-        warnings.simplefilter("ignore", category=ImportWarning)
-        warnings.simplefilter("ignore", category=DeprecationWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
-        warnings.simplefilter("ignore", category=UserWarning)
-        self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
+        super().setUp()
+        self.output_dir = self.make_temp_dir()
         self.frame_field_ds = self.get_frame_field_ds()
         with rasterio.open(self.frame_field_ds[0]["path"], "r") as raster_ds:
             self.crs = raster_ds.crs
@@ -113,9 +110,6 @@ class Test_Inference(unittest.TestCase):
         }
         self.center_crop = A.CenterCrop(512, 512)
 
-    def tearDown(self):
-        remove_folder(self.output_dir)
-
     def get_frame_field_ds(self, with_center_crop=False):
         config_name = (
             "frame_field_dataset.yaml"
@@ -123,7 +117,7 @@ class Test_Inference(unittest.TestCase):
             else "frame_field_dataset_with_center_crop.yaml"
         )
         csv_path = os.path.join(frame_field_root_dir, "dsg_dataset.csv")
-        with initialize(config_path="./test_configs"):
+        with initialize(config_path="./test_configs", version_base=None):
             cfg = compose(
                 config_name=config_name,
                 overrides=[
@@ -351,12 +345,25 @@ class Test_Inference(unittest.TestCase):
     # TTA tests
     # ------------------------------------------------------------------
 
-    @parameterized.expand([
-        ("rotations_4", ["rot0", "rot90", "rot180", "rot270"]),
-        ("d4_group",    ["rot0", "rot90", "rot180", "rot270",
-                         "flip_h", "flip_v", "flip_h_rot90", "flip_v_rot90"]),
-        ("two_rots",    ["rot0", "rot180"]),
-    ])
+    @parameterized.expand(
+        [
+            ("rotations_4", ["rot0", "rot90", "rot180", "rot270"]),
+            (
+                "d4_group",
+                [
+                    "rot0",
+                    "rot90",
+                    "rot180",
+                    "rot270",
+                    "flip_h",
+                    "flip_v",
+                    "flip_h_rot90",
+                    "flip_v_rot90",
+                ],
+            ),
+            ("two_rots", ["rot0", "rot180"]),
+        ]
+    )
     def test_tta_produces_output_file(self, _name, tta_augmentations) -> None:
         """TTA-enabled processor must write a valid output file."""
         output_file_path = os.path.join(self.output_dir, f"output_tta_{_name}.tif")
@@ -379,9 +386,7 @@ class Test_Inference(unittest.TestCase):
         model = smp.Unet()
 
         def _run(use_tta):
-            out_path = os.path.join(
-                self.output_dir, f"shape_check_tta_{use_tta}.tif"
-            )
+            out_path = os.path.join(self.output_dir, f"shape_check_tta_{use_tta}.tif")
             proc = SingleImageInfereceProcessor(
                 model=model,
                 device=device,

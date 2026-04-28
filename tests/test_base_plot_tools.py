@@ -19,39 +19,28 @@
  *                                                                         *
  ****
 """
-import os
-import unittest
-import warnings
 
+import os
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
 import torch
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     ObjectDetectionDataset,
 )
-from pytorch_segmentation_models_trainer.utils.os_utils import (
-    create_folder,
-    remove_folder,
-)
 from pytorch_segmentation_models_trainer.tools.visualization.base_plot_tools import (
     visualize_image_with_bboxes,
 )
+from tests.utils import BasicTestCase
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, "testing_data")
 detection_root_dir = os.path.join(current_dir, "testing_data", "data", "detection_data")
 
 
-class Test_BasePlotTools(unittest.TestCase):
+class Test_BasePlotTools(BasicTestCase):
     def setUp(self):
-        warnings.simplefilter("ignore", category=ImportWarning)
-        warnings.simplefilter("ignore", category=DeprecationWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
-        warnings.simplefilter("ignore", category=UserWarning)
-        self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
-
-    def tearDown(self):
-        remove_folder(self.output_dir)
+        super().setUp()
+        self.output_dir = self.make_temp_dir()
 
     def test_visualize_image_with_bboxes(self):
         csv_path = os.path.join(detection_root_dir, "geo", "dsg_dataset.csv")

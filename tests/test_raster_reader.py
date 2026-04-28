@@ -19,6 +19,7 @@
  *                                                                         *
  ****
 """
+
 import os
 import unittest
 import warnings
@@ -84,21 +85,19 @@ expected_image_list = [
         "Ortoimagem_MI_2970-1-SO_1045.tif",
     ]
 ]
+from tests.utils import BasicTestCase
+
+current_dir = os.path.dirname(__file__)
+...
 
 
-class Test_RasterReader(unittest.TestCase):
+class Test_RasterReader(BasicTestCase):
     def setUp(self):
-        warnings.simplefilter("ignore", category=ImportWarning)
-        warnings.simplefilter("ignore", category=DeprecationWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
-        warnings.simplefilter("ignore", category=UserWarning)
-        self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
-        create_folder(os.path.join(root_dir, "test_output", "mask"))
-        create_folder(os.path.join(root_dir, "test_output", "boundary_mask"))
-        create_folder(os.path.join(root_dir, "test_output", "vertex_mask"))
-
-    def tearDown(self):
-        remove_folder(self.output_dir)
+        super().setUp()
+        self.output_dir = self.make_temp_dir()
+        create_folder(os.path.join(self.output_dir, "mask"))
+        create_folder(os.path.join(self.output_dir, "boundary_mask"))
+        create_folder(os.path.join(self.output_dir, "vertex_mask"))
 
     @parameterized.expand(test_list)
     def test_instantiate_object(self, obj_class, params, expected_shape) -> None:

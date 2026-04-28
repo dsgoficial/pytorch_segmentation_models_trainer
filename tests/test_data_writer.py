@@ -50,18 +50,16 @@ from shapely.geometry import Polygon
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, "testing_data")
+from tests.utils import BasicTestCase
+
+current_dir = os.path.dirname(__file__)
+...
 
 
-class Test_DataWriter(unittest.TestCase):
+class Test_DataWriter(BasicTestCase):
     def setUp(self):
-        warnings.simplefilter("ignore", category=ImportWarning)
-        warnings.simplefilter("ignore", category=DeprecationWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
-        warnings.simplefilter("ignore", category=UserWarning)
-        self.output_dir = create_folder(os.path.join(root_dir, "test_output"))
-
-    def tearDown(self):
-        remove_folder(self.output_dir)
+        super().setUp()
+        self.output_dir = self.make_temp_dir()
 
     def test_raster_data_writer(self) -> None:
         input_data = np.ones([256, 256, 1], dtype=np.uint8)

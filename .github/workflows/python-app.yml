@@ -73,10 +73,12 @@ jobs:
       with:
         path: ~/work/pytorch_segmentation_models_trainer/pytorch_segmentation_models_trainer/tests/testing_data/data/checkpoints/
         key: ${{ runner.os }}-test-cache
-    - name: Test with pytest (fast tests)
+    - name: Test with pytest (parallel)
       run: |
-        uv run coverage run --source pytorch_segmentation_models_trainer --omit pytorch_segmentation_models_trainer/custom_models/sync_bn/* \
-          -m pytest tests/ \
+        uv run pytest tests/ \
+          -n auto --dist loadfile \
+          --cov=pytorch_segmentation_models_trainer \
+          --cov-report=xml \
           --ignore=tests/test_detection_model.py \
           --ignore=tests/test_gradient_centralization.py \
           --ignore=tests/test_optimizers.py \
@@ -89,14 +91,14 @@ jobs:
       run: |
         for f in tests/test_detection_model.py tests/test_gradient_centralization.py tests/test_optimizers.py tests/test_custom_models.py tests/test_frame_field_model.py; do
           echo "=== Running $f in isolation ==="
-          uv run coverage run --source pytorch_segmentation_models_trainer --omit pytorch_segmentation_models_trainer/custom_models/sync_bn/* \
-            --append -m pytest "$f" --timeout=300 -v -p no:warnings || true
+          uv run pytest "$f" \
+            --cov=pytorch_segmentation_models_trainer --cov-append --cov-report=xml \
+            --timeout=300 -v -p no:warnings || true
         done
     - name: statistics
       if: success()
       run: |
         uv run coverage report
-        uv run coverage xml
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
       if: always()
@@ -162,17 +164,17 @@ jobs:
 
     - name: Run transformer test suite
       run: |
-        uv run coverage run \
-          --source pytorch_segmentation_models_trainer \
-          --omit pytorch_segmentation_models_trainer/custom_models/sync_bn/* \
-          -m pytest \
-            tests/test_transformer_adapters.py \
-            tests/test_huggingface_models.py \
-            tests/test_timm_models.py \
-            tests/test_fine_tuning.py \
-            tests/test_model_training_step.py \
-            tests/test_terratorch_models.py \
-            tests/test_inference_pipeline.py \
+        uv run pytest \
+          -n auto --dist loadfile \
+          --cov=pytorch_segmentation_models_trainer \
+          --cov-report=xml \
+          tests/test_transformer_adapters.py \
+          tests/test_huggingface_models.py \
+          tests/test_timm_models.py \
+          tests/test_fine_tuning.py \
+          tests/test_model_training_step.py \
+          tests/test_terratorch_models.py \
+          tests/test_inference_pipeline.py \
           --timeout=120 \
           -v \
           -p no:warnings
@@ -181,7 +183,6 @@ jobs:
       if: success()
       run: |
         uv run coverage report
-        uv run coverage xml
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4

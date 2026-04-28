@@ -76,6 +76,8 @@ tests = [
     "coverage",
     "pytest-timeout",
     "flake8",
+    "pytest-xdist",
+    "pytest-cov",
 ]
 transformers = [
     "transformers>=4.30.0",
