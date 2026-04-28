@@ -632,6 +632,12 @@ class Model(pl.LightningModule):
 
         return [optimizer], scheduler_list
 
+    def _prefetch_factor(self, data_loader_cfg, num_workers: int) -> Optional[int]:
+        """Return prefetch_factor or None when num_workers=0 (PyTorch requirement)."""
+        if num_workers == 0:
+            return None
+        return data_loader_cfg.prefetch_factor if "prefetch_factor" in data_loader_cfg else 2
+
     def _make_dataloader_generator(self) -> Optional[torch.Generator]:
         """Return a seeded Generator when cfg.seed is present, else None."""
         seed = self.cfg.get("seed", None)
@@ -642,20 +648,19 @@ class Model(pl.LightningModule):
         return g
 
     def train_dataloader(self):
+        num_workers = self.cfg.train_dataset.data_loader.num_workers
         return DataLoader(
             self.train_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
             shuffle=self.cfg.train_dataset.data_loader.shuffle,
-            num_workers=self.cfg.train_dataset.data_loader.num_workers,
+            num_workers=num_workers,
             pin_memory=self.cfg.train_dataset.data_loader.pin_memory
             if "pin_memory" in self.cfg.train_dataset.data_loader
             else True,
             drop_last=self.cfg.train_dataset.data_loader.drop_last
             if "drop_last" in self.cfg.train_dataset.data_loader
             else True,
-            prefetch_factor=self.cfg.train_dataset.data_loader.prefetch_factor
-            if "prefetch_factor" in self.cfg.train_dataset.data_loader
-            else 2,
+            prefetch_factor=self._prefetch_factor(self.cfg.train_dataset.data_loader, num_workers),
             persistent_workers=self.cfg.train_dataset.data_loader.persistent_workers
             if "persistent_workers" in self.cfg.train_dataset.data_loader
             else False,
@@ -666,22 +671,21 @@ class Model(pl.LightningModule):
     def val_dataloader(self):
         if self.val_ds is None:
             return None
+        num_workers = self.cfg.val_dataset.data_loader.num_workers
         return DataLoader(
             self.val_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
             shuffle=self.cfg.val_dataset.data_loader.shuffle
             if "shuffle" in self.cfg.val_dataset.data_loader
             else False,
-            num_workers=self.cfg.val_dataset.data_loader.num_workers,
+            num_workers=num_workers,
             pin_memory=self.cfg.val_dataset.data_loader.pin_memory
             if "pin_memory" in self.cfg.val_dataset.data_loader
             else True,
             drop_last=self.cfg.val_dataset.data_loader.drop_last
             if "drop_last" in self.cfg.val_dataset.data_loader
             else False,
-            prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor
-            if "prefetch_factor" in self.cfg.val_dataset.data_loader
-            else 2,
+            prefetch_factor=self._prefetch_factor(self.cfg.val_dataset.data_loader, num_workers),
             persistent_workers=self.cfg.val_dataset.data_loader.persistent_workers
             if "persistent_workers" in self.cfg.val_dataset.data_loader
             else False,
@@ -692,22 +696,21 @@ class Model(pl.LightningModule):
     def test_dataloader(self):
         if self.test_ds is None:
             return None
+        num_workers = self.cfg.test_dataset.data_loader.num_workers
         return DataLoader(
             self.test_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
             shuffle=self.cfg.test_dataset.data_loader.shuffle
             if "shuffle" in self.cfg.test_dataset.data_loader
             else False,
-            num_workers=self.cfg.test_dataset.data_loader.num_workers,
+            num_workers=num_workers,
             pin_memory=self.cfg.test_dataset.data_loader.pin_memory
             if "pin_memory" in self.cfg.test_dataset.data_loader
             else True,
             drop_last=self.cfg.test_dataset.data_loader.drop_last
             if "drop_last" in self.cfg.test_dataset.data_loader
             else False,
-            prefetch_factor=self.cfg.test_dataset.data_loader.prefetch_factor
-            if "prefetch_factor" in self.cfg.test_dataset.data_loader
-            else 2,
+            prefetch_factor=self._prefetch_factor(self.cfg.test_dataset.data_loader, num_workers),
             persistent_workers=self.cfg.test_dataset.data_loader.persistent_workers
             if "persistent_workers" in self.cfg.test_dataset.data_loader
             else False,
@@ -762,8 +765,12 @@ class Model(pl.LightningModule):
     def _unpack_batch(self, batch):
         """Extract (images, masks) from a batch dict or tuple."""
         if isinstance(batch, dict):
-            images = batch.get("image")
-            masks = batch.get("mask")
+            image_key = self.cfg.get("image_key", "image")
+            mask_key = self.cfg.get("mask_key", "mask")
+            if image_key not in batch:
+                raise KeyError(image_key)
+            images = batch[image_key]
+            masks = batch.get(mask_key)
         else:
             images, masks = batch[0], batch[1]
         return images, masks
@@ -788,8 +795,7 @@ class Model(pl.LightningModule):
             prefix: 'train' or 'val' (used for log keys).
         """
         is_train = prefix == "train"
-        images = batch["image"]
-        masks = batch["mask"]
+        images, masks = self._unpack_batch(batch)
 
         # Soft labels arrive as float (B,C,H,W); hard labels as int/long (B,H,W)
         if masks.is_floating_point():
@@ -983,16 +989,17 @@ class Model(pl.LightningModule):
         # Compute and log metrics
         metrics_attr = f"{prefix}_metrics"
         if hasattr(self, metrics_attr):
-            metrics = getattr(self, metrics_attr)(
-                predicted_masks_for_metrics, hard_masks
-            )
-            self.log_dict(
-                metrics, on_step=is_train, on_epoch=True, prog_bar=False, sync_dist=True
-            )
+            preds_for_metrics = self._prepare_preds_for_metrics(predicted_masks_for_metrics)
+            if preds_for_metrics is not None:
+                metrics = getattr(self, metrics_attr)(preds_for_metrics, hard_masks)
+                self.log_dict(
+                    metrics, on_step=is_train, on_epoch=True, prog_bar=False, sync_dist=True
+                )
 
         # Per-class IoU (validation only)
         if not is_train and self._per_class_iou is not None:
-            per_class = self._per_class_iou(predicted_masks_for_metrics, hard_masks)
+            preds_for_metrics = self._prepare_preds_for_metrics(predicted_masks_for_metrics)
+            per_class = self._per_class_iou(preds_for_metrics, hard_masks)
             for i, name in enumerate(self._class_names):
                 self.log(
                     f"val_iou/{name}",

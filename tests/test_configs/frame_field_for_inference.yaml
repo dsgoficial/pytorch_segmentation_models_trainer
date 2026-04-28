@@ -107,7 +107,7 @@ train_dataset:
     height: ${backbone.input_width}
     width: ${backbone.input_height}
     p: 1.0
-  - _target_: albumentations.Flip
+  - _target_: albumentations.HorizontalFlip
     p: 0.5
   - _target_: albumentations.Normalize
     p: 1.0

@@ -57,7 +57,10 @@ def instantiate_model_from_checkpoint(cfg: DictConfig) -> torch.nn.Module:
         elif cfg.pl_trainer.devices == -1:
             map_location = f"cuda:0"
         else:
-            map_location = f"cuda:{cfg.pl_trainer.devices[0]}"
+            if isinstance(cfg.pl_trainer.devices, int):
+                map_location = f"cuda:{cfg.pl_trainer.devices}"
+            else:
+                map_location = f"cuda:{cfg.pl_trainer.devices[0]}"
     else:
         map_location = "cpu"
 

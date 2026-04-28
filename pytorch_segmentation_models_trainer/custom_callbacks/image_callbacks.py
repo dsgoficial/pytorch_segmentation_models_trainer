@@ -409,11 +409,14 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
     def on_validation_epoch_end(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule
     ):
-        val_ds = pl_module.val_dataloader().loaders  # type: ignore
+        combined = pl_module.val_dataloader()
+        # PL ≥ 2.x renamed CombinedLoader.loaders → CombinedLoader.iterables
+        val_ds = getattr(combined, "iterables", None) or getattr(combined, "loaders", combined)  # type: ignore
         current_item = 0
-        prepared_input = val_ds[
-            "polygon_rnn"
-        ].loader.dataset.get_n_image_path_dict_list(self.n_samples)
+        polygon_rnn_dl = val_ds["polygon_rnn"]
+        # PL ≥ 2.x: iterables values are plain DataLoaders (no .loader wrapper)
+        ds = getattr(polygon_rnn_dl, "dataset", None) or getattr(polygon_rnn_dl, "loader", polygon_rnn_dl).dataset
+        prepared_input = ds.get_n_image_path_dict_list(self.n_samples)
         model: GenericModPolyMapper = pl_module.model  # type: ignore
         grid_size = model.polygonrnn_model.grid_size
         model.eval()  # type: ignore

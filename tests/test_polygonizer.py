@@ -28,7 +28,19 @@ import geopandas
 import hydra
 import rasterio
 import torch
-from geopandas.testing import geom_almost_equals
+from geopandas.testing import geom_almost_equals as _geom_almost_equals
+
+
+def geom_almost_equals(this, that, tolerance=0.01):
+    """Wrapper around geom_equals_exact with a 1cm default tolerance.
+
+    geopandas.testing.geom_almost_equals uses a fixed sub-millimetre
+    tolerance (5e-7) which breaks when newer shapely serialises GeoJSON
+    coordinates with fewer decimal places.  A 1cm tolerance is still very
+    tight for geographic polygons while being robust to floating-point
+    representation changes across library versions.
+    """
+    return this.geom_equals_exact(that, tolerance=tolerance).all()
 from hydra import compose, initialize
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
     VectorFileDataWriter,

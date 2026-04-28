@@ -234,7 +234,7 @@ class Test_ModPolyMapperModel(BasicTestCase):
         [
             (
                 "experiment_mod_polymapper.yaml",
-                ["+pl_trainer.fast_dev_run=true", "+pl_model.perform_evaluation=true"],
+                ["++pl_trainer.fast_dev_run=true", "+pl_model.perform_evaluation=true"],
             ),
             ("experiment_mod_polymapper_with_callback.yaml", None),
         ]
@@ -256,7 +256,8 @@ class Test_ModPolyMapperModel(BasicTestCase):
                 f"val_dataset.object_detection.root_dir={detection_root_dir}",
                 f"val_dataset.polygon_rnn.input_csv_path={poly_csv_path}",
                 f"val_dataset.polygon_rnn.root_dir={polygon_rnn_root_dir}",
-                "pl_trainer.gpus=1",
+                "++pl_trainer.devices=1",
+                "++pl_trainer.fast_dev_run=true",
             ]
             + extra_overrides,
         )
@@ -267,7 +268,7 @@ class Test_ModPolyMapperModel(BasicTestCase):
     #     [
     #         (
     #             "experiment_mod_polymapper_with_callback.yaml",
-    #             ["+pl_trainer.fast_dev_run=true", "+pl_model.perform_evaluation=true"],
+    #             ["++pl_trainer.fast_dev_run=true", "+pl_model.perform_evaluation=true"],
     #         )
     #     ]
     # )

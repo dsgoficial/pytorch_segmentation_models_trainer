@@ -232,12 +232,12 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             # Log evaluation metrics
             for metric_name, metric_value in metrics_dict_item.items():
                 if metric_name not in ["intersection", "union"]:
-                    if torch.is_tensor(metric_value):
+                    if torch.is_tensor(metric_value) and metric_value.numel() > 0:
                         self.log(
                             f"metrics/val_{metric_name}",
-                            metric_value.mean()
+                            metric_value.float().mean()
                             if metric_value.numel() > 1
-                            else metric_value,
+                            else metric_value.float(),
                             on_step=False,
                             on_epoch=True,
                         )

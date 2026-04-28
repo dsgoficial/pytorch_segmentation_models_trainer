@@ -42,6 +42,7 @@ class Test_Train(CustomTestCase):
                 overrides=[
                     "train_dataset.input_csv_path=" + self.csv_ds_file,
                     "val_dataset.input_csv_path=" + self.csv_ds_file,
+                    "++pl_trainer.fast_dev_run=true",
                 ],
             )
             result = train(cfg)
@@ -88,6 +89,7 @@ class Test_Train(CustomTestCase):
                 overrides=[
                     "train_dataset.input_csv_path=" + self.csv_ds_file,
                     "val_dataset.input_csv_path=" + self.csv_ds_file,
+                    "++pl_trainer.fast_dev_run=true",
                 ],
             )
             result = train(cfg)

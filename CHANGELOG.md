@@ -1,5 +1,20 @@
 # Unreleased
 
+## Bug fixes
+
+- Fixed `NameError: name 'DictConfig' is not defined` in `dataset_loader/dataset.py` (`load_augmentation_object`): `DictConfig` was used but not imported from `omegaconf`, causing all augmentation loading to silently fall back to raw OmegaConf objects and crash with `albumentations >= 2.x` when `A.Compose` tried to access `.available_keys` on them.
+- Fixed `Model._unpack_batch` (`model_loader/model.py`) to respect the `image_key` and `mask_key` config fields (was hardcoded to `"image"` / `"mask"`). Also propagated the fix to `_shared_step` so training/validation steps honour custom keys end-to-end.
+- Fixed `ValueError: prefetch_factor option could only be specified in multiprocessing` in `Model.train_dataloader`, `val_dataloader`, and `test_dataloader`: when `num_workers=0`, `prefetch_factor` is now set to `None` as required by PyTorch's DataLoader API.
+- Fixed `MCDropoutInferenceProcessor` (`tools/inference/mc_dropout_inference_processor.py`) to save uncertainty rasters with suffix `_mc_uncertainty` instead of the generic `_uncertainty` from the parent class, matching the test expectation and making it distinguishable from TTA uncertainty maps.
+- Fixed `merge_lora_weights` (`fine_tuning/lora_utils.py`) to use `is_peft_model()` for the PEFT check rather than a local `isinstance` guard; this makes the function testable without a real PEFT installation and consistent with `is_peft_model`.
+- Fixed `TimmEncoderWithSMPDecoder` (`custom_models/timm_models.py`) for SMP 0.5.0 compatibility: replaced removed `use_batchnorm` kwarg with `use_norm` in `UnetDecoder.__init__`, and changed the decoder `forward` call to pass features as a single list instead of splatted positional arguments (both `UnetDecoder` and `FPNDecoder` now use `forward(features: list)` in SMP 0.5.x).
+- Updated `test_caches.py::TestClassPresenceCacheAutoSave::test_auto_save_json_structure` to account for the `_config` metadata key now present in the class-presence cache JSON, filtering it out before counting data entries.
+- Fixed `Model._shared_step` (`model_loader/model.py`) to apply `_prepare_preds_for_metrics` before computing train/val metrics: binary models output `[B, 1, H, W]` but torchmetrics expects `[B, H, W]`, causing a shape mismatch `RuntimeError` during training. The same fix was applied to the per-class IoU path.
+- Fixed `test_frame_field_model.py::_make_ff_batch`: `class_freq` was built as `torch.ones(B)` (1-D) but `compute_seg_loss_weights` in `base_loss.py` sums over `dim=1`, requiring `[B, C]`. Also added the missing `gt_crossfield_angle: torch.zeros(B, 1, H, W)` key, required by `compute_gt_field` when `compute_crossfield: true`.
+- Fixed `mod_polymapper.py` validation metric logging: added `numel() > 0` guard to skip empty tensors (produced when no polygons are detected in `fast_dev_run`), and added `.float()` before `.mean()` to handle Long-dtype metric values, preventing `ValueError: tensor must have a single element` and `RuntimeError: mean() dtype`.
+- Fixed `test_polygonizer.py::test_polygonizer_acm_processor`: replaced `geopandas.testing.geom_almost_equals` (fixed 5×10⁻⁷ m tolerance, too strict for GeoJSON coordinate rounding) with a 1 cm tolerance wrapper; regenerated the `acm_polygonizer.geojson` baseline because the ACM algorithm produces different vertex coordinates with newer shapely/geopandas.
+- Fixed `custom_callbacks/image_callbacks.py`: `CombinedLoader.loaders` was renamed to `CombinedLoader.iterables` in PyTorch Lightning ≥ 2.x; added a `getattr` fallback so the callback works on both old and new PL versions. Also fixed the follow-up `DataLoader.loader.dataset` chain: PL ≥ 2.x exposes plain `DataLoader` objects in `iterables`, so `.dataset` is now accessed directly with a fallback to the old `.loader.dataset` path.
+
 ## Installation & Environment
 
 - Migrated to `uv` as the primary project and dependency manager.

@@ -56,7 +56,7 @@ from pytorch_segmentation_models_trainer.utils.os_utils import (
     create_folder,
     remove_folder,
 )
-from torchvision.datasets.utils import download_url
+from tests.mock_utils import create_dummy_checkpoint
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, "testing_data")
@@ -118,11 +118,7 @@ def get_checkpoint_file(file_name):
     checkpoint_folder = create_folder(os.path.join(root_dir, "data", "checkpoints"))
     checkpoint_file_path = os.path.join(checkpoint_folder, file_name)
     if not os.path.isfile(checkpoint_file_path):
-        download_url(
-            url=pretrained_checkpoints_download_links[file_name.split(".")[0]],
-            root=checkpoint_folder,
-            filename=file_name,
-        )
+        create_dummy_checkpoint(checkpoint_file_path)
     return checkpoint_file_path
 
 

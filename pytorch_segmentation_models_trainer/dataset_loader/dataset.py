@@ -37,7 +37,7 @@ import pandas as pd
 import shapely.wkt
 import torch
 from hydra.utils import instantiate
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 from albumentations.pytorch import ToTensorV2
 from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
@@ -76,10 +76,15 @@ def load_augmentation_object(input_list, bbox_params=None):
     if isinstance(input_list, A.Compose):
         return input_list
     try:
-        aug_list = [
-            instantiate(_sanitize_aug_config(i), _recursive_=False) for i in input_list
+        # Convert to primitive dict to avoid OmegaConf/Albumentations compatibility issues
+        sanitized_list = [
+            OmegaConf.to_container(i, resolve=True) if isinstance(i, DictConfig) else i
+            for i in input_list
         ]
-    except:
+        aug_list = [
+            instantiate(_sanitize_aug_config(i), _recursive_=False) for i in sanitized_list
+        ]
+    except Exception as e:
         aug_list = input_list
     if bbox_params is None:
         return A.Compose(aug_list)

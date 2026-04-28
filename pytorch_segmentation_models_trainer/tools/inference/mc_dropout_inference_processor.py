@@ -300,7 +300,28 @@ class MCDropoutInferenceProcessor(MultiClassInferenceProcessor):
                 else None,
             )
         if save_inference_output:
-            self.save_inference(image_path, threshold, profile, inference, output_dict)
+            self._save_mc_inference(image_path, threshold, profile, inference, output_dict)
         if kwargs.get("output_inferences"):
             output_dict["inference_output"].append(inference)
         return output_dict
+
+    def _save_mc_inference(self, image_path, threshold, profile, inference, output_dict):
+        """Like save_inference but uses '_mc_uncertainty' suffix for the uncertainty raster."""
+        if self.export_uncertainty_map and "uncertainty" in inference:
+            self._save_uncertainty_raster(
+                uncertainty_map=inference["uncertainty"],
+                reference_profile=profile,
+                image_path=image_path,
+                suffix="_mc_uncertainty",
+            )
+        profile = dict(profile)
+        profile["count"] = 1
+        profile["dtype"] = "uint8"
+        profile["input_name"] = Path(image_path).stem
+        profile["suffix"] = Path(image_path).suffix
+        if self.export_strategy is not None:
+            output_dict["inference"].append(
+                self.export_strategy.save_inference(
+                    {"seg": inference.get("seg", inference)}, profile
+                )
+            )

@@ -131,7 +131,7 @@ class TimmEncoderWithSMPDecoder(nn.Module):
                 encoder_channels=encoder_channels_smp,
                 decoder_channels=decoder_channels[: len(encoder_channels)],
                 n_blocks=len(encoder_channels),
-                use_batchnorm=True,
+                use_norm=True,
                 attention_type=None,
             )
             head_in_channels = decoder_channels[len(encoder_channels) - 1]
@@ -168,6 +168,6 @@ class TimmEncoderWithSMPDecoder(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         features = self.encoder(x)
-        # SMP decoders expect the feature list prepended with the input tensor
-        decoder_output = self.decoder(*([x] + features))
+        # SMP 0.5+ decoders expect a single list argument (not splatted args)
+        decoder_output = self.decoder([x] + features)
         return self.segmentation_head(decoder_output)

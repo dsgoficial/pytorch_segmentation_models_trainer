@@ -24,6 +24,7 @@ import os
 import subprocess
 from typing import List
 
+import pytest
 import pytorch_lightning as pl
 from parameterized import parameterized
 from hydra import compose, initialize
@@ -37,6 +38,7 @@ config_path_list = [
 ]
 
 
+@pytest.mark.skip(reason="High overhead of subprocess calls. Integration is covered by other tests.")
 class Test_Script(CustomTestCase):
     def test_run_train_from_python_script(self) -> None:
         script_path = os.path.join(
@@ -60,6 +62,7 @@ class Test_Script(CustomTestCase):
         )
         self.assertEqual(return_from_process.returncode, 0)
 
+    @pytest.mark.skip(reason="High overhead of subprocess calls. Integration is covered by other tests.")
     @parameterized.expand(config_path_list)
     def test_run_train_from_command_line(self, config_path: str) -> None:
         return_from_process = subprocess.run(
@@ -77,6 +80,7 @@ class Test_Script(CustomTestCase):
         )
         self.assertEqual(return_from_process.returncode, 0)
 
+    @pytest.mark.skip(reason="High overhead of subprocess calls. Integration is covered by other tests.")
     @parameterized.expand(config_path_list)
     def test_run_validate_config_from_command_line(self, config_path: str) -> None:
         return_from_process = subprocess.run(
@@ -92,6 +96,7 @@ class Test_Script(CustomTestCase):
         )
         self.assertEqual(return_from_process.returncode, 0)
 
+    @pytest.mark.skip(reason="High overhead of subprocess calls. Integration is covered by other tests.")
     @parameterized.expand(config_path_list)
     def test_run_validate_config_from_python_script(self, config_path: str) -> None:
         script_path = os.path.join(

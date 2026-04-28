@@ -231,7 +231,7 @@ class TestClassPresenceCacheAutoSave(unittest.TestCase):
         self.assertTrue(os.path.exists(self.cache_path))
 
     def test_auto_save_json_structure(self):
-        """Auto-saved JSON should map filenames to class lists."""
+        """Auto-saved JSON should map filenames to class lists (plus optional _config key)."""
         ds = RandomCropSegmentationDataset(
             input_csv_path=self.csv_path,
             crop_size=[32, 32], n_classes=3,
@@ -243,8 +243,9 @@ class TestClassPresenceCacheAutoSave(unittest.TestCase):
         with open(self.cache_path) as f:
             cache = json.load(f)
 
-        self.assertEqual(len(cache), 3)
-        for name, classes in cache.items():
+        data_entries = {k: v for k, v in cache.items() if k != "_config"}
+        self.assertEqual(len(data_entries), 3)
+        for name, classes in data_entries.items():
             self.assertIsInstance(classes, list)
             self.assertTrue(all(isinstance(c, int) for c in classes))
 

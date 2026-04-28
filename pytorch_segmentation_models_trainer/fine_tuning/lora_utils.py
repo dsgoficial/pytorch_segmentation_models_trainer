@@ -287,14 +287,10 @@ def merge_lora_weights(model: nn.Module) -> nn.Module:
     Returns:
         The merged base model.
     """
-    try:
-        from peft import PeftModel
-    except ImportError:
-        return model  # peft not installed, nothing to do
-
-    if isinstance(model, PeftModel):
-        model = model.merge_and_unload()
-        logger.info("LoRA weights merged and PEFT wrapper removed.")
+    if not is_peft_model(model):
+        return model
+    model = model.merge_and_unload()
+    logger.info("LoRA weights merged and PEFT wrapper removed.")
     return model
 
 

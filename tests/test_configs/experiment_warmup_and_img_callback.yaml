@@ -65,7 +65,7 @@ train_dataset:
       height: 256
       width: 256
       p: 1.0
-    - _target_: albumentations.Flip
+    - _target_: albumentations.HorizontalFlip
       always_apply: true
     - _target_: albumentations.Normalize
       p: 1.0

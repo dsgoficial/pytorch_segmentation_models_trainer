@@ -12,7 +12,7 @@ augmentation_list:
     height: 256
     width: 256
     p: 1.0
-  - _target_: albumentations.Flip
+  - _target_: albumentations.HorizontalFlip
     always_apply: true
   - _target_: albumentations.pytorch.transforms.ToTensorV2
     always_apply: true

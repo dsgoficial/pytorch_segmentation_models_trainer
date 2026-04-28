@@ -225,10 +225,12 @@ class Test_FrameFieldModel(CustomTestCase):
     def _make_ff_batch(self):
         """Minimal FrameField-style batch with required keys."""
         B, H, W = 2, 64, 64
+        C = 3  # channels must match gt_polygons_image channels
         return {
             "image": torch.randn(B, 3, H, W),
-            "gt_polygons_image": torch.zeros(B, 3, H, W),
-            "class_freq": torch.ones(B),
+            "gt_polygons_image": torch.zeros(B, C, H, W),
+            "class_freq": torch.ones(B, C),       # [B, C] required by compute_seg_loss_weights
+            "gt_crossfield_angle": torch.zeros(B, 1, H, W),  # required by compute_gt_field
         }
 
     def test_frame_field_validation_step_returns_loss(self) -> None:
