@@ -75,7 +75,7 @@ jobs:
         key: ${{ runner.os }}-test-cache
     - name: Test with pytest (fast tests)
       run: |
-        coverage run --source pytorch_segmentation_models_trainer --omit pytorch_segmentation_models_trainer/custom_models/sync_bn/* \
+        uv run coverage run --source pytorch_segmentation_models_trainer --omit pytorch_segmentation_models_trainer/custom_models/sync_bn/* \
           -m pytest tests/ \
           --ignore=tests/test_detection_model.py \
           --ignore=tests/test_gradient_centralization.py \
@@ -89,14 +89,14 @@ jobs:
       run: |
         for f in tests/test_detection_model.py tests/test_gradient_centralization.py tests/test_optimizers.py tests/test_custom_models.py tests/test_frame_field_model.py; do
           echo "=== Running $f in isolation ==="
-          coverage run --source pytorch_segmentation_models_trainer --omit pytorch_segmentation_models_trainer/custom_models/sync_bn/* \
+          uv run coverage run --source pytorch_segmentation_models_trainer --omit pytorch_segmentation_models_trainer/custom_models/sync_bn/* \
             --append -m pytest "$f" --timeout=300 -v -p no:warnings || true
         done
     - name: statistics
       if: success()
       run: |
-        coverage report
-        coverage xml
+        uv run coverage report
+        uv run coverage xml
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
       if: always()
@@ -136,6 +136,7 @@ jobs:
     # CPU-only PyTorch keeps the image small and the job fast.
     - name: Install dependencies (CPU)
       run: |
+        uv venv
         uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
         uv sync --extra transformers --dev
         uv pip install opencv-python-headless
