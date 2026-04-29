@@ -58,7 +58,7 @@ dependencies = [
     "uvicorn>=0.20.0",
     "httpx>=0.23.0",
     "pydantic-settings>=2.0.0",
-    "similaritymeasures==0.4.4",
+    "similaritymeasures==1.4.0",
     "colorama==0.4.5",
     "swifter==1.0.9",
     "python-multipart==0.0.5",
