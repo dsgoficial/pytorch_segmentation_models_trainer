@@ -18,6 +18,7 @@
  * *
  * ****
 """
+
 import datetime
 import os
 from pathlib import Path
@@ -238,9 +239,9 @@ class FrameFieldOverlayedResultCallback(ImageSegmentationResultCallback):
                 image_seg_display = get_tensorboard_image_seg_display(
                     image_display[idx].unsqueeze(0),
                     seg[idx].unsqueeze(0),
-                    crossfield=crossfield[idx].unsqueeze(0)
-                    if crossfield is not None
-                    else None,
+                    crossfield=(
+                        crossfield[idx].unsqueeze(0) if crossfield is not None else None
+                    ),
                 )
                 trainer.logger.experiment.add_images(
                     f"overlay-{batch['path'][idx]}",
@@ -415,7 +416,10 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
         current_item = 0
         polygon_rnn_dl = val_ds["polygon_rnn"]
         # PL ≥ 2.x: iterables values are plain DataLoaders (no .loader wrapper)
-        ds = getattr(polygon_rnn_dl, "dataset", None) or getattr(polygon_rnn_dl, "loader", polygon_rnn_dl).dataset
+        ds = (
+            getattr(polygon_rnn_dl, "dataset", None)
+            or getattr(polygon_rnn_dl, "loader", polygon_rnn_dl).dataset
+        )
         prepared_input = ds.get_n_image_path_dict_list(self.n_samples)
         model: GenericModPolyMapper = pl_module.model  # type: ignore
         grid_size = model.polygonrnn_model.grid_size
@@ -834,9 +838,11 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         self._log(f"Save DPI: {self.save_dpi}", prefix="  ")
         self._log(f"Output path: {self.output_path}", prefix="  ")
         self._log("-" * 80, prefix="")
-        self._log(
-            f"Expected mask values: 0 to {self.num_classes - 1} (integers)", prefix="  "
-        )
+        if self.num_classes is not None:
+            self._log(
+                f"Expected mask values: 0 to {self.num_classes - 1} (integers)",
+                prefix="  ",
+            )
         self._log("Color mapping:", prefix="  ")
         for i, (color, name) in enumerate(
             zip(
@@ -904,7 +910,8 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         # Phase 1: Generate visualizations and submit for saving
         inference_start_time = time.time()
         self._log(
-            "Phase 1: Generating predictions and creating visualizations...", prefix="🔮"
+            "Phase 1: Generating predictions and creating visualizations...",
+            prefix="🔮",
         )
 
         # Process in batches with no gradient computation
@@ -935,9 +942,11 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
                         )
                         masks = batch_dict.get(
                             "mask",
-                            batch[1]
-                            if isinstance(batch, (tuple, list)) and len(batch) > 1
-                            else None,
+                            (
+                                batch[1]
+                                if isinstance(batch, (tuple, list)) and len(batch) > 1
+                                else None
+                            ),
                         )
                         batch_paths = None
                     except Exception as e:
@@ -1172,7 +1181,9 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         self.executor.shutdown(wait=True)
 
         cleanup_time = time.time() - cleanup_start
-        self._log(f"Cleanup completed in {self._format_time(cleanup_time)}", prefix="✅")
+        self._log(
+            f"Cleanup completed in {self._format_time(cleanup_time)}", prefix="✅"
+        )
         self._log("Visualization callback shutdown complete", prefix="🏁")
         self._log("=" * 80, prefix="")
 

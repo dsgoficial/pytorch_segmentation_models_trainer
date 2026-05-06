@@ -114,30 +114,33 @@ class TestGPUDistributor(unittest.TestCase):
         # Manually set available gpus to bypass detection for this test
         distributor.available_gpus = [0]
 
-        info = distributor.get_gpu_memory_info(0)
-        self.assertEqual(info["total_gb"], 8.0)
-        self.assertEqual(info["used_gb"], 2.0)
-        self.assertEqual(info["free_gb"], 6.0)
+        # Mock check_gpu_availability to return True without calling .cuda()
+        with patch.object(GPUDistributor, "check_gpu_availability", return_value=True):
+            info = distributor.get_gpu_memory_info(0)
+            self.assertEqual(info["total_gb"], 8.0)
+            self.assertEqual(info["used_gb"], 2.0)
+            self.assertEqual(info["free_gb"], 6.0)
 
     @patch("torch.cuda.is_available", return_value=True)
     @patch("torch.cuda.device_count", return_value=1)
     def test_get_optimal_batch_size(self, mock_count, mock_avail):
         distributor = GPUDistributor(self.config)
 
-        # Mock get_gpu_memory_info
-        distributor.get_gpu_memory_info = MagicMock(return_value={"free_gb": 4.0})
+        # Mock check_gpu_availability and memory info
+        with patch.object(GPUDistributor, "check_gpu_availability", return_value=True):
+            distributor.get_gpu_memory_info = MagicMock(return_value={"free_gb": 4.0})
 
-        # 4GB * 0.8 = 3.2GB = 3200MB. 3200 / 100 = 32.
-        batch_size = distributor.get_optimal_batch_size(
-            0, base_batch_size=16, memory_per_sample_mb=100.0
-        )
-        self.assertEqual(batch_size, 32)
+            # 4GB * 0.8 = 3.2GB = 3200MB. 3200 / 100 = 32.
+            batch_size = distributor.get_optimal_batch_size(
+                0, base_batch_size=16, memory_per_sample_mb=100.0
+            )
+            self.assertEqual(batch_size, 32)
 
-        # Test capping at 4 * base
-        batch_size_capped = distributor.get_optimal_batch_size(
-            0, base_batch_size=4, memory_per_sample_mb=100.0
-        )
-        self.assertEqual(batch_size_capped, 16)
+            # Test capping at 4 * base
+            batch_size_capped = distributor.get_optimal_batch_size(
+                0, base_batch_size=4, memory_per_sample_mb=100.0
+            )
+            self.assertEqual(batch_size_capped, 16)
 
 
 if __name__ == "__main__":

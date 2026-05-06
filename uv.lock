@@ -2994,7 +2994,7 @@ requires-dist = [
     { name = "seaborn", specifier = "==0.13.2" },
     { name = "segmentation-models-pytorch" },
     { name = "shapely", specifier = ">=2.0.0" },
-    { name = "similaritymeasures", specifier = "==0.4.4" },
+    { name = "similaritymeasures", specifier = "==1.4.0" },
     { name = "skan", specifier = ">=0.11.0" },
     { name = "swifter", specifier = "==1.0.9" },
     { name = "tensorboardx" },
@@ -3554,13 +3554,16 @@ wheels = [
 
 [[package]]
 name = "similaritymeasures"
-version = "0.4.4"
+version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/80/0c/419f521804ffd8c8eee07929f0f6d7820347887539e558f42b90fb02ff93/similaritymeasures-0.4.4.tar.gz", hash = "sha256:752859e051b3656171505bd0413b6ca89601ef267d9ec385117e399b1c81c8f2", size = 395169, upload-time = "2020-08-25T16:51:20.074Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/54/c8/c6847432ef7bc6ad65cd58577bb28c01e86680a45cdd29ab157d98374bc3/similaritymeasures-1.4.0.tar.gz", hash = "sha256:52032dd11ea3c0f94158e17df16f8d512101d6de0d31a2db42193f1434720572", size = 400378, upload-time = "2025-10-18T19:57:11.201Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/79/da/bcaed2d3b13f69cf7a2c2ec6c64e1008a7bd07e7ace4703ab2aeaf892852/similaritymeasures-1.4.0-py3-none-any.whl", hash = "sha256:4beae86c93a202cbbd8451f8b0d7163d54ba7562563af56f62a47f3491efe00f", size = 15499, upload-time = "2025-10-18T19:57:09.562Z" },
+]
 
 [[package]]
 name = "simsimd"
