@@ -12,6 +12,7 @@ RUN apt update \
     && apt install -y git htop nano libpq-dev python3-dev build-essential python3-opencv python3.12-venv \
     && python3 -m venv /opt/venv \
     && . /opt/venv/bin/activate \
+    && uv pip install hatchling \
     && uv pip install debugpy jupyter flake8 pytest parameterized \
     && uv pip install --no-build-isolation .
 
