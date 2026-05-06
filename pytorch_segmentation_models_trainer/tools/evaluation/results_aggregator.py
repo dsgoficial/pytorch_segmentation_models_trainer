@@ -52,6 +52,73 @@ class ResultsAggregator:
         self.config = config
         logger.info("ResultsAggregator initialized")
 
+    def aggregate_results(self) -> Dict:
+        """
+        Agrega resultados lidos do disco para todos os experimentos configurados.
+
+        Returns:
+            Dict com resultados agregados por experimento.
+        """
+        aggregated_metrics = {}
+
+        # Obter experimentos da config
+        experiments = self.config.get("experiments", [])
+
+        for exp in experiments:
+            metrics_path = self._get_metrics_file_path(exp)
+
+            if os.path.exists(metrics_path):
+                try:
+                    with open(metrics_path, "r") as f:
+                        data = json.load(f)
+                        if data:
+                            aggregated_metrics[exp.name] = data
+                            logger.info(
+                                f"Loaded metrics for {exp.name} from {metrics_path}"
+                            )
+                except Exception as e:
+                    logger.error(f"Error loading metrics from {metrics_path}: {e}")
+            else:
+                logger.warning(f"Metrics file not found for {exp.name}: {metrics_path}")
+
+        # Salvar JSON agregado se configurado
+        output_json = self.config.get("output_metrics_json")
+        if output_json:
+            Path(output_json).parent.mkdir(parents=True, exist_ok=True)
+            with open(output_json, "w") as f:
+                json.dump(aggregated_metrics, f, indent=2)
+            logger.info(f"Saved aggregated metrics JSON: {output_json}")
+
+        # Salvar CSV agregado se configurado
+        output_csv = self.config.get("output_metrics_csv")
+        if output_csv:
+            Path(output_csv).parent.mkdir(parents=True, exist_ok=True)
+            rows = []
+            for exp_name, metrics in aggregated_metrics.items():
+                # Tentar encontrar métricas 'overall' ou 'aggregated'
+                overall = metrics.get("overall") or metrics.get("aggregated")
+                if overall:
+                    row = {"experiment_name": exp_name}
+                    row.update(overall)
+                    rows.append(row)
+
+            if rows:
+                df = pd.DataFrame(rows)
+                df.to_csv(output_csv, index=False)
+                logger.info(f"Saved aggregated metrics CSV: {output_csv}")
+
+        return aggregated_metrics
+
+    def _get_metrics_file_path(self, experiment_config: DictConfig) -> str:
+        """
+        Determina o caminho do arquivo de métricas para um experimento.
+        """
+        filename = getattr(experiment_config, "output_metrics_filename", None)
+        if not filename:
+            filename = f"{experiment_config.name}_metrics.json"
+
+        return os.path.join(experiment_config.output_folder, filename)
+
     def aggregate(self, all_results: Dict) -> Dict:
         """
         Agrega resultados de múltiplos experimentos.

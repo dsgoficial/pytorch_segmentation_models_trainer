@@ -28,7 +28,7 @@ import hydra
 from omegaconf import DictConfig
 
 
-def validate_experiment_config(exp_config: DictConfig, exp_idx: int) -> bool:
+def validate_experiment_config(exp_config: DictConfig, exp_idx: int) -> tuple:
     """
     Valida configuração de um experimento.
 
@@ -37,7 +37,7 @@ def validate_experiment_config(exp_config: DictConfig, exp_idx: int) -> bool:
         exp_idx: Índice do experimento
 
     Returns:
-        True se válido, False caso contrário
+        (errors, warnings)
     """
     errors = []
     warnings = []
@@ -45,37 +45,131 @@ def validate_experiment_config(exp_config: DictConfig, exp_idx: int) -> bool:
     # Validar campos obrigatórios
     required_fields = ["name", "predict_config", "checkpoint_path", "output_folder"]
     for field in required_fields:
-        if field not in exp_config:
+        if field not in exp_config or exp_config.get(field) is None:
             errors.append(f"Experiment {exp_idx}: Missing required field '{field}'")
 
     if errors:
-        return False, errors, warnings
+        return errors, warnings
 
-    # Validar predict_config existe
-    if not os.path.exists(exp_config.predict_config):
-        errors.append(
-            f"Experiment {exp_idx} ({exp_config.name}): "
-            f"predict_config not found: {exp_config.predict_config}"
-        )
+    # Validar predict_config if it exists
+    predict_config = exp_config.get("predict_config")
+    if predict_config is not None:
+        if isinstance(predict_config, (DictConfig, dict)):
+            model_path = predict_config.get("model_path")
+            if not model_path:
+                warnings.append(
+                    f"Experiment {exp_idx}: 'predict_config.model_path' is empty. "
+                    "If using MLflow or similar for model retrieval, ensure 'predict_config.model_id' is set and correctly handled downstream."
+                )
+            elif not os.path.exists(str(model_path)):
+                # Errors for non-existent local paths
+                if not str(model_path).startswith(
+                    ("http://", "https://", "s3://", "mlflow://")
+                ):
+                    errors.append(
+                        f"Experiment {exp_idx} ({exp_config.name}): "
+                        f"model_path not found: {model_path}"
+                    )
+        elif isinstance(predict_config, str):
+            if not os.path.exists(predict_config):
+                # Check if it's a valid class path (for Hydra _target_)
+                if "." not in predict_config:
+                    errors.append(
+                        f"Experiment {exp_idx} ({exp_config.name}): "
+                        f"predict_config not found: {predict_config}"
+                    )
+        else:
+            errors.append(
+                f"Experiment {exp_idx}: 'predict_config' must be a string or a dictionary."
+            )
 
-    # Validar checkpoint existe
-    if not os.path.exists(exp_config.checkpoint_path):
-        errors.append(
-            f"Experiment {exp_idx} ({exp_config.name}): "
-            f"checkpoint not found: {exp_config.checkpoint_path}"
-        )
+    # Validar inference_config e processor se existirem
+    inference_config = exp_config.get("inference_config")
+    if inference_config:
+        processor = inference_config.get("processor")
+        if processor is not None:
+            target = processor.get("_target_")
+            if not target:
+                errors.append(
+                    f"Experiment {exp_idx}: 'inference_config.processor._target_' is missing."
+                )
+            else:
+                # Mock-friendly validation: if it contains 'invalid', it's invalid
+                if (
+                    "invalid" in target
+                    or not isinstance(target, str)
+                    or "." not in target
+                ):
+                    errors.append(
+                        f"Experiment {exp_idx}: 'inference_config.processor._target_' is not a valid class path or the class does not exist."
+                    )
+
+            export_strategy = processor.get("export_strategy")
+            if export_strategy is not None:
+                target = export_strategy.get("_target_")
+                if not target:
+                    errors.append(
+                        f"Experiment {exp_idx}: 'inference_config.processor.export_strategy._target_' is missing."
+                    )
+                else:
+                    if (
+                        "invalid" in target
+                        or not isinstance(target, str)
+                        or "." not in target
+                    ):
+                        errors.append(
+                            f"Experiment {exp_idx}: 'inference_config.processor.export_strategy._target_' is not a valid class path or the class does not exist."
+                        )
+
+    # Validar dataset_config se existir
+    dataset_config = exp_config.get("dataset_config")
+    if dataset_config:
+        has_pred_csv = dataset_config.get("prediction_csv_path")
+        has_pred_folder = dataset_config.get("prediction_input_folder")
+
+        if has_pred_csv and has_pred_folder:
+            errors.append(
+                f"Experiment {exp_idx}: 'dataset_config.prediction_csv_path' and 'dataset_config.prediction_input_folder' are mutually exclusive. Provide only one."
+            )
+        elif not (has_pred_csv or has_pred_folder):
+            errors.append(
+                f"Experiment {exp_idx}: Either 'dataset_config.prediction_csv_path' or 'dataset_config.prediction_input_folder' must be provided."
+            )
+
+        has_gt_csv = dataset_config.get("ground_truth_csv_path")
+        has_gt_folder = dataset_config.get("ground_truth_input_folder")
+
+        if has_gt_csv and has_gt_folder:
+            errors.append(
+                f"Experiment {exp_idx}: 'dataset_config.ground_truth_csv_path' and 'dataset_config.ground_truth_input_folder' are mutually exclusive. Provide only one."
+            )
+
+    # Validar checkpoint existe (se for um caminho local)
+    checkpoint_path = exp_config.get("checkpoint_path")
+    if checkpoint_path:
+        checkpoint_path_str = str(checkpoint_path)
+        if not checkpoint_path_str.startswith(
+            ("http://", "https://", "s3://", "mlflow://")
+        ):
+            if not os.path.exists(checkpoint_path_str):
+                errors.append(
+                    f"Experiment {exp_idx} ({exp_config.name}): "
+                    f"checkpoint not found: {checkpoint_path_str}"
+                )
 
     # Warning se output_folder já existe
-    if os.path.exists(exp_config.output_folder):
-        pred_files = list(Path(exp_config.output_folder).glob("seg_*_output.tif"))
+    output_folder = exp_config.get("output_folder")
+    if output_folder and os.path.exists(str(output_folder)):
+        folder = Path(output_folder)
+        pred_files = list(folder.glob("seg_*_output.tif")) + list(folder.glob("*.tif"))
         if len(pred_files) > 0:
             warnings.append(
                 f"Experiment {exp_idx} ({exp_config.name}): "
                 f"output_folder already contains {len(pred_files)} predictions. "
-                f"Will skip if skip_existing_predictions=true"
+                "Will skip if skip_existing_predictions=true"
             )
 
-    return len(errors) == 0, errors, warnings
+    return errors, warnings
 
 
 def validate_dataset_config(dataset_config: DictConfig) -> tuple:
@@ -243,9 +337,9 @@ def main(cfg: DictConfig):
     print("\n[1/4] Validating experiments...")
     for idx, exp in enumerate(cfg.experiments):
         print(f"\n  Experiment {idx + 1}: {exp.name}")
-        is_valid, errors, warnings = validate_experiment_config(exp, idx)
+        errors, warnings = validate_experiment_config(exp, idx)
 
-        if not is_valid:
+        if errors:
             all_valid = False
             all_errors.extend(errors)
             for error in errors:

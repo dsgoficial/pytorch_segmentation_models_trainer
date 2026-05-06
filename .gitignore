@@ -147,3 +147,4 @@ htmlcov/
 *.ckpt
 
 .claude/
+lightning_logs/

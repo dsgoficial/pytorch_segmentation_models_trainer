@@ -23,6 +23,7 @@
 import os
 from pathlib import Path
 import warnings
+from unittest.mock import MagicMock, patch
 
 import hydra
 import torch
@@ -145,3 +146,35 @@ class Test_Predict(BasicTestCase):
             )
         inference_processor = instantiate_inference_processor(cfg)
         self.assertIsInstance(inference_processor, AbstractInferenceProcessor)
+
+    @patch(
+        "pytorch_segmentation_models_trainer.predict.instantiate_inference_processor"
+    )
+    @patch("pytorch_segmentation_models_trainer.predict.get_images")
+    @patch("pytorch_segmentation_models_trainer.predict.tqdm")
+    def test_predict_main_function(
+        self, mock_tqdm, mock_get_images, mock_instantiate_proc
+    ):
+        with initialize(config_path="./test_configs", version_base=None):
+            cfg = compose(
+                config_name="predict.yaml",
+                overrides=[
+                    "train_dataset.input_csv_path=" + self.csv_ds_file,
+                    "val_dataset.input_csv_path=" + self.csv_ds_file,
+                    "checkpoint_path=" + self.checkpoint_file_path,
+                ],
+            )
+
+        mock_processor = MagicMock()
+        mock_instantiate_proc.return_value = mock_processor
+        mock_get_images.return_value = ["img1.tif", "img2.tif"]
+        mock_tqdm.side_effect = lambda x: x  # pass-through
+
+        from pytorch_segmentation_models_trainer.predict import predict
+
+        predict(cfg)
+
+        self.assertEqual(mock_processor.process.call_count, 2)
+        mock_processor.process.assert_any_call(
+            "img1.tif", save_inference_output=True, inference_threshold=0.5
+        )

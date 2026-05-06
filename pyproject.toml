@@ -52,7 +52,7 @@ dependencies = [
     "ninja>=1.11.0",
     "pyyaml>=5.4",
     "pycocotools",
-    "multiprocess==0.70.13",
+    "multiprocess==0.70.19",
     "wget==3.2",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
@@ -97,6 +97,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pytorch_segmentation_models_trainer"]
+
+[tool.uv]
+managed = true
 
 [dependency-groups]
 dev = [

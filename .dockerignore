@@ -1,4 +1,28 @@
-#example of ignoring .git and python cache folder
+# Source Control
 .git
-__pycache__
-.claude
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Gemini / IDEs
+.claude/
+.vscode/
+.idea/
+.gemini/
+
+# Project Specific
+tests/
+website/
+web/
+docs/
+CHANGELOG.md
+README.md
+Dockerfile
+docker-compose.yml

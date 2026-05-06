@@ -1679,17 +1679,19 @@ wheels = [
 
 [[package]]
 name = "multiprocess"
-version = "0.70.13"
+version = "0.70.19"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dill" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4b/7f/55f7dacc3127a918110763998dfbabbec8dd693bfde9a7df9c4e44f4da29/multiprocess-0.70.13.tar.gz", hash = "sha256:2e096dd618a84d15aa369a9cf6695815e5539f853dc8fa4f4b9153b11b1d0b32", size = 1772400, upload-time = "2022-05-23T22:53:20.611Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/f2/e783ac7f2aeeed14e9e12801f22529cc7e6b7ab80928d6dcce4e9f00922d/multiprocess-0.70.19.tar.gz", hash = "sha256:952021e0e6c55a4a9fe4cd787895b86e239a40e76802a789d6305398d3975897", size = 2079989, upload-time = "2026-01-19T06:47:39.744Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fa/e6/3b9d10a3700782464eb304b6703224428404bac36d14acdb1b2a0046ade6/multiprocess-0.70.13-py310-none-any.whl", hash = "sha256:0f4faf4811019efdb2f91db09240f893ee40cbfcb06978f3b8ed8c248e73babe", size = 133053, upload-time = "2022-05-23T22:53:12.391Z" },
-    { url = "https://files.pythonhosted.org/packages/4b/28/915e6d4943eab538963a4fac7c409aa4a75213f5e6b98d91334e9a284c5c/multiprocess-0.70.13-py37-none-any.whl", hash = "sha256:62e556a0c31ec7176e28aa331663ac26c276ee3536b5e9bb5e850681e7a00f11", size = 115115, upload-time = "2022-05-23T22:53:14.128Z" },
-    { url = "https://files.pythonhosted.org/packages/1e/bc/625b7345861101ef708a0d5b4e9fd7694e2f97621a69e9b869100e0be47d/multiprocess-0.70.13-py38-none-any.whl", hash = "sha256:7be9e320a41d2d0d0eddacfe693cfb07b4cb9c0d3d10007f4304255c15215778", size = 131429, upload-time = "2022-05-23T22:53:15.792Z" },
-    { url = "https://files.pythonhosted.org/packages/e1/a4/98f97b3aaa84b8be6702bad22ee9893dd506ed7c9dbfdad481793677066b/multiprocess-0.70.13-py39-none-any.whl", hash = "sha256:00ef48461d43d1e30f8f4b2e1b287ecaaffec325a37053beb5503e0d69e5a3cd", size = 132289, upload-time = "2022-05-23T22:53:17.307Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/45/8004d1e6b9185c1a444d6b55ac5682acf9d98035e54386d967366035a03a/multiprocess-0.70.19-py310-none-any.whl", hash = "sha256:97404393419dcb2a8385910864eedf47a3cadf82c66345b44f036420eb0b5d87", size = 134948, upload-time = "2026-01-19T06:47:32.325Z" },
+    { url = "https://files.pythonhosted.org/packages/86/c2/dec9722dc3474c164a0b6bcd9a7ed7da542c98af8cabce05374abab35edd/multiprocess-0.70.19-py311-none-any.whl", hash = "sha256:928851ae7973aea4ce0eaf330bbdafb2e01398a91518d5c8818802845564f45c", size = 144457, upload-time = "2026-01-19T06:47:33.711Z" },
+    { url = "https://files.pythonhosted.org/packages/71/70/38998b950a97ea279e6bd657575d22d1a2047256caf707d9a10fbce4f065/multiprocess-0.70.19-py312-none-any.whl", hash = "sha256:3a56c0e85dd5025161bac5ce138dcac1e49174c7d8e74596537e729fd5c53c28", size = 150281, upload-time = "2026-01-19T06:47:35.037Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/74/d2c27e03cb84251dfe7249b8e82923643c6d48fa4883b9476b025e7dc7eb/multiprocess-0.70.19-py313-none-any.whl", hash = "sha256:8d5eb4ec5017ba2fab4e34a747c6d2c2b6fecfe9e7236e77988db91580ada952", size = 156414, upload-time = "2026-01-19T06:47:35.915Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/61/af9115673a5870fd885247e2f1b68c4f1197737da315b520a91c757a861a/multiprocess-0.70.19-py314-none-any.whl", hash = "sha256:e8cc7fbdff15c0613f0a1f1f8744bef961b0a164c0ca29bdff53e9d2d93c5e5f", size = 160318, upload-time = "2026-01-19T06:47:37.497Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/82/69e539c4c2027f1e1697e09aaa2449243085a0edf81ae2c6341e84d769b6/multiprocess-0.70.19-py39-none-any.whl", hash = "sha256:0d4b4397ed669d371c81dcd1ef33fd384a44d6c3de1bd0ca7ac06d837720d3c5", size = 133477, upload-time = "2026-01-19T06:47:38.619Z" },
 ]
 
 [[package]]
@@ -2830,12 +2832,12 @@ wheels = [
 
 [[package]]
 name = "python-multipart"
-version = "0.0.5"
+version = "0.0.27"
 source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "six" },
+sdist = { url = "https://files.pythonhosted.org/packages/69/9b/f23807317a113dc36e74e75eb265a02dd1a4d9082abc3c1064acd22997c4/python_multipart-0.0.27.tar.gz", hash = "sha256:9870a6a8c5a20a5bf4f07c017bd1489006ff8836cff097b6933355ee2b49b602", size = 44043, upload-time = "2026-04-27T10:51:26.649Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/99/78/4126abcbdbd3c559d43e0db7f7b9173fc6befe45d39a2856cc0b8ec2a5a6/python_multipart-0.0.27-py3-none-any.whl", hash = "sha256:6fccfad17a27334bd0193681b369f476eda3409f17381a2d65aa7df3f7275645", size = 29254, upload-time = "2026-04-27T10:51:24.997Z" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/46/40/a933ac570bf7aad12a298fc53458115cc74053474a72fbb8201d7dc06d3d/python-multipart-0.0.5.tar.gz", hash = "sha256:f7bb5f611fc600d15fa47b3974c8aa16e93724513b49b5f95c81e6624c83fa43", size = 32581, upload-time = "2018-10-12T08:36:41.595Z" }
 
 [[package]]
 name = "pytorch-lightning"
@@ -2858,7 +2860,7 @@ wheels = [
 
 [[package]]
 name = "pytorch-segmentation-models-trainer"
-version = "1.0.1"
+version = "1.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "albumentations" },
@@ -2961,7 +2963,7 @@ requires-dist = [
     { name = "hydra-core", specifier = ">=1.3.0" },
     { name = "kornia" },
     { name = "matplotlib" },
-    { name = "multiprocess", specifier = "==0.70.13" },
+    { name = "multiprocess", specifier = "==0.70.19" },
     { name = "ninja", specifier = ">=1.11.0" },
     { name = "numba" },
     { name = "numpy" },
@@ -2978,7 +2980,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'tests'" },
     { name = "pytest-timeout", marker = "extra == 'tests'" },
     { name = "pytest-xdist", marker = "extra == 'tests'" },
-    { name = "python-multipart", specifier = "==0.0.5" },
+    { name = "python-multipart", specifier = "==0.0.27" },
     { name = "pytorch-lightning", specifier = ">=2.4.0" },
     { name = "pytorch-segmentation-models-trainer", extras = ["tests", "transformers"], marker = "extra == 'all'" },
     { name = "pytorch-toolbelt", specifier = "==0.4.3" },

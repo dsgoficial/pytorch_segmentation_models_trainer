@@ -33,13 +33,14 @@ from pytorch_segmentation_models_trainer.utils import (
     object_detection_utils,
     polygonrnn_utils,
 )
-from torch import nn
 from torch.utils.data import DataLoader
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
 
 class GenericPolyMapperPLModel(pl.LightningModule):
-    def __init__(self, cfg, grid_size=28, val_seq_len=60, perform_evaluation=True):
+    def __init__(
+        self, cfg, grid_size=28, val_seq_len=60, perform_evaluation=True, threshold=0.5
+    ):
         super(GenericPolyMapperPLModel, self).__init__()
         self.cfg = cfg
         self.model = self.get_model()
@@ -57,6 +58,11 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             perform_evaluation
             if "perform_evaluation" not in self.cfg.pl_model
             else self.cfg.pl_model.perform_evaluation
+        )
+        self.threshold = (
+            threshold
+            if "threshold" not in self.cfg.pl_model
+            else self.cfg.pl_model.threshold
         )
         self.object_detection_train_ds = instantiate(
             self.cfg.train_dataset.object_detection, _recursive_=False
@@ -106,12 +112,16 @@ class GenericPolyMapperPLModel(pl.LightningModule):
             batch_size=batch_size,
             shuffle=self.cfg.train_dataset.data_loader.shuffle,
             num_workers=self.cfg.train_dataset.data_loader.num_workers,
-            pin_memory=self.cfg.train_dataset.data_loader.pin_memory
-            if "pin_memory" in self.cfg.train_dataset.data_loader
-            else True,
-            drop_last=self.cfg.train_dataset.data_loader.drop_last
-            if "drop_last" in self.cfg.train_dataset.data_loader
-            else True,
+            pin_memory=(
+                self.cfg.train_dataset.data_loader.pin_memory
+                if "pin_memory" in self.cfg.train_dataset.data_loader
+                else True
+            ),
+            drop_last=(
+                self.cfg.train_dataset.data_loader.drop_last
+                if "drop_last" in self.cfg.train_dataset.data_loader
+                else True
+            ),
             prefetch_factor=self.cfg.train_dataset.data_loader.prefetch_factor,
             collate_fn=ds.collate_fn if hasattr(ds, "collate_fn") else None,
         )
@@ -120,16 +130,22 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         return DataLoader(
             ds,
             batch_size=batch_size,
-            shuffle=self.cfg.val_dataset.data_loader.shuffle
-            if "shuffle" in self.cfg.val_dataset.data_loader
-            else False,
+            shuffle=(
+                self.cfg.val_dataset.data_loader.shuffle
+                if "shuffle" in self.cfg.val_dataset.data_loader
+                else False
+            ),
             num_workers=self.cfg.val_dataset.data_loader.num_workers,
-            pin_memory=self.cfg.val_dataset.data_loader.pin_memory
-            if "pin_memory" in self.cfg.val_dataset.data_loader
-            else True,
-            drop_last=self.cfg.val_dataset.data_loader.drop_last
-            if "drop_last" in self.cfg.val_dataset.data_loader
-            else True,
+            pin_memory=(
+                self.cfg.val_dataset.data_loader.pin_memory
+                if "pin_memory" in self.cfg.val_dataset.data_loader
+                else True
+            ),
+            drop_last=(
+                self.cfg.val_dataset.data_loader.drop_last
+                if "drop_last" in self.cfg.val_dataset.data_loader
+                else True
+            ),
             prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor,
             collate_fn=ds.collate_fn if hasattr(ds, "collate_fn") else None,
         )
@@ -226,7 +242,7 @@ class GenericPolyMapperPLModel(pl.LightningModule):
         return_dict = {"loss": loss, "acc": acc}
         if self.perform_evaluation:
             self.model.eval()
-            outputs = self.model(obj_det_images)
+            outputs = self.model(obj_det_images, threshold=self.threshold)
             metrics_dict_item = self.evaluate_output(batch, outputs)
 
             # Log evaluation metrics
@@ -235,9 +251,11 @@ class GenericPolyMapperPLModel(pl.LightningModule):
                     if torch.is_tensor(metric_value) and metric_value.numel() > 0:
                         self.log(
                             f"metrics/val_{metric_name}",
-                            metric_value.float().mean()
-                            if metric_value.numel() > 1
-                            else metric_value.float(),
+                            (
+                                metric_value.float().mean()
+                                if metric_value.numel() > 1
+                                else metric_value.float()
+                            ),
                             on_step=False,
                             on_epoch=True,
                         )

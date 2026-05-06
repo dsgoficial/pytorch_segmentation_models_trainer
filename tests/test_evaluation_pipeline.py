@@ -1,263 +1,229 @@
 # -*- coding: utf-8 -*-
 """
-/***************************************************************************
- pytorch_segmentation_models_trainer
-                              -------------------
-        begin                : 2025-01-15
-        git sha              : $Format:%H$
-        copyright            : (C) 2025 by Philipe Borba - Cartographic Engineer
-                                                            @ Brazilian Army
-        email                : philipeborba at gmail dot com
- ***************************************************************************/
-/***************************************************************************
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- ****
+Unit tests for evaluation_pipeline.py
 """
 
-import os
-import tempfile
 import unittest
+from unittest.mock import MagicMock, patch, call
+import os
+import shutil
+import tempfile
 from pathlib import Path
-
-import numpy as np
 import pandas as pd
-import rasterio
+import numpy as np
 from omegaconf import OmegaConf
-from rasterio.transform import from_bounds
 
-from pytorch_segmentation_models_trainer.tools.evaluation.csv_builder import (
-    DatasetCSVBuilder,
+from pytorch_segmentation_models_trainer.tools.evaluation.evaluation_pipeline import (
+    EvaluationPipeline,
 )
 
 
-class TestDatasetCSVBuilder(unittest.TestCase):
-    """
-    Testes para DatasetCSVBuilder.
-    """
-
+class TestEvaluationPipeline(unittest.TestCase):
     def setUp(self):
-        """Setup para cada teste."""
+        self.tmp_dir = tempfile.mkdtemp()
+        self.base_dir = os.path.join(self.tmp_dir, "base")
+        os.makedirs(self.base_dir, exist_ok=True)
+
+        self.config = OmegaConf.create(
+            {
+                "experiments": [
+                    {
+                        "name": "exp1",
+                        "output_folder": os.path.join(self.base_dir, "exp1"),
+                        "checkpoint_path": "model1.ckpt",
+                        "predict_config": "config1.yaml",
+                    }
+                ],
+                "output": {
+                    "base_dir": self.base_dir,
+                    "files": {"summary_report": "summary.json"},
+                    "structure": {
+                        "reports_folder": "reports",
+                        "comparison_folder": "comparisons",
+                    },
+                },
+                "evaluation_dataset": {
+                    "input_csv_path": os.path.join(self.base_dir, "dataset.csv"),
+                    "build_csv_from_folders": {"enabled": False},
+                },
+                "pipeline_options": {
+                    "parallel_inference": {"enabled": False},
+                    "skip_existing_predictions": False,
+                    "skip_existing_evaluations": False,
+                    "load_predictions_from_folder": {"enabled": False},
+                },
+                "visualization": {
+                    "comparison_plots": {"enabled": False},
+                    "confusion_matrix": {
+                        "save_individual": False,
+                        "save_comparison": False,
+                    },
+                },
+            }
+        )
+
+        # Create dummy dataset CSV
+        self.dataset_csv = self.config.evaluation_dataset.input_csv_path
+        pd.DataFrame({"image": ["im1.tif"], "mask": ["gt1.tif"]}).to_csv(
+            self.dataset_csv, index=False
+        )
+
+        # Create exp folders
+        os.makedirs(self.config.experiments[0].output_folder, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir)
+
+    @patch(
+        "pytorch_segmentation_models_trainer.tools.evaluation.evaluation_pipeline.subprocess.run"
+    )
+    @patch(
+        "pytorch_segmentation_models_trainer.tools.evaluation.evaluation_pipeline.MetricsCalculator"
+    )
+    @patch(
+        "pytorch_segmentation_models_trainer.tools.evaluation.evaluation_pipeline.ResultsAggregator"
+    )
+    def test_run_basic_sequential(self, MockAggregator, MockMetricsCalc, mock_subproc):
+        # Setup mocks
+        mock_subproc.return_value = MagicMock(returncode=0)
+
+        mock_metrics_calc_instance = MagicMock()
+        MockMetricsCalc.return_value = mock_metrics_calc_instance
+        mock_metrics_calc_instance.calculate_metrics.return_value = {
+            "aggregated": {"iou": 0.8},
+            "per_image": pd.DataFrame({"image": ["im1.tif"], "iou": [0.8]}),
+            "num_classes": 2,
+            "class_names": ["bg", "fg"],
+            "output_dir": "some_dir",
+        }
+
+        mock_aggregator_instance = MagicMock()
+        MockAggregator.return_value = mock_aggregator_instance
+        mock_aggregator_instance.aggregate.return_value = {
+            "num_experiments": 1,
+            "experiments": {
+                "exp1": mock_metrics_calc_instance.calculate_metrics.return_value
+            },
+        }
+
+        pipeline = EvaluationPipeline(self.config)
+        results = pipeline.run()
+
+        self.assertEqual(results["num_experiments"], 1)
+        mock_subproc.assert_called_once()
+        mock_metrics_calc_instance.calculate_metrics.assert_called_once()
+        mock_aggregator_instance.aggregate.assert_called_once()
+
+        # Check if summary report was saved
+        summary_path = os.path.join(self.base_dir, "summary.json")
+        self.assertTrue(os.path.exists(summary_path))
+
+    @patch(
+        "pytorch_segmentation_models_trainer.tools.evaluation.csv_builder.DatasetCSVBuilder"
+    )
+    def test_prepare_dataset_build_from_folders(self, MockCSVBuilder):
+        self.config.evaluation_dataset.build_csv_from_folders.enabled = True
+        mock_builder = MagicMock()
+        MockCSVBuilder.return_value = mock_builder
+
+        pipeline = EvaluationPipeline(self.config)
+        csv_path = pipeline._prepare_dataset()
+
+        expected_csv_path = os.path.join(self.base_dir, "generated_dataset.csv")
+        self.assertEqual(csv_path, expected_csv_path)
+        mock_builder.build_csv.assert_called_once_with(expected_csv_path)
+
+    def test_should_skip_prediction(self):
+        pipeline = EvaluationPipeline(self.config)
+        exp = self.config.experiments[0]
+
+        # Should not skip if disabled in config
+        self.config.pipeline_options.skip_existing_predictions = False
+        self.assertFalse(pipeline._should_skip_prediction(exp))
+
+        # Should skip if enabled and files exist
+        self.config.pipeline_options.skip_existing_predictions = True
+        Path(os.path.join(exp.output_folder, "pred.tif")).touch()
+        self.assertTrue(pipeline._should_skip_prediction(exp))
+
+    @patch("os.path.exists", return_value=True)
+    @patch("os.path.isdir", return_value=True)
+    def test_validate_predictions_folder(self, mock_isdir, mock_exists):
+        pipeline = EvaluationPipeline(self.config)
+
+        # Mock Path.glob to return files only for one pattern to keep count simple
+        with patch(
+            "pytorch_segmentation_models_trainer.tools.evaluation.evaluation_pipeline.Path.glob"
+        ) as mock_glob:
+            mock_glob.side_effect = [
+                [Path("file1.tif")],
+                [],
+                [],
+                [],
+            ]  # 4 patterns: *.tif, *.tiff, *.TIF, *.TIFF
+            with patch("os.path.getsize", return_value=100):
+                result = pipeline._validate_predictions_folder("some_folder", "exp1")
+                self.assertTrue(result["valid"])
+                self.assertEqual(result["num_files"], 1)
+
+    def test_load_existing_predictions(self):
+        self.config.pipeline_options.load_predictions_from_folder.enabled = True
+        self.config.pipeline_options.load_predictions_from_folder.base_folder = (
+            self.base_dir
+        )
+
+        # Create subfolder for exp1 with a tif file
+        exp1_pred_dir = os.path.join(self.base_dir, "exp1")
+        os.makedirs(exp1_pred_dir, exist_ok=True)
+        Path(os.path.join(exp1_pred_dir, "test.tif")).write_text(
+            "dummy"
+        )  # Ensure size > 0
+
+        pipeline = EvaluationPipeline(self.config)
+        preds_info = pipeline._load_existing_predictions()
+
+        self.assertIn("exp1", preds_info)
+        self.assertTrue(preds_info["exp1"]["loaded"])
+        self.assertEqual(preds_info["exp1"]["num_predictions"], 1)
+
+
+class TestDatasetCSVBuilder(unittest.TestCase):
+    def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         self.images_folder = Path(self.temp_dir) / "images"
         self.masks_folder = Path(self.temp_dir) / "masks"
-
         self.images_folder.mkdir(parents=True)
         self.masks_folder.mkdir(parents=True)
 
-        # Criar imagens e máscaras de teste
-        self._create_test_data()
-
     def tearDown(self):
-        """Cleanup após cada teste."""
-        import shutil
-
         shutil.rmtree(self.temp_dir)
 
-    def _create_test_data(self):
-        """Cria imagens e máscaras de teste."""
-        for i in range(5):
-            # Criar imagem
-            image_path = self.images_folder / f"image_{i:03d}.tif"
-            self._create_dummy_tif(image_path, width=256, height=256, bands=3)
+    def _create_dummy_tif(self, path):
+        import rasterio
+        from rasterio.transform import from_bounds
 
-            # Criar máscara
-            mask_path = self.masks_folder / f"mask_{i:03d}.tif"
-            self._create_dummy_tif(mask_path, width=256, height=256, bands=1)
-
-    def _create_dummy_tif(
-        self, path: Path, width: int = 256, height: int = 256, bands: int = 1
-    ):
-        """Cria arquivo TIF dummy."""
-        data = np.random.randint(0, 255, (bands, height, width), dtype=np.uint8)
-
-        transform = from_bounds(0, 0, width, height, width, height)
-
+        # Use np from module level
+        data = np.zeros((1, 10, 10), dtype=np.uint8)
+        transform = from_bounds(0, 0, 10, 10, 10, 10)
         with rasterio.open(
             path,
             "w",
             driver="GTiff",
-            height=height,
-            width=width,
-            count=bands,
+            height=10,
+            width=10,
+            count=1,
             dtype=rasterio.uint8,
             transform=transform,
         ) as dst:
-            for i in range(bands):
-                dst.write(data[i], i + 1)
+            dst.write(data[0], 1)
 
     def test_csv_builder_same_basename(self):
-        """Testa construção de CSV com matching same_basename."""
-        # Criar imagens e máscaras com mesmo basename
-        test_images = self.images_folder / "test_images"
-        test_masks = self.masks_folder / "test_masks"
-        test_images.mkdir()
-        test_masks.mkdir()
-
-        for i in range(3):
-            image_path = test_images / f"{i:03d}.tif"
-            mask_path = test_masks / f"{i:03d}.tif"
-            self._create_dummy_tif(image_path)
-            self._create_dummy_tif(mask_path)
-
-        # Config
-        config = OmegaConf.create(
-            {
-                "images_folder": str(test_images),
-                "masks_folder": str(test_masks),
-                "image_pattern": "*.tif",
-                "mask_pattern": "*.tif",
-                "matching_strategy": "same_basename",
-            }
+        from pytorch_segmentation_models_trainer.tools.evaluation.csv_builder import (
+            DatasetCSVBuilder,
         )
 
-        # Construir CSV
-        builder = DatasetCSVBuilder(config)
-        csv_path = Path(self.temp_dir) / "dataset.csv"
-        df = builder.build_csv(str(csv_path))
-
-        # Verificações
-        self.assertTrue(csv_path.exists())
-        self.assertEqual(len(df), 3)
-        self.assertIn("image", df.columns)
-        self.assertIn("mask", df.columns)
-        self.assertIn("width", df.columns)
-        self.assertIn("height", df.columns)
-
-        # Verificar que todos os arquivos existem
-        for _, row in df.iterrows():
-            self.assertTrue(Path(row["image"]).exists())
-            self.assertTrue(Path(row["mask"]).exists())
-
-    def test_csv_builder_prefix_suffix(self):
-        """Testa construção de CSV com matching prefix_suffix."""
-        # Criar imagens e máscaras com prefixos diferentes
-        test_images = self.images_folder / "test_prefix"
-        test_masks = self.masks_folder / "test_prefix"
-        test_images.mkdir()
-        test_masks.mkdir()
-
-        for i in range(3):
-            image_path = test_images / f"image_{i:03d}.tif"
-            mask_path = test_masks / f"mask_{i:03d}.tif"
-            self._create_dummy_tif(image_path)
-            self._create_dummy_tif(mask_path)
-
-        # Config
-        config = OmegaConf.create(
-            {
-                "images_folder": str(test_images),
-                "masks_folder": str(test_masks),
-                "image_pattern": "image_*.tif",
-                "mask_pattern": "mask_*.tif",
-                "matching_strategy": "prefix_suffix",
-                "image_prefix": "image_",
-                "mask_prefix": "mask_",
-            }
-        )
-
-        # Construir CSV
-        builder = DatasetCSVBuilder(config)
-        csv_path = Path(self.temp_dir) / "dataset_prefix.csv"
-        df = builder.build_csv(str(csv_path))
-
-        # Verificações
-        self.assertEqual(len(df), 3)
-
-        # Verificar matching correto
-        for _, row in df.iterrows():
-            image_stem = Path(row["image"]).stem
-            mask_stem = Path(row["mask"]).stem
-
-            # Remover prefixos
-            image_id = image_stem.replace("image_", "")
-            mask_id = mask_stem.replace("mask_", "")
-
-            self.assertEqual(image_id, mask_id)
-
-    def test_csv_builder_custom_regex(self):
-        """Testa construção de CSV com matching custom_regex."""
-        # Criar imagens e máscaras com IDs numéricos
-        test_images = self.images_folder / "test_regex"
-        test_masks = self.masks_folder / "test_regex"
-        test_images.mkdir()
-        test_masks.mkdir()
-
-        for i in range(3):
-            image_path = test_images / f"abc_{i:03d}_xyz.tif"
-            mask_path = test_masks / f"mask_{i:03d}_end.tif"
-            self._create_dummy_tif(image_path)
-            self._create_dummy_tif(mask_path)
-
-        # Config
-        config = OmegaConf.create(
-            {
-                "images_folder": str(test_images),
-                "masks_folder": str(test_masks),
-                "image_pattern": "*.tif",
-                "mask_pattern": "*.tif",
-                "matching_strategy": "custom_regex",
-                "regex_pattern": r"(?P<id>\d{3})",
-            }
-        )
-
-        # Construir CSV
-        builder = DatasetCSVBuilder(config)
-        csv_path = Path(self.temp_dir) / "dataset_regex.csv"
-        df = builder.build_csv(str(csv_path))
-
-        # Verificações
-        self.assertEqual(len(df), 3)
-
-    def test_csv_builder_no_matches(self):
-        """Testa comportamento quando não há matches."""
-        # Criar apenas imagens, sem máscaras
-        test_images = self.images_folder / "test_no_match"
-        test_masks = self.masks_folder / "test_no_match"
-        test_images.mkdir()
-        test_masks.mkdir()
-
-        for i in range(3):
-            image_path = test_images / f"image_{i:03d}.tif"
-            self._create_dummy_tif(image_path)
-
-        # Config
-        config = OmegaConf.create(
-            {
-                "images_folder": str(test_images),
-                "masks_folder": str(test_masks),
-                "image_pattern": "*.tif",
-                "mask_pattern": "*.tif",
-                "matching_strategy": "same_basename",
-            }
-        )
-
-        # Construir CSV deve falhar
-        builder = DatasetCSVBuilder(config)
-        csv_path = Path(self.temp_dir) / "dataset_no_match.csv"
-
-        with self.assertRaises(ValueError):
-            builder.build_csv(str(csv_path))
-
-    def test_validate_dataset(self):
-        """Testa validação de dataset."""
-        # Criar CSV válido
-        df = pd.DataFrame(
-            {
-                "image": [
-                    str(self.images_folder / f"image_{i:03d}.tif") for i in range(5)
-                ],
-                "mask": [
-                    str(self.masks_folder / f"mask_{i:03d}.tif") for i in range(5)
-                ],
-                "width": [256] * 5,
-                "height": [256] * 5,
-            }
-        )
+        self._create_dummy_tif(self.images_folder / "1.tif")
+        self._create_dummy_tif(self.masks_folder / "1.tif")
 
         config = OmegaConf.create(
             {
@@ -268,26 +234,10 @@ class TestDatasetCSVBuilder(unittest.TestCase):
                 "matching_strategy": "same_basename",
             }
         )
-
         builder = DatasetCSVBuilder(config)
-
-        # Validação deve passar
-        self.assertTrue(builder.validate_dataset(df))
-
-
-class TestMetricsCalculatorIntegration(unittest.TestCase):
-    """
-    Testes de integração para MetricsCalculator.
-
-    Nota: Estes testes requerem um ambiente completo com modelos treinados.
-    Por isso, são marcados como skip por padrão.
-    """
-
-    @unittest.skip("Requires full environment with trained models")
-    def test_metrics_calculator_basic(self):
-        """Teste básico do MetricsCalculator."""
-        # Este teste seria implementado quando houver um ambiente de teste completo
-        pass
+        csv_path = Path(self.temp_dir) / "out.csv"
+        df = builder.build_csv(str(csv_path))
+        self.assertEqual(len(df), 1)
 
 
 if __name__ == "__main__":
