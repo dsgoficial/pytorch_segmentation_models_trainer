@@ -120,7 +120,7 @@ class VectorFileExportInferenceStrategy(ExportInferenceTemplate):
         self.output_file_path = output_file_path
         self.driver = driver
         self.writer = VectorFileDataWriter(
-            output_file_path=output_file_path, driver=driver
+            output_file_name=output_file_path, driver=driver
         )
 
 

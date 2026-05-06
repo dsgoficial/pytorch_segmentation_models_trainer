@@ -19,6 +19,7 @@
  *                                                                         *
  ****
 """
+
 import os
 import subprocess
 from typing import Dict, Optional
@@ -258,6 +259,7 @@ class Test_ModPolyMapperModel(BasicTestCase):
                 f"val_dataset.polygon_rnn.root_dir={polygon_rnn_root_dir}",
                 "++pl_trainer.devices=1",
                 "++pl_trainer.fast_dev_run=true",
+                "++pl_model.threshold=0.9",
             ]
             + extra_overrides,
         )

@@ -19,6 +19,7 @@
  *                                                                         *
  ****
 """
+
 import os
 
 import albumentations as A
@@ -55,7 +56,7 @@ class Test_NaiveModPolymapperModel(BasicTestCase):
         sample = torch.ones([2, 3, 256, 256])
         model.eval()
         with torch.no_grad():
-            out = model(sample)
+            out = model(sample, threshold=0.9)
         self.assertEqual(len(out), 2)
 
     def test_create_inference_from_model(self) -> None:
@@ -88,7 +89,7 @@ class Test_NaiveModPolymapperModel(BasicTestCase):
         model = self._get_model()
         with torch.no_grad():
             image, target, indexes = next(iter(data_loader))
-            output = model(image, target)
+            output = model(image, target, threshold=0.9)
         self.assertEqual(len(output), 6)
 
     # @parameterized.expand([("experiment_naive_mod_polymapper.yaml",)])

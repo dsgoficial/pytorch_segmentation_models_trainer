@@ -22,7 +22,7 @@
 import os
 import itertools
 from dataclasses import dataclass
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, List
 
 import torch
 import torchvision
@@ -34,9 +34,6 @@ from pytorch_segmentation_models_trainer.custom_models.rnn.polygon_rnn import Po
 from pytorch_segmentation_models_trainer.custom_models.utils import (
     _SimpleSegmentationModel,
 )
-from pytorch_segmentation_models_trainer.custom_models.hrnet_models import (
-    seg_hrnet_ocr,
-)  # noqa: F401
 from torchvision.datasets.utils import download_url
 
 current_dir = os.path.dirname(__file__)
@@ -72,7 +69,9 @@ class FCN50SegmentationBackbone:
 
 @dataclass
 class UNetResNetSegmentationBackbone:
-    _target_: str = "pytorch_segmentation_models_trainer.custom_models.unet_resnet.UNetResNetBackbone"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_models.unet_resnet.UNetResNetBackbone"
+    )
     encoder_depth: int = 34
     num_filters: int = 32
     dropout_2d: float = 0.2
@@ -281,14 +280,35 @@ class NaiveModPolyMapper(torch.nn.Module):
         self.val_seq_len = val_seq_len if val_seq_len is not None else 60
 
     def forward(
-        self, x: torch.Tensor, targets: Optional[torch.Tensor] = None
-    ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
+        self,
+        x: torch.Tensor,
+        targets: Optional[torch.Tensor] = None,
+        threshold: Optional[float] = None,
+    ) -> Union[torch.Tensor, List[Dict[str, torch.Tensor]]]:
         if self.training:
             losses = self.get_obj_det_losses(x, targets)
             losses.update(self.get_polygonrnn_losses(x, targets))
             return losses
         detections = self.obj_det_model(x)
+
+        if threshold is not None:
+            detections = [
+                {key: det[key][det["scores"] > threshold] for key in det.keys()}
+                for det in detections
+            ]
+
         for idx, det in enumerate(detections):
+            if det["boxes"].shape[0] == 0:
+                det.update(
+                    {
+                        "polygonrnn_output": torch.empty(
+                            (0, self.val_seq_len), device=det["boxes"].device
+                        )
+                    }
+                )
+                detections[idx] = det
+                continue
+
             resized_inputs = torchvision.ops.roi_align(
                 x, [det["boxes"]], output_size=(224, 224)
             )

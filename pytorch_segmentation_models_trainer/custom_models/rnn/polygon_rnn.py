@@ -20,6 +20,7 @@
  *   https://github.com/AlexMa011/pytorch-polygon-rnn                      *
  ****
 """
+
 import os
 from pathlib import Path
 from typing import Dict
@@ -30,7 +31,6 @@ import torch.nn.init
 from torch.nn.modules.loss import _Loss
 import torch.utils.model_zoo as model_zoo
 import wget
-from torch import nn
 from torch.autograd import Variable
 
 current_dir = os.path.dirname(__file__)
@@ -414,7 +414,7 @@ class PolygonRNN(nn.Module):
                 out=str(model_path),
             )
             vgg16_dict = torch.load(model_path)
-        except:
+        except Exception:
             vgg16_dict = torch.load(
                 model_zoo.load_url(
                     "https://download.pytorch.org/models/vgg16_bn" "-6c64b313.pth"

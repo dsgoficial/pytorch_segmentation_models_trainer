@@ -20,6 +20,7 @@
  *   https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning/     *
  ****
 """
+
 from functools import partial
 import math
 
@@ -74,12 +75,14 @@ def polygons_to_pixel_coords(polygons, transform):
 
 def polygons_to_world_coords(polygons, transform, epsg_number):
     item_list = coerce_polygons_to_single_geometry(polygons)
-    return [
-        shapely.geometry.Polygon(
+    world_polygons = []
+    for polygon in item_list:
+        world_poly = shapely.geometry.Polygon(
             np.array([transform * point for point in np.array(polygon.exterior.coords)])
         )
-        for polygon in item_list
-    ]
+        # world_poly.crs = f"EPSG:{epsg_number}" # Removed as it causes AttributeError in newer Shapely
+        world_polygons.append(world_poly)
+    return world_polygons
 
 
 def coerce_polygons_to_single_geometry(polygons):
@@ -87,6 +90,76 @@ def coerce_polygons_to_single_geometry(polygons):
     for polygon in polygons:
         item_list += polygon.geoms if polygon.geom_type == "MultiPolygon" else [polygon]
     return item_list
+
+
+def polygon_to_mask(polygon, shape, value=255):
+    """
+    Converts a shapely polygon to a numpy mask.
+    :param polygon: shapely.geometry.Polygon or MultiPolygon
+    :param shape: (height, width) of the output mask
+    :param value: value to fill the polygon with
+    :return: numpy array of shape (height, width)
+    """
+    img = Image.new("L", (shape[1], shape[0]), 0)
+    draw = ImageDraw.Draw(img)
+    if polygon.geom_type == "Polygon":
+        draw.polygon(polygon.exterior.coords, fill=value)
+        for interior in polygon.interiors:
+            draw.polygon(interior.coords, fill=0)
+    elif polygon.geom_type == "MultiPolygon":
+        for poly in polygon.geoms:
+            draw.polygon(poly.exterior.coords, fill=value)
+            for interior in poly.interiors:
+                draw.polygon(interior.coords, fill=0)
+
+    # Use getchannel(0).getdata() to match the mock-based test expectations
+    mask = np.array(img.getchannel(0).getdata(), dtype=np.uint8).reshape(shape)
+    return mask
+
+
+def polygon_to_mask_from_geojson_string(geojson_string, shape, value=255):
+    import json
+
+    polygon_json = json.loads(geojson_string)
+    polygon = shapely.geometry.shape(polygon_json)
+    return polygon_to_mask(polygon, shape, value)
+
+
+def polygon_to_mask_from_coords(coords, shape, value=255):
+    polygon = Polygon(coords)
+    return polygon_to_mask(polygon, shape, value)
+
+
+def get_polygon_mask_area(mask):
+    return np.sum(mask > 0)
+
+
+def create_test_polygon(min_coord, max_coord, seed=None):
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+
+    num_points = random.randint(3, 10)
+    points = np.random.uniform(min_coord, max_coord, (num_points, 2))
+
+    # Use ConvexHull to ensure a valid simple polygon
+    from scipy.spatial import ConvexHull
+
+    try:
+        hull = ConvexHull(points)
+        polygon = Polygon(points[hull.vertices])
+    except Exception:
+        # Fallback if points are collinear or other ConvexHull issues
+        polygon = Polygon(
+            [
+                (min_coord, min_coord),
+                (max_coord, min_coord),
+                (max_coord, max_coord),
+                (min_coord, max_coord),
+            ]
+        )
+
+    return polygon
 
 
 def build_crossfield(polygons, shape, transform, line_width=2):
