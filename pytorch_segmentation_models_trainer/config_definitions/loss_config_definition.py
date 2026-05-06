@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 from dataclasses import dataclass, field
 import logging
 from typing import Any, List, Optional, Union
@@ -25,7 +26,6 @@ from typing import Any, List, Optional, Union
 import hydra
 from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING, DictConfig, OmegaConf
-
 
 # ============================================================================
 # Individual Loss Configurations
@@ -45,7 +45,7 @@ class BaseLossConfig:
 
     _target_: str = MISSING
     name: str = MISSING
-    weight: Union[float, List[float]] = 1.0  # Static weight or list for interpolation
+    weight: Any = 1.0  # Static weight or list for interpolation
 
 
 @dataclass
@@ -54,9 +54,7 @@ class SegLossConfig(BaseLossConfig):
         "pytorch_segmentation_models_trainer.custom_losses.base_loss.SegLoss"
     )
     name: str = "seg"
-    gt_channel_selector: Union[SegParamsConfig, int] = field(
-        default_factory=SegParamsConfig
-    )
+    gt_channel_selector: Any = field(default_factory=SegParamsConfig)
     bce_coef: float = 0.5
     dice_coef: float = 0.5
     tversky_focal_coef: float = 0.0
@@ -65,21 +63,27 @@ class SegLossConfig(BaseLossConfig):
 
 @dataclass
 class CrossfieldAlignLossConfig(BaseLossConfig):
-    _target_: str = "pytorch_segmentation_models_trainer.custom_losses.base_loss.CrossfieldAlignLoss"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_losses.base_loss.CrossfieldAlignLoss"
+    )
     name: str = "crossfield_align"
     weight: float = 1.0
 
 
 @dataclass
 class CrossfieldAlign90LossConfig(BaseLossConfig):
-    _target_: str = "pytorch_segmentation_models_trainer.custom_losses.base_loss.CrossfieldAlign90Loss"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_losses.base_loss.CrossfieldAlign90Loss"
+    )
     name: str = "crossfield_align90"
     weight: float = 0.2
 
 
 @dataclass
 class CrossfieldSmoothLossConfig(BaseLossConfig):
-    _target_: str = "pytorch_segmentation_models_trainer.custom_losses.base_loss.CrossfieldSmoothLoss"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_losses.base_loss.CrossfieldSmoothLoss"
+    )
     name: str = "crossfield_smooth"
     weight: float = 0.005
 
@@ -91,14 +95,16 @@ class SegCrossfieldLossConfig(BaseLossConfig):
     )
     name: str = "seg_crossfield"
     pred_channel: int = 0
-    weight: Union[float, List[float]] = field(default_factory=lambda: [0, 0, 0.2])
+    weight: Any = field(default_factory=lambda: [0, 0, 0.2])
 
 
 @dataclass
 class SegEdgeInteriorLossConfig(BaseLossConfig):
-    _target_: str = "pytorch_segmentation_models_trainer.custom_losses.base_loss.SegEdgeInteriorLoss"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_losses.base_loss.SegEdgeInteriorLoss"
+    )
     name: str = "seg_edge_interior"
-    weight: Union[float, List[float]] = field(default_factory=lambda: [0, 0, 0.2])
+    weight: Any = field(default_factory=lambda: [0, 0, 0.2])
 
 
 # ============================================================================

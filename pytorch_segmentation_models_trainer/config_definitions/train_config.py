@@ -18,12 +18,13 @@
  *                                                                         *
  ****
 """
+
 from dataclasses import dataclass, field
 from typing import List, Optional
 
 import torch
 from omegaconf import MISSING
-from pytorch_segmentation_models_trainer.custom_losses.loss_config_definition import (
+from pytorch_segmentation_models_trainer.config_definitions.loss_config_definition import (
     LossParamsConfig,
 )
 from pytorch_segmentation_models_trainer.model_loader.model import Model
@@ -44,7 +45,9 @@ class PLTrainerConfig:
     max_epochs: str = "${hyperparameters.epochs}"
     devices: int = -1  # Changed from 'gpus'
     accelerator: str = "auto"  # New: auto, gpu, cpu, tpu, etc.
-    precision: str = "32-true"  # Changed from int to string format: "32-true", "16-mixed", "bf16-mixed"
+    precision: str = (
+        "32-true"  # Changed from int to string format: "32-true", "16-mixed", "bf16-mixed"
+    )
     default_root_dir: str = (
         "/experiment_data/${backbone.name}_${hyperparameters.model_name}"
     )

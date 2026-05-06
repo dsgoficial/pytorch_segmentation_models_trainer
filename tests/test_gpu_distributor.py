@@ -99,10 +99,13 @@ class TestGPUDistributor(unittest.TestCase):
         self.assertEqual(distributor.get_device_for_experiment("exp2", assignments), 1)
 
     @patch("torch.cuda.is_available", return_value=True)
+    @patch("torch.cuda.device_count", return_value=1)
     @patch("torch.cuda.get_device_properties")
     @patch("torch.cuda.memory_allocated", return_value=2 * (1024**3))
     @patch("torch.cuda.set_device")
-    def test_get_gpu_memory_info(self, mock_set, mock_mem, mock_props, mock_avail):
+    def test_get_gpu_memory_info(
+        self, mock_set, mock_mem, mock_props, mock_count, mock_avail
+    ):
         mock_props_instance = MagicMock()
         mock_props_instance.total_memory = 8 * (1024**3)
         mock_props.return_value = mock_props_instance
@@ -116,7 +119,9 @@ class TestGPUDistributor(unittest.TestCase):
         self.assertEqual(info["used_gb"], 2.0)
         self.assertEqual(info["free_gb"], 6.0)
 
-    def test_get_optimal_batch_size(self):
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("torch.cuda.device_count", return_value=1)
+    def test_get_optimal_batch_size(self, mock_count, mock_avail):
         distributor = GPUDistributor(self.config)
 
         # Mock get_gpu_memory_info
