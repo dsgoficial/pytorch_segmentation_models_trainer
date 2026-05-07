@@ -1,5 +1,11 @@
 # Unreleased
 
+## GPU K-Means
+- Added `MiniBatchKMeans` PyTorch implementation for high-performance clustering on GPU.
+- Added `KMeansClusteringTool` for orchestrating clustering pipelines with GeoPandas and PostGIS support.
+- Supports K-Means++ initialization and efficient mini-batch updates for large datasets.
+- Added GeoParquet and PostGIS export capabilities for clustered spatial data.
+
 ## Autoencoder
 - Added `GenericAutoencoder` model supporting SMP and Transformers encoders.
 - Added `AutoencoderModel` LightningModule for image reconstruction tasks.
