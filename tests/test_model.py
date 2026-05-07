@@ -1,35 +1,105 @@
 # -*- coding: utf-8 -*-
 """
-/***************************************************************************
- segmentation_models_trainer
-                              -------------------
-        begin                : 2021-02-25
-        git sha              : $Format:%H$
-        copyright            : (C) 2021 by Philipe Borba -
-                                    Cartographic Engineer @ Brazilian Army
-        email                : philipeborba at gmail dot com
- ***************************************************************************/
-
-/***************************************************************************
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- ****
+Unit tests for model.py
 """
 
 import unittest
-import numpy as np
-import hydra
-import segmentation_models_pytorch as smp
-from hydra import initialize, compose
+from unittest.mock import MagicMock, patch
+import torch
+import torch.nn as nn
+import torchmetrics
+from omegaconf import OmegaConf
+
+from pytorch_segmentation_models_trainer.model_loader.model import Model
 
 
-class Test_SegmentationModel(unittest.TestCase):
-    def test_create_instance(self) -> None:
-        with initialize(config_path="./test_configs"):
-            cfg = compose(config_name="model.yaml")
-            model_obj = hydra.utils.instantiate(cfg, _recursive_=False)
-            assert isinstance(model_obj, smp.Unet)
+class TestModelLoader(unittest.TestCase):
+    def setUp(self):
+        self.cfg = OmegaConf.create(
+            {
+                "model": {"_target_": "torch.nn.Identity"},
+                "loss": {"_target_": "torch.nn.BCEWithLogitsLoss"},
+                "hyperparameters": {
+                    "batch_size": 2,
+                    "accelerator": "cpu",
+                    "devices": 1,
+                },
+                "metrics": [
+                    {"_target_": "torchmetrics.JaccardIndex", "task": "binary"}
+                ],
+            }
+        )
+
+    def test_model_init(self):
+        with patch(
+            "pytorch_segmentation_models_trainer.model_loader.model.instantiate"
+        ) as mock_inst:
+            # model, loss, metric
+            mock_model = nn.Identity()
+            mock_loss = nn.BCEWithLogitsLoss()
+            mock_metric = torchmetrics.JaccardIndex(task="binary")
+
+            mock_inst.side_effect = [mock_model, mock_loss, mock_metric]
+
+            model_pl = Model(self.cfg)
+            self.assertIsNotNone(model_pl.model)
+            self.assertIsNotNone(model_pl.loss_function)
+
+    def test_shared_step(self):
+        with patch(
+            "pytorch_segmentation_models_trainer.model_loader.model.instantiate"
+        ) as mock_inst:
+            mock_model = lambda x: torch.sigmoid(
+                torch.randn(x.shape[0], 1, x.shape[2], x.shape[3])
+            )
+            mock_loss = nn.BCEWithLogitsLoss()
+            mock_metric = torchmetrics.JaccardIndex(task="binary", ignore_index=255)
+            mock_inst.side_effect = [mock_model, mock_loss, mock_metric]
+
+            model_pl = Model(self.cfg)
+            model_pl.log = MagicMock()
+            model_pl.log_dict = MagicMock()
+
+            batch = {
+                "image": torch.randn(2, 3, 32, 32),
+                "mask": torch.randint(0, 2, (2, 1, 32, 32)).float(),
+            }
+            loss = model_pl.training_step(batch, 0)
+            self.assertIsInstance(loss, torch.Tensor)
+
+    def test_configure_optimizers(self):
+        with patch(
+            "pytorch_segmentation_models_trainer.model_loader.model.instantiate"
+        ) as mock_inst:
+            mock_model = nn.Conv2d(3, 1, 3)
+            mock_loss = nn.BCEWithLogitsLoss()
+            mock_metric = torchmetrics.JaccardIndex(task="binary")
+            mock_inst.side_effect = [mock_model, mock_loss, mock_metric]
+
+            self.cfg.optimizer = {"_target_": "torch.optim.Adam", "lr": 1e-3}
+            model_pl = Model(self.cfg)
+
+            with patch(
+                "pytorch_segmentation_models_trainer.model_loader.model.instantiate",
+                return_value=torch.optim.Adam(model_pl.parameters(), lr=1e-3),
+            ):
+                optimizers, schedulers = model_pl.configure_optimizers()
+                self.assertEqual(len(optimizers), 1)
+
+    def test_get_tta_augmentations(self):
+        with patch(
+            "pytorch_segmentation_models_trainer.model_loader.model.instantiate"
+        ) as mock_inst:
+            mock_model = nn.Identity()
+            mock_loss = nn.BCEWithLogitsLoss()
+            mock_metric = torchmetrics.JaccardIndex(task="binary")
+            mock_inst.side_effect = [mock_model, mock_loss, mock_metric]
+
+            self.cfg.tta_mode = "d4"
+            model_pl = Model(self.cfg)
+            augs = model_pl._get_tta_augmentations()
+            self.assertEqual(len(augs), 8)
+
+
+if __name__ == "__main__":
+    unittest.main()

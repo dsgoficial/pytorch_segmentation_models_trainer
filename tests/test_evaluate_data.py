@@ -1,75 +1,52 @@
 # -*- coding: utf-8 -*-
 """
-Unit tests for evaluate_experiments.py
+Unit tests for evaluate_data.py
 """
 
 import unittest
 from unittest.mock import MagicMock, patch
-import os
-import shutil
-import tempfile
-from pathlib import Path
-from omegaconf import OmegaConf
+from shapely.geometry import Polygon, Point
 
-from pytorch_segmentation_models_trainer.evaluate_experiments import (
-    evaluate,
-    setup_logging,
+from pytorch_segmentation_models_trainer.tools.evaluation.evaluate_data import (
+    compute_metrics_on_match_list_dict,
+    compute_vertex_errors_on_match_list_dict,
 )
 
 
-class TestEvaluateExperiments(unittest.TestCase):
-    def setUp(self):
-        self.tmp_dir = tempfile.mkdtemp()
-        self.config = OmegaConf.create(
+class TestEvaluateData(unittest.TestCase):
+    def test_compute_metrics(self):
+        # Mock metric function
+        def mock_iou(ref, target):
+            return (0.8, 80, 100)
+
+        mock_iou.__name__ = "iou_metric"
+
+        match_list = [
             {
-                "name": "test_pipeline",
-                "output": {"base_dir": self.tmp_dir},
-                "logging": {"level": "info", "save_to_file": False},
-                "experiments": [],
-                "pipeline_options": {"parallel_inference": {"enabled": False}},
+                "reference": Polygon([(0, 0), (1, 0), (1, 1)]),
+                "target": Polygon([(0, 0), (1, 0), (1, 1)]),
             }
-        )
+        ]
 
-    def tearDown(self):
-        shutil.rmtree(self.tmp_dir)
+        results = compute_metrics_on_match_list_dict(match_list, [mock_iou])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["iou"], 0.8)
 
-    def test_setup_logging_basic(self):
-        # Should not raise errors
-        setup_logging(self.config)
+    def test_compute_vertex_errors(self):
+        match_list = [{"reference": Polygon(), "target": Polygon()}]
 
-    def test_setup_logging_to_file(self):
-        self.config.logging.save_to_file = True
-        self.config.logging.log_file = "test.log"
-        setup_logging(self.config)
-        self.assertTrue(os.path.exists(os.path.join(self.tmp_dir, "test.log")))
+        # per_vertex_error_list is imported from matching, let's mock it at the module level
+        with patch(
+            "pytorch_segmentation_models_trainer.tools.evaluation.evaluate_data.per_vertex_error_list"
+        ) as mock_error:
+            mock_error.return_value = [{"point": Point(0, 0), "error": 0.1}]
 
-    @patch(
-        "pytorch_segmentation_models_trainer.evaluate_experiments.EvaluationPipeline"
-    )
-    def test_evaluate_function(self, MockPipeline):
-        mock_pipeline_instance = MagicMock()
-        MockPipeline.return_value = mock_pipeline_instance
-        mock_pipeline_instance.run.return_value = {"status": "success"}
-
-        # Call evaluate directly (bypass @hydra.main decoration logic for unit test)
-        # Note: evaluate is actually the 'evaluate' function defined in evaluate_experiments.py
-        # but hydra wraps it. We can call the underlying function if needed or just call it as is.
-        results = evaluate(self.config)
-
-        self.assertEqual(results, {"status": "success"})
-        mock_pipeline_instance.run.assert_called_once()
-
-    @patch(
-        "pytorch_segmentation_models_trainer.evaluate_experiments.EvaluationPipeline"
-    )
-    @patch("sys.exit")
-    def test_evaluate_function_error(self, mock_exit, MockPipeline):
-        mock_pipeline_instance = MagicMock()
-        MockPipeline.return_value = mock_pipeline_instance
-        mock_pipeline_instance.run.side_effect = Exception("Test error")
-
-        evaluate(self.config)
-        mock_exit.assert_called_with(1)
+            results = compute_vertex_errors_on_match_list_dict(
+                match_list, convert_output_to_wkt=True
+            )
+            self.assertEqual(len(results), 1)
+            self.assertIsInstance(results[0]["point"], str)
+            self.assertIn("POINT", results[0]["point"])
 
 
 if __name__ == "__main__":
