@@ -77,6 +77,11 @@ def main(cfg: DictConfig):
     elif cfg.mode == "evaluate-experiments":
         from pytorch_segmentation_models_trainer.evaluate_experiments import evaluate
         return evaluate(cfg)
+    elif cfg.mode == "run-experiments":
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+        return ExperimentsRunner(cfg).run()
     else:
         raise NotImplementedError
 
