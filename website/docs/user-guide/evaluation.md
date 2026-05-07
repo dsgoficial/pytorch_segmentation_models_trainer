@@ -116,7 +116,7 @@ experiments:
 ```
 
 :::note predict_config
-The `predict_config` path must point to a valid predict config YAML (see the [Running Inference](./inference) guide). The pipeline invokes it as a subprocess, passing `checkpoint_path` and `device` overrides automatically.
+The `predict_config` path must point to a valid predict config YAML (see the [Running Inference](./inference.md) guide). The pipeline invokes it as a subprocess, passing `checkpoint_path` and `device` overrides automatically.
 :::
 
 ---

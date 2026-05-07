@@ -31,7 +31,7 @@ device: cuda          # Computing device
 ```
 
 :::tip Config Builder
-Use the visual [Config Builder](/config-builder/) to create these files without manually writing YAML.
+Use the visual [Config Builder](https://dsgoficial.github.io/pytorch_segmentation_models_trainer/config-builder/) to create these files without manually writing YAML.
 :::
 
 ## The `_target_` Pattern
