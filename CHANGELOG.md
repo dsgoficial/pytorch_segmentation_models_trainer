@@ -1,3 +1,11 @@
+# Unreleased
+
+## Autoencoder
+- Added `GenericAutoencoder` model supporting SMP and Transformers encoders.
+- Added `AutoencoderModel` LightningModule for image reconstruction tasks.
+- Added `AutoencoderDataset` for self-supervised learning and reconstruction.
+- Added example configuration `conf/examples/generic_autoencoder.yaml`.
+
 # Version 1.1.0 - 2026-04-28
 
 ## Bug fixes

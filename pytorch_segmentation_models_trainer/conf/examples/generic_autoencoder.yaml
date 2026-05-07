@@ -1,0 +1,87 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: Generic Autoencoder with SMP/Transformers
+# ──────────────────────────────────────────────────────────────────────────────
+# This config demonstrates the GenericAutoencoder architecture for image
+# reconstruction tasks, combining SMP encoders and PyTorch Lightning.
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+hyperparameters:
+  model_name: autoencoder_mit_b2
+  batch_size: 16
+  epochs: 20
+  max_lr: 1e-4
+  in_channels: 3
+
+# We use AutoencoderModel (LightningModule) instead of the default Model
+# to handle reconstruction steps.
+pl_trainer_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.autoencoder_model.AutoencoderModel
+
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.generic_autoencoder.GenericAutoencoder
+  encoder_name: mit_b2
+  use_huggingface: false
+  in_channels: ${hyperparameters.in_channels}
+  latent_dim: 128
+  pretrained: true
+
+loss:
+  _target_: torch.nn.MSELoss
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1e-4
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: ${hyperparameters.epochs}
+    interval: epoch
+    frequency: 1
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.AutoencoderDataset
+  input_csv_path: /data/images.csv
+  root_dir: /data
+  # Corruption is applied ONLY to the input image (Denoising)
+  corruption_augmentation_list:
+    - _target_: albumentations.GaussNoise
+      var_limit: [10.0, 50.0]
+      p: 0.5
+  # Base augmentations are applied to both (Synchronized)
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: 256
+      width: 256
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.Normalize
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 4
+    shuffle: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.AutoencoderDataset
+  input_csv_path: /data/val_images.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: 256
+      width: 256
+    - _target_: albumentations.Normalize
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 4
+    shuffle: false
+
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1

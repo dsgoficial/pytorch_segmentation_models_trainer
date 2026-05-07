@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 import contextlib
 import itertools
 import json
@@ -82,7 +83,8 @@ def load_augmentation_object(input_list, bbox_params=None):
             for i in input_list
         ]
         aug_list = [
-            instantiate(_sanitize_aug_config(i), _recursive_=False) for i in sanitized_list
+            instantiate(_sanitize_aug_config(i), _recursive_=False)
+            for i in sanitized_list
         ]
     except Exception as e:
         aug_list = input_list
@@ -254,6 +256,52 @@ class ImageDataset(AbstractDataset):
         result = (
             {"image": image} if self.transform is None else self.transform(image=image)
         )
+        result.update({"path": self.get_path(idx, key=self.image_key)})
+        return result
+
+
+class AutoencoderDataset(ImageDataset):
+    """
+    Dataset for Autoencoder training.
+    Supports a 'corruption_augmentation_list' that is applied ONLY to the input image,
+    while 'augmentation_list' is applied to both input and target (synchronized).
+    """
+
+    def __init__(
+        self,
+        *args,
+        corruption_augmentation_list: Optional[List[Dict[str, Any]]] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.corruption_transform = (
+            None
+            if corruption_augmentation_list is None
+            else load_augmentation_object(corruption_augmentation_list)
+        )
+        # Update transform to support synchronized targets
+        if self.transform is not None:
+            # Albumentations Compose object exposes its list of transforms
+            self.transform = A.Compose(
+                self.transform.transforms, additional_targets={"target": "image"}
+            )
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        idx = idx % self.len
+        image = self.load_image(idx, key=self.image_key)
+        target = image.copy()
+
+        # 1. Apply corruption ONLY to the input image
+        if self.corruption_transform is not None:
+            image = self.corruption_transform(image=image)["image"]
+
+        # 2. Apply base transforms (Resize, Flip, Normalize, etc.) to both
+        if self.transform is not None:
+            res = self.transform(image=image, target=target)
+            result = {"image": res["image"], "target": res["target"]}
+        else:
+            result = {"image": image, "target": target}
+
         result.update({"path": self.get_path(idx, key=self.image_key)})
         return result
 
@@ -504,12 +552,16 @@ class SegmentationDataset(AbstractDataset):
         transform_func = deepcopy(self.transform)
         output = transform_func(image=image, mask=mask)
         output_dict = {
-            "image": output["image"].clone().detach()
-            if torch.is_tensor(output["image"])
-            else output["image"].copy(),
-            "mask": output["mask"].clone().detach()
-            if torch.is_tensor(output["mask"])
-            else output["mask"].copy(),
+            "image": (
+                output["image"].clone().detach()
+                if torch.is_tensor(output["image"])
+                else output["image"].copy()
+            ),
+            "mask": (
+                output["mask"].clone().detach()
+                if torch.is_tensor(output["mask"])
+                else output["mask"].copy()
+            ),
         }
         del output
         del transform_func
@@ -2114,12 +2166,16 @@ class RandomCropSegmentationDataset(AbstractDataset):
         else:
             output = transform_func(image=image, mask=mask)
         output_dict = {
-            "image": output["image"].clone().detach()
-            if torch.is_tensor(output["image"])
-            else output["image"].copy(),
-            "mask": output["mask"].clone().detach()
-            if torch.is_tensor(output["mask"])
-            else output["mask"].copy(),
+            "image": (
+                output["image"].clone().detach()
+                if torch.is_tensor(output["image"])
+                else output["image"].copy()
+            ),
+            "mask": (
+                output["mask"].clone().detach()
+                if torch.is_tensor(output["mask"])
+                else output["mask"].copy()
+            ),
         }
         if hard_mask is not None:
             output_dict["hard_mask"] = self._to_hard_mask_tensor(output["hard_mask"])
