@@ -1,5 +1,14 @@
 # Unreleased
 
+## Dataset Distillation
+- Added `dataset_distillation.py` utilities for dataset distillation using Coreset of Medoids (Optimal Quantization).
+- Implemented `extract_all_latents` for high-throughput embedding extraction from trained Autoencoders.
+- Implemented `find_coreset_medoids` using K-Means and L2 distance (`torch.cdist`) to find representative real samples closest to cluster centroids.
+- Added `create_distilled_dataloader` for subsetting datasets based on medoid indices.
+- Added `DatasetDistillationConfig` Hydra dataclass and registered it in the ConfigStore.
+- Added example configuration `conf/examples/dataset_distillation.yaml`.
+- Added user documentation in `website/docs/user-guide/dataset_distillation.md`.
+
 ## GPU K-Means
 - Added `MiniBatchKMeans` PyTorch implementation for high-performance clustering on GPU.
 - Added `KMeansClusteringTool` for orchestrating clustering pipelines with GeoPandas and PostGIS support.

@@ -8,9 +8,7 @@ import sys
 if sys.platform == "win32":
     # Allow coexistence of libomp.dll (torch) and libiomp5md.dll (conda/MKL)
     os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-    _torch_lib = os.path.join(
-        sys.prefix, "Lib", "site-packages", "torch", "lib"
-    )
+    _torch_lib = os.path.join(sys.prefix, "Lib", "site-packages", "torch", "lib")
     if os.path.isdir(_torch_lib):
         if hasattr(os, "add_dll_directory"):
             os.add_dll_directory(_torch_lib)
@@ -33,5 +31,6 @@ from . import model_loader
 from . import utils
 from . import tools
 from . import custom_callbacks
+from . import dataset_distillation
 
-__all__ = ["dataset_loader", "model_loader", "tools", "utils"]
+__all__ = ["dataset_loader", "model_loader", "tools", "utils", "dataset_distillation"]

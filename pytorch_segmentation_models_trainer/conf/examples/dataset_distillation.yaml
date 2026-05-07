@@ -1,0 +1,11 @@
+# Example configuration for Dataset Distillation (Coreset of Medoids)
+# This uses a trained Autoencoder to select the most representative samples.
+
+dataset_distillation:
+  num_clusters: 100            # Total samples to select for the coreset (budget)
+  batch_size: 32               # Batch size for latent extraction
+  num_workers: 4               # DataLoader workers
+  device: "cuda"               # Device for extraction and clustering
+  checkpoint_path: "path/to/autoencoder_checkpoint.ckpt"
+  unlabeled_dataloader_config: "conf/dataset/unlabeled_sat_data.yaml"
+  output_indices_path: "selected_medoids.pt"
