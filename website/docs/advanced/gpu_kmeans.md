@@ -66,7 +66,12 @@ tool.export_to_postgis(
 
 The core logic is implemented in `MiniBatchKMeans`, which mimics the scikit-learn API but runs entirely on PyTorch tensors. Centroids are updated incrementally using the formula:
 
-$$\eta = \frac{1}{\text{counts}_j}$$
-$$c_j = (1 - \eta)c_j + \eta \bar{x}_{batch}$$
+$$
+\eta = \frac{1}{\text{counts}_j}
+$$
+
+$$
+c_j = (1 - \eta)c_j + \eta \bar{x}_{batch}
+$$
 
 This ensures that the centroids converge to the global mean of the assigned points over time.
