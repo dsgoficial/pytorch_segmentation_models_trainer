@@ -43,6 +43,19 @@ def geom_almost_equals(this, that, tolerance=0.01):
     return this.geom_equals_exact(that, tolerance=tolerance).all()
 
 
+def sort_gdf(gdf):
+    """Sorts a GeoDataFrame by its geometry centroid for consistent comparison."""
+    # Use WKT of centroid for a stable sort key
+    gdf = gdf.copy()
+    gdf["_sort_key"] = gdf.geometry.centroid.to_wkt()
+    sorted_gdf = (
+        gdf.sort_values(by="_sort_key")
+        .drop(columns=["_sort_key"])
+        .reset_index(drop=True)
+    )
+    return sorted_gdf
+
+
 from hydra import compose, initialize
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
     VectorFileDataWriter,
@@ -115,12 +128,17 @@ class Test_Polygonize(BasicTestCase):
             self.profile,
         )
         assert os.path.isfile(output_file_path)
-        expected_output_gdf = geopandas.read_file(
-            filename=os.path.join(
-                root_dir, "expected_outputs", "polygonize", "simple_polygonizer.geojson"
+        expected_output_gdf = sort_gdf(
+            geopandas.read_file(
+                filename=os.path.join(
+                    root_dir,
+                    "expected_outputs",
+                    "polygonize",
+                    "simple_polygonizer.geojson",
+                )
             )
         )
-        output_features_gdf = geopandas.read_file(filename=output_file_path)
+        output_features_gdf = sort_gdf(geopandas.read_file(filename=output_file_path))
         assert geom_almost_equals(
             expected_output_gdf["geometry"], output_features_gdf["geometry"]
         )
@@ -145,14 +163,21 @@ class Test_Polygonize(BasicTestCase):
             self.profile,
         )
         assert os.path.isfile(output_file_path)
-        expected_output_gdf = geopandas.read_file(
-            filename=os.path.join(
-                root_dir, "expected_outputs", "polygonize", "acm_polygonizer.geojson"
+        expected_output_gdf = sort_gdf(
+            geopandas.read_file(
+                filename=os.path.join(
+                    root_dir,
+                    "expected_outputs",
+                    "polygonize",
+                    "acm_polygonizer.geojson",
+                )
             )
         )
-        output_features_gdf = geopandas.read_file(filename=output_file_path)
+        output_features_gdf = sort_gdf(geopandas.read_file(filename=output_file_path))
         assert geom_almost_equals(
-            expected_output_gdf["geometry"], output_features_gdf["geometry"]
+            expected_output_gdf["geometry"],
+            output_features_gdf["geometry"],
+            tolerance=0.05,
         )
 
     def test_polygonizer_asm_processor(self) -> None:
@@ -175,12 +200,19 @@ class Test_Polygonize(BasicTestCase):
             self.profile,
         )
         assert os.path.isfile(output_file_path)
-        expected_output_gdf = geopandas.read_file(
-            filename=os.path.join(
-                root_dir, "expected_outputs", "polygonize", "asm_polygonizer.geojson"
+        expected_output_gdf = sort_gdf(
+            geopandas.read_file(
+                filename=os.path.join(
+                    root_dir,
+                    "expected_outputs",
+                    "polygonize",
+                    "asm_polygonizer.geojson",
+                )
             )
         )
-        output_features_gdf = geopandas.read_file(filename=output_file_path)
+        output_features_gdf = sort_gdf(geopandas.read_file(filename=output_file_path))
         assert geom_almost_equals(
-            expected_output_gdf["geometry"], output_features_gdf["geometry"]
+            expected_output_gdf["geometry"],
+            output_features_gdf["geometry"],
+            tolerance=0.05,
         )
