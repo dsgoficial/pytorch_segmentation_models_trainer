@@ -1,0 +1,153 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: Experiments Runner — successive training runs with different seeds
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# Use this config to run the same experiment multiple times with different
+# random seeds.  The framework trains in series, saves per-run checkpoints to
+# isolated directories, and writes a summary.csv with mean ± std metrics.
+#
+# How seeds work
+# ──────────────
+#   Option A — explicit seeds (recommended for reproducibility studies):
+#     experiments_runner:
+#       seeds: [42, 101, 28]      # 3 runs, seeds fixed
+#
+#   Option B — random seeds, fixed count:
+#     experiments_runner:
+#       n_runs: 5                 # 5 runs, seeds generated at runtime
+#
+#   Option C — consistent explicit spec (both must agree):
+#     experiments_runner:
+#       seeds: [42, 101, 28]
+#       n_runs: 3                 # must equal len(seeds)
+#
+# Output layout
+# ─────────────
+#   outputs/experiments_runner/
+#   ├── run_00/          ← pl_trainer checkpoints & logs for seed 42
+#   ├── run_01/          ← pl_trainer checkpoints & logs for seed 101
+#   ├── run_02/          ← pl_trainer checkpoints & logs for seed 28
+#   └── summary.csv      ← per-run metrics + mean ± std
+#
+# summary.csv columns
+# ───────────────────
+#   run | seed | duration_s | train/loss | val/loss | val/F1Score | ...
+#   0   | 42   | 142.30     | 0.210000   | 0.340000 | 0.820000   | ...
+#   1   | 101  | 139.80     | 0.190000   | 0.330000 | 0.825000   | ...
+#   2   | 28   | 141.10     | 0.200000   | 0.350000 | 0.818000   | ...
+#  mean | -    | 141.07     | 0.200000   | 0.340000 | 0.821000   | ...
+#  std  | -    | 1.26       | 0.010000   | 0.010000 | 0.003606   | ...
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+# ── Experiments Runner ────────────────────────────────────────────────────────
+mode: run-experiments
+
+experiments_runner:
+  seeds: [42, 101, 28]
+  output_base_dir: outputs/experiments_runner
+  save_summary: true
+  summary_metrics:
+    - val/loss
+    - val/F1Score
+
+# ── Backbone ─────────────────────────────────────────────────────────────────
+backbone:
+  name: resnet34
+  input_width: 256
+  input_height: 256
+
+# ── Hyperparameters ──────────────────────────────────────────────────────────
+hyperparameters:
+  model_name: unet_resnet34
+  backbone: resnet34
+  batch_size: 8
+  epochs: 50
+  max_lr: 1e-3
+  classes: 1
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet34
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: ${hyperparameters.classes}
+
+# ── Loss ─────────────────────────────────────────────────────────────────────
+loss:
+  _target_: segmentation_models_pytorch.losses.DiceLoss
+  mode: binary
+
+# ── Optimizer ────────────────────────────────────────────────────────────────
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1e-4
+
+# ── Scheduler ────────────────────────────────────────────────────────────────
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: ${hyperparameters.epochs}
+      eta_min: 1e-7
+    interval: epoch
+    frequency: 1
+
+# ── PyTorch Lightning Trainer ─────────────────────────────────────────────────
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+  precision: "16-mixed"
+  # default_root_dir is overridden per run by ExperimentsRunner
+
+# ── Datasets ─────────────────────────────────────────────────────────────────
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/train.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width: ${backbone.input_width}
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/val.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Resize
+      height: ${backbone.input_height}
+      width: ${backbone.input_width}
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
+# ── Metrics ───────────────────────────────────────────────────────────────────
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: binary
+  - _target_: torchmetrics.F1Score
+    task: binary

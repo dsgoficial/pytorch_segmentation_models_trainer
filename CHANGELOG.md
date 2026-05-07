@@ -1,5 +1,18 @@
 # Unreleased
 
+## Experiments Runner
+
+- Added `ExperimentsRunner` class (`tools/experiments_runner/experiments_runner.py`) that runs successive training experiments in series, each with an isolated seed and output directory.
+- Seeds can be specified explicitly (`seeds: [42, 101, 28]`) or generated automatically at runtime by supplying only `n_runs: 5`. Providing both values is accepted when they are consistent; a conflict raises a `ValueError` with a clear message.
+- Each run receives its seed via the existing `set_training_seed()` mechanism (Python `random`, NumPy, PyTorch CPU/CUDA, DataLoader workers), and writes checkpoints and logs to `<output_base_dir>/run_<idx:02d>/`.
+- Wall-clock training time and all Lightning `callback_metrics` (`train/*`, `val/*`, `test/*`) are captured per run, including test metrics when a `test_dataset` block is present.
+- When `save_summary: true` (default), a `summary.csv` is written to `output_base_dir` containing per-run rows plus aggregated `mean` and `std` rows for all metrics and the training duration.
+- Added `ExperimentsRunnerConfig` dataclass in `config_definitions/experiments_runner_config.py`, registered in Hydra's ConfigStore.
+- Added new dispatch mode `run-experiments` in `main.py`.
+- Added example configuration `conf/examples/experiments_runner.yaml` (UNet / ResNet-34, 3 fixed seeds).
+- Added user documentation `website/docs/user-guide/experiments_runner.md`.
+- Added 38 unit tests in `tests/test_experiments_runner.py` covering validation, seed resolution, config mutation, metric collection, CSV output, and the full `run()` integration with a mocked trainer.
+
 ## Dataset Distillation
 - Added `dataset_distillation.py` utilities for dataset distillation using Coreset of Medoids (Optimal Quantization).
 - Implemented `extract_all_latents` for high-throughput embedding extraction from trained Autoencoders.
