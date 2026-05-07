@@ -20,7 +20,6 @@ A comprehensive framework for training semantic segmentation models using PyTorc
 - **Easy Training & Inference**: Simple CLI commands for training and prediction
 - **Flexible Data Loading**: Support for various dataset formats and augmentation pipelines
 - **Built-in Visualization**: Tools for visualizing results and debugging
-- **Docker Ready**: Pre-built containers with all dependencies
 - **Comprehensive Evaluation**: Pipeline for comparing multiple models with IoU, Hausdorff, and Fréchet metrics
 
 ## Quick Example

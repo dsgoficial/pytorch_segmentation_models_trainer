@@ -40,28 +40,6 @@ cd pytorch_segmentation_models_trainer
 pip install -e .
 ```
 
-### Option 4: Docker (Easiest for GPU)
-
-We provide pre-built Docker images with all dependencies:
-
-```bash
-# Pull the latest image
-docker pull phborba/pytorch_segmentation_models_trainer:latest
-
-# Run interactively
-docker run -it --gpus all \
-    -v /path/to/your/data:/data \
-    -v /path/to/your/configs:/configs \
-    phborba/pytorch_segmentation_models_trainer:latest bash
-
-# Run training directly
-docker run --gpus all \
-    -v /path/to/your/data:/data \
-    -v /path/to/your/configs:/configs \
-    phborba/pytorch_segmentation_models_trainer:latest \
-    pytorch-smt --config-dir /configs --config-name my_config +mode=train
-```
-
 ## Verify Installation
 
 Test your installation:
@@ -80,34 +58,6 @@ Or use the CLI:
 pytorch-smt --help
 ```
 
-## Docker Compose Setup
-
-For development with database support:
-
-```yaml
-version: '3'
-services:
-  db:
-    image: postgis/postgis
-    environment:
-      POSTGRES_DB: test_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
-
-  app:
-    image: phborba/pytorch_segmentation_models_trainer:latest
-    volumes:
-      - .:/workspace
-    depends_on:
-      - db
-```
-
-Run with:
-```bash
-docker-compose up -d
-```
 
 ## Optional Dependencies
 
@@ -190,7 +140,7 @@ pip install --upgrade hydra-core
    nvidia-smi
    ```
 
-3. **For M1/M2 Macs**: Use the Docker option or install with MPS support:
+3. **For M1/M2 Macs**: Install with MPS support:
    ```bash
    pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cpu
    ```
