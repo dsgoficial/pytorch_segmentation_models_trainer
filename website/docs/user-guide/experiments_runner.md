@@ -56,8 +56,9 @@ pytorch-smt --config-path . --config-name my_experiment
 | `seeds` | `list[int]` | one of seeds/n_runs | — | Explicit seed list.  Determines the number of runs. |
 | `n_runs` | `int` | one of seeds/n_runs | — | Number of runs with auto-generated seeds.  Required when `seeds` is absent. |
 | `output_base_dir` | `str` | no | `outputs/experiments_runner` | Root directory for per-run outputs. |
-| `save_summary` | `bool` | no | `true` | Write `summary.csv` after all runs. |
+| `save_summary` | `bool` | no | `true` | Update `summary.csv` after every completed run. |
 | `summary_metrics` | `list[str]` | no | `[val/loss]` | Metric keys logged to the run summary table. |
+| `resume` | `bool` | no | `false` | Skip already-completed runs on restart using `runner_state.json`. |
 
 ### Seeds vs n\_runs
 
@@ -74,14 +75,17 @@ pytorch-smt --config-path . --config-name my_experiment
 
 ```
 outputs/my_study/
-├── run_00/          ← Lightning checkpoints & logs (seed 42)
-│   └── ...
-├── run_01/          ← Lightning checkpoints & logs (seed 101)
-│   └── ...
-├── run_02/          ← Lightning checkpoints & logs (seed 28)
-│   └── ...
-└── summary.csv
+├── run_00_seed42/        ← Lightning checkpoints & logs
+│   └── lightning_logs/
+├── run_01_seed101/
+│   └── lightning_logs/
+├── run_02_seed28/
+│   └── lightning_logs/
+├── runner_state.json     ← written after each run; drives resume
+└── summary.csv           ← updated after each run
 ```
+
+The seed is embedded in every directory name so you can identify an experiment directly from the filesystem without consulting `summary.csv`.
 
 ### summary.csv format
 
@@ -104,25 +108,45 @@ available metrics.
 ## Using random seeds
 
 When `seeds` is omitted and only `n_runs` is specified, the runner generates
-cryptographically random 31-bit seeds at runtime.  They are stored in
-`summary.csv` so you can reproduce any individual run later:
+cryptographically random 31-bit seeds at runtime.  They are saved in
+`runner_state.json` immediately so `resume: true` always uses the same seeds:
 
 ```yaml
 experiments_runner:
   n_runs: 5
   output_base_dir: outputs/random_study
   save_summary: true
+  resume: false
 ```
 
-To replay run 2 (seed from `summary.csv`, e.g. 1084739421):
+To replay an individual run, read its seed from the directory name
+(`run_02_seed1084739421/`) or from `summary.csv`:
 
 ```yaml
 mode: train
 seed: 1084739421
 pl_trainer:
-  default_root_dir: outputs/random_study/run_02_replay
+  default_root_dir: outputs/random_study/run_02_seed1084739421_replay
 # ... rest of config unchanged ...
 ```
+
+---
+
+## Resuming an interrupted run sequence
+
+If training is interrupted between runs, restart with `resume: true`:
+
+```yaml
+experiments_runner:
+  seeds: [42, 101, 28]
+  output_base_dir: outputs/my_study
+  resume: true           # reads runner_state.json, skips completed runs
+```
+
+The runner reads `runner_state.json`, identifies which runs already have
+results, and starts from the first pending run.  For within-run resumption
+(interrupted mid-epoch), configure PyTorch Lightning's `ModelCheckpoint`
+callback and set `resume_from_checkpoint` in `hyperparameters` as usual.
 
 ---
 

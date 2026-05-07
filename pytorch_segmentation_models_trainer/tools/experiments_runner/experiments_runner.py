@@ -17,19 +17,23 @@
  ***************************************************************************/
 """
 import csv
+import dataclasses
+import json
 import logging
 import os
 import secrets
 import statistics
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from omegaconf import DictConfig, OmegaConf
 
 from pytorch_segmentation_models_trainer.train import train
 
 logger = logging.getLogger(__name__)
+
+_STATE_FILE = "runner_state.json"
 
 
 @dataclass
@@ -47,7 +51,7 @@ class RunResult:
         test_metrics: Final test metrics, keyed with the ``test/`` prefix.
             Empty when no test dataset is configured.
         output_dir: Absolute path to the per-run output directory
-            (``<output_base_dir>/run_<run_idx:02d>``).
+            (``<output_base_dir>/run_<run_idx:02d>_seed<seed>``).
     """
 
     run_idx: int
@@ -64,8 +68,14 @@ class ExperimentsRunner:
 
     The runner takes a full Hydra ``DictConfig`` that contains both the usual
     training configuration and an ``experiments_runner`` block.  For each run
-    it strips that block, overrides the seed and the Lightning
-    ``default_root_dir``, and delegates to :func:`train`.
+    it strips that block, overrides the seed, adjusts the Lightning
+    ``default_root_dir``, and injects run identity into the logger before
+    delegating to :func:`train`.
+
+    After every completed run the runner writes a ``runner_state.json`` to
+    ``output_base_dir`` and, when ``save_summary`` is enabled, updates
+    ``summary.csv``.  Set ``resume: true`` to skip already-completed runs
+    on restart.
 
     Args:
         cfg: Full Hydra config including the ``experiments_runner`` sub-tree.
@@ -130,8 +140,9 @@ class ExperimentsRunner:
     def _build_run_cfg(self, run_idx: int, seed: int) -> Tuple[DictConfig, str]:
         """Build a training config for a single run.
 
-        Removes the ``experiments_runner`` block, sets the seed, and adjusts
-        ``pl_trainer.default_root_dir`` to an isolated per-run directory.
+        Removes the ``experiments_runner`` block, sets the seed, adjusts
+        ``pl_trainer.default_root_dir`` to an isolated per-run directory, and
+        injects the run identity into the configured logger (if any).
 
         Args:
             run_idx: Zero-based run index.
@@ -148,14 +159,49 @@ class ExperimentsRunner:
         OmegaConf.update(run_cfg, "seed", seed, merge=True)
 
         output_dir = os.path.join(
-            self.runner_cfg.output_base_dir, f"run_{run_idx:02d}"
+            self.runner_cfg.output_base_dir, f"run_{run_idx:02d}_seed{seed}"
         )
         if "pl_trainer" in run_cfg:
             OmegaConf.update(
                 run_cfg, "pl_trainer.default_root_dir", output_dir, merge=True
             )
 
+        self._inject_run_identity_into_logger(run_cfg, run_idx, seed)
+
         return run_cfg, output_dir
+
+    def _inject_run_identity_into_logger(
+        self, run_cfg: DictConfig, run_idx: int, seed: int
+    ) -> None:
+        """Stamp run_idx and seed into the logger config.
+
+        * If the logger has a ``version`` field (TensorBoardLogger, CSVLogger):
+          set it to ``"run_<idx:02d>_seed<seed>"``.
+        * If the logger has a ``name`` field but no ``version`` (WandbLogger):
+          append ``_run_<idx:02d>_seed<seed>`` to the name.
+        * If no ``logger`` key or logger is a plain bool (Lightning default):
+          do nothing.
+
+        Args:
+            run_cfg: Per-run config (already stripped of experiments_runner).
+            run_idx: Zero-based run index.
+            seed: Seed for this run.
+        """
+        if "logger" not in run_cfg:
+            return
+        logger_cfg = run_cfg.logger
+        # Plain bool → Lightning default logger, nothing to modify.
+        if not isinstance(logger_cfg, DictConfig):
+            return
+
+        run_tag = f"run_{run_idx:02d}_seed{seed}"
+        if "version" in logger_cfg:
+            OmegaConf.update(run_cfg, "logger.version", run_tag, merge=True)
+        elif "name" in logger_cfg:
+            current_name = OmegaConf.select(run_cfg, "logger.name")
+            OmegaConf.update(
+                run_cfg, "logger.name", f"{current_name}_{run_tag}", merge=True
+            )
 
     def _collect_metrics(
         self, trainer
@@ -173,6 +219,33 @@ class ExperimentsRunner:
         val_metrics = {k: v for k, v in all_metrics.items() if k.startswith("val/")}
         test_metrics = {k: v for k, v in all_metrics.items() if k.startswith("test/")}
         return train_metrics, val_metrics, test_metrics
+
+    # ------------------------------------------------------------------
+    # State persistence
+    # ------------------------------------------------------------------
+
+    def _state_path(self) -> str:
+        return os.path.join(self.runner_cfg.output_base_dir, _STATE_FILE)
+
+    def _save_state(self, all_seeds: List[int], results: List[RunResult]) -> None:
+        """Persist seed list and completed runs to ``runner_state.json``.
+
+        Args:
+            all_seeds: Full ordered seed list for the experiment sequence.
+            results: Completed :class:`RunResult` objects so far.
+        """
+        os.makedirs(self.runner_cfg.output_base_dir, exist_ok=True)
+        state = {
+            "all_seeds": all_seeds,
+            "completed_runs": [dataclasses.asdict(r) for r in results],
+        }
+        with open(self._state_path(), "w") as f:
+            json.dump(state, f, indent=2)
+
+    def _load_state(self) -> dict:
+        """Load state from ``runner_state.json``."""
+        with open(self._state_path()) as f:
+            return json.load(f)
 
     # ------------------------------------------------------------------
     # Core execution
@@ -222,22 +295,54 @@ class ExperimentsRunner:
         )
 
     def run(self) -> List[RunResult]:
-        """Run all experiments in series.
+        """Run all experiments in series, with optional resume support.
+
+        On each completed run the state is persisted to ``runner_state.json``
+        and ``summary.csv`` is updated (when ``save_summary`` is enabled).
+        When ``resume: true`` is set and a state file exists, already-completed
+        runs are skipped; seeds are loaded from the state file so
+        auto-generated seeds remain stable across restarts.
 
         Returns:
-            List of :class:`RunResult`, one per run, in execution order.
+            List of :class:`RunResult`, one per run, ordered by ``run_idx``.
         """
-        seeds = self._resolve_seeds()
-        results: List[RunResult] = []
+        resume = self.runner_cfg.get("resume", False)
+        state_exists = os.path.exists(self._state_path())
 
-        for run_idx, seed in enumerate(seeds):
+        if resume and state_exists:
+            state = self._load_state()
+            all_seeds = state["all_seeds"]
+            completed_results = [RunResult(**r) for r in state["completed_runs"]]
+            logger.info(
+                "ExperimentsRunner — resuming: %d/%d runs already complete.",
+                len(completed_results),
+                len(all_seeds),
+            )
+        else:
+            all_seeds = self._resolve_seeds()
+            completed_results = []
+
+        completed_indices = {r.run_idx for r in completed_results}
+        results: List[RunResult] = list(completed_results)
+
+        for run_idx, seed in enumerate(all_seeds):
+            if run_idx in completed_indices:
+                logger.info(
+                    "ExperimentsRunner — run %d (seed=%d) already done, skipping.",
+                    run_idx,
+                    seed,
+                )
+                continue
+
             result = self._run_single(run_idx, seed)
             results.append(result)
+            results_sorted = sorted(results, key=lambda r: r.run_idx)
 
-        if self.runner_cfg.get("save_summary", True):
-            self._save_summary(results)
+            self._save_state(all_seeds, results_sorted)
+            if self.runner_cfg.get("save_summary", True):
+                self._save_summary(results_sorted)
 
-        return results
+        return sorted(results, key=lambda r: r.run_idx)
 
     # ------------------------------------------------------------------
     # Summary CSV
@@ -285,7 +390,9 @@ class ExperimentsRunner:
         std_row: Dict = {
             "run": "std",
             "seed": "-",
-            "duration_s": _fmt(statistics.stdev(durations)) if len(durations) >= 2 else "0.000000",
+            "duration_s": (
+                _fmt(statistics.stdev(durations)) if len(durations) >= 2 else "0.000000"
+            ),
         }
 
         for k in all_metric_keys:

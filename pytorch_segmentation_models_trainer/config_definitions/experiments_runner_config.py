@@ -37,13 +37,18 @@ class ExperimentsRunnerConfig:
         seeds: Explicit seed list — one entry per run.  Determines the number
             of runs.  When absent, ``n_runs`` random seeds are generated.
         output_base_dir: Root directory for per-run outputs.  Each run writes
-            to ``<output_base_dir>/run_<idx:02d>/``.
+            to ``<output_base_dir>/run_<idx:02d>_seed<seed>/``.
         save_summary: When ``True`` (default) a ``summary.csv`` with per-run
-            metrics and mean ± std aggregation is written to
-            ``output_base_dir`` after all runs finish.
+            metrics and mean ± std aggregation is written incrementally to
+            ``output_base_dir`` after each run finishes.
         summary_metrics: Metric keys (as logged by Lightning, e.g.
             ``"val/loss"``) to highlight in log output.  All available
             metrics are always written to the CSV regardless of this list.
+        resume: When ``True`` and a ``runner_state.json`` exists in
+            ``output_base_dir``, already-completed runs are skipped and
+            execution continues from the first pending run.  Seeds are
+            loaded from the state file so auto-generated seeds are stable
+            across restarts.
 
     Example YAML:
 
@@ -53,6 +58,7 @@ class ExperimentsRunnerConfig:
           seeds: [42, 101, 28]
           output_base_dir: outputs/reproducibility_study
           save_summary: true
+          resume: false
           summary_metrics:
             - val/loss
             - val/F1Score
@@ -63,6 +69,7 @@ class ExperimentsRunnerConfig:
     output_base_dir: str = "outputs/experiments_runner"
     save_summary: bool = True
     summary_metrics: List[str] = field(default_factory=lambda: ["val/loss"])
+    resume: bool = False
 
 
 def _register_configs() -> None:

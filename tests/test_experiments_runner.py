@@ -5,6 +5,7 @@ Tests for ExperimentsRunner (TDD — written before implementation).
 Run with:
     uv run pytest tests/test_experiments_runner.py -v --tb=short
 """
+import json
 import os
 import shutil
 import tempfile
@@ -23,6 +24,7 @@ def _make_runner_cfg(
     output_base_dir=None,
     save_summary=False,
     summary_metrics=None,
+    resume=False,
     extra=None,
 ):
     """Build a minimal DictConfig that ExperimentsRunner accepts."""
@@ -33,6 +35,7 @@ def _make_runner_cfg(
         runner_block["n_runs"] = n_runs
     runner_block["save_summary"] = save_summary
     runner_block["summary_metrics"] = summary_metrics or ["val/loss"]
+    runner_block["resume"] = resume
     if extra:
         runner_block.update(extra)
 
@@ -167,11 +170,12 @@ class TestBuildRunCfg(BasicTestCase):
         run_cfg, _ = ExperimentsRunner(cfg)._build_run_cfg(0, 42)
         self.assertIn("mode", run_cfg)
 
-    def test_output_dir_ends_with_correct_run_folder(self):
+    def test_output_dir_contains_run_idx_and_seed(self):
         ExperimentsRunner = self._import()
         cfg = _make_runner_cfg(seeds=[42, 101], output_base_dir="/base/runs")
         _, output_dir = ExperimentsRunner(cfg)._build_run_cfg(1, 101)
-        self.assertTrue(output_dir.endswith("run_01"))
+        self.assertIn("run_01", output_dir)
+        self.assertIn("seed101", output_dir)
 
     def test_pl_trainer_default_root_dir_updated(self):
         ExperimentsRunner = self._import()
@@ -184,12 +188,65 @@ class TestBuildRunCfg(BasicTestCase):
         cfg = _make_runner_cfg(seeds=[42], output_base_dir="/base")
         _, output_dir = ExperimentsRunner(cfg)._build_run_cfg(0, 42)
         self.assertIn("run_00", output_dir)
+        self.assertIn("seed42", output_dir)
 
     def test_second_run_idx_formatted(self):
         ExperimentsRunner = self._import()
         cfg = _make_runner_cfg(seeds=[42, 99], output_base_dir="/base")
         _, output_dir = ExperimentsRunner(cfg)._build_run_cfg(9, 99)
         self.assertIn("run_09", output_dir)
+        self.assertIn("seed99", output_dir)
+
+
+class TestLoggerInjection(BasicTestCase):
+    """_build_run_cfg() must inject run identity into the configured logger."""
+
+    def _import(self):
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+        return ExperimentsRunner
+
+    def _make_cfg_with_logger(self, logger_block):
+        base = _make_runner_cfg(seeds=[42])
+        cfg_dict = OmegaConf.to_container(base, resolve=False)
+        cfg_dict["logger"] = logger_block
+        return OmegaConf.create(cfg_dict)
+
+    def test_version_field_set_to_run_tag(self):
+        ExperimentsRunner = self._import()
+        cfg = self._make_cfg_with_logger({
+            "_target_": "pytorch_lightning.loggers.TensorBoardLogger",
+            "save_dir": "logs",
+            "name": "my_exp",
+            "version": 0,
+        })
+        run_cfg, _ = ExperimentsRunner(cfg)._build_run_cfg(0, 42)
+        self.assertEqual(run_cfg.logger.version, "run_00_seed42")
+
+    def test_name_appended_when_no_version(self):
+        ExperimentsRunner = self._import()
+        cfg = self._make_cfg_with_logger({
+            "_target_": "pytorch_lightning.loggers.WandbLogger",
+            "name": "my_exp",
+            "project": "segmentation",
+        })
+        run_cfg, _ = ExperimentsRunner(cfg)._build_run_cfg(0, 42)
+        self.assertIn("run_00_seed42", run_cfg.logger.name)
+        self.assertTrue(run_cfg.logger.name.startswith("my_exp"))
+
+    def test_no_logger_in_cfg_no_crash(self):
+        ExperimentsRunner = self._import()
+        cfg = _make_runner_cfg(seeds=[42])
+        # Must not raise even without a logger block
+        run_cfg, _ = ExperimentsRunner(cfg)._build_run_cfg(0, 42)
+        self.assertNotIn("logger", run_cfg)
+
+    def test_lightning_default_logger_true_no_crash(self):
+        ExperimentsRunner = self._import()
+        cfg = self._make_cfg_with_logger(True)
+        run_cfg, _ = ExperimentsRunner(cfg)._build_run_cfg(0, 42)
+        self.assertEqual(run_cfg.logger, True)
 
 
 class TestCollectMetrics(BasicTestCase):
@@ -250,12 +307,13 @@ class TestRunMethod(BasicTestCase):
         super().setUp()
         self.tmp = self.make_temp_dir()
 
-    def _make_cfg(self, seeds=None, n_runs=None, save_summary=False, metrics=None):
+    def _make_cfg(self, seeds=None, n_runs=None, save_summary=False, resume=False):
         return _make_runner_cfg(
             seeds=seeds,
             n_runs=n_runs,
             output_base_dir=self.tmp,
             save_summary=save_summary,
+            resume=resume,
         )
 
     @patch(_TRAIN_PATH)
@@ -375,11 +433,12 @@ class TestRunMethod(BasicTestCase):
         self.assertIn("duration_s", header)
 
     @patch(_TRAIN_PATH)
-    def test_result_output_dir_matches_run_folder(self, mock_train):
+    def test_result_output_dir_contains_seed(self, mock_train):
         mock_train.return_value = _make_mock_trainer()
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import ExperimentsRunner
         results = ExperimentsRunner(self._make_cfg(seeds=[42])).run()
         self.assertIn("run_00", results[0].output_dir)
+        self.assertIn("seed42", results[0].output_dir)
 
     @patch(_TRAIN_PATH)
     def test_single_run_std_row_is_zero(self, mock_train):
@@ -391,3 +450,176 @@ class TestRunMethod(BasicTestCase):
         with open(os.path.join(self.tmp, "summary.csv")) as f:
             content = f.read()
         self.assertIn("std", content)
+
+    @patch(_TRAIN_PATH)
+    def test_summary_written_after_each_run(self, mock_train):
+        """summary.csv must exist after the first run, not just at the end."""
+        summaries_seen = []
+
+        def fake_train(cfg):
+            summaries_seen.append(
+                os.path.exists(os.path.join(self.tmp, "summary.csv"))
+            )
+            return _make_mock_trainer({"val/loss": 0.5})
+
+        mock_train.side_effect = fake_train
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import ExperimentsRunner
+        ExperimentsRunner(self._make_cfg(seeds=[42, 101], save_summary=True)).run()
+        # After run 0 completes, summary already exists when run 1 starts
+        self.assertTrue(summaries_seen[1], "summary.csv was not present before run 1 started")
+
+
+class TestStateFile(BasicTestCase):
+    """runner_state.json is written after each run and drives resume logic."""
+
+    def setUp(self):
+        super().setUp()
+        self.tmp = self.make_temp_dir()
+
+    def _make_cfg(self, seeds=None, n_runs=None, resume=False, save_summary=False):
+        return _make_runner_cfg(
+            seeds=seeds,
+            n_runs=n_runs,
+            output_base_dir=self.tmp,
+            save_summary=save_summary,
+            resume=resume,
+        )
+
+    @patch(_TRAIN_PATH)
+    def test_state_file_created_after_first_run(self, mock_train):
+        state_path = os.path.join(self.tmp, "runner_state.json")
+        state_snapshots = []
+
+        def fake_train(cfg):
+            state_snapshots.append(os.path.exists(state_path))
+            return _make_mock_trainer()
+
+        mock_train.side_effect = fake_train
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import ExperimentsRunner
+        ExperimentsRunner(self._make_cfg(seeds=[42, 101])).run()
+        # State file must exist before run 1 starts (written after run 0)
+        self.assertTrue(state_snapshots[1])
+
+    @patch(_TRAIN_PATH)
+    def test_state_file_contains_all_seeds(self, mock_train):
+        mock_train.return_value = _make_mock_trainer()
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import ExperimentsRunner
+        ExperimentsRunner(self._make_cfg(seeds=[42, 101, 28])).run()
+        with open(os.path.join(self.tmp, "runner_state.json")) as f:
+            state = json.load(f)
+        self.assertEqual(state["all_seeds"], [42, 101, 28])
+
+    @patch(_TRAIN_PATH)
+    def test_state_file_records_completed_runs(self, mock_train):
+        mock_train.return_value = _make_mock_trainer({"val/loss": 0.4})
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import ExperimentsRunner
+        ExperimentsRunner(self._make_cfg(seeds=[42, 101])).run()
+        with open(os.path.join(self.tmp, "runner_state.json")) as f:
+            state = json.load(f)
+        self.assertEqual(len(state["completed_runs"]), 2)
+        self.assertEqual(state["completed_runs"][0]["seed"], 42)
+        self.assertEqual(state["completed_runs"][1]["seed"], 101)
+
+    @patch(_TRAIN_PATH)
+    def test_state_file_preserves_auto_seeds_for_resume(self, mock_train):
+        """With n_runs, state file must store the generated seeds so resume uses them."""
+        mock_train.return_value = _make_mock_trainer()
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import ExperimentsRunner
+        ExperimentsRunner(self._make_cfg(n_runs=3)).run()
+        with open(os.path.join(self.tmp, "runner_state.json")) as f:
+            state = json.load(f)
+        self.assertEqual(len(state["all_seeds"]), 3)
+        self.assertEqual(len(state["completed_runs"]), 3)
+
+    @patch(_TRAIN_PATH)
+    def test_resume_skips_already_completed_runs(self, mock_train):
+        mock_train.return_value = _make_mock_trainer()
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner, RunResult,
+        )
+        # Pre-write a state file with run 0 completed
+        completed = RunResult(
+            run_idx=0, seed=42, training_time_seconds=10.0,
+            train_metrics={"train/loss": 0.2},
+            val_metrics={"val/loss": 0.4},
+            test_metrics={},
+            output_dir=os.path.join(self.tmp, "run_00_seed42"),
+        )
+        import dataclasses
+        state = {"all_seeds": [42, 101, 28], "completed_runs": [dataclasses.asdict(completed)]}
+        os.makedirs(self.tmp, exist_ok=True)
+        with open(os.path.join(self.tmp, "runner_state.json"), "w") as f:
+            json.dump(state, f)
+
+        cfg = self._make_cfg(seeds=[42, 101, 28], resume=True)
+        results = ExperimentsRunner(cfg).run()
+
+        # train() must only have been called for runs 1 and 2
+        self.assertEqual(mock_train.call_count, 2)
+        self.assertEqual(len(results), 3)
+
+    @patch(_TRAIN_PATH)
+    def test_resume_false_ignores_existing_state(self, mock_train):
+        mock_train.return_value = _make_mock_trainer()
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner, RunResult,
+        )
+        # Pre-write a complete state file
+        import dataclasses
+        completed = [
+            dataclasses.asdict(RunResult(
+                run_idx=i, seed=s, training_time_seconds=10.0,
+                train_metrics={}, val_metrics={"val/loss": 0.5},
+                test_metrics={}, output_dir=f"/tmp/run_{i:02d}_seed{s}",
+            ))
+            for i, s in enumerate([42, 101])
+        ]
+        state = {"all_seeds": [42, 101], "completed_runs": completed}
+        os.makedirs(self.tmp, exist_ok=True)
+        with open(os.path.join(self.tmp, "runner_state.json"), "w") as f:
+            json.dump(state, f)
+
+        cfg = self._make_cfg(seeds=[42, 101], resume=False)
+        ExperimentsRunner(cfg).run()
+
+        # resume=False → all runs re-executed
+        self.assertEqual(mock_train.call_count, 2)
+
+    @patch(_TRAIN_PATH)
+    def test_resume_uses_seeds_from_state_not_new_random(self, mock_train):
+        """When n_runs is used and we resume, seeds come from state file."""
+        mock_train.return_value = _make_mock_trainer()
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner, RunResult,
+        )
+        import dataclasses
+        fixed_seeds = [111111, 222222]
+        completed = [
+            dataclasses.asdict(RunResult(
+                run_idx=0, seed=111111, training_time_seconds=5.0,
+                train_metrics={}, val_metrics={"val/loss": 0.3},
+                test_metrics={}, output_dir=f"/tmp/run_00_seed111111",
+            ))
+        ]
+        state = {"all_seeds": fixed_seeds, "completed_runs": completed}
+        os.makedirs(self.tmp, exist_ok=True)
+        with open(os.path.join(self.tmp, "runner_state.json"), "w") as f:
+            json.dump(state, f)
+
+        # Use n_runs (would generate new random seeds) but resume=True
+        cfg = self._make_cfg(n_runs=2, resume=True)
+        results = ExperimentsRunner(cfg).run()
+
+        # Only run 1 should execute; its seed must be the one from state
+        self.assertEqual(mock_train.call_count, 1)
+        self.assertEqual(results[1].seed, 222222)
+
+    @patch(_TRAIN_PATH)
+    def test_resume_no_state_file_starts_fresh(self, mock_train):
+        """resume=True with no state file on disk must not crash."""
+        mock_train.return_value = _make_mock_trainer()
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import ExperimentsRunner
+        cfg = self._make_cfg(seeds=[42, 101], resume=True)
+        results = ExperimentsRunner(cfg).run()
+        self.assertEqual(mock_train.call_count, 2)
+        self.assertEqual(len(results), 2)

@@ -24,10 +24,11 @@
 # Output layout
 # ─────────────
 #   outputs/experiments_runner/
-#   ├── run_00/          ← pl_trainer checkpoints & logs for seed 42
-#   ├── run_01/          ← pl_trainer checkpoints & logs for seed 101
-#   ├── run_02/          ← pl_trainer checkpoints & logs for seed 28
-#   └── summary.csv      ← per-run metrics + mean ± std
+#   ├── run_00_seed42/   ← pl_trainer checkpoints & logs (seed visible in path)
+#   ├── run_01_seed101/
+#   ├── run_02_seed28/
+#   ├── runner_state.json ← written after each run; enables resume
+#   └── summary.csv       ← updated after each run; per-run metrics + mean ± std
 #
 # summary.csv columns
 # ───────────────────
@@ -49,6 +50,7 @@ experiments_runner:
   seeds: [42, 101, 28]
   output_base_dir: outputs/experiments_runner
   save_summary: true
+  resume: false          # set to true to skip already-completed runs on restart
   summary_metrics:
     - val/loss
     - val/F1Score
