@@ -26,3 +26,5 @@ CHANGELOG.md
 README.md
 Dockerfile
 docker-compose.yml
+pytorch_segmentation_models_trainer/custom_models/pretrained/
+pytorch_segmentation_models_trainer/custom_models/rnn/
