@@ -16,10 +16,19 @@ class DatasetDistillationConfig:
     device: str = "cuda"
     random_seed: int = 42
 
+    # DDOQ Specific
+    use_sqrt_heuristic: bool = True
+    adaptive_k: bool = False
+    k_min: int = 10
+    k_max: int = 1000
+    k_step: int = 50
+
     # Paths
     unlabeled_dataloader_config: Optional[str] = None
     checkpoint_path: Optional[str] = None
     output_indices_path: str = "medoid_indices.pt"
+    output_weights_path: str = "ddoq_weights.pt"
+    output_ddoq_results_path: str = "ddoq_results.pt"
 
 
 def register_dataset_distillation_configs():

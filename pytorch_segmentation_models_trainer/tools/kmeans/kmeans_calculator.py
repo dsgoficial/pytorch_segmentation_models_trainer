@@ -214,3 +214,77 @@ class MiniBatchKMeans:
             labels[i:end] = batch_labels.to(x.device)
 
         return labels
+
+
+def find_optimal_k_elbow_method(
+    latents: torch.Tensor,
+    k_min: int = 10,
+    k_max: int = 1000,
+    step: int = 50,
+    random_state: int = 42,
+) -> int:
+    """Encontra o K ótimo calculando a maior distância perpendicular à reta secante.
+
+    Args:
+        latents: Tensor de latents (N, D).
+        k_min: Valor mínimo de K.
+        k_max: Valor máximo de K.
+        step: Passo entre valores de K.
+        random_state: Semente aleatória para o KMeans.
+
+    Returns:
+        O valor de K correspondente ao 'cotovelo' da curva de inércia.
+    """
+    import numpy as np
+
+    k_values = list(range(k_min, k_max + 1, step))
+    inertias = []
+
+    # Se latents estiver na GPU, movemos para CPU para o loop do KMeans se for grande,
+    # ou usamos o MiniBatchKMeans implementado aqui se quisermos GPU.
+    # Por simplicidade e robustez com datasets grandes, usamos a classe interna.
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    for k in k_values:
+        kmeans = MiniBatchKMeans(
+            n_clusters=k, random_state=random_state, batch_size=2048, device=device
+        )
+        kmeans.fit(latents)
+
+        # Calcula inércia final (soma das distâncias quadradas ao centroide mais próximo)
+        # Usamos uma amostra ou o dataset todo dependendo do tamanho
+        total_inertia = 0
+        n_samples = latents.shape[0]
+        for i in range(0, n_samples, 2048):
+            end = min(i + 2048, n_samples)
+            batch = latents[i:end].to(device)
+            dist = torch.cdist(batch, kmeans.centroids, p=2)
+            min_dist, _ = torch.min(dist, dim=1)
+            total_inertia += torch.sum(min_dist.pow(2)).item()
+
+        inertias.append(total_inertia)
+
+    k_arr = np.array(k_values)
+    inertia_arr = np.array(inertias)
+
+    # Normalização [0, 1] para cálculo de distância geométrica
+    k_norm = (k_arr - k_arr.min()) / (k_arr.max() - k_arr.min() + 1e-8)
+    inertia_norm = (inertia_arr - inertia_arr.min()) / (
+        inertia_arr.max() - inertia_arr.min() + 1e-8
+    )
+
+    points = np.column_stack((k_norm, inertia_norm))
+    line_start, line_end = points[0], points[-1]
+
+    line_vector = line_end - line_start
+    point_vectors = points - line_start
+
+    # Distância perpendicular (Produto vetorial 2D simplificado)
+    # dist = |Ax * By - Ay * Bx| / |A|
+    cross_product = (line_vector[0] * point_vectors[:, 1]) - (
+        line_vector[1] * point_vectors[:, 0]
+    )
+    distances = np.abs(cross_product) / (np.linalg.norm(line_vector) + 1e-8)
+
+    optimal_idx = np.argmax(distances)
+    return int(k_values[optimal_idx])

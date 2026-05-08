@@ -27,7 +27,12 @@
 - Added `dataset_distillation.py` utilities for dataset distillation using Coreset of Medoids (Optimal Quantization).
 - Implemented `extract_all_latents` for high-throughput embedding extraction from trained Autoencoders.
 - Implemented `find_coreset_medoids` using K-Means and L2 distance (`torch.cdist`) to find representative real samples closest to cluster centroids.
-- Added `create_distilled_dataloader` for subsetting datasets based on medoid indices.
+- Added `KMeansClusteringTool` for orchestrating DDOQ pipelines, including OOM-safe Medoid search and Voronoi weight calculation.
+- Implemented **DDOQ (Dataset Distillation by Optimal Quantization)** with variance reduction heuristics (Square Root) and a toggle for Vanilla density weights.
+- Added `DDOQDistilledDataset` which returns the triplet `(image, mask, weight)`, supporting both hard-labels and teacher-generated soft-labels.
+- Added `StudentSegmentationModel` (`pl.LightningModule`) implementing the DDOQ weighted loss: `min_theta sum(w * Loss(x, y, theta))`.
+- Added support for **Adaptive K search** via the Elbow Method (Perpendicular Distance) in `kmeans_calculator.py`.
+- Added utilities to save and load DDOQ results (indices and weights).
 - Added `DatasetDistillationConfig` Hydra dataclass and registered it in the ConfigStore.
 - Added example configuration `conf/examples/dataset_distillation.yaml`.
 - Added user documentation in `website/docs/user-guide/dataset_distillation.md`.

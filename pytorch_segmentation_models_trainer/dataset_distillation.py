@@ -4,7 +4,8 @@ Dataset distillation utilities using Coreset of Medoids.
 Inspired by "Dataset Distillation as Pushforward Optimal Quantization".
 """
 
-from typing import List, Optional, Union
+import os
+from typing import Any, List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset, Subset
@@ -17,30 +18,129 @@ from pytorch_segmentation_models_trainer.tools.kmeans.kmeans_calculator import (
 )
 
 
+class KMeansClusteringTool:
+    """
+    Orchestrator for DDOQ (Dataset Distillation by Optimal Quantization).
+    Handles clustering, weight calculation (Voronoi weights), and Medoid search.
+    """
+
+    def __init__(self, n_clusters: int, device: torch.device):
+        self.n_clusters = n_clusters
+        self.device = device
+        self.model = None
+
+    def fit(self, latents: torch.Tensor, batch_size: int = 1024, max_iter: int = 100):
+        """Trains the MiniBatchKMeans model."""
+        self.model = MiniBatchKMeans(
+            n_clusters=self.n_clusters,
+            device=self.device,
+            random_state=42,
+            batch_size=batch_size,
+            max_iter=max_iter,
+        )
+        self.model.fit(latents)
+        return self
+
+    def get_cluster_weights(self, mode: str = "density") -> torch.Tensor:
+        """
+        Calculates cluster weights for Student training.
+
+        Args:
+            mode:
+                - "uniform": Classical K-Means coreset (all weights = 1.0).
+                - "density": Vanilla DDOQ (weights proportional to counts).
+                - "sqrt": Improved DDOQ (weights proportional to sqrt of counts).
+        """
+        if mode == "uniform":
+            # Classical K-Means: returns equal weights (1.0) without further processing.
+            return torch.ones(self.n_clusters)
+
+        if self.model is None or self.model.counts is None:
+            raise ValueError(
+                "Model must be fitted before calculating density-based weights."
+            )
+
+        counts = self.model.counts.clone().float().cpu()
+        if mode == "density":
+            weights = counts
+        elif mode == "sqrt":
+            weights = torch.sqrt(counts + 1e-8)
+        else:
+            raise ValueError(f"Invalid weight mode: {mode}")
+
+        # DDOQ Normalization: Ensures the average weight is 1.0.
+        # This keeps the Loss magnitude consistent across different modes and Coreset sizes (K),
+        # preserving the original gradient scale for the optimizer.
+        weights = (weights / (torch.sum(weights) + 1e-8)) * self.n_clusters
+        return weights
+
+    def get_medoids_from_dataloader(
+        self, dataloader: DataLoader
+    ) -> Tuple[List[int], List[float]]:
+        """
+        OOM-safe search for Medoids (real samples closest to centroids).
+
+        Returns:
+            A tuple containing (medoid_indices, medoid_weights).
+        """
+        if self.model is None or self.model.centroids is None:
+            raise ValueError("Model must be fitted before finding medoids.")
+
+        centroids = self.model.centroids.to(self.device)
+        min_distances = torch.full((self.n_clusters,), float("inf"), device=self.device)
+        medoid_indices = [-1] * self.n_clusters
+
+        # We assume the dataloader returns batches with an "index" or "id" field
+        # or we track the global index manually if shuffle=False.
+        global_idx = 0
+
+        with torch.no_grad():
+            for batch in tqdm(dataloader, desc="Finding medoids"):
+                if isinstance(batch, dict):
+                    emb = batch.get("embedding") or batch.get("latents")
+                    batch_ids = batch.get("id") or batch.get("index")
+                else:
+                    emb = batch
+                    batch_ids = None
+
+                if emb is None:
+                    continue
+
+                emb = emb.to(self.device).float()
+
+                # Calculate L2 distances (Batch_Size, K)
+                dist_matrix = torch.cdist(emb, centroids, p=2)
+
+                # Find closest samples in this batch for each centroid
+                batch_min_dist, batch_min_idx = torch.min(dist_matrix, dim=0)
+
+                for k in range(self.n_clusters):
+                    if batch_min_dist[k] < min_distances[k]:
+                        min_distances[k] = batch_min_dist[k]
+                        if batch_ids is not None:
+                            medoid_indices[k] = int(batch_ids[batch_min_idx[k].item()])
+                        else:
+                            medoid_indices[k] = global_idx + batch_min_idx[k].item()
+
+                global_idx += emb.shape[0]
+
+        return medoid_indices
+
+
 def extract_all_latents(
     model: pl.LightningModule, dataloader: DataLoader, device: torch.device
 ) -> torch.Tensor:
     """
     Extracts latents from all images in the dataloader using the model's encoder.
-
-    Args:
-        model: Trained PyTorch Lightning module (e.g., AutoencoderSystem).
-        dataloader: DataLoader containing unlabeled images.
-        device: Device to perform extraction on (e.g., 'cuda' or 'cpu').
-
-    Returns:
-        A CPU tensor of shape (N, latent_dim) where N is the total number of samples.
     """
     model.to(device)
     model.eval()
 
-    # Identify the inner model if it's a LightningModule wrapper
     inner_model = getattr(model, "model", model)
 
     latents = []
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Extracting latents"):
-            # Handle different batch formats (images, [images, masks], etc.)
             if isinstance(batch, (list, tuple)):
                 x = batch[0]
             elif isinstance(batch, dict):
@@ -53,7 +153,6 @@ def extract_all_latents(
 
             x = x.to(device)
 
-            # Extract features following GenericAutoencoder-like structure
             if hasattr(inner_model, "encoder"):
                 encoder = inner_model.encoder
                 if (
@@ -69,18 +168,14 @@ def extract_all_latents(
                         else features
                     )
             else:
-                # Fallback to model forward if no explicit encoder is found
                 z = inner_model(x)
 
-            # Apply latent projection if it exists (GenericAutoencoder uses this)
             if hasattr(inner_model, "latent_proj"):
                 z = inner_model.latent_proj(z)
 
-            # Global Average Pooling if the output is spatial (B, C, H, W)
             if z.ndim == 4:
                 z = torch.mean(z, dim=(2, 3))
             elif z.ndim == 3:
-                # Handle sequence models (B, L, C) -> (B, C)
                 z = torch.mean(z, dim=1)
 
             latents.append(z.cpu())
@@ -88,93 +183,14 @@ def extract_all_latents(
     return torch.cat(latents, dim=0)
 
 
-def find_coreset_medoids(
-    latents: torch.Tensor, num_clusters: int, device: torch.device
-) -> List[int]:
-    """
-    Performs K-Means clustering and finds the medoids (closest real samples to centroids).
-    Uses MiniBatchKMeans (GPU support) if a CUDA device is provided, otherwise falls back
-    to sklearn.cluster.KMeans on CPU.
-
-    Args:
-        latents: (N, latent_dim) tensor of embeddings.
-        num_clusters: Number of clusters to find (size of the coreset).
-        device: Device to perform distance calculations on.
-
-    Returns:
-        List of global dataset indices corresponding to the selected medoids.
-    """
-
-    if device.type == "cuda":
-        # Use custom GPU-optimized MiniBatchKMeans
-        kmeans = MiniBatchKMeans(
-            n_clusters=num_clusters,
-            device=device,
-            random_state=42,
-            batch_size=min(1024, latents.shape[0]),
-        )
-        kmeans.fit(latents)
-        centroids = kmeans.centroids
-        # Predict clusters for each latent vector
-        labels = kmeans.predict(latents).cpu().numpy()
-    else:
-        # Fallback to scikit-learn for CPU
-        from sklearn.cluster import KMeans
-
-        latents_np = latents.numpy()
-        kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init="auto")
-        labels = kmeans.fit_predict(latents_np)
-        centroids = torch.from_numpy(kmeans.cluster_centers_).to(device)
-
-    # Move latents and centroids to the specified device for fast distance calculation
-    latents_gpu = latents.to(device)
-    centroids = centroids.to(device)
-    medoid_indices = []
-
-    for i in range(num_clusters):
-        # Identify indices of latents belonging to this cluster
-        cluster_mask = labels == i
-        cluster_indices = np.where(cluster_mask)[0]
-
-        if len(cluster_indices) == 0:
-            continue
-
-        # Extract latents for this cluster
-        cluster_latents = latents_gpu[cluster_mask]
-        centroid = centroids[i].unsqueeze(0)  # Shape: (1, latent_dim)
-
-        # Calculate L2 distances between the centroid and all points in the cluster
-        dists = torch.cdist(centroid, cluster_latents)  # Shape: (1, N_cluster)
-
-        # Find the index of the point closest to the centroid within this cluster
-        local_min_idx = torch.argmin(dists).item()
-        global_min_idx = cluster_indices[local_min_idx]
-
-        medoid_indices.append(int(global_min_idx))
-
-    return medoid_indices
+def save_ddoq_results(indices: List[int], weights: torch.Tensor, output_path: str):
+    """Saves medoid indices and their Voronoi weights."""
+    data = {"indices": indices, "weights": weights.cpu().tolist()}
+    torch.save(data, output_path)
+    print(f"DDOQ results saved to {output_path}")
 
 
-def create_distilled_dataloader(
-    original_dataset: Dataset,
-    medoid_indices: List[int],
-    batch_size: int,
-    num_workers: int = 4,
-) -> DataLoader:
-    """
-    Creates a new DataLoader containing only the selected medoid samples.
-
-    Args:
-        original_dataset: The full unlabeled dataset.
-        medoid_indices: Indices of the selected medoid samples.
-        batch_size: Batch size for the new DataLoader.
-        num_workers: Number of workers for data loading.
-
-    Returns:
-        A PyTorch DataLoader serving the distilled dataset.
-    """
-    distilled_subset = Subset(original_dataset, medoid_indices)
-
-    return DataLoader(
-        distilled_subset, batch_size=batch_size, num_workers=num_workers, shuffle=False
-    )
+def load_ddoq_results(path: str) -> Tuple[List[int], torch.Tensor]:
+    """Loads medoid indices and Voronoi weights."""
+    data = torch.load(path)
+    return data["indices"], torch.tensor(data["weights"])

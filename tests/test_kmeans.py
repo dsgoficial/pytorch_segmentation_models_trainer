@@ -109,6 +109,20 @@ class TestMiniBatchKMeans(unittest.TestCase):
         self.assertIsNotNone(kmeans.centroids)
         self.assertEqual(kmeans.centroids.shape, (self.n_clusters, n_features))
 
+    def test_find_optimal_k_elbow_method(self):
+        """Testa se a busca adaptativa de K retorna um valor razoável."""
+        from pytorch_segmentation_models_trainer.tools.kmeans.kmeans_calculator import (
+            find_optimal_k_elbow_method,
+        )
+
+        # Usamos dados com 3 clusters claros
+        optimal_k = find_optimal_k_elbow_method(
+            self.data, k_min=2, k_max=10, step=1, random_state=42
+        )
+        # O 'cotovelo' deve estar próximo de 3
+        self.assertGreaterEqual(optimal_k, 2)
+        self.assertLessEqual(optimal_k, 5)
+
 
 class TestKMeansClusteringTool(unittest.TestCase):
     def setUp(self):
