@@ -46,6 +46,7 @@ from pytorch_segmentation_models_trainer.utils.object_detection_utils import (
     bbox_xywh_to_xyxy,
     bbox_xyxy_to_xywh,
 )
+from pytorch_segmentation_models_trainer.utils.dataframe_utils import read_dataframe
 from torch.utils.data import Dataset
 
 from pytorch_toolbelt.inference.tiles import ImageSlicer
@@ -114,11 +115,7 @@ class AbstractDataset(Dataset):
         if df is not None:
             self.df = df
         else:
-            self.df = (
-                pd.read_csv(input_csv_path)
-                if n_first_rows_to_read is None
-                else pd.read_csv(input_csv_path, nrows=n_first_rows_to_read)
-            )
+            self.df = read_dataframe(input_csv_path, nrows=n_first_rows_to_read)
         self.len = len(self.df)
         self.transform = (
             None

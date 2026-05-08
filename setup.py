@@ -50,14 +50,16 @@ EXTRAS = {
     #   pip install pytorch_segmentation_models_trainer[transformers]
     "transformers": [
         "transformers>=4.30.0",  # HuggingFace models (Segformer, Mask2Former, …)
-        "peft>=0.6.0",           # LoRA / adapter fine-tuning
-        "timm>=0.9.0",           # timm standalone encoder support
+        "peft>=0.6.0",  # LoRA / adapter fine-tuning
+        "timm>=0.9.0",  # timm standalone encoder support
         # terratorch is not on PyPI – install manually: pip install terratorch
     ],
     # Everything at once
     #   pip install pytorch_segmentation_models_trainer[all]
     "all": [
-        "pytest", "scikit-image", "parameterized",
+        "pytest",
+        "scikit-image",
+        "parameterized",
         "transformers>=4.30.0",
         "peft>=0.6.0",
         "timm>=0.9.0",
@@ -132,7 +134,8 @@ setup(
     packages=find_packages(exclude=("tests", "docs", "images", "examples")),
     entry_points={
         "console_scripts": [
-            "pytorch-smt=pytorch_segmentation_models_trainer.main:entry"
+            "pytorch-smt=pytorch_segmentation_models_trainer.main:entry",
+            "csv-to-parquet=pytorch_segmentation_models_trainer.tools.data_handlers.csv_to_parquet:main",
         ]
     },
     # If your package is a single module, use this instead of 'packages':

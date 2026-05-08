@@ -1,0 +1,19 @@
+# Example of using a Parquet file for dataset metadata
+# You can use the CLI tool 'csv-to-parquet' to convert your CSVs:
+# csv-to-parquet my_dataset.csv
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: data/train.parquet # Directly using .parquet
+  root_dir: data/images
+  augmentation_list:
+    - _target_: albumentations.RandomCrop
+      width: 512
+      height: 512
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: data/val.csv # CSV will be automatically cached as .cache.parquet
+  root_dir: data/images

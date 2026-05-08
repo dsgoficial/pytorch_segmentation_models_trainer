@@ -1,15 +1,12 @@
 # Unreleased
 
 ## Dataset
-- Added `CSVWindowedSegmentationDataset` (`pytorch_segmentation_models_trainer/dataset_loader/dataset.py`) for segmentation tasks that require reading specific patches from large images based on CSV coordinates. Useful in storage constrained scenarios where we want to test different samples and not to keep croping the original images.
-- Added `CSVWindowedImageDataset` (`pytorch_segmentation_models_trainer/dataset_loader/dataset.py`) for image-only tasks (no masks), supporting memory-efficient windowed reading from large GeoTIFFs.
-- It performs efficient windowed reading using `rasterio`, avoiding loading full images into memory.
-- Expected CSV columns (default): `image`, `mask`, `row_off`, `col_off`, `patch_size`.
-- Added 3 unit tests in `tests/test_csv_windowed_dataset.py`.
-- Added 3 unit tests in `tests/test_csv_windowed_image_dataset.py`.
-- Added `CSVWindowedDatasetConfig` and `CSVWindowedImageDatasetConfig` Hydra dataclasses and registered them in the ConfigStore.
-- Added user documentation in `website/docs/user-guide/dataset-csv-windowed.md`.
-- Added example configuration in `conf/examples/csv_windowed_segmentation.yaml` and `conf/examples/csv_windowed_image.yaml`.
+- Added Apache Parquet support for all datasets inheriting from `AbstractDataset`.
+- Implemented an automatic caching mechanism that converts `.csv` metadata files to `.cache.parquet` on the first run. Subsequent runs read the Parquet file if the CSV has not been modified, significantly improving metadata loading speed and memory efficiency.
+- Metadata files (e.g., `input_csv_path`) can now be provided directly as `.parquet` files.
+- Added a CLI tool `csv-to-parquet` for manual conversion of CSV datasets to Parquet (supports single files and recursive directory conversion).
+- Integrated `pyarrow` as a new dependency.
+- Added unit tests for Parquet reading, caching logic, and CLI tool in `tests/test_dataframe_utils.py`.
 
 ## Experiments Runner
 
