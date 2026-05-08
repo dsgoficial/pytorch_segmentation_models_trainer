@@ -1,0 +1,113 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: CSV Windowed Dataset (CSVWindowedSegmentationDataset) + SMP Unet
+# ──────────────────────────────────────────────────────────────────────────────
+# Uses CSVWindowedSegmentationDataset to read specific patches from large
+# GeoTIFFs based on coordinates defined in a CSV file.
+#
+# Key parameters in CSV:
+#   image      : Path to the original full-size image
+#   mask       : Path to the corresponding mask
+#   row_off    : Vertical offset of the patch start
+#   col_off    : Horizontal offset of the patch start
+#   patch_size : Size of the square patch to extract
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+backbone:
+  name: resnet34
+  input_width: 256
+  input_height: 256
+
+hyperparameters:
+  model_name: unet_resnet34_csv_windowed
+  backbone: resnet34
+  batch_size: 16
+  epochs: 50
+  max_lr: 1e-4
+  classes: 2
+
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet34
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: ${hyperparameters.classes}
+
+loss:
+  _target_: segmentation_models_pytorch.losses.DiceLoss
+  mode: multiclass
+  from_logits: true
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1e-4
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: ${hyperparameters.epochs}
+      eta_min: 1e-7
+    interval: epoch
+    frequency: 1
+
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+  precision: "16-mixed"
+
+# ── Datasets ──────────────────────────────────────────────────────────────────
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedSegmentationDataset
+  input_csv_path: /data/train_patches.csv
+  image_key: image
+  mask_key: mask
+  row_off_key: row_off
+  col_off_key: col_off
+  patch_size_key: patch_size
+  image_dtype: uint8
+  use_rasterio: true
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedSegmentationDataset
+  input_csv_path: /data/val_patches.csv
+  image_key: image
+  mask_key: mask
+  row_off_key: row_off
+  col_off_key: col_off
+  patch_size_key: patch_size
+  image_dtype: uint8
+  use_rasterio: true
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${hyperparameters.classes}

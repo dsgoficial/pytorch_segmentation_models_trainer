@@ -1,5 +1,16 @@
 # Unreleased
 
+## Dataset
+- Added `CSVWindowedSegmentationDataset` (`pytorch_segmentation_models_trainer/dataset_loader/dataset.py`) for segmentation tasks that require reading specific patches from large images based on CSV coordinates. Useful in storage constrained scenarios where we want to test different samples and not to keep croping the original images.
+- Added `CSVWindowedImageDataset` (`pytorch_segmentation_models_trainer/dataset_loader/dataset.py`) for image-only tasks (no masks), supporting memory-efficient windowed reading from large GeoTIFFs.
+- It performs efficient windowed reading using `rasterio`, avoiding loading full images into memory.
+- Expected CSV columns (default): `image`, `mask`, `row_off`, `col_off`, `patch_size`.
+- Added 3 unit tests in `tests/test_csv_windowed_dataset.py`.
+- Added 3 unit tests in `tests/test_csv_windowed_image_dataset.py`.
+- Added `CSVWindowedDatasetConfig` and `CSVWindowedImageDatasetConfig` Hydra dataclasses and registered them in the ConfigStore.
+- Added user documentation in `website/docs/user-guide/dataset-csv-windowed.md`.
+- Added example configuration in `conf/examples/csv_windowed_segmentation.yaml` and `conf/examples/csv_windowed_image.yaml`.
+
 ## Experiments Runner
 
 - Added `ExperimentsRunner` class (`tools/experiments_runner/experiments_runner.py`) that runs successive training experiments in series, each with an isolated seed and output directory.

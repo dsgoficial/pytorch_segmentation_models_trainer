@@ -28,9 +28,11 @@ torch.utils.data.Dataset
 ├── RasterPatchDataset          ← sliding-window, folder-based (no CSV)
 └── AbstractDataset             ← CSV / DataFrame-based
     ├── ImageDataset
+    │   ├── CSVWindowedImageDataset
     │   └── TiledInferenceImageDataset
     ├── SegmentationDataset
     │   ├── SegmentationDatasetFromFolder
+    │   ├── CSVWindowedSegmentationDataset
     │   └── FrameFieldSegmentationDataset
     ├── RandomCropSegmentationDataset
     ├── ObjectDetectionDataset
@@ -136,6 +138,43 @@ Base class for all datasets. Handles CSV loading, root directory resolution, and
 | `get_path` | `(idx, key=None, add_root_dir=True) -> str` | Returns the file path for item `idx` under the given CSV column key. |
 | `load_image` | `(idx, key=None, is_mask=False, force_rgb=False, is_binary_mask=True) -> np.ndarray` | Loads and returns a numpy array for the given item. |
 | `update_df` | `(new_df) -> None` | Replaces the internal DataFrame and updates `self.len`. |
+
+---
+
+## `CSVWindowedImageDataset`
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.dataset import CSVWindowedImageDataset
+```
+
+Extends `ImageDataset` to read specific patches from large images using `rasterio` windowed read. Coordinates (offsets) for each patch are read from the input CSV. Does not include masks.
+
+### Constructor Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `input_csv_path` | `Path \| str` | `None` | Path to the CSV file. |
+| `df` | `pd.DataFrame` | `None` | Pre-built DataFrame. |
+| `root_dir` | `Any` | `None` | Root directory for path resolution. |
+| `augmentation_list` | `Any` | `None` | Albumentations augmentation pipeline. |
+| `data_loader` | `Any` | `None` | DataLoader sub-configuration. |
+| `image_key` | `str` | `"image"` | CSV column for image paths. |
+| `row_off_key` | `str` | `"row_off"` | CSV column for vertical offset. |
+| `col_off_key` | `str` | `"col_off"` | CSV column for horizontal offset. |
+| `patch_size_key` | `str` | `"patch_size"` | CSV column for patch size. |
+| `n_first_rows_to_read` | `int` | `None` | Limit on rows to read. |
+| `selected_bands` | `Optional[List[int]]` | `None` | 1-based band indices to load. |
+| `use_rasterio` | `bool` | `True` | Forces rasterio for windowed read. |
+| `image_dtype` | `str` | `"uint8"` | Data type for rasterio-loaded images. |
+
+### `__getitem__` Returns
+
+`Dict[str, Any]` with keys:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `"image"` | `np.ndarray` or `torch.Tensor` | The loaded patch, optionally transformed. |
+| `"path"` | `str` | Absolute path to the source image file. |
 
 ---
 
@@ -285,6 +324,44 @@ Same as `SegmentationDataset`:
 |--------|-------------|
 | `_normalize_extension(ext)` | Ensures the extension starts with a dot. |
 | `_build_dataframe(image_folder, mask_folder, image_extension, mask_extension)` | Scans both folders recursively, matches pairs, and returns a `pd.DataFrame` with `image` and `mask` columns. Raises `ValueError` if no pairs are found. |
+
+---
+
+## `CSVWindowedSegmentationDataset`
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.dataset import CSVWindowedSegmentationDataset
+```
+
+Extends `SegmentationDataset` to read specific patches from large GeoTIFFs using `rasterio` windowed read. Coordinates (offsets) for each patch are read from the input CSV.
+
+### Constructor Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `input_csv_path` | `Path \| str` | `None` | Path to the CSV file. |
+| `df` | `pd.DataFrame` | `None` | Pre-built DataFrame (alternative to `input_csv_path`). |
+| `root_dir` | `Any` | `None` | Root directory for path resolution. |
+| `augmentation_list` | `Any` | `None` | Albumentations augmentation pipeline. |
+| `data_loader` | `Any` | `None` | DataLoader sub-configuration. |
+| `image_key` | `str` | `"image"` | CSV column for image paths. |
+| `mask_key` | `str` | `"mask"` | CSV column for mask paths. |
+| `row_off_key` | `str` | `"row_off"` | CSV column for vertical offset. |
+| `col_off_key` | `str` | `"col_off"` | CSV column for horizontal offset. |
+| `patch_size_key` | `str` | `"patch_size"` | CSV column for patch size. |
+| `n_classes` | `int` | `2` | Number of classes. If 2, mask is binarized (`> 0`). |
+| `selected_bands` | `Optional[List[int]]` | `None` | 1-based band indices to load via rasterio. |
+| `use_rasterio` | `bool` | `True` | Forces rasterio for windowed read. |
+| `image_dtype` | `str` | `"uint8"` | Data type for rasterio-loaded images. |
+
+### `__getitem__` Returns
+
+Same as `SegmentationDataset`:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `"image"` | `torch.Tensor` (C, H, W), float32 | Normalized image tensor. |
+| `"mask"` | `torch.Tensor` (H, W), int64 | Class-index mask. |
 
 ---
 

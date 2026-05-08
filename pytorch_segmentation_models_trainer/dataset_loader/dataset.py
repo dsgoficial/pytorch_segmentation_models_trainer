@@ -260,6 +260,97 @@ class ImageDataset(AbstractDataset):
         return result
 
 
+class CSVWindowedImageDataset(ImageDataset):
+    """Dataset de imagem que lê janelas (crops) específicas de imagens maiores,
+    baseando-se em offsets e tamanho de patch definidos em um arquivo CSV.
+    Não inclui máscaras.
+
+    Colunas esperadas no CSV (configuráveis):
+    - image: Caminho da imagem original.
+    - row_off: Offset vertical (linha) do patch.
+    - col_off: Offset horizontal (coluna) do patch.
+    - patch_size: Tamanho do patch (largura e altura).
+    """
+
+    def __init__(
+        self,
+        input_csv_path: Path = None,
+        df: Optional[pd.DataFrame] = None,
+        root_dir=None,
+        augmentation_list=None,
+        data_loader=None,
+        image_key="image",
+        row_off_key="row_off",
+        col_off_key="col_off",
+        patch_size_key="patch_size",
+        n_first_rows_to_read=None,
+        selected_bands: Optional[List[int]] = None,
+        use_rasterio: bool = True,
+        reset_augmentation_function: bool = False,
+        image_dtype: str = "uint8",
+    ) -> None:
+        super().__init__(
+            input_csv_path=input_csv_path,
+            df=df,
+            root_dir=root_dir,
+            augmentation_list=augmentation_list,
+            data_loader=data_loader,
+            image_key=image_key,
+            n_first_rows_to_read=n_first_rows_to_read,
+        )
+        self.row_off_key = row_off_key
+        self.col_off_key = col_off_key
+        self.patch_size_key = patch_size_key
+        self.selected_bands = selected_bands
+        self.use_rasterio = use_rasterio
+        self.reset_augmentation_function = reset_augmentation_function
+
+        if image_dtype not in _VALID_IMAGE_DTYPES:
+            raise ValueError(
+                f"image_dtype '{image_dtype}' é inválido. "
+                f"Valores aceitos: {sorted(_VALID_IMAGE_DTYPES)}"
+            )
+        self.image_dtype = image_dtype
+
+        # Validação de colunas
+        for col in [self.row_off_key, self.col_off_key, self.patch_size_key]:
+            if col not in self.df.columns:
+                raise ValueError(
+                    f"A coluna '{col}' é obrigatória no CSV/DataFrame para CSVWindowedImageDataset."
+                )
+
+    def load_image(
+        self,
+        idx: int,
+        key: str = None,
+        is_mask: bool = False,
+        force_rgb: bool = False,
+        is_binary_mask: bool = True,
+    ) -> np.ndarray:
+        idx = idx % self.len
+        row = self.df.iloc[idx]
+        image_path = self.get_path(idx, key=key)
+
+        window = rasterio.windows.Window(
+            col_off=row[self.col_off_key],
+            row_off=row[self.row_off_key],
+            width=row[self.patch_size_key],
+            height=row[self.patch_size_key],
+        )
+
+        with rasterio.open(image_path) as src:
+            # Sempre lê como imagem (pode ter múltiplas bandas)
+            data = (
+                src.read(window=window)
+                if self.selected_bands is None
+                else src.read(self.selected_bands, window=window)
+            )
+            image = np.transpose(data, (1, 2, 0)).copy()
+            if self.image_dtype == "native":
+                return image
+            return np.array(image, dtype=np.dtype(self.image_dtype))
+
+
 class AutoencoderDataset(ImageDataset):
     """
     Dataset for Autoencoder training.
@@ -719,6 +810,103 @@ class SegmentationDatasetFromFolder(SegmentationDataset):
             {"image": str(image_map[k]), "mask": str(mask_map[k])} for k in common_keys
         ]
         return pd.DataFrame(records)
+
+
+class CSVWindowedSegmentationDataset(SegmentationDataset):
+    """Dataset para segmentação que lê janelas (crops) específicas de imagens maiores,
+    baseando-se em offsets e tamanho de patch definidos em um arquivo CSV.
+
+    Colunas esperadas no CSV (configuráveis):
+    - image: Caminho da imagem original.
+    - mask: Caminho da máscara correspondente.
+    - row_off: Offset vertical (linha) do patch.
+    - col_off: Offset horizontal (coluna) do patch.
+    - patch_size: Tamanho do patch (largura e altura).
+    """
+
+    def __init__(
+        self,
+        input_csv_path: Path = None,
+        df: Optional[pd.DataFrame] = None,
+        root_dir=None,
+        augmentation_list=None,
+        data_loader=None,
+        image_key="image",
+        mask_key="mask",
+        row_off_key="row_off",
+        col_off_key="col_off",
+        patch_size_key="patch_size",
+        n_first_rows_to_read=None,
+        n_classes=2,
+        selected_bands: Optional[List[int]] = None,
+        use_rasterio: bool = True,
+        reset_augmentation_function: bool = False,
+        image_dtype: str = "uint8",
+    ) -> None:
+        super().__init__(
+            input_csv_path=input_csv_path,
+            df=df,
+            root_dir=root_dir,
+            augmentation_list=augmentation_list,
+            data_loader=data_loader,
+            image_key=image_key,
+            mask_key=mask_key,
+            n_first_rows_to_read=n_first_rows_to_read,
+            n_classes=n_classes,
+            selected_bands=selected_bands,
+            use_rasterio=use_rasterio,
+            reset_augmentation_function=reset_augmentation_function,
+            image_dtype=image_dtype,
+        )
+        self.row_off_key = row_off_key
+        self.col_off_key = col_off_key
+        self.patch_size_key = patch_size_key
+
+        # Validação de colunas
+        for col in [self.row_off_key, self.col_off_key, self.patch_size_key]:
+            if col not in self.df.columns:
+                raise ValueError(
+                    f"A coluna '{col}' é obrigatória no CSV/DataFrame para CSVWindowedSegmentationDataset."
+                )
+
+    def load_image(
+        self,
+        idx: int,
+        key: str = None,
+        is_mask: bool = False,
+        force_rgb: bool = False,
+        is_binary_mask: bool = True,
+    ) -> np.ndarray:
+        idx = idx % self.len
+        row = self.df.iloc[idx]
+        image_path = self.get_path(idx, key=key)
+
+        window = rasterio.windows.Window(
+            col_off=row[self.col_off_key],
+            row_off=row[self.row_off_key],
+            width=row[self.patch_size_key],
+            height=row[self.patch_size_key],
+        )
+
+        with rasterio.open(image_path) as src:
+            if is_mask:
+                # Máscara: lê a primeira banda e converte para uint8
+                data = src.read(1, window=window)
+                mask = data.astype(np.uint8)
+                if is_binary_mask:
+                    mask = (mask > 0).astype(np.uint8)
+                return mask
+            else:
+                # Imagem: lê as bandas selecionadas (ou todas)
+                data = (
+                    src.read(window=window)
+                    if self.selected_bands is None
+                    else src.read(self.selected_bands, window=window)
+                )
+                image = np.transpose(data, (1, 2, 0)).copy()
+                if self.image_dtype == "native":
+                    return image
+                return np.array(image, dtype=np.dtype(self.image_dtype))
 
 
 @contextlib.contextmanager

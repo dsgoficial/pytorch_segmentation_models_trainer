@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -85,9 +86,64 @@ class RasterPatchDatasetConfig:
 
 
 @dataclass
-class FrameFieldDatasetConfig(DatasetConfig):
-    _target_: str = "pytorch_segmentation_models_trainer.dataset_loader.dataset.FrameFieldSegmentationDataset"
-    return_distance_mask: str = "${loss_params.seg_loss_params.use_dist}"
-    return_size_mask: str = "${loss_params.seg_loss_params.use_size}"
-    image_width: str = "${backbone.input_width}"
-    image_height: str = "${backbone.input_height}"
+class CSVWindowedDatasetConfig(DatasetConfig):
+    """Configuração para CSVWindowedSegmentationDataset.
+
+    Lê patches específicos de imagens maiores baseando-se em offsets e tamanho
+    de patch definidos em um arquivo CSV. Útil para datasets onde os patches
+    foram pré-selecionados.
+
+    Exemplo de YAML::
+
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedSegmentationDataset
+          input_csv_path: patches.csv
+          image_key: image
+          mask_key: mask
+          row_off_key: row_off
+          col_off_key: col_off
+          patch_size_key: patch_size
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedSegmentationDataset"
+    )
+    image_key: str = "image"
+    mask_key: str = "mask"
+    row_off_key: str = "row_off"
+    col_off_key: str = "col_off"
+    patch_size_key: str = "patch_size"
+    n_classes: int = 2
+    selected_bands: Optional[List[int]] = None
+    use_rasterio: bool = True
+    reset_augmentation_function: bool = False
+
+
+@dataclass
+class CSVWindowedImageDatasetConfig(DatasetConfig):
+    """Configuração para CSVWindowedImageDataset.
+
+    Lê patches específicos de imagens maiores para tarefas de imagem pura
+    (sem máscara), baseando-se em offsets e tamanho de patch definidos em um CSV.
+
+    Exemplo de YAML::
+
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedImageDataset
+          input_csv_path: patches.csv
+          image_key: image
+          row_off_key: row_off
+          col_off_key: col_off
+          patch_size_key: patch_size
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedImageDataset"
+    )
+    image_key: str = "image"
+    row_off_key: str = "row_off"
+    col_off_key: str = "col_off"
+    patch_size_key: str = "patch_size"
+    selected_bands: Optional[List[int]] = None
+    use_rasterio: bool = True
+    reset_augmentation_function: bool = False
