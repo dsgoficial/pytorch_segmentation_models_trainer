@@ -19,6 +19,7 @@ from pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks import
     FrameFieldResultCallback,
     PolygonRNNResultCallback,
     ModPolyMapperResultCallback,
+    AutoencoderResultCallback,
 )
 
 
@@ -60,6 +61,36 @@ class TestImageCallbacks(unittest.TestCase):
 
         self.pl_module.val_dataloader.return_value = self.dataloader
         self.pl_module.side_effect = None  # Clear side effect
+
+    def test_autoencoder_result_callback(self):
+        # Mock dataset to return what AutoencoderDataset would return
+        self.dataset.__getitem__.side_effect = lambda i: {
+            "image": torch.zeros(3, 10, 10),
+            "target": torch.zeros(3, 10, 10),
+        }
+        self.dataset.__len__.return_value = 1
+
+        callback = AutoencoderResultCallback(n_samples=1)
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+
+        # Mock pl_module(image) call
+        self.pl_module.return_value = torch.zeros(1, 3, 10, 10)
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_fig = MagicMock()
+            mock_vis.return_value = (MagicMock(), mock_fig)
+
+            with patch.object(callback, "save_plot_to_disk", return_value="dummy.png"):
+                with patch.object(callback, "log_data_to_tensorboard"):
+                    callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+            mock_vis.assert_called_once()
+            # Check if input_image and reconstructed_image were passed to generate_visualization
+            args, kwargs = mock_vis.call_args
+            self.assertIn("input_image", kwargs)
+            self.assertIn("reconstructed_image", kwargs)
 
     def tearDown(self):
         shutil.rmtree(self.tmp_dir)

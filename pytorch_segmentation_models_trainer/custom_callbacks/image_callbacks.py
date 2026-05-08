@@ -1191,3 +1191,71 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         """Ensure executor is shut down when callback is destroyed."""
         if hasattr(self, "executor"):
             self.executor.shutdown(wait=False)
+
+
+class AutoencoderResultCallback(ImageSegmentationResultCallback):
+    """
+    Callback for Autoencoder visualization.
+    Saves and logs input vs reconstructed images.
+
+    Args:
+        n_samples: Number of samples to visualize.
+        output_path: Path to save outputs.
+        normalized_input: Whether input images are normalized.
+        norm_params: Normalization parameters (mean, std).
+        log_every_k_epochs: Frequency of logging.
+
+    Example YAML:
+        _target_: pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.AutoencoderResultCallback
+        n_samples: 8
+        log_every_k_epochs: 1
+    """
+
+    @rank_zero_only
+    def on_validation_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ):
+        if (
+            not self.save_outputs
+            or trainer.current_epoch % self.log_every_k_epochs != 0
+        ):
+            return
+
+        val_ds = pl_module.val_dataloader().dataset
+        device = pl_module.device
+        logger = trainer.logger
+        n_samples = (
+            pl_module.val_dataloader().batch_size
+            if self.n_samples is None
+            else self.n_samples
+        )
+
+        pl_module.eval()
+        for i in range(min(n_samples, len(val_ds))):
+            batch = val_ds[i]
+            image = batch["image"].unsqueeze(0).to(device)
+
+            with torch.no_grad():
+                reconstructed = pl_module(image)
+
+            image_cpu = image.squeeze(0).cpu().numpy()
+            reconstructed_cpu = reconstructed.squeeze(0).cpu().numpy()
+
+            plot_title = (
+                val_ds.get_path(i) if hasattr(val_ds, "get_path") else f"sample_{i}"
+            )
+
+            plt_result, fig = generate_visualization(
+                fig_title=plot_title,
+                input_image=self.prepare_image_to_plot(image_cpu),
+                reconstructed_image=self.prepare_image_to_plot(reconstructed_cpu),
+            )
+
+            if self.save_outputs:
+                saved_image = self.save_plot_to_disk(
+                    plt_result, plot_title, trainer.current_epoch
+                )
+                self.log_data_to_tensorboard(
+                    saved_image, plot_title, logger, trainer.current_epoch
+                )
+            plt.close(fig)

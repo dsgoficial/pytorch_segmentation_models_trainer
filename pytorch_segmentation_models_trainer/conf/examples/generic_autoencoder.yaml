@@ -85,3 +85,7 @@ pl_trainer:
   max_epochs: ${hyperparameters.epochs}
   accelerator: auto
   devices: 1
+  callbacks:
+    - _target_: pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.AutoencoderResultCallback
+      n_samples: 8
+      log_every_k_epochs: 1

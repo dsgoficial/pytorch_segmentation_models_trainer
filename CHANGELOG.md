@@ -45,7 +45,9 @@
 - Added `GenericAutoencoder` model supporting SMP and Transformers encoders.
 - Added `AutoencoderModel` LightningModule for image reconstruction tasks.
 - Added `AutoencoderDataset` for self-supervised learning and reconstruction.
+- Added `AutoencoderResultCallback` for side-by-side visualization of input and reconstructed images during validation.
 - Added example configuration `conf/examples/generic_autoencoder.yaml`.
+- Updated documentation in `website/docs/user-guide/generic_autoencoder.md`.
 
 # Version 1.1.0 - 2026-04-28
 

@@ -70,3 +70,15 @@ model:
 ```
 
 The model will automatically attempt to reshape the `last_hidden_state` into a 2D spatial map based on the number of tokens.
+
+## Monitoring and Visualization
+
+To monitor the reconstruction quality during training, you can use the `AutoencoderResultCallback`. This callback logs input and reconstructed images side-by-side to TensorBoard and saves them to the log directory.
+
+```yaml
+pl_trainer:
+  callbacks:
+    - _target_: pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.AutoencoderResultCallback
+      n_samples: 8           # Number of samples to visualize
+      log_every_k_epochs: 1  # How often to log visualizations
+```
