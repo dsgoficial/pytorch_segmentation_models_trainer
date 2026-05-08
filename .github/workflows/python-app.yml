@@ -101,14 +101,14 @@ jobs:
         uv run coverage report
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
-      if: always()
+      if: success()
       # see: https://github.com/actions/toolkit/issues/399
       continue-on-error: true
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         file: coverage.xml
-        flags: cpu,unittest,python${{ matrix.python-version }}
-        name: CPU-coverage
+        flags: main
+        name: main-coverage
         fail_ci_if_error: false
 
   # ── Transformer / foundation-model test suite ──────────────────────────────
@@ -186,11 +186,11 @@ jobs:
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
-      if: always()
+      if: success()
       continue-on-error: true
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         file: coverage.xml
-        flags: cpu,transformers,unittest
-        name: CPU-transformers-coverage
+        flags: transformers
+        name: transformers-coverage
         fail_ci_if_error: false

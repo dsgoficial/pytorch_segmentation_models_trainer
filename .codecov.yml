@@ -6,6 +6,28 @@ coverage:
   precision: 2
   round: down
   range: "70...100"
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+        # Use carryforward coverage if a report is missing in the current run
+        if_not_found: success
+        if_ci_failed: error
+    patch:
+      default:
+        target: auto
+        threshold: 0%
+
+flags:
+  main:
+    paths:
+      - pytorch_segmentation_models_trainer/
+    carryforward: true
+  transformers:
+    paths:
+      - pytorch_segmentation_models_trainer/
+    carryforward: true
 
 parsers:
   gcov:
