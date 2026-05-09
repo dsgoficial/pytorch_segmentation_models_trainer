@@ -71,7 +71,7 @@ class KMeansClusteringTool:
         # DDOQ Normalization: Ensures the average weight is 1.0.
         # This keeps the Loss magnitude consistent across different modes and Coreset sizes (K),
         # preserving the original gradient scale for the optimizer.
-        weights = (weights / (torch.sum(weights) + 1e-8)) * torch.sqrt(self.n_clusters).to(torch.float32)
+        weights = (weights / (torch.sum(weights) + 1e-8)) * torch.sqrt(torch.tensor(self.n_clusters))
         return weights
 
     def get_medoids_from_dataloader(
