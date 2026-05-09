@@ -68,10 +68,12 @@ class KMeansClusteringTool:
         else:
             raise ValueError(f"Invalid weight mode: {mode}")
 
-        # DDOQ Normalization: Ensures the average weight is 1.0.
+        # DDOQ Normalization: Scales weights so the average is 1/sqrt(K).
         # This keeps the Loss magnitude consistent across different modes and Coreset sizes (K),
         # preserving the original gradient scale for the optimizer.
-        weights = (weights / (torch.sum(weights) + 1e-8)) * torch.sqrt(torch.tensor(self.n_clusters))
+        weights = (weights / (torch.sum(weights) + 1e-8)) * torch.sqrt(
+            torch.tensor(self.n_clusters)
+        )
         return weights
 
     def get_medoids_from_dataloader(
@@ -97,8 +99,13 @@ class KMeansClusteringTool:
         with torch.no_grad():
             for batch in tqdm(dataloader, desc="Finding medoids"):
                 if isinstance(batch, dict):
-                    emb = batch.get("embedding") or batch.get("latents")
-                    batch_ids = batch.get("id") or batch.get("index")
+                    emb = batch.get("embedding")
+                    if emb is None:
+                        emb = batch.get("latents")
+
+                    batch_ids = batch.get("id")
+                    if batch_ids is None:
+                        batch_ids = batch.get("index")
                 else:
                     emb = batch
                     batch_ids = None
@@ -144,7 +151,9 @@ def extract_all_latents(
             if isinstance(batch, (list, tuple)):
                 x = batch[0]
             elif isinstance(batch, dict):
-                x = batch.get("image") or batch.get("x")
+                x = batch.get("image")
+                if x is None:
+                    x = batch.get("x")
             else:
                 x = batch
 
