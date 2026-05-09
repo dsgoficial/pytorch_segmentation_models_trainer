@@ -172,8 +172,8 @@ def compute_crossfield_to_plot(gt_crossfield_angle, crossfield_shape=None):
         else torch.zeros(crossfield_shape)
     )
 
-    crossfield[:, 0, :, :] = c0.real
-    crossfield[:, 1, :, :] = c0.imag
-    crossfield[:, 2, :, :] = c2.real
-    crossfield[:, 3, :, :] = c2.imag
+    crossfield[:, 0, :, :] = torch.from_numpy(c0.real)
+    crossfield[:, 1, :, :] = torch.from_numpy(c0.imag)
+    crossfield[:, 2, :, :] = torch.from_numpy(c2.real)
+    crossfield[:, 3, :, :] = torch.from_numpy(c2.imag)
     return crossfield

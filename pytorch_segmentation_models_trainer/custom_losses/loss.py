@@ -101,12 +101,18 @@ class SmoothCrossEntropyLoss(_WeightedLoss):
 
     def k_one_hot(self, targets: torch.Tensor, n_classes: int, smoothing=0.0):
         with torch.no_grad():
-            targets = (
-                torch.empty(size=(targets.size(0), n_classes), device=targets.device)
+            # Create one-hot tensor with same spatial dims as targets
+            # targets shape: (B, H, W) or (B,)
+            # targets_oh shape: (B, C, H, W) or (B, C)
+            out_shape = list(targets.shape)
+            out_shape.insert(1, n_classes)
+
+            targets_oh = (
+                torch.empty(size=out_shape, device=targets.device)
                 .fill_(smoothing / (n_classes - 1))
-                .scatter_(1, targets.data.unsqueeze(1), 1.0 - smoothing)
+                .scatter_(1, targets.unsqueeze(1), 1.0 - smoothing)
             )
-        return targets
+        return targets_oh
 
     def reduce_loss(self, loss, valid_mask=None):
         if valid_mask is not None:
@@ -114,9 +120,7 @@ class SmoothCrossEntropyLoss(_WeightedLoss):
         return (
             loss.mean()
             if self.reduction == "mean"
-            else loss.sum()
-            if self.reduction == "sum"
-            else loss
+            else loss.sum() if self.reduction == "sum" else loss
         )
 
     def forward(self, inputs, targets):
@@ -125,13 +129,16 @@ class SmoothCrossEntropyLoss(_WeightedLoss):
         valid_mask = targets != self.ignore_index
         targets_safe = torch.where(valid_mask, targets, 0)
 
-        targets_oh = self.k_one_hot(targets_safe, inputs.size(-1), self.smoothing)
-        log_preds = F.log_softmax(inputs, -1)
+        n_classes = inputs.size(1)
+        targets_oh = self.k_one_hot(targets_safe, n_classes, self.smoothing)
+        log_preds = F.log_softmax(inputs, dim=1)
 
         if self.weight is not None:
-            log_preds = log_preds * self.weight.unsqueeze(0)
+            # weight shape should be (C,)
+            weight = self.weight.view(1, n_classes, 1, 1)
+            log_preds = log_preds * weight
 
-        return self.reduce_loss(-(targets_oh * log_preds).sum(dim=-1), valid_mask)
+        return self.reduce_loss(-(targets_oh * log_preds).sum(dim=1), valid_mask)
 
 
 def smooth_cross_entropy_loss(

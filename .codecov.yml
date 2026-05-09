@@ -1,3 +1,4 @@
+# Codecov configuration
 codecov:
   require_ci_to_pass: yes
   after_n_builds: 2
@@ -5,13 +6,12 @@ codecov:
 coverage:
   precision: 2
   round: down
-  range: "70...100"
+  range: [70, 100]
   status:
     project:
       default:
         target: auto
         threshold: 1%
-        # Use carryforward coverage if a report is missing in the current run
         if_not_found: success
         if_ci_failed: error
     patch:
@@ -29,18 +29,11 @@ flags:
       - pytorch_segmentation_models_trainer/
     carryforward: true
 
-parsers:
-  gcov:
-    branch_detection:
-      conditional: yes
-      loop: yes
-      method: no
-      macro: no
-
 comment:
   layout: "reach,diff,flags,files,footer"
   behavior: default
   require_changes: no
 
 ignore:
-  - "*/tests/*"
+  - "**/tests/**"
+  - "**/__init__.py"
