@@ -20,6 +20,7 @@
  *   https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning/     *
  ****
 """
+
 import numpy as np
 import torch
 
@@ -63,10 +64,10 @@ def bilinear_interpolate(im, pos, batch=None):
         Ic = im[batch, :, y0_int, x1_int]
         Id = im[batch, :, y1_int, x1_int]
     else:
-        Ia = im[..., y0_int, x0_int].t()
-        Ib = im[..., y1_int, x0_int].t()
-        Ic = im[..., y0_int, x1_int].t()
-        Id = im[..., y1_int, x1_int].t()
+        Ia = im[..., y0_int, x0_int].squeeze(0).t()
+        Ib = im[..., y1_int, x0_int].squeeze(0).t()
+        Ic = im[..., y0_int, x1_int].squeeze(0).t()
+        Id = im[..., y1_int, x1_int].squeeze(0).t()
 
     wa = (x1.float() - x) * (y1.float() - y)
     wb = (x1.float() - x) * (y - y0.float())

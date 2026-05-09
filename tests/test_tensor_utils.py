@@ -32,6 +32,10 @@ from parameterized.parameterized import parameterized
 from pytorch_segmentation_models_trainer.utils.tensor_utils import (
     polygons_to_tensorpoly,
     tensorpoly_pad,
+    SpatialGradient,
+    get_scharr_kernel2d,
+    batch_to_cuda,
+    tensor_dict_to_device,
 )
 from tests.utils import BasicTestCase
 
@@ -119,3 +123,37 @@ class Test_TensorUtils(BasicTestCase):
                 ]
             ),
         )
+
+    def test_spatial_gradient(self):
+        input_tensor = torch.rand(1, 1, 10, 10)
+        grad_layer = SpatialGradient(mode="sobel", order=1)
+        output = grad_layer(input_tensor)
+        # Expected shape: (B, C, 2, H, W) for order 1
+        self.assertEqual(output.shape, (1, 1, 2, 10, 10))
+
+        grad_layer_2 = SpatialGradient(mode="sobel", order=2)
+        output_2 = grad_layer_2(input_tensor)
+        # Expected shape: (B, C, 3, H, W) for order 2
+        self.assertEqual(output_2.shape, (1, 1, 3, 10, 10))
+
+    def test_scharr_kernel(self):
+        kernel = get_scharr_kernel2d()
+        self.assertEqual(kernel.shape, (2, 3, 3))
+
+    def test_batch_to_cuda(self):
+        # Even if we don't have CUDA, we can test that it tries to call .cuda()
+        from unittest.mock import MagicMock
+
+        mock_tensor = MagicMock()
+        mock_tensor.cuda.return_value = "cuda_tensor"
+        batch = {"data": mock_tensor}
+        res = batch_to_cuda(batch)
+        self.assertEqual(res["data"], "cuda_tensor")
+
+    def test_tensor_dict_to_device(self):
+        from unittest.mock import MagicMock
+
+        mock_tensor = MagicMock()
+        tensor_dict = {"data": mock_tensor}
+        tensor_dict_to_device(tensor_dict, "cpu")
+        mock_tensor.to.assert_called_with("cpu")
