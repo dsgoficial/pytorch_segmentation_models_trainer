@@ -4,6 +4,7 @@
 
 Toda implementação deve incluir os itens abaixo antes de ser considerada concluída.
 Nós desenvolvemos usando TDD sempre.
+Novas funcionalidades devem ter 100% de coverage nos testes desenvolvidos.
 Não espere o usuário pedir cada um separadamente:
 
 1. **Testes unitários** em `tests/test_<módulo>.py` cobrindo:
