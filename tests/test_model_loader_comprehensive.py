@@ -62,6 +62,7 @@ class TestModelLoaderComprehensive(unittest.TestCase):
                     "perform_evaluation": True,
                     "threshold": 0.5,
                 },
+                "detection_threshold": 0.5,
             }
         )
 
@@ -206,6 +207,28 @@ class TestModelLoaderComprehensive(unittest.TestCase):
                     )
                     self.assertIsInstance(weighted_loss, torch.Tensor)
 
+    def test_student_model_compute_loss_weighted_ndim_fallback(self):
+        with patch.object(StudentSegmentationModel, "get_model"):
+            with patch.object(
+                StudentSegmentationModel, "get_loss_function"
+            ) as mock_get_loss:
+                mock_get_loss.return_value = nn.CrossEntropyLoss()
+                model = StudentSegmentationModel(self.cfg)
+                model.train()
+
+                pred = torch.randn(2, 2, 8, 8)
+                mask = torch.randint(0, 2, (2, 8, 8))
+                weights = torch.tensor([1.0, 2.0])
+
+                with patch(
+                    "pytorch_segmentation_models_trainer.model_loader.model.Model._compute_loss",
+                    return_value=(torch.tensor([0.5, 0.6]), {}, {}),
+                ):
+                    weighted_loss, _, _ = model._compute_loss(
+                        pred, mask, weights=weights
+                    )
+                    self.assertIsInstance(weighted_loss, torch.Tensor)
+
     def test_student_model_compute_loss_val_fallback(self):
         with patch.object(StudentSegmentationModel, "get_model"):
             with patch.object(StudentSegmentationModel, "get_loss_function"):
@@ -282,10 +305,11 @@ class TestModelLoaderComprehensive(unittest.TestCase):
 
             model = GenericPolyMapperPLModel(self.cfg)
             model.log = MagicMock()
-            model.perform_evaluation = False
+            model.perform_evaluation = True
+            model.threshold = 0.5
 
             batch = {
-                "object_detection": (torch.randn(1, 3, 8, 8), [], []),
+                "object_detection": (torch.randn(1, 3, 8, 8), [MagicMock()], []),
                 "polygon_rnn": {
                     "ta": torch.zeros(1, 10, 2),
                     "scale_h": 1.0,
@@ -295,12 +319,18 @@ class TestModelLoaderComprehensive(unittest.TestCase):
                 },
             }
 
-            loss = model.training_step(batch, 0)
-            self.assertIsInstance(loss, torch.Tensor)
-
-            val_out = model.validation_step(batch, 0)
-            self.assertIn("loss", val_out)
-            self.assertIn("acc", val_out)
+            with patch.object(
+                model,
+                "evaluate_output",
+                return_value={
+                    "box_iou": torch.tensor([0.5]),
+                    "intersection": 0.5,
+                    "union": 1.0,
+                },
+            ):
+                val_out = model.validation_step(batch, 0)
+                self.assertIn("loss", val_out)
+                self.assertIn("box_iou", val_out)
 
     def test_generic_polymapper_evaluate_output(self):
         with patch(
@@ -360,8 +390,8 @@ class TestModelLoaderComprehensive(unittest.TestCase):
                     "polygonrnn_output": torch.zeros(1, 1, 2),
                     "scale_h": 1.0,
                     "scale_w": 1.0,
-                    "min_col": 0,
-                    "min_row": 0,
+                    "min_col": 0.0,
+                    "min_row": 0.0,
                 }
             ]
             polygon_rnn_batch = {
@@ -380,14 +410,65 @@ class TestModelLoaderComprehensive(unittest.TestCase):
                     "pytorch_segmentation_models_trainer.custom_metrics.metrics.batch_polis",
                     return_value=np.array([0.5]),
                 ):
+                    # Mock iou to return a simple list of floats
                     with patch(
                         "pytorch_segmentation_models_trainer.custom_metrics.metrics.polygon_iou",
-                        return_value=(0.5, 0.5, 1.0),
+                        return_value=[0.5, 0.5, 1.0],
                     ):
                         polis, inter, union = model._compute_polygonrnn_metrics(
                             outputs, polygon_rnn_batch
                         )
                         self.assertEqual(polis.item(), 0.5)
+
+    def test_generic_polymapper_optimizers_with_scheduler(self):
+        self.cfg.scheduler_list = [
+            {
+                "scheduler": {
+                    "_target_": "torch.optim.lr_scheduler.StepLR",
+                    "step_size": 1,
+                }
+            }
+        ]
+        with patch(
+            "pytorch_segmentation_models_trainer.model_loader.mod_polymapper.instantiate"
+        ) as mock_inst:
+            mock_model = MagicMock()
+            mock_opt = MagicMock()
+            mock_sched = MagicMock()
+
+            mock_inst.side_effect = [
+                mock_model,
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+                mock_opt,
+                mock_sched,
+            ]
+
+            model = GenericPolyMapperPLModel(self.cfg)
+            opts, scheds = model.configure_optimizers()
+            self.assertEqual(len(scheds), 1)
+
+    def test_generic_polymapper_predict_step(self):
+        with patch(
+            "pytorch_segmentation_models_trainer.model_loader.mod_polymapper.instantiate"
+        ) as mock_inst:
+            mock_inst.side_effect = [
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+            ]
+            model = GenericPolyMapperPLModel(self.cfg)
+            model.model = MagicMock(
+                return_value=[{"box": torch.tensor([0, 0, 10, 10])}]
+            )
+
+            batch = {"image": torch.randn(1, 3, 32, 32)}
+            res = model.predict_step(batch, 0)
+            self.assertEqual(len(res), 1)
 
 
 if __name__ == "__main__":

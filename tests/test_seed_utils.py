@@ -184,6 +184,154 @@ class TestSeedIntegrationWithModel(BasicTestCase):
         v2 = torch.randint(0, 2**31 - 1, (5,), generator=gen2).tolist()
         self.assertEqual(v1, v2)
 
+    def test_model_init_calls_set_training_seed(self):
+        from omegaconf import OmegaConf
+        from pytorch_segmentation_models_trainer.model_loader.model import Model
+
+        cfg = OmegaConf.create(
+            {
+                "seed": 123,
+                "model": {"_target_": "torch.nn.Identity"},
+                "loss": {"_target_": "torch.nn.MSELoss"},
+            }
+        )
+        with patch(
+            "pytorch_segmentation_models_trainer.model_loader.model.set_training_seed"
+        ) as mock_seed:
+            # We only want to test the seed call, so we can mock get_model and get_loss_function if needed
+            # but let's try to let it run as much as possible with Identity model.
+            with (
+                patch.object(Model, "get_model"),
+                patch.object(Model, "get_loss_function"),
+            ):
+                Model(cfg)
+            mock_seed.assert_called_once_with(123, deterministic_cudnn=False)
+
+
+class TestSeedIntegrationEndToEnd(BasicTestCase):
+    """End-to-End tests to verify that seed actually produces deterministic results."""
+
+    def test_model_weights_determinism(self):
+        """Verifies that the same seed produces the same initial model weights."""
+        from omegaconf import OmegaConf
+        from pytorch_segmentation_models_trainer.model_loader.model import Model
+
+        cfg = OmegaConf.create(
+            {
+                "seed": 42,
+                "model": {
+                    "_target_": "torch.nn.Conv2d",
+                    "in_channels": 3,
+                    "out_channels": 16,
+                    "kernel_size": 3,
+                },
+                "loss": {"_target_": "torch.nn.CrossEntropyLoss"},
+            }
+        )
+
+        # Instance A with seed 42
+        model_a = Model(cfg)
+        weights_a = [p.clone().detach() for p in model_a.parameters()]
+
+        # Instance B with seed 42
+        model_b = Model(cfg)
+        weights_b = [p.clone().detach() for p in model_b.parameters()]
+
+        # Instance C with seed 99
+        cfg_c = cfg.copy()
+        cfg_c.seed = 99
+        model_c = Model(cfg_c)
+        weights_c = [p.clone().detach() for p in model_c.parameters()]
+
+        # Assertions
+        for wa, wb in zip(weights_a, weights_b):
+            self.assertTrue(torch.equal(wa, wb), "Weights A and B must be identical")
+
+        different = False
+        for wa, wc in zip(weights_a, weights_c):
+            if not torch.equal(wa, wc):
+                different = True
+                break
+        self.assertTrue(different, "Weights A and C must be different")
+
+    def test_dataloader_determinism_with_augmentation(self):
+        """Verifies that the same seed produces the same augmented batches."""
+        from omegaconf import OmegaConf
+        import albumentations as A
+        from pytorch_segmentation_models_trainer.model_loader.model import Model
+        from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
+            ImageDataset,
+        )
+        import pandas as pd
+        import numpy as np
+
+        # Create dummy data
+        dummy_img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+        import cv2
+
+        os.makedirs("tests/testing_data/dummy_seed_test", exist_ok=True)
+        cv2.imwrite("tests/testing_data/dummy_seed_test/img.png", dummy_img)
+
+        df = pd.DataFrame({"image": ["tests/testing_data/dummy_seed_test/img.png"]})
+
+        # Config with random augmentation
+        # Using allow_objects=True to support DataFrame in OmegaConf
+        cfg = OmegaConf.create(
+            {
+                "seed": 42,
+                "model": {
+                    "_target_": "torch.nn.Conv2d",
+                    "in_channels": 3,
+                    "out_channels": 3,
+                    "kernel_size": 1,
+                },
+                "loss": {"_target_": "torch.nn.MSELoss"},
+                "hyperparameters": {"batch_size": 1},
+                "train_dataset": {
+                    "_target_": "pytorch_segmentation_models_trainer.dataset_loader.dataset.ImageDataset",
+                    "df": df,
+                    "augmentation_list": [
+                        {
+                            "_target_": "albumentations.RandomCrop",
+                            "height": 50,
+                            "width": 50,
+                        },
+                        {"_target_": "albumentations.pytorch.ToTensorV2"},
+                    ],
+                    "data_loader": {
+                        "num_workers": 0,
+                        "shuffle": False,
+                        "pin_memory": False,
+                        "drop_last": False,
+                        "persistent_workers": False,
+                    },
+                },
+            },
+            flags={"allow_objects": True},
+        )
+
+        # Get batch from instance A
+        # No need to call set_training_seed manually, Model(cfg) does it.
+        model_a = Model(cfg)
+        w1 = next(model_a.parameters()).sum().item()
+        loader_a = model_a.train_dataloader()
+        batch_a = next(iter(loader_a))
+
+        # Get batch from instance B
+        model_b = Model(cfg)
+        w2 = next(model_b.parameters()).sum().item()
+        loader_b = model_b.train_dataloader()
+        batch_b = next(iter(loader_b))
+
+        # Assertions
+        self.assertEqual(
+            w1, w2, "Model weights should be identical after same seed in cfg"
+        )
+        self.assertTrue(
+            torch.equal(batch_a["image"], batch_b["image"]),
+            "Augmented images must be identical with same seed in cfg",
+        )
+
 
 class TestTrainCallsSeedUtils(BasicTestCase):
     """train() must call set_training_seed before Model instantiation."""
@@ -193,9 +341,12 @@ class TestTrainCallsSeedUtils(BasicTestCase):
         from omegaconf import OmegaConf
         from unittest.mock import MagicMock, patch
 
-        with patch.object(
-            train_module, "set_training_seed", return_value=torch.Generator()
-        ) as mock_seed, patch.object(train_module, "Trainer", MagicMock()):
+        with (
+            patch.object(
+                train_module, "set_training_seed", return_value=torch.Generator()
+            ) as mock_seed,
+            patch.object(train_module, "Trainer", MagicMock()),
+        ):
             cfg = OmegaConf.create({"seed": 42, "deterministic_cudnn": False})
             try:
                 train_module.train(cfg)
@@ -208,8 +359,9 @@ class TestTrainCallsSeedUtils(BasicTestCase):
         from omegaconf import OmegaConf
         from unittest.mock import MagicMock, patch
 
-        with patch.object(train_module, "set_training_seed") as mock_seed, patch.object(
-            train_module, "Trainer", MagicMock()
+        with (
+            patch.object(train_module, "set_training_seed") as mock_seed,
+            patch.object(train_module, "Trainer", MagicMock()),
         ):
             cfg = OmegaConf.create(
                 {"hyperparameters": {"batch_size": 1, "epochs": 1, "max_lr": 0.001}}

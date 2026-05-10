@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 import logging
 import pytorch_lightning as pl
 import torchmetrics
@@ -29,6 +30,7 @@ from torch.utils.data import DataLoader
 
 from typing import Any, List, Optional, Union, Dict, Tuple
 from pytorch_segmentation_models_trainer.utils.model_utils import replace_activation
+from pytorch_segmentation_models_trainer.utils.seed_utils import set_training_seed
 from pytorch_segmentation_models_trainer.custom_losses.base_loss import MultiLoss
 from pytorch_segmentation_models_trainer.fine_tuning.lora_utils import (
     apply_fine_tuning_strategy,
@@ -39,7 +41,6 @@ from pytorch_segmentation_models_trainer.tools.tta.tta import (
     apply_tta,
 )
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import _worker_init_fn
-from pytorch_segmentation_models_trainer.utils.seed_utils import set_training_seed
 
 logger = logging.getLogger(__name__)
 
@@ -50,21 +51,28 @@ class Model(pl.LightningModule):
     def __init__(self, cfg, inference_mode=False):
         super(Model, self).__init__()
         self.cfg = cfg
+
+        seed = self.cfg.get("seed", None)
+        if seed is not None:
+            set_training_seed(
+                seed, deterministic_cudnn=self.cfg.get("deterministic_cudnn", False)
+            )
+
         self.model = self.get_model()
         if inference_mode:
             return
         self.train_ds = (
-            instantiate(self.cfg.train_dataset, _recursive_=False)
+            instantiate(self.cfg.train_dataset, seed=seed, _recursive_=False)
             if "train_dataset" in self.cfg
             else None
         )
         self.val_ds = (
-            instantiate(self.cfg.val_dataset, _recursive_=False)
+            instantiate(self.cfg.val_dataset, seed=seed, _recursive_=False)
             if "val_dataset" in self.cfg
             else None
         )
         self.test_ds = (
-            instantiate(self.cfg.test_dataset, _recursive_=False)
+            instantiate(self.cfg.test_dataset, seed=seed, _recursive_=False)
             if "test_dataset" in self.cfg
             else None
         )
@@ -636,7 +644,11 @@ class Model(pl.LightningModule):
         """Return prefetch_factor or None when num_workers=0 (PyTorch requirement)."""
         if num_workers == 0:
             return None
-        return data_loader_cfg.prefetch_factor if "prefetch_factor" in data_loader_cfg else 2
+        return (
+            data_loader_cfg.prefetch_factor
+            if "prefetch_factor" in data_loader_cfg
+            else 2
+        )
 
     def _make_dataloader_generator(self) -> Optional[torch.Generator]:
         """Return a seeded Generator when cfg.seed is present, else None."""
@@ -654,16 +666,24 @@ class Model(pl.LightningModule):
             batch_size=self.cfg.hyperparameters.batch_size,
             shuffle=self.cfg.train_dataset.data_loader.shuffle,
             num_workers=num_workers,
-            pin_memory=self.cfg.train_dataset.data_loader.pin_memory
-            if "pin_memory" in self.cfg.train_dataset.data_loader
-            else True,
-            drop_last=self.cfg.train_dataset.data_loader.drop_last
-            if "drop_last" in self.cfg.train_dataset.data_loader
-            else True,
-            prefetch_factor=self._prefetch_factor(self.cfg.train_dataset.data_loader, num_workers),
-            persistent_workers=self.cfg.train_dataset.data_loader.persistent_workers
-            if "persistent_workers" in self.cfg.train_dataset.data_loader
-            else False,
+            pin_memory=(
+                self.cfg.train_dataset.data_loader.pin_memory
+                if "pin_memory" in self.cfg.train_dataset.data_loader
+                else True
+            ),
+            drop_last=(
+                self.cfg.train_dataset.data_loader.drop_last
+                if "drop_last" in self.cfg.train_dataset.data_loader
+                else True
+            ),
+            prefetch_factor=self._prefetch_factor(
+                self.cfg.train_dataset.data_loader, num_workers
+            ),
+            persistent_workers=(
+                self.cfg.train_dataset.data_loader.persistent_workers
+                if "persistent_workers" in self.cfg.train_dataset.data_loader
+                else False
+            ),
             worker_init_fn=_worker_init_fn,
             generator=self._make_dataloader_generator(),
         )
@@ -675,20 +695,30 @@ class Model(pl.LightningModule):
         return DataLoader(
             self.val_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
-            shuffle=self.cfg.val_dataset.data_loader.shuffle
-            if "shuffle" in self.cfg.val_dataset.data_loader
-            else False,
+            shuffle=(
+                self.cfg.val_dataset.data_loader.shuffle
+                if "shuffle" in self.cfg.val_dataset.data_loader
+                else False
+            ),
             num_workers=num_workers,
-            pin_memory=self.cfg.val_dataset.data_loader.pin_memory
-            if "pin_memory" in self.cfg.val_dataset.data_loader
-            else True,
-            drop_last=self.cfg.val_dataset.data_loader.drop_last
-            if "drop_last" in self.cfg.val_dataset.data_loader
-            else False,
-            prefetch_factor=self._prefetch_factor(self.cfg.val_dataset.data_loader, num_workers),
-            persistent_workers=self.cfg.val_dataset.data_loader.persistent_workers
-            if "persistent_workers" in self.cfg.val_dataset.data_loader
-            else False,
+            pin_memory=(
+                self.cfg.val_dataset.data_loader.pin_memory
+                if "pin_memory" in self.cfg.val_dataset.data_loader
+                else True
+            ),
+            drop_last=(
+                self.cfg.val_dataset.data_loader.drop_last
+                if "drop_last" in self.cfg.val_dataset.data_loader
+                else False
+            ),
+            prefetch_factor=self._prefetch_factor(
+                self.cfg.val_dataset.data_loader, num_workers
+            ),
+            persistent_workers=(
+                self.cfg.val_dataset.data_loader.persistent_workers
+                if "persistent_workers" in self.cfg.val_dataset.data_loader
+                else False
+            ),
             worker_init_fn=_worker_init_fn,
             generator=self._make_dataloader_generator(),
         )
@@ -700,20 +730,30 @@ class Model(pl.LightningModule):
         return DataLoader(
             self.test_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
-            shuffle=self.cfg.test_dataset.data_loader.shuffle
-            if "shuffle" in self.cfg.test_dataset.data_loader
-            else False,
+            shuffle=(
+                self.cfg.test_dataset.data_loader.shuffle
+                if "shuffle" in self.cfg.test_dataset.data_loader
+                else False
+            ),
             num_workers=num_workers,
-            pin_memory=self.cfg.test_dataset.data_loader.pin_memory
-            if "pin_memory" in self.cfg.test_dataset.data_loader
-            else True,
-            drop_last=self.cfg.test_dataset.data_loader.drop_last
-            if "drop_last" in self.cfg.test_dataset.data_loader
-            else False,
-            prefetch_factor=self._prefetch_factor(self.cfg.test_dataset.data_loader, num_workers),
-            persistent_workers=self.cfg.test_dataset.data_loader.persistent_workers
-            if "persistent_workers" in self.cfg.test_dataset.data_loader
-            else False,
+            pin_memory=(
+                self.cfg.test_dataset.data_loader.pin_memory
+                if "pin_memory" in self.cfg.test_dataset.data_loader
+                else True
+            ),
+            drop_last=(
+                self.cfg.test_dataset.data_loader.drop_last
+                if "drop_last" in self.cfg.test_dataset.data_loader
+                else False
+            ),
+            prefetch_factor=self._prefetch_factor(
+                self.cfg.test_dataset.data_loader, num_workers
+            ),
+            persistent_workers=(
+                self.cfg.test_dataset.data_loader.persistent_workers
+                if "persistent_workers" in self.cfg.test_dataset.data_loader
+                else False
+            ),
             generator=self._make_dataloader_generator(),
         )
 
@@ -989,16 +1029,24 @@ class Model(pl.LightningModule):
         # Compute and log metrics
         metrics_attr = f"{prefix}_metrics"
         if hasattr(self, metrics_attr):
-            preds_for_metrics = self._prepare_preds_for_metrics(predicted_masks_for_metrics)
+            preds_for_metrics = self._prepare_preds_for_metrics(
+                predicted_masks_for_metrics
+            )
             if preds_for_metrics is not None:
                 metrics = getattr(self, metrics_attr)(preds_for_metrics, hard_masks)
                 self.log_dict(
-                    metrics, on_step=is_train, on_epoch=True, prog_bar=False, sync_dist=True
+                    metrics,
+                    on_step=is_train,
+                    on_epoch=True,
+                    prog_bar=False,
+                    sync_dist=True,
                 )
 
         # Per-class IoU (validation only)
         if not is_train and self._per_class_iou is not None:
-            preds_for_metrics = self._prepare_preds_for_metrics(predicted_masks_for_metrics)
+            preds_for_metrics = self._prepare_preds_for_metrics(
+                predicted_masks_for_metrics
+            )
             per_class = self._per_class_iou(preds_for_metrics, hard_masks)
             for i, name in enumerate(self._class_names):
                 self.log(

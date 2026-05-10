@@ -74,8 +74,10 @@ def _sanitize_aug_config(cfg):
     return container
 
 
-def load_augmentation_object(input_list, bbox_params=None):
+def load_augmentation_object(input_list, bbox_params=None, seed=None):
     if isinstance(input_list, A.Compose):
+        if seed is not None:
+            input_list.set_random_seed(seed)
         return input_list
     try:
         # Convert to primitive dict to avoid OmegaConf/Albumentations compatibility issues
@@ -90,10 +92,12 @@ def load_augmentation_object(input_list, bbox_params=None):
     except Exception as e:
         aug_list = input_list
     if bbox_params is None:
-        return A.Compose(aug_list)
+        return A.Compose(aug_list, seed=seed)
     if isinstance(bbox_params, A.BboxParams):
-        return A.Compose(aug_list, bbox_params=bbox_params)
-    return A.Compose(aug_list, bbox_params=OmegaConf.to_container(bbox_params))
+        return A.Compose(aug_list, bbox_params=bbox_params, seed=seed)
+    return A.Compose(
+        aug_list, bbox_params=OmegaConf.to_container(bbox_params), seed=seed
+    )
 
 
 class AbstractDataset(Dataset):
@@ -107,6 +111,7 @@ class AbstractDataset(Dataset):
         image_key=None,
         mask_key=None,
         n_first_rows_to_read=None,
+        seed=None,
     ) -> None:
         if input_csv_path is None and df is None:
             raise ValueError("Must provide either input_csv_path or df")
@@ -120,7 +125,7 @@ class AbstractDataset(Dataset):
         self.transform = (
             None
             if augmentation_list is None
-            else load_augmentation_object(augmentation_list)
+            else load_augmentation_object(augmentation_list, seed=seed)
         )
         self.data_loader = data_loader
         self.image_key = image_key if image_key is not None else "image"
@@ -212,6 +217,7 @@ class ImageDataset(AbstractDataset):
         data_loader=None,
         image_key=None,
         n_first_rows_to_read=None,
+        seed=None,
     ) -> None:
         super(ImageDataset, self).__init__(
             input_csv_path=input_csv_path,
@@ -221,6 +227,7 @@ class ImageDataset(AbstractDataset):
             data_loader=data_loader,
             image_key=image_key,
             n_first_rows_to_read=n_first_rows_to_read,
+            seed=seed,
         )
 
     @classmethod
@@ -529,6 +536,7 @@ class SegmentationDataset(AbstractDataset):
         use_rasterio: bool = False,
         reset_augmentation_function: bool = False,
         image_dtype: str = "uint8",
+        seed=None,
     ) -> None:
         super(SegmentationDataset, self).__init__(
             input_csv_path=input_csv_path,
@@ -539,6 +547,7 @@ class SegmentationDataset(AbstractDataset):
             image_key=image_key,
             mask_key=mask_key,
             n_first_rows_to_read=n_first_rows_to_read,
+            seed=seed,
         )
         self.n_classes = n_classes
         self.selected_bands = selected_bands
@@ -2395,6 +2404,7 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
         image_width=224,
         image_height=224,
         gpu_augmentation_list=None,
+        seed=None,
     ) -> None:
         mask_key = "polygon_mask" if mask_key is None else mask_key
         super(FrameFieldSegmentationDataset, self).__init__(
@@ -2405,6 +2415,7 @@ class FrameFieldSegmentationDataset(SegmentationDataset):
             image_key=image_key,
             mask_key=mask_key,
             n_first_rows_to_read=n_first_rows_to_read,
+            seed=seed,
         )
         self.multi_band_mask = multi_band_mask
         self.boundary_mask_key = (
@@ -2613,6 +2624,7 @@ class PolygonRNNDataset(AbstractDataset):
         n_first_rows_to_read: str = None,
         dataset_type: str = "train",
         grid_size=28,
+        seed=None,
     ) -> None:
         super(PolygonRNNDataset, self).__init__(
             input_csv_path=input_csv_path,
@@ -2622,6 +2634,7 @@ class PolygonRNNDataset(AbstractDataset):
             image_key=image_key,
             mask_key=mask_key,
             n_first_rows_to_read=n_first_rows_to_read,
+            seed=seed,
         )
         self.sequence_length = sequence_length
         self.scale_h_key = scale_h_key if scale_h_key is not None else "scale_h"
@@ -2761,6 +2774,7 @@ class ObjectDetectionDataset(AbstractDataset):
         bbox_format="xywh",
         bbox_output_format="xyxy",
         bbox_params=None,
+        seed=None,
     ) -> None:
         super(ObjectDetectionDataset, self).__init__(
             input_csv_path=input_csv_path,
@@ -2770,11 +2784,14 @@ class ObjectDetectionDataset(AbstractDataset):
             image_key=image_key,
             mask_key=mask_key,
             n_first_rows_to_read=n_first_rows_to_read,
+            seed=seed,
         )
         self.transform = (
             None
             if augmentation_list is None
-            else load_augmentation_object(augmentation_list, bbox_params=bbox_params)
+            else load_augmentation_object(
+                augmentation_list, bbox_params=bbox_params, seed=seed
+            )
         )
         self.bounding_box_key = (
             "bounding_boxes" if bounding_box_key is None else bounding_box_key
@@ -2861,6 +2878,7 @@ class InstanceSegmentationDataset(ObjectDetectionDataset):
         return_mask=True,
         return_keypoints=False,
         bbox_params=None,
+        seed=None,
     ) -> None:
         mask_key = "polygon_mask" if mask_key is None else mask_key
         super(InstanceSegmentationDataset, self).__init__(
@@ -2875,6 +2893,7 @@ class InstanceSegmentationDataset(ObjectDetectionDataset):
             bbox_format=bbox_format,
             bbox_output_format=bbox_output_format,
             bbox_params=bbox_params,
+            seed=seed,
         )
         self.return_mask = return_mask
         self.return_keypoints = return_keypoints

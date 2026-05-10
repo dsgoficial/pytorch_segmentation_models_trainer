@@ -505,9 +505,11 @@ def crop_and_rescale_polygons_to_bounding_boxes(
     bboxes = (
         torch.Tensor(
             get_bboxes_from_polygons(croped_polygons),
-            device=bounding_boxes.device
-            if isinstance(bounding_boxes, torch.Tensor)
-            else "cpu",
+            device=(
+                bounding_boxes.device
+                if isinstance(bounding_boxes, torch.Tensor)
+                else "cpu"
+            ),
         )
         if len(croped_polygons) > len(bounding_boxes)
         else bounding_boxes
@@ -557,7 +559,7 @@ def crop_and_rescale_polygons_to_bounding_boxes(
 
 
 def target_list_to_dict(
-    targets: List[Dict[str, torch.Tensor]]
+    targets: List[Dict[str, torch.Tensor]],
 ) -> Dict[str, torch.Tensor]:
     """
     Converts a list of targets to a dictionary of targets.
@@ -574,11 +576,23 @@ def target_list_to_dict(
             result_dict[key].append(value)
     output_result_dict = dict()
     for key, value in result_dict.items():
-        value = list(itertools.chain.from_iterable(value))
-        if value == []:
+        # Flatten only if items are lists/tuples, otherwise keep as is
+        flattened = []
+        for item in value:
+            if isinstance(item, (list, tuple)):
+                flattened.extend(item)
+            else:
+                flattened.append(item)
+
+        if not flattened:
             output_result_dict[key] = torch.tensor([])
             continue
-        output_result_dict[key] = torch.stack(value)
+
+        # Convert all to tensors for stacking
+        tensors = [
+            v if isinstance(v, torch.Tensor) else torch.tensor(v) for v in flattened
+        ]
+        output_result_dict[key] = torch.stack(tensors)
     return output_result_dict
 
 
