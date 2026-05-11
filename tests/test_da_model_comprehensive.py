@@ -7,16 +7,25 @@ from omegaconf import OmegaConf
 from pytorch_segmentation_models_trainer.model_loader.domain_adaptation_model import (
     DomainAdaptationModel,
 )
+from pytorch_segmentation_models_trainer.domain_adaptation.base_method import (
+    BaseDomainAdaptationMethod,
+    DomainAdaptationLossOutput,
+)
 
 
-class _DummyDAMethod(nn.Module):
+class _DummyDAMethod(BaseDomainAdaptationMethod):
     def __init__(self):
-        super().__init__()
+        super().__init__(lambda_da=1.0)
         # Define as property or normal attribute that exists
         self.requires_features = True
 
     def forward(self, *args, **kwargs):
         return torch.tensor(0.1)
+
+    def compute_da_loss(self, *args, **kwargs):
+        return DomainAdaptationLossOutput(
+            loss=torch.tensor(0.1), log_dict={"dummy_loss": 0.1}
+        )
 
 
 class TestDAModelComprehensive(unittest.TestCase):
