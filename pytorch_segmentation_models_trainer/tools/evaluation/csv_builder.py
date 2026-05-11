@@ -223,10 +223,10 @@ class DatasetCSVBuilder:
             image_prefix="image_", mask_prefix="mask_"
             image_001.tif -> mask_001.tif
         """
-        image_prefix = self.config.get("image_prefix", "")
-        mask_prefix = self.config.get("mask_prefix", "")
-        image_suffix = self.config.get("image_suffix", "")
-        mask_suffix = self.config.get("mask_suffix", "")
+        image_prefix = self.image_prefix
+        mask_prefix = self.mask_prefix
+        image_suffix = self.image_suffix
+        mask_suffix = self.mask_suffix
 
         # Remover prefixo e sufixo da imagem
         stem = image_path.stem
@@ -237,11 +237,20 @@ class DatasetCSVBuilder:
 
         # Construir nome da máscara
         mask_stem = f"{mask_prefix}{stem}{mask_suffix}"
+
+        # Tentar com extensão da máscara baseada no pattern
         mask_extension = Path(self.mask_pattern.replace("*", "")).suffix
+        if not mask_extension:
+            mask_extension = image_path.suffix
+
         mask_path = self.masks_folder / f"{mask_stem}{mask_extension}"
 
         if mask_path.exists():
             return mask_path
+
+        # Tentar buscar qualquer arquivo com mesmo stem e qualquer extensão
+        for mask_file in self.masks_folder.glob(f"{mask_stem}.*"):
+            return mask_file
 
         return None
 
@@ -262,9 +271,6 @@ class DatasetCSVBuilder:
         # Extrair ID da imagem
         match = re.search(regex_pattern, image_path.stem)
         if not match:
-            logger.warning(
-                f"Regex pattern '{regex_pattern}' did not match image: {image_path}"
-            )
             return None
 
         image_id = match.group("id")

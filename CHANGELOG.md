@@ -1,6 +1,9 @@
 # Unreleased
 
 ## Tests
+- Alcançados 100% de test coverage para os módulos `pytorch_segmentation_models_trainer/tools/inference/inference_csv_builder.py` e `pytorch_segmentation_models_trainer/tools/evaluation/csv_builder.py`.
+- Adicionados novos arquivos de testes unitários: `tests/test_inference_csv_builder.py`, `tests/test_csv_builder.py` e `tests/test_image_processing_worker.py`.
+- Aumentada a cobertura global dos módulos `inference` e `evaluation` através de testes de casos de borda e fluxos de erro.
 - Achieved 100% test coverage for all files in the `pytorch_segmentation_models_trainer/config_definitions/` directory.
 - Created individual test files for all configuration dataclasses: `test_coco_dataset_config.py`, `test_dataset_config.py`, `test_dataset_distillation_config.py`, `test_edl_config.py`, `test_evaluation_config.py`, `test_experiments_runner_config.py`, `test_fine_tuning_config.py`, `test_inference_config.py`, `test_loss_config_definition.py`, `test_mc_dropout_config.py`, `test_predict_config.py`, `test_tools_config_def.py`, and `test_train_config.py`.
 
