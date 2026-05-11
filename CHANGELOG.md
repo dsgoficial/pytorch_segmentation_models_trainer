@@ -1,4 +1,4 @@
-# Unreleased
+# Version 1.2.0 - 2026-05-11
 
 ## Tests
 - Alcançados 100% de test coverage para os módulos `pytorch_segmentation_models_trainer/tools/inference/inference_csv_builder.py` e `pytorch_segmentation_models_trainer/tools/evaluation/csv_builder.py`.
