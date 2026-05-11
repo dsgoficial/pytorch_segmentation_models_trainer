@@ -1,5 +1,14 @@
 # Unreleased
 
+## Tests
+- Achieved 100% test coverage for all files in the `pytorch_segmentation_models_trainer/config_definitions/` directory.
+- Created individual test files for all configuration dataclasses: `test_coco_dataset_config.py`, `test_dataset_config.py`, `test_dataset_distillation_config.py`, `test_edl_config.py`, `test_evaluation_config.py`, `test_experiments_runner_config.py`, `test_fine_tuning_config.py`, `test_inference_config.py`, `test_loss_config_definition.py`, `test_mc_dropout_config.py`, `test_predict_config.py`, `test_tools_config_def.py`, and `test_train_config.py`.
+
+## Bug fixes
+- Fixed `TrainConfig` dataclass in `config_definitions/train_config.py` which had an invalid `default_factory` for `callbacks` (was a list instead of a callable) and a problematic `default_factory` for `pl_model` and `model` (was calling `Model()` without required arguments).
+- Fixed `LossParamsConfig` in `config_definitions/loss_config_definition.py` where `seg_loss_params` had an incorrect type hint (`SegParamsConfig` instead of `SegLossParamsConfig`).
+- Fixed `LossWeightConfig` in `config_definitions/loss_config_definition.py` to use `Any` for the `weight` field, resolving an `OmegaConf` limitation with `Union[float, List[float]]`.
+
 ## Dataset
 - Added Apache Parquet support for all datasets inheriting from `AbstractDataset`.
 - Implemented an automatic caching mechanism that converts `.csv` metadata files to `.cache.parquet` on the first run. Subsequent runs read the Parquet file if the CSV has not been modified, significantly improving metadata loading speed and memory efficiency.

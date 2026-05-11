@@ -123,7 +123,7 @@ class LossWeightConfig:
     """Configuration for a single loss with its weight"""
 
     loss: Any = MISSING  # The loss configuration (SegLossConfig, etc.)
-    weight: Union[float, List[float]] = 1.0  # Weight can be static or dynamic
+    weight: Any = 1.0  # Weight can be static or dynamic
 
 
 @dataclass
@@ -210,7 +210,7 @@ class MultiLossConfig:
 @dataclass
 class LossParamsConfig:
     multi_loss: MultiLossConfig = field(default_factory=MultiLossConfig)
-    seg_loss_params: SegParamsConfig = field(default_factory=SegLossParamsConfig)
+    seg_loss_params: SegLossParamsConfig = field(default_factory=SegLossParamsConfig)
     # New compound loss configuration
     compound_loss: Optional[CompoundLossConfig] = None
 
@@ -249,4 +249,4 @@ def build_config(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
-    build_config()
+    build_config()  # pragma: no cover

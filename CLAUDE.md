@@ -5,6 +5,7 @@
 Toda implementação deve incluir os itens abaixo antes de ser considerada concluída.
 Nós desenvolvemos usando TDD sempre.
 Novas funcionalidades devem ter 100% de coverage nos testes desenvolvidos.
+Os commits não devem nunca diminuir a coverage do projeto. Toda modificação deve olhar para os testes daquela componente e garantir que a coverage dele não será diminuída.
 Não espere o usuário pedir cada um separadamente:
 
 1. **Testes unitários** em `tests/test_<módulo>.py` cobrindo:

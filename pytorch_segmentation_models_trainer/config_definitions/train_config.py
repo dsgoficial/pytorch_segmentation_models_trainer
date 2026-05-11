@@ -20,7 +20,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Any
 
 import torch
 from omegaconf import MISSING
@@ -109,8 +109,8 @@ class MetricConfig:
 
 @dataclass
 class TrainConfig:
-    pl_model: Model = field(default_factory=Model)
-    model: torch.nn.Module = field(default_factory=torch.nn.Module)
+    pl_model: Optional[Any] = None
+    model: Optional[Any] = None
     backbone: BackboneConfig = field(default_factory=BackboneConfig)
     compute_seg: bool = True
     compute_crossfield: bool = False
@@ -124,7 +124,7 @@ class TrainConfig:
     scheduler_list: List[SchedulerItemConfig] = field(
         default_factory=lambda: [SchedulerItemConfig()]
     )
-    callbacks: List[CallbackConfig] = field(default_factory=[CallbackConfig()])
+    callbacks: List[CallbackConfig] = field(default_factory=lambda: [CallbackConfig()])
     pl_trainer: PLTrainerConfig = field(default_factory=PLTrainerConfig)
     train_dataset: DatasetConfig = field(default_factory=DatasetConfig)
     val_dataset: DatasetConfig = field(default_factory=DatasetConfig)
