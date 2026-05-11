@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 import logging
 from pathlib import Path
 import pytorch_lightning as pl
@@ -357,6 +358,7 @@ class FrameFieldPolygonizerCallback(pl.callbacks.BasePredictionWriter):
             return
         with concurrent.futures.ThreadPoolExecutor() as pool:
             polygonizer = instantiate_polygonizer(pl_module.cfg)
+            futures = []
             try:
                 with torch.enable_grad():
                     futures = polygonizer.process(

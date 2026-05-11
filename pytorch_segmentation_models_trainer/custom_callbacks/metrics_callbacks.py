@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 import datetime
 import os
 from pathlib import Path
@@ -288,12 +289,14 @@ class ClassificationReportCallback(pl.callbacks.Callback):
 
         if predictions.dim() > 2:
             predictions = torch.argmax(predictions, dim=1)
-        if targets.dim() > 2:
+        if targets.dim() == 4:  # [B, C, H, W]
             targets = (
                 torch.argmax(targets, dim=1)
                 if targets.shape[1] > 1
                 else targets.squeeze(1)
             )
+        elif targets.dim() == 3:  # Already [B, H, W]
+            pass
 
         predictions_flat = predictions.flatten().cpu().numpy()
         targets_flat = targets.flatten().cpu().numpy()
