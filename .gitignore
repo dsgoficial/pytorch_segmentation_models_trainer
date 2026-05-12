@@ -148,3 +148,4 @@ htmlcov/
 
 .claude/
 lightning_logs/
+.wolf/
