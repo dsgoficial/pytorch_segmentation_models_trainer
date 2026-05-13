@@ -37,7 +37,8 @@ class TinyHFEncoder(nn.Module):
         self.net = nn.Conv2d(3, 8, kernel_size=3, stride=4, padding=1)
 
     def forward(self, x):
-        return self.net(x)
+        # HuggingFace encoders usually return a list/tuple of hidden states
+        return [self.net(x)]
 
 
 class TinyVAEOutputModel(nn.Module):
@@ -76,7 +77,7 @@ def test_generic_variational_autoencoder_smp_contract_and_gradients():
 
     assert model.mu_proj.weight.grad is not None
     assert model.logvar_proj.weight.grad is not None
-    assert model.decoder.decoder[0].weight.grad is not None
+    assert model.decoder.conv1.weight.grad is not None
 
 
 def test_generic_variational_autoencoder_huggingface_adapter_path():
@@ -97,6 +98,123 @@ def test_generic_variational_autoencoder_huggingface_adapter_path():
     assert output.reconstruction.shape == x.shape
     assert output.mu.shape == output.logvar.shape == output.z.shape
     assert output.mu.shape[1] == 8
+    # HF scale_factor should be 4 (32/8)
+    assert model._hf_scale_factor == 4
+    assert model.decoder.scale_factor == 4
+
+
+def test_generic_variational_autoencoder_encoder_depth():
+    with patch(
+        "pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.smp"
+    ) as smp_mock:
+        smp_mock.encoders.get_encoder.return_value = TinyEncoder()
+
+        # Test depth 3
+        model = GenericVariationalAutoencoder(
+            encoder_name="tiny", encoder_depth=3, pretrained=False
+        )
+        assert model.scale_factor == 8
+        smp_mock.encoders.get_encoder.assert_called_with(
+            "tiny", in_channels=3, depth=3, weights=None
+        )
+
+        # Test depth 4
+        model = GenericVariationalAutoencoder(
+            encoder_name="tiny", encoder_depth=4, pretrained=False
+        )
+        assert model.scale_factor == 16
+
+    # Backward compatibility: default encoder_depth=None -> 5
+    with patch(
+        "pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.smp"
+    ) as smp_mock:
+        smp_mock.encoders.get_encoder.return_value = TinyEncoder()
+        model = GenericVariationalAutoencoder(
+            encoder_name="tiny", encoder_depth=None, pretrained=False
+        )
+        assert model.scale_factor == 32
+        smp_mock.encoders.get_encoder.assert_called_with(
+            "tiny", in_channels=3, depth=5, weights=None
+        )
+
+
+def test_generic_variational_autoencoder_invalid_configs():
+    with patch(
+        "pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.smp"
+    ) as smp_mock:
+        smp_mock.encoders.get_encoder.return_value = TinyEncoder()
+
+        # encoder_depth with HF
+        with pytest.raises(ValueError, match="encoder_depth"):
+            GenericVariationalAutoencoder(
+                encoder_name="tiny", use_huggingface=True, encoder_depth=3
+            )
+
+        # feature_level with SMP
+        with pytest.raises(ValueError, match="feature_level"):
+            GenericVariationalAutoencoder(
+                encoder_name="tiny", use_huggingface=False, feature_level=0
+            )
+
+        # invalid encoder_depth
+        with pytest.raises(ValueError, match="encoder_depth"):
+            GenericVariationalAutoencoder(encoder_name="tiny", encoder_depth=6)
+        with pytest.raises(ValueError, match="encoder_depth"):
+            GenericVariationalAutoencoder(encoder_name="tiny", encoder_depth=0)
+
+
+def test_generic_variational_autoencoder_huggingface_feature_level():
+    class MultiLevelHFEncoder(nn.Module):
+        def __init__(self, *_args, **_kwargs):
+            super().__init__()
+            self.out_channels = 8
+
+        def forward(self, x):
+            # Return two levels: 2x downsampled and 4x downsampled
+            return [
+                torch.randn(x.shape[0], 8, x.shape[2] // 2, x.shape[3] // 2),
+                torch.randn(x.shape[0], 8, x.shape[2] // 4, x.shape[3] // 4),
+            ]
+
+    with patch(
+        "pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.HuggingFaceEncoderAdapter",
+        MultiLevelHFEncoder,
+    ):
+        # Test level 0 (2x downsampling)
+        model = GenericVariationalAutoencoder(
+            encoder_name="hf-multi", use_huggingface=True, feature_level=0
+        )
+        x = torch.randn(1, 3, 32, 32)
+        model(x)
+        assert model._hf_scale_factor == 2
+
+        # Test level 1 or -1 (4x downsampling)
+        model = GenericVariationalAutoencoder(
+            encoder_name="hf-multi", use_huggingface=True, feature_level=-1
+        )
+        model(x)
+        assert model._hf_scale_factor == 4
+
+
+def test_generic_variational_autoencoder_huggingface_non_square_scale():
+    class NonSquareHFEncoder(nn.Module):
+        def __init__(self, *_args, **_kwargs):
+            super().__init__()
+            self.out_channels = 8
+
+        def forward(self, x):
+            return [torch.randn(x.shape[0], 8, x.shape[2] // 2, x.shape[3] // 4)]
+
+    with patch(
+        "pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.HuggingFaceEncoderAdapter",
+        NonSquareHFEncoder,
+    ):
+        model = GenericVariationalAutoencoder(
+            encoder_name="hf-nonsquare", use_huggingface=True
+        )
+        x = torch.randn(1, 3, 32, 32)
+        with pytest.raises(RuntimeError, match="Non-square scale factor"):
+            model(x)
 
 
 def test_generic_variational_autoencoder_reparameterize_is_differentiable():

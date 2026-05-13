@@ -69,18 +69,21 @@ class GenericDecoder(nn.Module):
 
     def __init__(self, in_channels: int, out_channels: int, scale_factor: int = 32):
         super().__init__()
-        # Simple stack of transposed convolutions or bilinear upsampling + conv
-        self.decoder = nn.Sequential(
-            nn.Conv2d(in_channels, in_channels // 2, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Upsample(
-                scale_factor=scale_factor, mode="bilinear", align_corners=False
-            ),
-            nn.Conv2d(in_channels // 2, out_channels, kernel_size=3, padding=1),
-        )
+        self.scale_factor = scale_factor
+        self.conv1 = nn.Conv2d(in_channels, in_channels // 2, kernel_size=3, padding=1)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(in_channels // 2, out_channels, kernel_size=3, padding=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.decoder(x)
+        x = self.relu(self.conv1(x))
+        if self.scale_factor > 0:
+            x = F.interpolate(
+                x,
+                scale_factor=float(self.scale_factor),
+                mode="bilinear",
+                align_corners=False,
+            )
+        return self.conv2(x)
 
 
 class GenericAutoencoder(nn.Module):
