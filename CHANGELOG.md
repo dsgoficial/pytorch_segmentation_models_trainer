@@ -1,3 +1,12 @@
+# Unreleased
+
+## Dataset
+- Added `WindowedImageDataset` for deterministic sliding-window (grid) patch extraction from rasters without requiring pre-generated masks.
+- Added `WindowedImageAutoencoderDataset` specifically for Autoencoder validation/testing, yielding `(image, target)` pairs where `image` can be optionally corrupted while `target` remains clean.
+- Both datasets support global indexing across multiple images of varying sizes using efficient binary search (bisect).
+- Added example configuration `conf/examples/windowed_image_autoencoder.yaml`.
+- Added unit tests in `tests/test_windowed_datasets.py` with 100% coverage.
+
 # Version 1.2.0 - 2026-05-11
 
 ## Tests

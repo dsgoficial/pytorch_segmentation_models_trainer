@@ -1,0 +1,27 @@
+# Example configuration for WindowedImageAutoencoderDataset
+# This dataset is useful for deterministic validation/testing of Autoencoders
+# using a sliding-window (grid) approach over all images in a folder.
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.WindowedImageAutoencoderDataset
+  image_dir: /path/to/your/validation_images
+  image_extensions: [".tif", ".tiff", ".png"]
+  crop_size: [256, 256]
+  stride: 256  # Set stride equal to crop_size for a non-overlapping grid
+  image_dtype: "uint8"
+
+  # Optional corruption transforms (applied only to the input 'image')
+  corruption_augmentation_list:
+    - _target_: albumentations.GaussianBlur
+      blur_limit: [3, 7]
+      p: 0.5
+    - _target_: albumentations.GaussNoise
+      var_limit: [10.0, 50.0]
+      p: 0.5
+
+  # Base transforms (applied synchronously to both 'image' and 'target')
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2

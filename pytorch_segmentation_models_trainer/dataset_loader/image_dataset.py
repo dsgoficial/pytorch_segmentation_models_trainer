@@ -19,6 +19,7 @@
  ****
 """
 
+import bisect
 import gc
 import logging
 import math
@@ -728,3 +729,293 @@ class AutoencoderRandomCropDataset(ImageDataset):
     @staticmethod
     def _normalize_extension(ext: str) -> str:
         return ext if ext.startswith(".") else f".{ext}"
+
+
+class WindowedImageDataset(ImageDataset):
+    """Deterministic sliding-window patch dataset for image-only tasks.
+
+    The dataset calculates a grid of patches for each image and allows
+    global indexing across all patches. Useful for processing all areas
+    of a set of rasters in a fixed grid.
+
+    Args:
+        input_csv_path: Optional CSV with image paths.
+        df: Optional pre-built DataFrame.
+        image_dir: Root folder scanned recursively for images.
+        image_extensions: Extensions to include when scanning ``image_dir``.
+        split: ``"all"``, ``"train"`` or ``"val"`` for deterministic folder
+            splitting.
+        val_fraction: Fraction assigned to the validation split.
+        split_seed: Seed used to shuffle discovered paths before splitting.
+        crop_size: Patch size as ``[height, width]``.
+        stride: Stride between patches. Defaults to ``crop_size``.
+        selected_bands: Optional 1-based rasterio band indices.
+        image_dtype: One of ``"uint8"``, ``"uint16"``, ``"float32"`` or
+            ``"native"``.
+        file_cache_maxsize: Max number of open rasters in the LRU cache.
+        **kwargs: Compatibility parameters accepted by ``ImageDataset`` and Hydra.
+
+    Returns:
+        Dict[str, Any]: Items with ``image`` and ``path`` keys.
+
+    Example YAML:
+        val_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.WindowedImageDataset
+          image_dir: /data/images
+          crop_size: [256, 256]
+          stride: 256
+    """
+
+    def __init__(
+        self,
+        input_csv_path: Optional[Union[str, Path]] = None,
+        df: Optional[pd.DataFrame] = None,
+        image_dir: Optional[Union[str, Path]] = None,
+        image_extensions: Optional[Sequence[str]] = None,
+        split: str = "all",
+        val_fraction: float = 0.2,
+        split_seed: int = 42,
+        crop_size: Optional[List[int]] = None,
+        stride: Optional[Union[int, List[int]]] = None,
+        selected_bands: Optional[List[int]] = None,
+        image_dtype: str = "uint8",
+        file_cache_maxsize: int = 0,
+        **kwargs,
+    ) -> None:
+        if crop_size is None:
+            crop_size = [256, 256]
+        if len(crop_size) != 2:
+            raise ValueError("crop_size must be [height, width]")
+
+        self.crop_size = crop_size
+        if stride is None:
+            self.stride = crop_size
+        else:
+            self.stride = [stride, stride] if isinstance(stride, int) else stride
+
+        if df is None and input_csv_path is None and image_dir is not None:
+            df = AutoencoderRandomCropDataset._build_dataframe_from_folder(
+                Path(image_dir),
+                image_extensions
+                or AutoencoderRandomCropDataset.DEFAULT_IMAGE_EXTENSIONS,
+                split=split,
+                val_fraction=val_fraction,
+                split_seed=split_seed,
+            )
+
+        super().__init__(
+            input_csv_path=input_csv_path,
+            df=df,
+            **kwargs,
+        )
+
+        self.selected_bands = selected_bands
+        self.image_dtype = image_dtype
+
+        # Calculate grid for each image
+        self._image_info = []
+        self._cumulative = [0]
+        total_patches = 0
+
+        crop_h, crop_w = self.crop_size
+        stride_h, stride_w = self.stride
+
+        for i in range(len(self.df)):
+            path = self.get_path(i, key=self.image_key)
+            with rasterio.open(path) as src:
+                w, h = src.width, src.height
+
+            if w < crop_w or h < crop_h:
+                continue
+
+            nx = (w - crop_w) // stride_w + 1
+            ny = (h - crop_h) // stride_h + 1
+            n_patches = nx * ny
+
+            if n_patches > 0:
+                self._image_info.append(
+                    {
+                        "img_idx": i,
+                        "path": path,
+                        "width": w,
+                        "height": h,
+                        "nx": nx,
+                        "ny": ny,
+                        "n_patches": n_patches,
+                    }
+                )
+                total_patches += n_patches
+                self._cumulative.append(total_patches)
+
+        self._total_patches = total_patches
+        if not self._image_info:
+            logger.warning(
+                "WindowedImageDataset: No images large enough for crop %s",
+                self.crop_size,
+            )
+
+        n_files = len(self._image_info)
+        self.file_cache_maxsize = (
+            file_cache_maxsize if file_cache_maxsize > 0 else n_files + 16
+        )
+        self._file_cache = _RasterioLRUCache(maxsize=self.file_cache_maxsize)
+
+    def __len__(self) -> int:
+        return self._total_patches
+
+    def _get_src(self, path: str):
+        return self._file_cache.get(path)
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        if idx < 0 or idx >= self._total_patches:
+            raise IndexError(f"Index {idx} out of range [0, {self._total_patches})")
+
+        img_idx = bisect.bisect_right(self._cumulative, idx) - 1
+        info = self._image_info[img_idx]
+        local_idx = idx - self._cumulative[img_idx]
+
+        grid_row = local_idx // info["nx"]
+        grid_col = local_idx % info["nx"]
+
+        row_off = grid_row * self.stride[0]
+        col_off = grid_col * self.stride[1]
+
+        window = Window(
+            col_off=col_off,
+            row_off=row_off,
+            width=self.crop_size[1],
+            height=self.crop_size[0],
+        )
+        src = self._get_src(info["path"])
+        data = (
+            src.read(window=window)
+            if self.selected_bands is None
+            else src.read(self.selected_bands, window=window)
+        )
+
+        image = np.transpose(data, (1, 2, 0)).copy()
+        if self.image_dtype != "native":
+            image = image.astype(np.dtype(self.image_dtype))
+
+        if self.transform is not None:
+            result = self.transform(image=image)
+        else:
+            image_tensor = torch.from_numpy(image.copy()).float().permute(2, 0, 1)
+            norm_factor = _DTYPE_NORMALIZATION.get(self.image_dtype)
+            if norm_factor is not None:
+                image_tensor = image_tensor / norm_factor
+            result = {"image": image_tensor}
+
+        result.update({"path": info["path"]})
+        return result
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_file_cache"] = _RasterioLRUCache(maxsize=self.file_cache_maxsize)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
+    def __del__(self):
+        if hasattr(self, "_file_cache") and isinstance(
+            self._file_cache, _RasterioLRUCache
+        ):
+            self._file_cache.close_all()
+
+
+class WindowedImageAutoencoderDataset(WindowedImageDataset):
+    """Deterministic sliding-window patch dataset for autoencoder reconstruction.
+
+    The clean crop is used as ``target``; optional corruption augmentations
+    affect only ``image``.
+
+    Args:
+        corruption_augmentation_list: Albumentations configs applied only to
+            ``image``.
+        **kwargs: Parameters accepted by :class:`WindowedImageDataset`.
+
+    Returns:
+        Dict[str, Any]: Items with ``image``, ``target`` and ``path`` keys.
+
+    Example YAML:
+        val_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.WindowedImageAutoencoderDataset
+          image_dir: /data/images
+          crop_size: [256, 256]
+          stride: 256
+    """
+
+    def __init__(
+        self,
+        corruption_augmentation_list: Optional[List[Dict[str, Any]]] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.corruption_transform = (
+            None
+            if corruption_augmentation_list is None
+            else load_augmentation_object(corruption_augmentation_list)
+        )
+        if self.transform is not None:
+            self.transform = A.Compose(
+                self.transform.transforms, additional_targets={"target": "image"}
+            )
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        """Return a deterministic crop pair for reconstruction."""
+        # We reuse the window reading logic but need to handle target
+        if idx < 0 or idx >= self._total_patches:
+            raise IndexError(f"Index {idx} out of range [0, {self._total_patches})")
+
+        img_idx = bisect.bisect_right(self._cumulative, idx) - 1
+        info = self._image_info[img_idx]
+        local_idx = idx - self._cumulative[img_idx]
+
+        grid_row = local_idx // info["nx"]
+        grid_col = local_idx % info["nx"]
+
+        row_off = grid_row * self.stride[0]
+        col_off = grid_col * self.stride[1]
+
+        window = Window(
+            col_off=col_off,
+            row_off=row_off,
+            width=self.crop_size[1],
+            height=self.crop_size[0],
+        )
+        src = self._get_src(info["path"])
+        data = (
+            src.read(window=window)
+            if self.selected_bands is None
+            else src.read(self.selected_bands, window=window)
+        )
+
+        image = np.transpose(data, (1, 2, 0)).copy()
+        if self.image_dtype != "native":
+            image = image.astype(np.dtype(self.image_dtype))
+
+        target = image.copy()
+
+        if self.corruption_transform is not None:
+            image = self.corruption_transform(image=image)["image"]
+
+        if self.transform is not None:
+            res = self.transform(image=image, target=target)
+            result = {"image": res["image"], "target": res["target"]}
+        else:
+            result = self._to_tensors_no_transform(image, target)
+
+        result.update({"path": info["path"]})
+        return result
+
+    def _to_tensors_no_transform(
+        self, image: np.ndarray, target: np.ndarray
+    ) -> Dict[str, torch.Tensor]:
+        image_tensor = torch.from_numpy(image.copy()).float().permute(2, 0, 1)
+        target_tensor = torch.from_numpy(target.copy()).float().permute(2, 0, 1)
+        norm_factor = _DTYPE_NORMALIZATION.get(self.image_dtype)
+        if norm_factor is not None:
+            image_tensor = image_tensor / norm_factor
+            target_tensor = target_tensor / norm_factor
+        return {"image": image_tensor, "target": target_tensor}
