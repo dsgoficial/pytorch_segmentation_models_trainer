@@ -863,6 +863,28 @@ class WindowedImageDataset(ImageDataset):
     def __len__(self) -> int:
         return self._total_patches
 
+    def get_path(self, idx: int, key: str = None, add_root_dir: bool = True) -> str:
+        """Get the original image path for a given patch index.
+
+        Args:
+            idx: Global patch index.  If ``idx >= len(self._cumulative)``, it
+                is assumed to be a patch index and mapped to the source image.
+                Otherwise, it is treated as a source image index for backward
+                compatibility with the base class.
+            key: Dataframe column name.
+            add_root_dir: Whether to prepend ``root_dir``.
+
+        Returns:
+            Source image path.
+        """
+        if idx >= len(self.df):
+            # Map global patch index to image index
+            img_idx = bisect.bisect_right(self._cumulative, idx) - 1
+            # Use the mapped image index to get the path
+            return super().get_path(img_idx, key=key, add_root_dir=add_root_dir)
+
+        return super().get_path(idx, key=key, add_root_dir=add_root_dir)
+
     def _get_src(self, path: str):
         return self._file_cache.get(path)
 
