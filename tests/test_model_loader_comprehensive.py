@@ -94,6 +94,27 @@ class TestModelLoaderComprehensive(unittest.TestCase):
                 loss_val = pl_model.validation_step(batch, 0)
                 self.assertIsInstance(loss_val, torch.Tensor)
 
+    def test_compute_steps_from_image_dir_dataset_samples_per_epoch(self):
+        cfg = OmegaConf.create(
+            {
+                "train_dataset": {
+                    "_target_": (
+                        "pytorch_segmentation_models_trainer.dataset_loader"
+                        ".image_dataset.AutoencoderRandomCropDataset"
+                    ),
+                    "image_dir": "/data/unlabeled",
+                    "samples_per_epoch": 10,
+                    "data_loader": {"batch_size": 2},
+                },
+                "hyperparameters": {"devices": 1, "accumulate_grad_batches": 1},
+            }
+        )
+        model = object.__new__(AutoencoderModel)
+        model.cfg = cfg
+        model.train_ds = None
+
+        self.assertEqual(model._compute_steps_from_config(), 5)
+
     def test_detection_model_init(self):
         with patch.object(ObjectDetectionPLModel, "get_model"):
             with patch.object(ObjectDetectionPLModel, "get_loss_function"):

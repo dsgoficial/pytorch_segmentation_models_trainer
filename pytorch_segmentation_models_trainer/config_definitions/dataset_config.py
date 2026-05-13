@@ -48,6 +48,71 @@ class DatasetConfig:
 
 
 @dataclass
+class AutoencoderDatasetConfig(DatasetConfig):
+    """Configuração para AutoencoderDataset baseado em CSV.
+
+    Exemplo de YAML::
+
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.AutoencoderDataset
+          input_csv_path: /data/images.csv
+          root_dir: /data
+          corruption_augmentation_list:
+            - _target_: albumentations.GaussNoise
+              p: 0.5
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".image_dataset.AutoencoderDataset"
+    )
+    corruption_augmentation_list: List = field(default_factory=list)
+
+
+@dataclass
+class AutoencoderRandomCropDatasetConfig:
+    """Configuração para AutoencoderRandomCropDataset.
+
+    Lê imagens inteiras de um CSV ou varre ``image_dir`` recursivamente e
+    amostra crops aleatórios on-the-fly para treino de reconstrução.
+
+    Exemplo de YAML::
+
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.AutoencoderRandomCropDataset
+          image_dir: /data/unlabeled
+          split: train
+          crop_size: [256, 256]
+          samples_per_epoch: 20000
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".image_dataset.AutoencoderRandomCropDataset"
+    )
+    image_dir: str = MISSING
+    input_csv_path: Optional[str] = None
+    root_dir: Optional[str] = None
+    image_extensions: Optional[List[str]] = None
+    split: str = "all"
+    val_fraction: float = 0.2
+    split_seed: int = 42
+    crop_size: List[int] = field(default_factory=lambda: [256, 256])
+    samples_per_epoch: int = 10000
+    selected_bands: Optional[List[int]] = None
+    image_dtype: str = "uint8"
+    file_cache_maxsize: int = 0
+    corruption_augmentation_list: List = field(default_factory=list)
+    reset_augmentation_function: bool = False
+    gpu_augmentation_list: List = field(default_factory=list)
+    augmentation_list: List = field(default_factory=list)
+    data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+    image_key: str = "image"
+    n_first_rows_to_read: Optional[int] = None
+    max_retries: int = 10
+
+
+@dataclass
 class RasterPatchDatasetConfig:
     """Configuração para RasterPatchDataset (janela deslizante determinística).
 
@@ -129,7 +194,7 @@ class CSVWindowedImageDatasetConfig(DatasetConfig):
     Exemplo de YAML::
 
         train_dataset:
-          _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedImageDataset
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.CSVWindowedImageDataset
           input_csv_path: patches.csv
           image_key: image
           row_off_key: row_off
@@ -138,7 +203,7 @@ class CSVWindowedImageDatasetConfig(DatasetConfig):
     """
 
     _target_: str = (
-        "pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedImageDataset"
+        "pytorch_segmentation_models_trainer.dataset_loader.image_dataset.CSVWindowedImageDataset"
     )
     image_key: str = "image"
     row_off_key: str = "row_off"

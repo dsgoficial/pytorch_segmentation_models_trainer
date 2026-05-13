@@ -56,6 +56,9 @@
 - Added GeoParquet and PostGIS export capabilities for clustered spatial data.
 
 ## Autoencoder
+- Moved image-only datasets to `dataset_loader/image_dataset.py` (`ImageDataset`, `CSVWindowedImageDataset`, `TiledInferenceImageDataset`, `AutoencoderDataset`, and `AutoencoderRandomCropDataset`), while keeping lazy compatibility exports from `dataset_loader.dataset` for existing configs.
+- Added `AutoencoderRandomCropDataset` for self-supervised reconstruction from unlabeled image folders or CSV-backed full-size rasters. It discovers images recursively, supports deterministic train/validation splits, rasterio windowed random crops, selected bands, dtype handling, and input-only corruption augmentations.
+- Added Hydra dataclasses and a folder-based example config for random-crop autoencoder training.
 - Added `GenericAutoencoder` model supporting SMP and Transformers encoders.
 - Added `AutoencoderModel` LightningModule for image reconstruction tasks.
 - Added `AutoencoderDataset` for self-supervised learning and reconstruction.

@@ -19,6 +19,18 @@ from pytorch_segmentation_models_trainer.dataset_loader.dataset import <ClassNam
 from pytorch_segmentation_models_trainer.dataset_loader.raster_patch_dataset import RasterPatchDataset
 ```
 
+Image-only datasets live in:
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import (
+    ImageDataset,
+    CSVWindowedImageDataset,
+    TiledInferenceImageDataset,
+    AutoencoderDataset,
+    AutoencoderRandomCropDataset,
+)
+```
+
 ---
 
 ## Class Hierarchy
@@ -28,6 +40,8 @@ torch.utils.data.Dataset
 ├── RasterPatchDataset          ← sliding-window, folder-based (no CSV)
 └── AbstractDataset             ← CSV / DataFrame-based
     ├── ImageDataset
+    │   ├── AutoencoderDataset
+    │   ├── AutoencoderRandomCropDataset
     │   ├── CSVWindowedImageDataset
     │   └── TiledInferenceImageDataset
     ├── SegmentationDataset
@@ -39,6 +53,61 @@ torch.utils.data.Dataset
     │   └── InstanceSegmentationDataset
     └── PolygonRNNDataset
 ```
+
+---
+
+## `AutoencoderDataset`
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import AutoencoderDataset
+```
+
+Whole-image dataset for reconstruction training. It returns the clean image as
+`target`; `corruption_augmentation_list` is applied only to `image`, while
+`augmentation_list` is applied synchronously to `image` and `target`.
+
+### `__getitem__` Returns
+
+| Key | Description |
+|---|---|
+| `"image"` | Input image, optionally corrupted. |
+| `"target"` | Clean reconstruction target. |
+| `"path"` | Source image path. |
+
+## `AutoencoderRandomCropDataset`
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import AutoencoderRandomCropDataset
+```
+
+Random-crop dataset for unlabeled image folders or CSV-backed full-size rasters.
+It scans `image_dir` recursively, filters by extension, optionally applies a
+deterministic train/validation split, and reads only the requested raster window
+at `__getitem__` time.
+
+### Constructor Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `image_dir` | `str \| Path \| None` | `None` | Root folder scanned recursively when no CSV/DataFrame is provided. |
+| `input_csv_path` | `str \| Path \| None` | `None` | Optional CSV with an image column. |
+| `image_extensions` | `List[str] \| None` | common image extensions | Extensions used in folder mode. Leading dot is optional. |
+| `split` | `str` | `"all"` | One of `"all"`, `"train"`, `"val"`. |
+| `val_fraction` | `float` | `0.2` | Fraction assigned to validation in folder mode. |
+| `split_seed` | `int` | `42` | Seed for deterministic splitting. |
+| `crop_size` | `List[int]` | `[256, 256]` | Crop size `[height, width]`. |
+| `samples_per_epoch` | `int` | `10000` | Number of random crops per epoch; `<= 0` estimates 3x area coverage. |
+| `selected_bands` | `List[int] \| None` | `None` | 1-based rasterio bands to read. |
+| `image_dtype` | `str` | `"uint8"` | `"uint8"`, `"uint16"`, `"float32"` or `"native"`. |
+| `corruption_augmentation_list` | `list` | `None` | Albumentations pipeline applied only to `image`. |
+
+### `__getitem__` Returns
+
+| Key | Description |
+|---|---|
+| `"image"` | Random crop input. |
+| `"target"` | Clean random crop target. |
+| `"path"` | Source image path used for the crop. |
 
 ---
 
@@ -144,7 +213,7 @@ Base class for all datasets. Handles CSV loading, root directory resolution, and
 ## `CSVWindowedImageDataset`
 
 ```python
-from pytorch_segmentation_models_trainer.dataset_loader.dataset import CSVWindowedImageDataset
+from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import CSVWindowedImageDataset
 ```
 
 Extends `ImageDataset` to read specific patches from large images using `rasterio` windowed read. Coordinates (offsets) for each patch are read from the input CSV. Does not include masks.
@@ -181,7 +250,7 @@ Extends `ImageDataset` to read specific patches from large images using `rasteri
 ## `ImageDataset`
 
 ```python
-from pytorch_segmentation_models_trainer.dataset_loader.dataset import ImageDataset
+from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import ImageDataset
 ```
 
 Image-only dataset. Returns a dict with the loaded image and its file path. Suitable for inference pipelines that do not require ground-truth masks.
@@ -536,7 +605,7 @@ Dataset for Polygon-RNN training and validation. Reads pre-cropped images and no
 ## `TiledInferenceImageDataset`
 
 ```python
-from pytorch_segmentation_models_trainer.dataset_loader.dataset import TiledInferenceImageDataset
+from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import TiledInferenceImageDataset
 ```
 
 Extends `ImageDataset` for large-image inference. Slices each image into overlapping tiles so that a fixed-input-size model can process arbitrarily large images. Uses `pytorch_toolbelt.inference.tiles.ImageSlicer` internally.

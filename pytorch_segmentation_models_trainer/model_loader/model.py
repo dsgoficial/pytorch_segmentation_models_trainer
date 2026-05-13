@@ -209,19 +209,8 @@ class Model(pl.LightningModule):
 
             dataset_cfg = self.cfg.train_dataset
 
-            # Get CSV path
-            if "input_csv_path" not in dataset_cfg:
-                logger.warning("'input_csv_path' not found in train_dataset config")
-                return None
-
-            csv_path = dataset_cfg.input_csv_path
-
             import pandas as pd
             import os
-
-            if not os.path.exists(csv_path):
-                logger.warning("CSV file not found: %s", csv_path)
-                return None
 
             # Use samples_per_epoch if defined (RandomCropSegmentationDataset),
             # otherwise fall back to CSV row count.
@@ -244,8 +233,24 @@ class Model(pl.LightningModule):
                 ):
                     dataset_size = self.train_ds.samples_per_epoch
             else:
+                # Get CSV path for traditional CSV/DataFrame-backed datasets.
+                if "input_csv_path" not in dataset_cfg:
+                    logger.warning(
+                        "'input_csv_path' not found in train_dataset config "
+                        "and no samples_per_epoch is available"
+                    )
+                    return None
+
+                csv_path = dataset_cfg.input_csv_path
+                if not os.path.exists(csv_path):
+                    logger.warning("CSV file not found: %s", csv_path)
+                    return None
+
                 df = pd.read_csv(csv_path)
                 dataset_size = len(df)
+            dataset_source = dataset_cfg.get(
+                "input_csv_path", dataset_cfg.get("image_dir", "<dataset>")
+            )
 
             # Get batch size from config (check multiple locations)
             batch_size = None
@@ -287,10 +292,10 @@ class Model(pl.LightningModule):
             steps_per_epoch = dataset_size // effective_batch_size
 
             logger.info(
-                "AUTO-COMPUTED STEPS_PER_EPOCH: csv=%s, dataset_size=%d, "
+                "AUTO-COMPUTED STEPS_PER_EPOCH: dataset=%s, dataset_size=%d, "
                 "batch_size=%d, devices=%d, accumulate=%d, effective_batch=%d, "
                 "steps_per_epoch=%d",
-                csv_path,
+                dataset_source,
                 dataset_size,
                 batch_size,
                 device_count,

@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 import logging
 from pathlib import Path
 
@@ -25,7 +26,9 @@ from pytorch_lightning.trainer.trainer import Trainer
 from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
     ModPolymapperPolygonizerCallback,
 )
-from pytorch_segmentation_models_trainer.dataset_loader.dataset import ImageDataset
+from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import (
+    ImageDataset,
+)
 import hydra
 import torch
 from omegaconf import DictConfig

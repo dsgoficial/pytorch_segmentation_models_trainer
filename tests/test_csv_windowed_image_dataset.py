@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
-from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
+from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import (
     CSVWindowedImageDataset,
 )
 from tests.utils import BasicTestCase
@@ -114,3 +114,20 @@ class TestCSVWindowedImageDataset(BasicTestCase):
 
         with pytest.raises(ValueError, match="coluna 'row_off' é obrigatória"):
             CSVWindowedImageDataset(input_csv_path=csv_path)
+
+    def test_invalid_image_dtype_raises(self):
+        with pytest.raises(ValueError, match="image_dtype"):
+            CSVWindowedImageDataset(
+                input_csv_path=self.csv_path,
+                image_dtype="int32",
+            )
+
+    def test_native_image_dtype_preserves_dtype(self):
+        ds = CSVWindowedImageDataset(
+            input_csv_path=self.csv_path,
+            image_dtype="native",
+        )
+
+        item = ds[0]
+
+        assert item["image"].dtype == np.uint8

@@ -8,6 +8,8 @@ from omegaconf import OmegaConf, MissingMandatoryValue
 from pytorch_segmentation_models_trainer.config_definitions.dataset_config import (
     DataLoaderConfig,
     DatasetConfig,
+    AutoencoderDatasetConfig,
+    AutoencoderRandomCropDatasetConfig,
     RasterPatchDatasetConfig,
     CSVWindowedDatasetConfig,
     CSVWindowedImageDatasetConfig,
@@ -26,6 +28,22 @@ class TestDatasetConfigs:
         with pytest.raises(MissingMandatoryValue):
             _ = cfg.input_csv_path
         assert "SegmentationDataset" in cfg._target_
+
+    def test_autoencoder_dataset_config(self):
+        cfg = OmegaConf.structured(AutoencoderDatasetConfig)
+        with pytest.raises(MissingMandatoryValue):
+            _ = cfg.input_csv_path
+        assert "image_dataset.AutoencoderDataset" in cfg._target_
+        assert cfg.corruption_augmentation_list == []
+
+    def test_autoencoder_random_crop_dataset_config(self):
+        cfg = OmegaConf.structured(AutoencoderRandomCropDatasetConfig)
+        with pytest.raises(MissingMandatoryValue):
+            _ = cfg.image_dir
+        assert "AutoencoderRandomCropDataset" in cfg._target_
+        assert cfg.crop_size == [256, 256]
+        assert cfg.samples_per_epoch == 10000
+        assert cfg.split == "all"
 
     def test_raster_patch_dataset_config(self):
         cfg = OmegaConf.structured(RasterPatchDatasetConfig)

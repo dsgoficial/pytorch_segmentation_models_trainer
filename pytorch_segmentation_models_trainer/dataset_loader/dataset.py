@@ -49,10 +49,6 @@ from pytorch_segmentation_models_trainer.utils.object_detection_utils import (
 from pytorch_segmentation_models_trainer.utils.dataframe_utils import read_dataframe
 from torch.utils.data import Dataset
 
-from pytorch_toolbelt.inference.tiles import ImageSlicer
-from pytorch_toolbelt.utils.torch_utils import (
-    image_to_tensor,
-)
 import gc
 import kornia as K
 
@@ -205,284 +201,6 @@ class AbstractDataset(Dataset):
 
     def to_tensor(self, x):
         return x if isinstance(x, torch.Tensor) else torch.from_numpy(x)
-
-
-class ImageDataset(AbstractDataset):
-    def __init__(
-        self,
-        input_csv_path: Path = None,
-        df=None,
-        root_dir=None,
-        augmentation_list=None,
-        data_loader=None,
-        image_key=None,
-        n_first_rows_to_read=None,
-        seed=None,
-    ) -> None:
-        super(ImageDataset, self).__init__(
-            input_csv_path=input_csv_path,
-            df=df,
-            root_dir=root_dir,
-            augmentation_list=augmentation_list,
-            data_loader=data_loader,
-            image_key=image_key,
-            n_first_rows_to_read=n_first_rows_to_read,
-            seed=seed,
-        )
-
-    @classmethod
-    def get_grouped_datasets(
-        cls,
-        df,
-        group_by_keys: List[str],
-        root_dir=None,
-        augmentation_list=None,
-        image_key=None,
-        n_first_rows_to_read=None,
-        **kwargs,
-    ):
-        return {
-            k: cls(
-                df=pd.DataFrame(df.iloc[v]).reset_index(),
-                root_dir=root_dir,
-                augmentation_list=augmentation_list,
-                image_key=image_key,
-                n_first_rows_to_read=n_first_rows_to_read,
-                **kwargs,
-            )
-            for k, v in df.groupby(group_by_keys).groups.items()
-        }
-
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        idx = idx % self.len
-
-        image = self.load_image(idx, key=self.image_key)
-        result = (
-            {"image": image} if self.transform is None else self.transform(image=image)
-        )
-        result.update({"path": self.get_path(idx, key=self.image_key)})
-        return result
-
-
-class CSVWindowedImageDataset(ImageDataset):
-    """Dataset de imagem que lê janelas (crops) específicas de imagens maiores,
-    baseando-se em offsets e tamanho de patch definidos em um arquivo CSV.
-    Não inclui máscaras.
-
-    Colunas esperadas no CSV (configuráveis):
-    - image: Caminho da imagem original.
-    - row_off: Offset vertical (linha) do patch.
-    - col_off: Offset horizontal (coluna) do patch.
-    - patch_size: Tamanho do patch (largura e altura).
-    """
-
-    def __init__(
-        self,
-        input_csv_path: Path = None,
-        df: Optional[pd.DataFrame] = None,
-        root_dir=None,
-        augmentation_list=None,
-        data_loader=None,
-        image_key="image",
-        row_off_key="row_off",
-        col_off_key="col_off",
-        patch_size_key="patch_size",
-        n_first_rows_to_read=None,
-        selected_bands: Optional[List[int]] = None,
-        use_rasterio: bool = True,
-        reset_augmentation_function: bool = False,
-        image_dtype: str = "uint8",
-    ) -> None:
-        super().__init__(
-            input_csv_path=input_csv_path,
-            df=df,
-            root_dir=root_dir,
-            augmentation_list=augmentation_list,
-            data_loader=data_loader,
-            image_key=image_key,
-            n_first_rows_to_read=n_first_rows_to_read,
-        )
-        self.row_off_key = row_off_key
-        self.col_off_key = col_off_key
-        self.patch_size_key = patch_size_key
-        self.selected_bands = selected_bands
-        self.use_rasterio = use_rasterio
-        self.reset_augmentation_function = reset_augmentation_function
-
-        if image_dtype not in _VALID_IMAGE_DTYPES:
-            raise ValueError(
-                f"image_dtype '{image_dtype}' é inválido. "
-                f"Valores aceitos: {sorted(_VALID_IMAGE_DTYPES)}"
-            )
-        self.image_dtype = image_dtype
-
-        # Validação de colunas
-        for col in [self.row_off_key, self.col_off_key, self.patch_size_key]:
-            if col not in self.df.columns:
-                raise ValueError(
-                    f"A coluna '{col}' é obrigatória no CSV/DataFrame para CSVWindowedImageDataset."
-                )
-
-    def load_image(
-        self,
-        idx: int,
-        key: str = None,
-        is_mask: bool = False,
-        force_rgb: bool = False,
-        is_binary_mask: bool = True,
-    ) -> np.ndarray:
-        idx = idx % self.len
-        row = self.df.iloc[idx]
-        image_path = self.get_path(idx, key=key)
-
-        window = rasterio.windows.Window(
-            col_off=row[self.col_off_key],
-            row_off=row[self.row_off_key],
-            width=row[self.patch_size_key],
-            height=row[self.patch_size_key],
-        )
-
-        with rasterio.open(image_path) as src:
-            # Sempre lê como imagem (pode ter múltiplas bandas)
-            data = (
-                src.read(window=window)
-                if self.selected_bands is None
-                else src.read(self.selected_bands, window=window)
-            )
-            image = np.transpose(data, (1, 2, 0)).copy()
-            if self.image_dtype == "native":
-                return image
-            return np.array(image, dtype=np.dtype(self.image_dtype))
-
-
-class AutoencoderDataset(ImageDataset):
-    """
-    Dataset for Autoencoder training.
-    Supports a 'corruption_augmentation_list' that is applied ONLY to the input image,
-    while 'augmentation_list' is applied to both input and target (synchronized).
-    """
-
-    def __init__(
-        self,
-        *args,
-        corruption_augmentation_list: Optional[List[Dict[str, Any]]] = None,
-        **kwargs,
-    ) -> None:
-        super().__init__(*args, **kwargs)
-        self.corruption_transform = (
-            None
-            if corruption_augmentation_list is None
-            else load_augmentation_object(corruption_augmentation_list)
-        )
-        # Update transform to support synchronized targets
-        if self.transform is not None:
-            # Albumentations Compose object exposes its list of transforms
-            self.transform = A.Compose(
-                self.transform.transforms, additional_targets={"target": "image"}
-            )
-
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        idx = idx % self.len
-        image = self.load_image(idx, key=self.image_key)
-        target = image.copy()
-
-        # 1. Apply corruption ONLY to the input image
-        if self.corruption_transform is not None:
-            image = self.corruption_transform(image=image)["image"]
-
-        # 2. Apply base transforms (Resize, Flip, Normalize, etc.) to both
-        if self.transform is not None:
-            res = self.transform(image=image, target=target)
-            result = {"image": res["image"], "target": res["target"]}
-        else:
-            result = {"image": image, "target": target}
-
-        result.update({"path": self.get_path(idx, key=self.image_key)})
-        return result
-
-
-class TiledInferenceImageDataset(ImageDataset):
-    def __init__(
-        self,
-        input_csv_path: Path = None,
-        df=None,
-        root_dir=None,
-        augmentation_list=None,
-        data_loader=None,
-        image_key=None,
-        normalize_output=True,
-        n_first_rows_to_read=None,
-        pad_if_needed=False,
-        model_input_shape=None,
-        step_shape=None,
-    ) -> None:
-        super(TiledInferenceImageDataset, self).__init__(
-            input_csv_path=input_csv_path,
-            df=df,
-            root_dir=root_dir,
-            augmentation_list=None,
-            data_loader=data_loader,
-            image_key=image_key,
-            n_first_rows_to_read=n_first_rows_to_read,
-        )
-        if pad_if_needed and model_input_shape is None:
-            raise ValueError("Must provide model_input_shape if pad_if_needed is True")
-        self.pad_if_needed = pad_if_needed
-        self.model_input_shape = model_input_shape
-        self.step_shape = (224, 224) if step_shape is None else step_shape
-        self.transform = A.Normalize() if normalize_output else None
-        self.tiler_dict = dict()
-        self.shape_dict = dict()
-        self.pad_func = A.PadIfNeeded(
-            math.ceil(self.df["width"].max() / self.model_input_shape[0])
-            * self.model_input_shape[0],
-            math.ceil(self.df["height"].max() / self.model_input_shape[1])
-            * self.model_input_shape[1],
-        )
-
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        idx = idx % self.len
-
-        image = self.load_image(idx, key=self.image_key)
-        self.shape_dict[idx] = image.shape[0:2]
-        result = (
-            {"image": image} if self.transform is None else self.transform(image=image)
-        )
-        if self.pad_if_needed:
-            result = self.pad_func(**result)
-        result.update({"path": self.get_path(idx, key=self.image_key)})
-        tiler = ImageSlicer(
-            result["image"].shape,
-            tile_size=self.model_input_shape,
-            tile_step=self.step_shape,
-        )
-        tiles = [image_to_tensor(tile) for tile in tiler.split(result.pop("image"))]
-        result.update({"tiles": torch.stack(tiles)})
-        result.update(
-            {"tile_image_idx": idx * torch.ones(len(tiles), dtype=torch.int64)}
-        )
-        result.update({"tiler_object": tiler})
-        result.update({"original_shape": tuple(self.df[["width", "height"]].iloc[idx])})
-        return result
-
-    @staticmethod
-    def collate_fn(batch: List) -> Dict[str, Union[torch.Tensor, List[str]]]:
-        """
-        :param batch: an iterable of N sets from __getitem__()
-        :return: a tensor of images, lists of varying-size tensors of bounding boxes, labels, and difficulties
-        """
-        paths = [item["path"] for item in batch]
-        tiles = torch.cat([item["tiles"] for item in batch], dim=0)
-        indexes = torch.cat([item["tile_image_idx"] for item in batch], dim=0)
-        tiler_object_list = [item["tiler_object"] for item in batch]
-        original_shape_list = [item["original_shape"] for item in batch]
-        return {
-            "path": paths,
-            "tiles": tiles,
-            "tile_image_idx": indexes,
-            "tiler_object_list": tiler_object_list,
-            "original_shape": original_shape_list,
-        }
 
 
 _DTYPE_NORMALIZATION = {
@@ -3028,6 +2746,34 @@ class ModPolyMapperDataset(NaiveModPolyMapperDataset):
         images = torch.stack(images, dim=0)
         indexes = torch.tensor(indexes, dtype=torch.int64)
         return images, list(targets), indexes
+
+
+def __getattr__(name: str):
+    """Lazy compatibility exports for datasets moved out of this module."""
+    image_dataset_exports = {
+        "ImageDataset",
+        "CSVWindowedImageDataset",
+        "TiledInferenceImageDataset",
+        "AutoencoderDataset",
+        "AutoencoderRandomCropDataset",
+    }
+    if name in image_dataset_exports:
+        from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import (
+            AutoencoderDataset,
+            AutoencoderRandomCropDataset,
+            CSVWindowedImageDataset,
+            ImageDataset,
+            TiledInferenceImageDataset,
+        )
+
+        return {
+            "ImageDataset": ImageDataset,
+            "CSVWindowedImageDataset": CSVWindowedImageDataset,
+            "TiledInferenceImageDataset": TiledInferenceImageDataset,
+            "AutoencoderDataset": AutoencoderDataset,
+            "AutoencoderRandomCropDataset": AutoencoderRandomCropDataset,
+        }[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ hyperparameters:
 # In a real unsupervised task, the model would be an Autoencoder or similar.
 
 train_dataset:
-  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedImageDataset
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.CSVWindowedImageDataset
   input_csv_path: /data/unlabeled_patches.csv
   image_key: image
   row_off_key: row_off

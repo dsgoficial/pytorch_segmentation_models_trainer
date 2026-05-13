@@ -45,7 +45,7 @@ image,row_off,col_off,patch_size
 
 ```yaml
 train_dataset:
-  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedImageDataset
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.CSVWindowedImageDataset
   input_csv_path: /data/unlabeled_patches.csv
   image_key: image
   row_off_key: row_off

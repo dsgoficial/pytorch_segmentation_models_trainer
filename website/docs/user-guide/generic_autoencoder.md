@@ -13,6 +13,7 @@ The `GenericAutoencoder` is a flexible architecture designed for image reconstru
 - **Automatic Reshaping**: Handles the conversion of 1D visual tokens (from ViTs) into 2D spatial feature maps.
 - **Reconstruction Trainer**: Dedicated `AutoencoderModel` (LightningModule) for managing MSE/L1 reconstruction loss.
 - **Simplified Dataset**: `AutoencoderDataset` designed for training without masks.
+- **Folder Random Crops**: `AutoencoderRandomCropDataset` scans image folders and samples crops on-the-fly from large rasters.
 
 ## Configuration
 
@@ -23,13 +24,44 @@ Use `AutoencoderDataset`, which requires only a CSV with image paths.
 
 ```yaml
 train_dataset:
-  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.AutoencoderDataset
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.AutoencoderDataset
   input_csv_path: path/to/images.csv
   root_dir: /data
   augmentation_list:
     - _target_: albumentations.Resize
       height: 256
       width: 256
+    - _target_: albumentations.Normalize
+    - _target_: albumentations.pytorch.ToTensorV2
+```
+
+For unlabeled image folders or large rasters, use `AutoencoderRandomCropDataset`.
+It recursively discovers images, splits train/validation deterministically, and
+reads only the sampled window for each item.
+
+```yaml
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.AutoencoderRandomCropDataset
+  image_dir: /data/unlabeled_images
+  split: train
+  val_fraction: 0.2
+  split_seed: 42
+  image_extensions: [".tif", ".tiff", ".png", ".jpg", ".jpeg"]
+  crop_size: [256, 256]
+  samples_per_epoch: 20000
+  augmentation_list:
+    - _target_: albumentations.Normalize
+    - _target_: albumentations.pytorch.ToTensorV2
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.AutoencoderRandomCropDataset
+  image_dir: /data/unlabeled_images
+  split: val
+  val_fraction: 0.2
+  split_seed: 42
+  crop_size: [256, 256]
+  samples_per_epoch: 2000
+  augmentation_list:
     - _target_: albumentations.Normalize
     - _target_: albumentations.pytorch.ToTensorV2
 ```

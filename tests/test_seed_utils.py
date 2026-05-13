@@ -259,7 +259,7 @@ class TestSeedIntegrationEndToEnd(BasicTestCase):
         from omegaconf import OmegaConf
         import albumentations as A
         from pytorch_segmentation_models_trainer.model_loader.model import Model
-        from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
+        from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import (
             ImageDataset,
         )
         import pandas as pd
@@ -288,7 +288,7 @@ class TestSeedIntegrationEndToEnd(BasicTestCase):
                 "loss": {"_target_": "torch.nn.MSELoss"},
                 "hyperparameters": {"batch_size": 1},
                 "train_dataset": {
-                    "_target_": "pytorch_segmentation_models_trainer.dataset_loader.dataset.ImageDataset",
+                    "_target_": "pytorch_segmentation_models_trainer.dataset_loader.image_dataset.ImageDataset",
                     "df": df,
                     "augmentation_list": [
                         {

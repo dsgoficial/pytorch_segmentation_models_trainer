@@ -19,6 +19,7 @@
  *                                                                         *
  ****
 """
+
 import logging
 import warnings
 from pathlib import Path
@@ -30,7 +31,7 @@ from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
 from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
     ActiveSkeletonsPolygonizerCallback,
 )
-from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
+from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import (
     ImageDataset,
     TiledInferenceImageDataset,
 )
@@ -305,9 +306,9 @@ def predict_from_batch(cfg: DictConfig):
         logger.info(f"Loaded {len(df)} images for inference via inference_processor")
 
         params = {
-            "save_inference_output": cfg.save_inference
-            if "save_inference" in cfg
-            else True
+            "save_inference_output": (
+                cfg.save_inference if "save_inference" in cfg else True
+            )
         }
         if "inference_threshold" in cfg:
             params["inference_threshold"] = cfg.inference_threshold
