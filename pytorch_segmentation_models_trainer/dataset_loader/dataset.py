@@ -612,25 +612,32 @@ class CSVWindowedSegmentationDataset(SegmentationDataset):
             height=row[self.patch_size_key],
         )
 
-        with rasterio.open(image_path) as src:
-            if is_mask:
-                # Máscara: lê a primeira banda e converte para uint8
-                data = src.read(1, window=window)
-                mask = data.astype(np.uint8)
-                if is_binary_mask:
-                    mask = (mask > 0).astype(np.uint8)
-                return mask
-            else:
-                # Imagem: lê as bandas selecionadas (ou todas)
-                data = (
-                    src.read(window=window)
-                    if self.selected_bands is None
-                    else src.read(self.selected_bands, window=window)
-                )
-                image = np.transpose(data, (1, 2, 0)).copy()
-                if self.image_dtype == "native":
-                    return image
-                return np.array(image, dtype=np.dtype(self.image_dtype))
+        try:
+            with rasterio.open(image_path) as src:
+                if is_mask:
+                    # Máscara: lê a primeira banda e converte para uint8
+                    data = src.read(1, window=window)
+                    mask = data.astype(np.uint8)
+                    if is_binary_mask:
+                        mask = (mask > 0).astype(np.uint8)
+                    return mask
+                else:
+                    # Imagem: lê as bandas selecionadas (ou todas)
+                    data = (
+                        src.read(window=window)
+                        if self.selected_bands is None
+                        else src.read(self.selected_bands, window=window)
+                    )
+                    image = np.transpose(data, (1, 2, 0)).copy()
+                    if self.image_dtype == "native":
+                        return image
+                    return np.array(image, dtype=np.dtype(self.image_dtype))
+        except (rasterio.errors.RasterioIOError, Exception) as e:
+            logger.error(f"Error reading window {window} from {image_path}: {e}")
+            # Try another index
+            return self.load_image(
+                (idx + 1) % self.len, key, is_mask, force_rgb, is_binary_mask
+            )
 
 
 @contextlib.contextmanager
@@ -1073,25 +1080,30 @@ class RandomCropSegmentationDataset(AbstractDataset):
         window = rasterio.windows.Window(
             col_off=x, row_off=y, width=crop_w, height=crop_h
         )
-        src = self._get_src(image_path)
-        if is_mask:
-            if self.soft_labels:
-                # Soft labels: C-band float32 GeoTIFF → (H, W, C)
-                data = src.read(window=window)  # (C, H, W) float32
-                return np.transpose(data, (1, 2, 0)).copy()  # (H, W, C)
+        try:
+            src = self._get_src(image_path)
+            if is_mask:
+                if self.soft_labels:
+                    # Soft labels: C-band float32 GeoTIFF → (H, W, C)
+                    data = src.read(window=window)  # (C, H, W) float32
+                    return np.transpose(data, (1, 2, 0)).copy()  # (H, W, C)
+                else:
+                    data = src.read(1, window=window)  # (H, W)
+                    return data.astype(np.uint8)
             else:
-                data = src.read(1, window=window)  # (H, W)
-                return data.astype(np.uint8)
-        else:
-            if self.selected_bands is not None:
-                data = src.read(self.selected_bands, window=window)
-            else:
-                data = src.read(window=window)
-            # (C, H, W) -> (H, W, C)
-            image = np.transpose(data, (1, 2, 0)).copy()
-            if self.image_dtype == "native":
-                return image
-            return image.astype(np.dtype(self.image_dtype))
+                if self.selected_bands is not None:
+                    data = src.read(self.selected_bands, window=window)
+                else:
+                    data = src.read(window=window)
+                # (C, H, W) -> (H, W, C)
+                image = np.transpose(data, (1, 2, 0)).copy()
+                if self.image_dtype == "native":
+                    return image
+                return image.astype(np.dtype(self.image_dtype))
+        except (rasterio.errors.RasterioIOError, Exception) as e:
+            logger.error(f"Error reading window {window} from {image_path}: {e}")
+            # Raise exception so caller can retry
+            raise e
 
     def _read_full_mask(self, idx: int) -> np.ndarray:
         """Read full mask for image idx as a single-band hard-label array.
@@ -1843,10 +1855,13 @@ class RandomCropSegmentationDataset(AbstractDataset):
                 y = np.random.randint(0, h - crop_h + 1)
 
             image_path = self.get_path(img_idx, key=self.image_key)
-            image = self._read_crop(image_path, x, y, is_mask=False)
-
             mask_path = self.get_path(img_idx, key=self.mask_key)
-            mask = self._read_crop(mask_path, x, y, is_mask=True)
+
+            try:
+                image = self._read_crop(image_path, x, y, is_mask=False)
+                mask = self._read_crop(mask_path, x, y, is_mask=True)
+            except Exception:
+                continue
 
             if self._is_crop_valid(image, mask_data=mask):
                 break
@@ -1897,10 +1912,15 @@ class RandomCropSegmentationDataset(AbstractDataset):
         img_idx, x, y = int(img_idx), int(x), int(y)
 
         image_path = self.get_path(img_idx, key=self.image_key)
-        image = self._read_crop(image_path, x, y, is_mask=False)
-
         mask_path = self.get_path(img_idx, key=self.mask_key)
-        mask = self._read_crop(mask_path, x, y, is_mask=True)
+
+        try:
+            image = self._read_crop(image_path, x, y, is_mask=False)
+            mask = self._read_crop(mask_path, x, y, is_mask=True)
+        except Exception:
+            # If a grid tile fails, try the next one to avoid crashing
+            new_idx = (idx + 1) % len(self._grid_positions)
+            return self._get_grid_crop(new_idx)
 
         if self.n_classes == 2 and not self.soft_labels:
             mask = (mask > 0).astype(np.uint8)
