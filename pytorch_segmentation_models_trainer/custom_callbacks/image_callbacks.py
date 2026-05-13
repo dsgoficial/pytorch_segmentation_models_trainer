@@ -1237,6 +1237,7 @@ class AutoencoderResultCallback(ImageSegmentationResultCallback):
 
             with torch.no_grad():
                 reconstructed = pl_module(image)
+                reconstructed = getattr(reconstructed, "reconstruction", reconstructed)
 
             image_cpu = image.squeeze(0).cpu().numpy()
             reconstructed_cpu = reconstructed.squeeze(0).cpu().numpy()

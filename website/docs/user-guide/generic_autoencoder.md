@@ -12,6 +12,7 @@ The `GenericAutoencoder` is a flexible architecture designed for image reconstru
 - **Unified Encoder API**: Use any SMP-supported backbone (including `timm` models) or native HuggingFace models.
 - **Automatic Reshaping**: Handles the conversion of 1D visual tokens (from ViTs) into 2D spatial feature maps.
 - **Reconstruction Trainer**: Dedicated `AutoencoderModel` (LightningModule) for managing MSE/L1 reconstruction loss.
+- **Variational Training**: `GenericVariationalAutoencoder`, `VariationalAutoencoderModel`, and `VariationalAutoencoderLoss` implement reconstruction plus KL regularization.
 - **Simplified Dataset**: `AutoencoderDataset` designed for training without masks.
 - **Folder Random Crops**: `AutoencoderRandomCropDataset` scans image folders and samples crops on-the-fly from large rasters.
 
@@ -88,6 +89,39 @@ pl_trainer_model:
 loss:
   _target_: torch.nn.MSELoss
 ```
+
+## Variational Autoencoder
+
+Use the VAE path when the latent representation should be regularized against a
+standard normal prior. The model returns reconstruction, `mu`, `logvar`, and the
+sampled latent tensor `z`; the loss combines reconstruction with the analytic KL
+term `KL(q(z|x) || N(0, I))`.
+
+```yaml
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.variational_autoencoder_model.VariationalAutoencoderModel
+
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.GenericVariationalAutoencoder
+  encoder_name: resnet18
+  use_huggingface: false
+  in_channels: 3
+  latent_dim: 128
+  pretrained: false
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.autoencoder_losses.VariationalAutoencoderLoss
+  reconstruction_loss: mse
+  reconstruction_weight: 1.0
+  beta: 1.0
+```
+
+`VariationalAutoencoderLoss` supports `mse`, `l1`, and `bce_with_logits` as the
+reconstruction term. The `beta` parameter controls the strength of the KL
+regularization. See
+`conf/examples/generic_variational_autoencoder_random_crop_folder.yaml` for a
+complete folder-based random-crop training config with train, validation, and
+test datasets.
 
 ## Usage with HuggingFace
 

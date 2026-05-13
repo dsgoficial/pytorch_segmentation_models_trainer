@@ -120,6 +120,58 @@ Non-custom losses are wrapped automatically by `build_compound_loss_from_config`
 
 ---
 
+## `VariationalAutoencoderLoss`
+
+```python
+from pytorch_segmentation_models_trainer.custom_losses.autoencoder_losses import VariationalAutoencoderLoss
+```
+
+Composite VAE objective:
+
+```text
+loss = reconstruction_weight * reconstruction_loss + beta * KL(q(z|x) || N(0, I))
+```
+
+The KL term is computed analytically from `mu` and `logvar`, so this is not the
+same API as `torch.nn.KLDivLoss`.
+
+### Constructor
+
+```python
+VariationalAutoencoderLoss(
+    reconstruction_loss="mse",
+    reconstruction_weight=1.0,
+    beta=1.0,
+)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `reconstruction_loss` | `str` | `"mse"` | One of `"mse"`, `"l1"`, or `"bce_with_logits"` |
+| `reconstruction_weight` | `float` | `1.0` | Weight applied to the reconstruction term |
+| `beta` | `float` | `1.0` | Weight applied to the analytic KL term |
+
+### Forward Signature
+
+```python
+def forward(output: VariationalAutoencoderOutput, target: torch.Tensor) -> dict
+```
+
+Returns `loss`, `reconstruction_loss`, and `kl_loss` scalar tensors. The
+component tensors are detached for logging while `loss` keeps gradients.
+
+### YAML Config Snippet
+
+```yaml
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.autoencoder_losses.VariationalAutoencoderLoss
+  reconstruction_loss: mse
+  reconstruction_weight: 1.0
+  beta: 1.0
+```
+
+---
+
 ## `MultiLoss`
 
 ```python

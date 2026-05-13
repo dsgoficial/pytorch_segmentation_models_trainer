@@ -13,6 +13,9 @@ import tempfile
 from pathlib import Path
 from PIL import Image
 
+from pytorch_segmentation_models_trainer.custom_models.variational_autoencoder import (
+    VariationalAutoencoderOutput,
+)
 from pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks import (
     ImageSegmentationResultCallback,
     EnhancedImageSegmentationResultCallback,
@@ -97,6 +100,34 @@ class TestImageCallbacks(unittest.TestCase):
             args, kwargs = mock_vis.call_args
             self.assertIn("input_image", kwargs)
             self.assertIn("reconstructed_image", kwargs)
+
+    def test_autoencoder_result_callback_accepts_vae_output(self):
+        self.dataset.__getitem__.side_effect = lambda i: {
+            "image": torch.zeros(3, 10, 10),
+            "target": torch.zeros(3, 10, 10),
+        }
+        self.dataset.__len__.return_value = 1
+
+        callback = AutoencoderResultCallback(n_samples=1)
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+        reconstruction = torch.zeros(1, 3, 10, 10)
+        mu = torch.zeros(1, 2, 2, 2)
+        self.pl_module.return_value = VariationalAutoencoderOutput(
+            reconstruction=reconstruction,
+            mu=mu,
+            logvar=mu,
+            z=mu,
+        )
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_vis.return_value = (MagicMock(), MagicMock())
+            with patch.object(callback, "save_plot_to_disk", return_value="dummy.png"):
+                with patch.object(callback, "log_data_to_tensorboard"):
+                    callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+        mock_vis.assert_called_once()
 
     def test_image_segmentation_result_callback_init(self):
         callback = ImageSegmentationResultCallback(n_samples=2)

@@ -56,6 +56,10 @@
 - Added GeoParquet and PostGIS export capabilities for clustered spatial data.
 
 ## Autoencoder
+- Added `GenericVariationalAutoencoder` with SMP/HuggingFace encoder support, posterior `mu`/`logvar` projections, and the reparameterization trick for differentiable latent sampling.
+- Added `VariationalAutoencoderLoss`, a composite reconstruction-plus-analytic-KL objective supporting MSE, L1, and BCE-with-logits reconstruction terms.
+- Added `VariationalAutoencoderModel` to log total, reconstruction, and KL losses across train, validation, and test steps.
+- Added Hydra dataclasses, API/user documentation, and a complete `AutoencoderRandomCropDataset` VAE example config with random horizontal, vertical, and transpose mirror flips.
 - Moved image-only datasets to `dataset_loader/image_dataset.py` (`ImageDataset`, `CSVWindowedImageDataset`, `TiledInferenceImageDataset`, `AutoencoderDataset`, and `AutoencoderRandomCropDataset`), while keeping lazy compatibility exports from `dataset_loader.dataset` for existing configs.
 - Added `AutoencoderRandomCropDataset` for self-supervised reconstruction from unlabeled image folders or CSV-backed full-size rasters. It discovers images recursively, supports deterministic train/validation splits, rasterio windowed random crops, selected bands, dtype handling, and input-only corruption augmentations.
 - Added Hydra dataclasses and a folder-based example config for random-crop autoencoder training.

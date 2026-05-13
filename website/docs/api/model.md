@@ -65,6 +65,49 @@ Model(cfg, inference_mode=False)
 
 ---
 
+## `VariationalAutoencoderModel`
+
+LightningModule for VAE reconstruction training. It expects the configured
+domain model to return a `VariationalAutoencoderOutput` and the configured loss
+to return either a scalar tensor or a dictionary containing `loss` plus optional
+component losses.
+
+**Import path:** `pytorch_segmentation_models_trainer.model_loader.variational_autoencoder_model.VariationalAutoencoderModel`
+
+### Constructor
+
+```python
+VariationalAutoencoderModel(cfg, inference_mode=False)
+```
+
+### Logged Values
+
+| Metric | Description |
+|--------|-------------|
+| `train/loss`, `val/loss`, `test/loss` | Total VAE objective |
+| `train/reconstruction_loss`, `val/reconstruction_loss`, `test/reconstruction_loss` | Reconstruction term when returned by the loss |
+| `train/kl_loss`, `val/kl_loss`, `test/kl_loss` | Analytic KL term when returned by the loss |
+
+### YAML Config Snippet
+
+```yaml
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.variational_autoencoder_model.VariationalAutoencoderModel
+
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.GenericVariationalAutoencoder
+  encoder_name: resnet18
+  in_channels: 3
+  latent_dim: 128
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.autoencoder_losses.VariationalAutoencoderLoss
+  reconstruction_loss: mse
+  beta: 1.0
+```
+
+---
+
 ## `FrameFieldSegmentationPLModel`
 
 PyTorch Lightning model for frame field segmentation. Extends `Model` with frame-field-specific loss building, normalization, and output handling.
