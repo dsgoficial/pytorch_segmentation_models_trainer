@@ -1,0 +1,49 @@
+# Variational Autoencoder with resnet18, encoder_depth=3 (28x28 latent for 224x224 input)
+# Uses WindowedImageAutoencoderDataset for deterministic grid-based reconstruction.
+
+# PyTorch Lightning Trainer Model
+pl_trainer_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.variational_autoencoder_model.VariationalAutoencoderModel
+
+# VAE Model Architecture
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.GenericVariationalAutoencoder
+  encoder_name: resnet18
+  use_huggingface: false
+  in_channels: 3
+  latent_dim: 128         # Number of latent channels
+  pretrained: true
+  encoder_depth: 3        # 2^3 = 8x downsampling
+
+# VAE Loss (MSE + KL)
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.autoencoder_losses.VariationalAutoencoderLoss
+  reconstruction_loss: mse
+  reconstruction_weight: 1.0
+  beta: 1.0               # KL divergence weight
+
+# Dataset configuration
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.WindowedImageAutoencoderDataset
+  image_dir: /path/to/train/images
+  image_extensions: [".tif", ".png"]
+  crop_size: [224, 224]
+  stride: 224
+  image_dtype: uint8
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.WindowedImageAutoencoderDataset
+  image_dir: /path/to/val/images
+  image_extensions: [".tif", ".png"]
+  crop_size: [224, 224]
+  stride: 224
+  image_dtype: uint8
+
+# Optimizer
+optimizer:
+  _target_: torch.optim.Adam
+  lr: 0.0001
+
+# Training hyperparameters
+batch_size: 16
+max_epochs: 100
