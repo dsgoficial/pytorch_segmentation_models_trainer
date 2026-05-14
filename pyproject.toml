@@ -50,6 +50,8 @@ dependencies = [
     "bidict==0.21.2",
     "cython>=3.0.0",
     "ninja>=1.11.0",
+    "click>=8.0.0",
+    "ruamel.yaml>=0.18.0",
     "pyyaml>=5.4",
     "pycocotools",
     "multiprocess==0.70.19",
@@ -90,6 +92,7 @@ all = [
 
 [project.scripts]
 pytorch-smt = "pytorch_segmentation_models_trainer.main:entry"
+pytorch-smt-tools = "pytorch_segmentation_models_trainer.tools.cli:entry"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,5 +1,15 @@
 # Unreleased
 
+## Tooling CLI
+
+- Added `pytorch-smt-tools` entry point as a generic CLI tooling hub for command-line utilities.
+- Added `compute-stats` subcommand (`pytorch-smt-tools compute-stats <yaml>`) that instantiates the training dataset defined in a YAML config, streams all samples through a DataLoader to compute per-channel mean and standard deviation, and writes the results back to the same YAML file.
+- The command inserts an `albumentations.Normalize` entry (with the computed mean/std and the correct `max_pixel_value` for the dataset's `image_dtype`) into the `augmentation_list` of every dataset key (`train_dataset`, `val_dataset`, `test_dataset`) found in the YAML.
+- If the YAML contains image-visualization callbacks (e.g. `AutoencoderResultCallback`, `ImageSegmentationResultCallback`), the command also updates their `norm_params` and sets `normalized_input: true`, eliminating the need to copy-paste statistics manually.
+- Added `--dry-run`, `--skip-callbacks`, `--dataset-key`, `--batch-size`, and `--num-workers` flags.
+- Added `click>=8.0.0` and `ruamel.yaml>=0.18.0` as project dependencies (ruamel.yaml preserves YAML comments and formatting on round-trip).
+- Added unit tests in `tests/test_compute_dataset_stats.py` with 100% coverage.
+
 ## Dataset
 - Added `WindowedImageDataset` for deterministic sliding-window (grid) patch extraction from rasters without requiring pre-generated masks.
 - Added `WindowedImageAutoencoderDataset` specifically for Autoencoder validation/testing, yielding `(image, target)` pairs where `image` can be optionally corrupted while `target` remains clean.
