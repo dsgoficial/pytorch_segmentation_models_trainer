@@ -95,12 +95,14 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
         data = torch.from_numpy(data)
         logger.experiment.add_image(image_path, data, current_epoch)
 
-    def save_plot_to_disk(self, plot, image_name, current_epoch):
-        image_name = Path(image_name).name.split(".")[0]
+    def save_plot_to_disk(self, plot, image_name, current_epoch, sample_idx=None):
+        stem = Path(image_name).name.split(".")[0]
+        idx_suffix = f"_idx{sample_idx}" if sample_idx is not None else ""
         report_path = os.path.join(
             self.output_path,
-            "report_image_{name}_epoch_{epoch}_{date}.png".format(
-                name=image_name,
+            "report_image_{name}{idx}_epoch_{epoch}_{date}.png".format(
+                name=stem,
+                idx=idx_suffix,
                 date=datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
                 epoch=current_epoch,
             ),
@@ -118,17 +120,28 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
     def on_validation_epoch_end(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule
     ):
-        if not self.save_outputs:
+        if (
+            not self.save_outputs
+            or trainer.current_epoch % self.log_every_k_epochs != 0
+        ):
             return
-        val_ds = pl_module.val_dataloader().dataset
+        val_dataloader = pl_module.val_dataloader()
+        val_ds = val_dataloader.dataset
         device = pl_module.device
         logger = trainer.logger
-        self.n_samples = (
-            pl_module.val_dataloader().batch_size
-            if self.n_samples is None
-            else self.n_samples
+        n_samples = (
+            val_dataloader.batch_size if self.n_samples is None else self.n_samples
         )
-        for i in range(self.n_samples):
+        effective_n = min(n_samples, len(val_ds))
+        if effective_n < n_samples:
+            logger.warning(
+                "ImageSegmentationResultCallback: requested %d samples but val_ds "
+                "has only %d — capping to %d.",
+                n_samples,
+                len(val_ds),
+                effective_n,
+            )
+        for i in range(effective_n):
             image, mask = val_ds[i].values()
             image = image.unsqueeze(0)
             image = image.to(device)
@@ -136,6 +149,7 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
             image = image.to("cpu")
             predicted_mask = predicted_mask.to("cpu")
             plot_title = val_ds.get_path(i)
+            tb_tag = f"{plot_title}_idx{i}"
             plt_result, fig = generate_visualization(
                 fig_title=plot_title,
                 image=self.prepare_image_to_plot(image.numpy()),
@@ -144,10 +158,10 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
             )
             if self.save_outputs:
                 saved_image = self.save_plot_to_disk(
-                    fig, plot_title, trainer.current_epoch
+                    fig, plot_title, trainer.current_epoch, sample_idx=i
                 )
                 self.log_data_to_tensorboard(
-                    saved_image, plot_title, logger, trainer.current_epoch
+                    saved_image, tb_tag, logger, trainer.current_epoch
                 )
             plt.close(fig)
         return
@@ -158,15 +172,17 @@ class FrameFieldResultCallback(ImageSegmentationResultCallback):
     def on_validation_epoch_end(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule
     ):
-        if not self.save_outputs:
+        if (
+            not self.save_outputs
+            or trainer.current_epoch % self.log_every_k_epochs != 0
+        ):
             return
-        val_ds = pl_module.val_dataloader()
+        val_dataloader = pl_module.val_dataloader()
+        val_ds = val_dataloader
         device = pl_module.device
         logger = trainer.logger
         n_samples = (
-            pl_module.val_dataloader().batch_size
-            if self.n_samples is None
-            else self.n_samples
+            val_dataloader.batch_size if self.n_samples is None else self.n_samples
         )
         current_item = 0
         for batch in val_ds:
@@ -212,16 +228,18 @@ class FrameFieldOverlayedResultCallback(ImageSegmentationResultCallback):
     def on_validation_epoch_end(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule
     ):
-        if not self.save_outputs:
+        if (
+            not self.save_outputs
+            or trainer.current_epoch % self.log_every_k_epochs != 0
+        ):
             return
-        val_ds = pl_module.val_dataloader()
+        val_dataloader = pl_module.val_dataloader()
+        val_ds = val_dataloader
         n_samples = (
-            pl_module.val_dataloader().batch_size
-            if self.n_samples is None
-            else self.n_samples
+            val_dataloader.batch_size if self.n_samples is None else self.n_samples
         )
         current_item = 0
-        for batch in val_ds:
+        for batch in val_dataloader:
             if current_item >= n_samples:
                 break
             images = batch["image"]
@@ -242,7 +260,7 @@ class FrameFieldOverlayedResultCallback(ImageSegmentationResultCallback):
                     ),
                 )
                 trainer.logger.experiment.add_images(
-                    f"overlay-{batch['path'][idx]}",
+                    f"overlay-{batch['path'][idx]}_idx{current_item}",
                     image_seg_display,
                     trainer.current_epoch,
                 )
@@ -347,15 +365,16 @@ class PolygonRNNResultCallback(ImageSegmentationResultCallback):
     def on_validation_epoch_end(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule
     ):
-        if not self.save_outputs:
+        if (
+            not self.save_outputs
+            or trainer.current_epoch % self.log_every_k_epochs != 0
+        ):
             return
-        val_ds = pl_module.val_dataloader()
-        self.n_samples = (
-            pl_module.val_dataloader().batch_size
-            if self.n_samples is None
-            else self.n_samples
+        val_dataloader = pl_module.val_dataloader()
+        n_samples = (
+            val_dataloader.batch_size if self.n_samples is None else self.n_samples
         )
-        prepared_input = val_ds.dataset.get_n_image_path_dict_list(self.n_samples)
+        prepared_input = val_dataloader.dataset.get_n_image_path_dict_list(n_samples)
         for image_path, prepared_item in prepared_input.items():
             output_batch_polygons = pl_module.model.test(
                 prepared_item["croped_images"].to(pl_module.device),
@@ -369,7 +388,7 @@ class PolygonRNNResultCallback(ImageSegmentationResultCallback):
                     prepared_item["scale_w"],
                     prepared_item["min_col"],
                     prepared_item["min_row"],
-                    grid_size=val_ds.dataset.grid_size,
+                    grid_size=val_dataloader.dataset.grid_size,
                 )
             )
             saved_image = self.build_polygon_vis(
@@ -775,17 +794,18 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         cbar.set_ticklabels(labels)
 
     def _save_visualization_to_disk(
-        self, fig, plot_title: str, current_epoch: int
+        self, fig, plot_title: str, current_epoch: int, sample_idx: int = None
     ) -> Optional[str]:
         """Save visualization to disk (runs in worker thread). Returns saved path."""
         try:
-            saved_image = self.save_plot_to_disk(fig, plot_title, current_epoch)
+            saved_image = self.save_plot_to_disk(
+                fig, plot_title, current_epoch, sample_idx=sample_idx
+            )
             return saved_image
         except Exception as e:
             self._log(f"Error saving visualization for {plot_title}: {e}", prefix="❌")
             return None
         finally:
-            # Always close the figure to free memory
             plt.close(fig)
 
     def log_data_to_tensorboard(
@@ -801,13 +821,17 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         except Exception as e:
             self._log(f"Error logging to tensorboard: {e}", prefix="❌")
 
-    def save_plot_to_disk(self, plot, image_name: str, current_epoch: int) -> str:
+    def save_plot_to_disk(
+        self, plot, image_name: str, current_epoch: int, sample_idx=None
+    ) -> str:
         """Save plot to disk with optimized settings."""
-        image_name = Path(image_name).name.split(".")[0]
+        stem = Path(image_name).name.split(".")[0]
+        idx_suffix = f"_idx{sample_idx}" if sample_idx is not None else ""
         report_path = os.path.join(
             self.output_path,
-            "report_image_{name}_epoch_{epoch}_{date}.png".format(
-                name=image_name,
+            "report_image_{name}{idx}_epoch_{epoch}_{date}.png".format(
+                name=stem,
+                idx=idx_suffix,
                 date=datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
                 epoch=current_epoch,
             ),
@@ -1016,9 +1040,11 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
                                 fig,
                                 plot_title,
                                 trainer.current_epoch,
+                                global_idx,
                             )
                             # Store metadata for later TensorBoard logging
-                            self.save_futures.append((future, plot_title))
+                            tb_tag = f"{plot_title}_idx{global_idx}"
+                            self.save_futures.append((future, tb_tag))
                         else:
                             plt.close(fig)
 
@@ -1219,17 +1245,25 @@ class AutoencoderResultCallback(ImageSegmentationResultCallback):
         ):
             return
 
-        val_ds = pl_module.val_dataloader().dataset
+        val_dataloader = pl_module.val_dataloader()
+        val_ds = val_dataloader.dataset
         device = pl_module.device
         logger = trainer.logger
         n_samples = (
-            pl_module.val_dataloader().batch_size
-            if self.n_samples is None
-            else self.n_samples
+            val_dataloader.batch_size if self.n_samples is None else self.n_samples
         )
+        effective_n = min(n_samples, len(val_ds))
+        if effective_n < n_samples:
+            logger.warning(
+                "AutoencoderResultCallback: requested %d samples but val_ds "
+                "has only %d — capping to %d.",
+                n_samples,
+                len(val_ds),
+                effective_n,
+            )
 
         pl_module.eval()
-        for i in range(min(n_samples, len(val_ds))):
+        for i in range(effective_n):
             batch = val_ds[i]
             image = batch["image"].unsqueeze(0).to(device)
 
@@ -1243,8 +1277,9 @@ class AutoencoderResultCallback(ImageSegmentationResultCallback):
             plot_title = (
                 val_ds.get_path(i) if hasattr(val_ds, "get_path") else f"sample_{i}"
             )
+            tb_tag = f"{plot_title}_idx{i}"
 
-            plt_result, fig = generate_visualization(
+            _, fig = generate_visualization(
                 fig_title=plot_title,
                 input_image=self.prepare_image_to_plot(image_cpu),
                 reconstructed_image=self.prepare_image_to_plot(reconstructed_cpu),
@@ -1252,9 +1287,9 @@ class AutoencoderResultCallback(ImageSegmentationResultCallback):
 
             if self.save_outputs:
                 saved_image = self.save_plot_to_disk(
-                    fig, plot_title, trainer.current_epoch
+                    fig, plot_title, trainer.current_epoch, sample_idx=i
                 )
                 self.log_data_to_tensorboard(
-                    saved_image, plot_title, logger, trainer.current_epoch
+                    saved_image, tb_tag, logger, trainer.current_epoch
                 )
             plt.close(fig)

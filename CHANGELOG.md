@@ -1,5 +1,15 @@
 # Unreleased
 
+## Image Callbacks
+
+- Fixed `ImageSegmentationResultCallback.on_validation_epoch_end` ignoring `log_every_k_epochs` — it now skips visualization on non-matching epochs, consistent with `AutoencoderResultCallback` and `EnhancedImageSegmentationResultCallback`.
+- Fixed `ImageSegmentationResultCallback.on_validation_epoch_end` mutating `self.n_samples` as side-effect — replaced with local variable.
+- Fixed `FrameFieldResultCallback`, `FrameFieldOverlayedResultCallback`, and `PolygonRNNResultCallback` ignoring `log_every_k_epochs` — all now respect the frequency setting.
+- Fixed `AutoencoderResultCallback` calling `val_dataloader()` twice — cached in a local variable.
+- All callbacks now warn (`logger.warning`) and cap gracefully when `n_samples > len(val_ds)`, instead of silently showing fewer images without explanation.
+- Fixed duplicate filenames when multiple crops of the same image are logged: `save_plot_to_disk` now accepts `sample_idx` and embeds it as `_idx{i}` in the filename; TensorBoard tags also include the index.
+- Added 5 new tests: `test_save_plot_to_disk_includes_sample_idx`, `test_autoencoder_callback_n_samples_capped_with_warning`, `test_autoencoder_callback_filename_includes_idx`, `test_log_every_k_epochs_skips_non_matching_epochs`, `test_autoencoder_log_every_k_epochs_respected`.
+
 ## Reproducibility / Seed
 
 - `set_training_seed` now delegates to `pytorch_lightning.seed_everything` instead of calling `random.seed`/`np.random.seed`/`torch.manual_seed` directly. This ensures `PL_GLOBAL_SEED` is set so DDP-spawned subprocesses inherit the seed automatically.

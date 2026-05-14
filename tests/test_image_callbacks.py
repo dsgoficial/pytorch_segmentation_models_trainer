@@ -50,6 +50,7 @@ class TestImageCallbacks(unittest.TestCase):
             "image": torch.zeros(3, 10, 10),
             "mask": torch.zeros(1, 10, 10),
         }
+        self.dataset.__len__ = MagicMock(return_value=10)
         self.dataset.grid_size = 28
 
         self.dataloader = MagicMock()
@@ -623,3 +624,114 @@ class TestImageCallbacks(unittest.TestCase):
         np.testing.assert_allclose(
             correct_result, np.full((8, 8, 3), 0.5, dtype=np.float32)
         )
+
+    def test_save_plot_to_disk_includes_sample_idx(self):
+        """save_plot_to_disk must embed sample_idx in the filename when provided."""
+        callback = AutoencoderResultCallback(n_samples=2)
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+
+        fig = MagicMock()
+        path = callback.save_plot_to_disk(fig, "tile.tif", 0, sample_idx=3)
+        self.assertIn("_idx3", path)
+
+        path_no_idx = callback.save_plot_to_disk(fig, "tile.tif", 0)
+        self.assertNotIn("_idx", path_no_idx)
+
+    def test_autoencoder_callback_n_samples_capped_with_warning(self):
+        """AutoencoderResultCallback warns and caps when n_samples > len(val_ds)."""
+        self.dataset.__getitem__.side_effect = lambda i: {
+            "image": torch.zeros(3, 10, 10),
+            "target": torch.zeros(3, 10, 10),
+        }
+        self.dataset.__len__ = MagicMock(return_value=2)
+
+        callback = AutoencoderResultCallback(n_samples=8)
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+        self.pl_module.return_value = torch.zeros(1, 3, 10, 10)
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_vis.return_value = (MagicMock(), MagicMock())
+            with patch.object(callback, "save_plot_to_disk", return_value="dummy.png"):
+                with patch.object(callback, "log_data_to_tensorboard"):
+                    callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+        # Only 2 calls (len(val_ds)=2), not 8
+        self.assertEqual(mock_vis.call_count, 2)
+        self.trainer.logger.warning.assert_called()
+
+    def test_autoencoder_callback_filename_includes_idx(self):
+        """Filename for each sample must contain _idx<i> to distinguish crops."""
+        self.dataset.__getitem__.side_effect = lambda i: {
+            "image": torch.zeros(3, 10, 10),
+            "target": torch.zeros(3, 10, 10),
+        }
+        self.dataset.__len__ = MagicMock(return_value=3)
+
+        callback = AutoencoderResultCallback(n_samples=3)
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+        self.pl_module.return_value = torch.zeros(1, 3, 10, 10)
+
+        saved_names = []
+
+        def capture_save(fig, name, epoch, sample_idx=None):
+            path = f"report_image_{name}_idx{sample_idx}_epoch_{epoch}.png"
+            saved_names.append(path)
+            return path
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_vis.return_value = (MagicMock(), MagicMock())
+            with patch.object(callback, "save_plot_to_disk", side_effect=capture_save):
+                with patch.object(callback, "log_data_to_tensorboard"):
+                    callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+        self.assertEqual(len(saved_names), 3)
+        for i, name in enumerate(saved_names):
+            self.assertIn(f"_idx{i}", name)
+
+    def test_log_every_k_epochs_skips_non_matching_epochs(self):
+        """Base class must skip visualization when current_epoch % log_every_k_epochs != 0."""
+        callback = ImageSegmentationResultCallback(n_samples=1, log_every_k_epochs=5)
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_vis.return_value = (MagicMock(), MagicMock())
+            self.trainer.current_epoch = 3  # 3 % 5 != 0 → skip
+            callback.on_validation_epoch_end(self.trainer, self.pl_module)
+            mock_vis.assert_not_called()
+
+            self.trainer.current_epoch = 5  # 5 % 5 == 0 → run
+            with patch.object(callback, "save_plot_to_disk", return_value="dummy.png"):
+                with patch.object(callback, "log_data_to_tensorboard"):
+                    callback.on_validation_epoch_end(self.trainer, self.pl_module)
+            mock_vis.assert_called()
+
+    def test_autoencoder_log_every_k_epochs_respected(self):
+        """AutoencoderResultCallback must skip when epoch doesn't match log_every_k_epochs."""
+        self.dataset.__getitem__.side_effect = lambda i: {
+            "image": torch.zeros(3, 10, 10),
+        }
+        self.dataset.__len__ = MagicMock(return_value=5)
+
+        callback = AutoencoderResultCallback(n_samples=2, log_every_k_epochs=3)
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+        self.pl_module.return_value = torch.zeros(1, 3, 10, 10)
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_vis.return_value = (MagicMock(), MagicMock())
+            self.trainer.current_epoch = 1  # 1 % 3 != 0 → skip
+            callback.on_validation_epoch_end(self.trainer, self.pl_module)
+            mock_vis.assert_not_called()
+
+            self.trainer.current_epoch = 3  # 3 % 3 == 0 → run
+            with patch.object(callback, "save_plot_to_disk", return_value="dummy.png"):
+                with patch.object(callback, "log_data_to_tensorboard"):
+                    callback.on_validation_epoch_end(self.trainer, self.pl_module)
+            self.assertEqual(mock_vis.call_count, 2)  # n_samples=2
