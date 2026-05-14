@@ -32,6 +32,7 @@
 - Added `--dry-run`, `--skip-callbacks`, `--dataset-key`, `--batch-size`, and `--num-workers` flags.
 - Added `click>=8.0.0` and `ruamel.yaml>=0.18.0` as project dependencies (ruamel.yaml preserves YAML comments and formatting on round-trip).
 - Added unit tests in `tests/test_compute_dataset_stats.py` with 100% coverage.
+- Changed `compute-stats` output format: mean/std values are now written to a top-level `normalization_parameters: {mean: [...], std: [...]}` key, and the `albumentations.Normalize` entry and callback `norm_params` reference them via Hydra interpolation (`${normalization_parameters.mean}`, `${normalization_parameters.std}`) instead of inlining the values directly. This makes it easy to override both at once from the command line or a child config without touching every dataset key.
 
 ## Dataset
 - Added `WindowedImageDataset` for deterministic sliding-window (grid) patch extraction from rasters without requiring pre-generated masks.

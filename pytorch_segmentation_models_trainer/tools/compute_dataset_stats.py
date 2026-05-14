@@ -209,13 +209,26 @@ def update_dataset_augmentation_list(
         aug_list.append(to_tensor_entry)
 
 
-def update_callbacks(yaml_data, mean: List[float], std: List[float]) -> int:
-    """Write ``norm_params`` into every image callback in *yaml_data*.
+def update_normalization_parameters(
+    yaml_data: dict, mean: List[float], std: List[float]
+) -> None:
+    """Write top-level ``normalization_parameters`` key with mean and std arrays.
 
     Args:
         yaml_data: Mutable mapping of the full parsed YAML.
         mean: Per-channel mean values.
         std: Per-channel std values.
+    """
+    yaml_data["normalization_parameters"] = {"mean": mean, "std": std}
+
+
+def update_callbacks(yaml_data, mean, std) -> int:
+    """Write ``norm_params`` into every image callback in *yaml_data*.
+
+    Args:
+        yaml_data: Mutable mapping of the full parsed YAML.
+        mean: Per-channel mean values or Hydra interpolation string.
+        std: Per-channel std values or Hydra interpolation string.
 
     Returns:
         Number of callbacks updated.
@@ -289,14 +302,23 @@ def process_yaml(
         print(f"  std:  {[round(v, 4) for v in std]}")
         print()
 
+    update_normalization_parameters(yaml_data, mean, std)
+    if progress:
+        print("  ✓ normalization_parameters → written")
+
+    mean_ref = "${normalization_parameters.mean}"
+    std_ref = "${normalization_parameters.std}"
+
     keys_to_update = [k for k in _DATASET_KEYS if k in yaml_data]
     for key in keys_to_update:
-        update_dataset_augmentation_list(yaml_data[key], mean, std, max_pixel_value)
+        update_dataset_augmentation_list(
+            yaml_data[key], mean_ref, std_ref, max_pixel_value
+        )
         if progress:
             print(f"  ✓ {key}.augmentation_list → updated")
 
     if not skip_callbacks:
-        n_updated = update_callbacks(yaml_data, mean, std)
+        n_updated = update_callbacks(yaml_data, mean_ref, std_ref)
         if progress and n_updated:
             print(f"  ✓ {n_updated} image callback(s) → norm_params updated")
 

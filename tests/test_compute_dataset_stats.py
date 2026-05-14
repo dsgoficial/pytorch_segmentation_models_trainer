@@ -16,6 +16,7 @@ from pytorch_segmentation_models_trainer.tools.compute_dataset_stats import (
     compute_stats,
     update_callbacks,
     update_dataset_augmentation_list,
+    update_normalization_parameters,
     process_yaml,
 )
 from tests.utils import BasicTestCase
@@ -294,6 +295,17 @@ class TestUpdateCallbacks(unittest.TestCase):
         assert cb["norm_params"]["mean"] == mean
         assert cb["norm_params"]["std"] == std
 
+    def test_image_callbacks_updated_with_interpolation(self):
+        target = "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.AutoencoderResultCallback"
+        yaml_data = self._yaml_with_callbacks(target)
+        mean_ref = "${normalization_parameters.mean}"
+        std_ref = "${normalization_parameters.std}"
+        n = update_callbacks(yaml_data, mean_ref, std_ref)
+        assert n == 1
+        cb = yaml_data["callbacks"][0]
+        assert cb["norm_params"]["mean"] == mean_ref
+        assert cb["norm_params"]["std"] == std_ref
+
     def test_non_image_callbacks_skipped(self):
         yaml_data = self._yaml_with_callbacks(
             "pytorch_lightning.callbacks.ModelCheckpoint",
@@ -335,6 +347,37 @@ class TestUpdateCallbacks(unittest.TestCase):
         }
         n = update_callbacks(yaml_data, [0.5], [0.1])
         assert n == 2
+
+
+# ---------------------------------------------------------------------------
+# update_normalization_parameters
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateNormalizationParameters(unittest.TestCase):
+    def test_writes_top_level_key(self):
+        yaml_data = {}
+        update_normalization_parameters(yaml_data, [0.4, 0.5, 0.6], [0.1, 0.2, 0.1])
+        assert "normalization_parameters" in yaml_data
+        assert yaml_data["normalization_parameters"]["mean"] == [0.4, 0.5, 0.6]
+        assert yaml_data["normalization_parameters"]["std"] == [0.1, 0.2, 0.1]
+
+    def test_overwrites_existing_key(self):
+        yaml_data = {"normalization_parameters": {"mean": [0.0], "std": [1.0]}}
+        update_normalization_parameters(yaml_data, [0.5, 0.5], [0.2, 0.2])
+        assert yaml_data["normalization_parameters"]["mean"] == [0.5, 0.5]
+        assert yaml_data["normalization_parameters"]["std"] == [0.2, 0.2]
+
+    def test_preserves_other_keys(self):
+        yaml_data = {"hyperparameters": {"batch_size": 64}}
+        update_normalization_parameters(yaml_data, [0.5], [0.1])
+        assert yaml_data["hyperparameters"]["batch_size"] == 64
+
+    def test_single_channel(self):
+        yaml_data = {}
+        update_normalization_parameters(yaml_data, [0.5], [0.1])
+        assert len(yaml_data["normalization_parameters"]["mean"]) == 1
+        assert len(yaml_data["normalization_parameters"]["std"]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +444,7 @@ class TestProcessYaml(BasicTestCase):
         mock_inst.return_value = _ConstantDataset(n=4, C=3)
         process_yaml(self.yaml_path, num_workers=0, progress=False)
         data = _load_yaml(self.yaml_path)
+        assert "normalization_parameters" in data
         for key in ("train_dataset", "val_dataset"):
             aug = data[key]["augmentation_list"]
             targets = [e["_target_"] for e in aug]
@@ -416,12 +460,17 @@ class TestProcessYaml(BasicTestCase):
         mock_inst.return_value = _BinaryDataset(n=8, C=3)
         process_yaml(self.yaml_path, num_workers=0, progress=False)
         data = _load_yaml(self.yaml_path)
+        # Values stored in normalization_parameters
+        norm_params = data["normalization_parameters"]
+        for v in norm_params["mean"]:
+            assert abs(v - 0.5) < 1e-3
+        for v in norm_params["std"]:
+            assert abs(v - 0.2) < 1e-3
+        # Normalize entry uses interpolation references
         aug = data["train_dataset"]["augmentation_list"]
         norm = next(e for e in aug if "Normalize" in e["_target_"])
-        for v in norm["mean"]:
-            assert abs(v - 0.5) < 1e-3
-        for v in norm["std"]:
-            assert abs(v - 0.2) < 1e-3
+        assert norm["mean"] == "${normalization_parameters.mean}"
+        assert norm["std"] == "${normalization_parameters.std}"
 
     @patch(
         "pytorch_segmentation_models_trainer.tools.compute_dataset_stats.instantiate_dataset_for_stats"
@@ -437,6 +486,10 @@ class TestProcessYaml(BasicTestCase):
         )
         assert autoencoder_cb["normalized_input"] is True
         assert "norm_params" in autoencoder_cb
+        assert (
+            autoencoder_cb["norm_params"]["mean"] == "${normalization_parameters.mean}"
+        )
+        assert autoencoder_cb["norm_params"]["std"] == "${normalization_parameters.std}"
 
     @patch(
         "pytorch_segmentation_models_trainer.tools.compute_dataset_stats.instantiate_dataset_for_stats"
@@ -527,6 +580,7 @@ class TestCLI(BasicTestCase):
         assert result.exit_code == 0, result.output
         data = _load_yaml(self.yaml_path)
         assert "augmentation_list" in data["train_dataset"]
+        assert "normalization_parameters" in data
 
 
 # ---------------------------------------------------------------------------
