@@ -67,6 +67,7 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
         normalized_input=True,
         norm_params=None,
         log_every_k_epochs=1,
+        shuffle_indices_seed: Optional[int] = None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -76,6 +77,7 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
         self.norm_params = norm_params if norm_params is not None else {}
         self.save_outputs = False
         self.log_every_k_epochs = log_every_k_epochs
+        self.shuffle_indices_seed = shuffle_indices_seed
 
     def prepare_image_to_plot(self, image):
         image = image.squeeze(0) if image.shape[0] == 1 else image
@@ -1266,8 +1268,16 @@ class AutoencoderResultCallback(ImageSegmentationResultCallback):
                 effective_n,
             )
 
+        if self.shuffle_indices_seed is not None:
+            rng = np.random.RandomState(self.shuffle_indices_seed)
+            all_indices = list(range(len(val_ds)))
+            rng.shuffle(all_indices)
+            sample_indices = all_indices[:effective_n]
+        else:
+            sample_indices = list(range(effective_n))
+
         pl_module.eval()
-        for i in range(effective_n):
+        for i in sample_indices:
             batch = val_ds[i]
             image = batch["image"].unsqueeze(0).to(device)
 

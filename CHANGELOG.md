@@ -1,8 +1,8 @@
 # Unreleased
 
-## Dataset
+## Image Callbacks
 
-- Added optional `shuffle_indices_seed` parameter to `AbstractDataset` and `SegmentationDataset`. When provided, indices are shuffled once at construction using a fixed `numpy.random.RandomState(seed)`, giving a stable, reproducible permutation. Image callbacks monitoring `val_ds[0..n-1]` will track a diverse, randomly-drawn subset rather than always the first N rows of the CSV. `update_df` preserves the seed and rebuilds the map for the new length. When `None` (default), behaviour is unchanged.
+- Added `shuffle_indices_seed` parameter (default `None`) to `ImageSegmentationResultCallback` (and all subclasses via inheritance, including `AutoencoderResultCallback`). When set, `AutoencoderResultCallback` samples a reproducible random subset of validation indices instead of always visualizing the first N rows. The seed is applied once per epoch via `numpy.random.RandomState`, so the shown subset is stable across epochs. When `None`, behaviour is unchanged (first N samples).
 
 ## ProgressiveDecoder
 

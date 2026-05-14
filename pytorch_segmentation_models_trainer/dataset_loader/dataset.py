@@ -114,7 +114,6 @@ class AbstractDataset(Dataset):
         mask_key=None,
         n_first_rows_to_read=None,
         seed=None,
-        shuffle_indices_seed: Optional[int] = None,
     ) -> None:
         if input_csv_path is None and df is None:
             raise ValueError("Must provide either input_csv_path or df")
@@ -125,8 +124,7 @@ class AbstractDataset(Dataset):
         else:
             self.df = read_dataframe(input_csv_path, nrows=n_first_rows_to_read)
         self.len = len(self.df)
-        self._shuffle_indices_seed = shuffle_indices_seed
-        self._index_map = self._build_index_map(shuffle_indices_seed)
+        self._index_map = list(range(self.len))
         self.transform = (
             None
             if augmentation_list is None
@@ -136,17 +134,10 @@ class AbstractDataset(Dataset):
         self.image_key = image_key if image_key is not None else "image"
         self.mask_key = mask_key if mask_key is not None else "mask"
 
-    def _build_index_map(self, shuffle_indices_seed: Optional[int]) -> List[int]:
-        indices = list(range(self.len))
-        if shuffle_indices_seed is not None:
-            rng = np.random.RandomState(shuffle_indices_seed)
-            rng.shuffle(indices)
-        return indices
-
     def update_df(self, new_df):
         self.df = new_df
         self.len = len(self.df)
-        self._index_map = self._build_index_map(self._shuffle_indices_seed)
+        self._index_map = list(range(self.len))
 
     def __len__(self) -> int:
         return self.len
@@ -272,7 +263,6 @@ class SegmentationDataset(AbstractDataset):
         reset_augmentation_function: bool = False,
         image_dtype: str = "uint8",
         seed=None,
-        shuffle_indices_seed: Optional[int] = None,
     ) -> None:
         super(SegmentationDataset, self).__init__(
             input_csv_path=input_csv_path,
@@ -284,7 +274,6 @@ class SegmentationDataset(AbstractDataset):
             mask_key=mask_key,
             n_first_rows_to_read=n_first_rows_to_read,
             seed=seed,
-            shuffle_indices_seed=shuffle_indices_seed,
         )
         self.n_classes = n_classes
         self.selected_bands = selected_bands

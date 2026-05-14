@@ -735,3 +735,86 @@ class TestImageCallbacks(unittest.TestCase):
                 with patch.object(callback, "log_data_to_tensorboard"):
                     callback.on_validation_epoch_end(self.trainer, self.pl_module)
             self.assertEqual(mock_vis.call_count, 2)  # n_samples=2
+
+    def test_autoencoder_shuffle_indices_seed_picks_random_subset(self):
+        """shuffle_indices_seed causes callback to sample random indices, not always first N."""
+        ds_size = 20
+        self.dataset.__len__ = MagicMock(return_value=ds_size)
+        self.dataset.__getitem__.side_effect = lambda i: {
+            "image": torch.zeros(3, 10, 10),
+        }
+
+        callback = AutoencoderResultCallback(n_samples=5, shuffle_indices_seed=42)
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+        self.pl_module.return_value = torch.zeros(1, 3, 10, 10)
+
+        accessed = []
+        original_getitem = self.dataset.__getitem__.side_effect
+
+        def tracking_getitem(i):
+            accessed.append(i)
+            return {"image": torch.zeros(3, 10, 10)}
+
+        self.dataset.__getitem__.side_effect = tracking_getitem
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_vis.return_value = (MagicMock(), MagicMock())
+            with patch.object(callback, "save_plot_to_disk", return_value="dummy.png"):
+                with patch.object(callback, "log_data_to_tensorboard"):
+                    callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+        self.assertEqual(len(accessed), 5)
+        # With seed=42 and 20 items, accessed indices must not be [0,1,2,3,4]
+        self.assertNotEqual(sorted(accessed), list(range(5)))
+
+    def test_autoencoder_shuffle_indices_seed_is_reproducible(self):
+        """Same seed gives same indices across two separate callback invocations."""
+        ds_size = 20
+        self.dataset.__len__ = MagicMock(return_value=ds_size)
+
+        def make_callback():
+            cb = AutoencoderResultCallback(n_samples=5, shuffle_indices_seed=7)
+            cb.on_sanity_check_end(self.trainer, self.pl_module)
+            self.pl_module.return_value = torch.zeros(1, 3, 10, 10)
+            accessed = []
+            self.dataset.__getitem__.side_effect = lambda i: accessed.append(i) or {
+                "image": torch.zeros(3, 10, 10)
+            }
+            with patch(
+                "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+            ) as mock_vis:
+                mock_vis.return_value = (MagicMock(), MagicMock())
+                with patch.object(cb, "save_plot_to_disk", return_value="dummy.png"):
+                    with patch.object(cb, "log_data_to_tensorboard"):
+                        cb.on_validation_epoch_end(self.trainer, self.pl_module)
+            return accessed
+
+        indices_a = make_callback()
+        indices_b = make_callback()
+        self.assertEqual(indices_a, indices_b)
+
+    def test_autoencoder_no_shuffle_seed_uses_first_n(self):
+        """Without seed, callback accesses val_ds[0..n-1] sequentially."""
+        ds_size = 10
+        self.dataset.__len__ = MagicMock(return_value=ds_size)
+
+        callback = AutoencoderResultCallback(n_samples=4)
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+        self.pl_module.return_value = torch.zeros(1, 3, 10, 10)
+
+        accessed = []
+        self.dataset.__getitem__.side_effect = lambda i: accessed.append(i) or {
+            "image": torch.zeros(3, 10, 10)
+        }
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_vis.return_value = (MagicMock(), MagicMock())
+            with patch.object(callback, "save_plot_to_disk", return_value="dummy.png"):
+                with patch.object(callback, "log_data_to_tensorboard"):
+                    callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+        self.assertEqual(accessed, [0, 1, 2, 3])
