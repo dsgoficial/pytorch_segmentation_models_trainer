@@ -12,7 +12,7 @@ hyperparameters:
   max_lr: 1e-4
   in_channels: 3
 
-pl_trainer_model:
+pl_model:
   _target_: pytorch_segmentation_models_trainer.model_loader.autoencoder_model.AutoencoderModel
 
 model:

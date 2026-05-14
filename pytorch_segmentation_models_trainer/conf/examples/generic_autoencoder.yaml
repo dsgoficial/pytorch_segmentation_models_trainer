@@ -17,7 +17,7 @@ hyperparameters:
 
 # We use AutoencoderModel (LightningModule) instead of the default Model
 # to handle reconstruction steps.
-pl_trainer_model:
+pl_model:
   _target_: pytorch_segmentation_models_trainer.model_loader.autoencoder_model.AutoencoderModel
 
 model:

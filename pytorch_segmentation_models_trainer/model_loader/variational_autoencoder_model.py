@@ -17,7 +17,7 @@ class VariationalAutoencoderModel(Model):
         Training, validation, and test steps return the scalar total loss.
 
     Example YAML:
-        pl_trainer_model:
+        pl_model:
           _target_: pytorch_segmentation_models_trainer.model_loader.variational_autoencoder_model.VariationalAutoencoderModel
 
         loss:

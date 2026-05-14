@@ -2,7 +2,7 @@
 # Uses WindowedImageAutoencoderDataset for deterministic grid-based reconstruction.
 
 # PyTorch Lightning Trainer Model
-pl_trainer_model:
+pl_model:
   _target_: pytorch_segmentation_models_trainer.model_loader.variational_autoencoder_model.VariationalAutoencoderModel
 
 # VAE Model Architecture

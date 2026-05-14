@@ -83,7 +83,7 @@ model:
 Use `AutoencoderModel` to enable the reconstruction training loop.
 
 ```yaml
-pl_trainer_model:
+pl_model:
   _target_: pytorch_segmentation_models_trainer.model_loader.autoencoder_model.AutoencoderModel
 
 loss:
