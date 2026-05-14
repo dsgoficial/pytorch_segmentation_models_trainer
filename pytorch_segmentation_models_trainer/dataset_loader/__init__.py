@@ -9,5 +9,7 @@ from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import (  
     AutoencoderRandomCropDataset,
     CSVWindowedImageDataset,
     ImageDataset,
+    IterableWindowedImageAutoencoderDataset,
+    IterableWindowedImageDataset,
     TiledInferenceImageDataset,
 )

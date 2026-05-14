@@ -163,6 +163,38 @@ class WindowedImageAutoencoderDatasetConfig:
 
 
 @dataclass
+class IterableWindowedImageAutoencoderDatasetConfig(
+    WindowedImageAutoencoderDatasetConfig
+):
+    """Configuração para IterableWindowedImageAutoencoderDataset.
+
+    Variante iterável do dataset windowed de autoencoder. Em DataLoaders com
+    múltiplos workers, cada worker recebe imagens inteiras distintas, evitando
+    leituras concorrentes do mesmo GeoTIFF.
+
+    Exemplo de YAML::
+
+        val_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.IterableWindowedImageAutoencoderDataset
+          image_dir: /data/validation/images
+          crop_size: [224, 224]
+          stride: 224
+          verify_windows: true
+          data_loader:
+            shuffle: false
+            num_workers: 4
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".image_dataset.IterableWindowedImageAutoencoderDataset"
+    )
+    data_loader: DataLoaderConfig = field(
+        default_factory=lambda: DataLoaderConfig(shuffle=False)
+    )
+
+
+@dataclass
 class RasterPatchDatasetConfig:
     """Configuração para RasterPatchDataset (janela deslizante determinística).
 

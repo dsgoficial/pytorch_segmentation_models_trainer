@@ -89,3 +89,28 @@ val_dataset:
 ```
 
 The cache stores only window coordinates, not image pixels. Training still reads pixels on demand with the normal rasterio LRU file-handle cache.
+
+## Iterable Worker Sharding
+
+Use `IterableWindowedImageDataset` or `IterableWindowedImageAutoencoderDataset`
+when a DataLoader with multiple workers should avoid concurrent reads from the
+same source raster. These variants assign whole images to workers:
+
+```yaml
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.IterableWindowedImageAutoencoderDataset
+  image_dir: /data/validation/images
+  crop_size: [224, 224]
+  stride: 224
+  verify_windows: true
+  window_index_cache: /data/validation/cache/window_index.json
+  data_loader:
+    shuffle: false
+    num_workers: 4
+    persistent_workers: false
+    prefetch_factor: 1
+```
+
+`shuffle` must remain `false` for iterable datasets. If validation contains many
+large rasters, this keeps parallelism across files without requiring per-window
+locks. If validation contains only one raster, only one worker can own that file.

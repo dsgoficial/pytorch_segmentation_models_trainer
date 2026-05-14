@@ -1,0 +1,28 @@
+# Example configuration for IterableWindowedImageAutoencoderDataset.
+# Use this variant when validation/test workers should process disjoint source
+# GeoTIFFs instead of reading the same raster concurrently.
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.IterableWindowedImageAutoencoderDataset
+  image_dir: /path/to/your/validation_images
+  image_extensions: [".tif", ".tiff", ".png"]
+  crop_size: [256, 256]
+  stride: 256
+  image_dtype: "uint8"
+  verify_windows: true
+  window_index_cache: /path/to/cache/iterable_windowed_autoencoder_val_index.json
+
+  data_loader:
+    shuffle: false
+    num_workers: 4
+    pin_memory: true
+    batch_size: 16
+    drop_last: false
+    persistent_workers: false
+    prefetch_factor: 1
+
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2

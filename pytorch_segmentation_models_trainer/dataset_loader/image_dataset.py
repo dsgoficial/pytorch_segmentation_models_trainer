@@ -34,6 +34,7 @@ import pandas as pd
 import rasterio
 import torch
 from rasterio.windows import Window
+from torch.utils.data import IterableDataset, get_worker_info
 
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     AbstractDataset,
@@ -1162,12 +1163,15 @@ class WindowedImageDataset(ImageDataset):
             width=self.crop_size[1],
             height=self.crop_size[0],
         )
+        serialize_rasterio_reads = getattr(self, "serialize_rasterio_reads", False)
+        rasterio_lock_dir = getattr(self, "rasterio_lock_dir", None)
+        reopen_rasterio_on_read = getattr(self, "reopen_rasterio_on_read", False)
         with _rasterio_read_lock(
             info["path"],
-            self.serialize_rasterio_reads,
-            self.rasterio_lock_dir,
+            serialize_rasterio_reads,
+            rasterio_lock_dir,
         ):
-            if self.reopen_rasterio_on_read:
+            if reopen_rasterio_on_read:
                 with rasterio.open(info["path"]) as src:
                     data = self._read_window_data(src, window)
             else:
@@ -1181,25 +1185,8 @@ class WindowedImageDataset(ImageDataset):
             return src.read(window=window)
         return src.read(self.selected_bands, window=window)
 
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        if idx < 0 or idx >= self._total_patches:
-            raise IndexError(f"Index {idx} out of range [0, {self._total_patches})")
-
-        info, row_off, col_off = self._get_window_info(idx)
-        window = Window(
-            col_off=col_off,
-            row_off=row_off,
-            width=self.crop_size[1],
-            height=self.crop_size[0],
-        )
-        try:
-            data, window = self._read_window(info, row_off, col_off)
-        except (rasterio.errors.RasterioIOError, Exception) as e:
-            logger.error(f"Error reading window {window} from {info['path']}: {e}")
-            # Try another index to avoid crashing
-            new_idx = (idx + 1) % self._total_patches
-            return self.__getitem__(new_idx)
-
+    def _format_image_item(self, info: Dict[str, Any], data) -> Dict[str, Any]:
+        """Convert a raw raster window into the public image sample."""
         image = np.transpose(data, (1, 2, 0)).copy()
         if self.image_dtype != "native":
             image = image.astype(np.dtype(self.image_dtype))
@@ -1215,6 +1202,67 @@ class WindowedImageDataset(ImageDataset):
 
         result.update({"path": info["path"]})
         return result
+
+    def _build_item_from_window(
+        self, info: Dict[str, Any], row_off: int, col_off: int
+    ) -> Dict[str, Any]:
+        """Read and format one image-only window sample."""
+        data, _ = self._read_window(info, row_off, col_off)
+        return self._format_image_item(info, data)
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        if idx < 0 or idx >= self._total_patches:
+            raise IndexError(f"Index {idx} out of range [0, {self._total_patches})")
+
+        info, row_off, col_off = self._get_window_info(idx)
+        window = Window(
+            col_off=col_off,
+            row_off=row_off,
+            width=self.crop_size[1],
+            height=self.crop_size[0],
+        )
+        try:
+            return self._build_item_from_window(info, row_off, col_off)
+        except (rasterio.errors.RasterioIOError, Exception) as e:
+            logger.error(f"Error reading window {window} from {info['path']}: {e}")
+            # Try another index to avoid crashing
+            new_idx = (idx + 1) % self._total_patches
+            return self.__getitem__(new_idx)
+
+    def _iter_worker_image_info_indices(self):
+        """Yield image-info indices assigned to the current DataLoader worker."""
+        worker = get_worker_info()
+        if worker is None:
+            yield from range(len(self._image_info))
+            return
+
+        yield from range(worker.id, len(self._image_info), worker.num_workers)
+
+    def _iter_window_specs_for_image_indices(self, image_info_indices):
+        """Yield ``(info, row_off, col_off)`` for selected source images."""
+        image_info_indices = set(image_info_indices)
+        if self._window_index is not None:
+            for entry in self._window_index:
+                image_info_idx = entry["image_info_idx"]
+                if image_info_idx not in image_info_indices:
+                    continue
+                yield (
+                    self._image_info[image_info_idx],
+                    entry["row_off"],
+                    entry["col_off"],
+                )
+            return
+
+        for image_info_idx in sorted(image_info_indices):
+            info = self._image_info[image_info_idx]
+            for row_off, col_off in self._iter_window_offsets(info):
+                yield info, row_off, col_off
+
+    def _iter_worker_window_specs(self):
+        """Yield window specs for images assigned to this worker."""
+        return self._iter_window_specs_for_image_indices(
+            self._iter_worker_image_info_indices()
+        )
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -1283,13 +1331,18 @@ class WindowedImageAutoencoderDataset(WindowedImageDataset):
             height=self.crop_size[0],
         )
         try:
-            data, window = self._read_window(info, row_off, col_off)
+            return self._build_item_from_window(info, row_off, col_off)
         except (rasterio.errors.RasterioIOError, Exception) as e:
             logger.error(f"Error reading window {window} from {info['path']}: {e}")
             # Try another index to avoid crashing
             new_idx = (idx + 1) % self._total_patches
             return self.__getitem__(new_idx)
 
+    def _build_item_from_window(
+        self, info: Dict[str, Any], row_off: int, col_off: int
+    ) -> Dict[str, Any]:
+        """Read and format one autoencoder reconstruction window sample."""
+        data, _ = self._read_window(info, row_off, col_off)
         image = np.transpose(data, (1, 2, 0)).copy()
         if self.image_dtype != "native":
             image = image.astype(np.dtype(self.image_dtype))
@@ -1318,3 +1371,96 @@ class WindowedImageAutoencoderDataset(WindowedImageDataset):
             image_tensor = image_tensor / norm_factor
             target_tensor = target_tensor / norm_factor
         return {"image": image_tensor, "target": target_tensor}
+
+
+class IterableWindowedImageDataset(WindowedImageDataset, IterableDataset):
+    """Iterable windowed image dataset that shards source images by worker.
+
+    This variant yields the same image-only samples as ``WindowedImageDataset``
+    but assigns whole source rasters to individual DataLoader workers. It avoids
+    concurrent reads from the same GeoTIFF when ``num_workers > 0``.
+
+    Args:
+        **kwargs: Parameters accepted by :class:`WindowedImageDataset`.
+
+    Returns:
+        Dict[str, Any]: Items with ``image`` and ``path`` keys.
+
+    Example YAML:
+        val_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.IterableWindowedImageDataset
+          image_dir: /data/images
+          crop_size: [224, 224]
+          stride: 224
+          verify_windows: true
+          data_loader:
+            shuffle: false
+            num_workers: 4
+    """
+
+    def __iter__(self):
+        """Yield windows for images assigned to the current worker."""
+        for info, row_off, col_off in self._iter_worker_window_specs():
+            try:
+                yield self._build_item_from_window(info, row_off, col_off)
+            except (rasterio.errors.RasterioIOError, Exception) as exc:
+                window = Window(
+                    col_off=col_off,
+                    row_off=row_off,
+                    width=self.crop_size[1],
+                    height=self.crop_size[0],
+                )
+                logger.error(
+                    "Error reading window %s from %s: %s",
+                    window,
+                    info["path"],
+                    exc,
+                )
+
+
+class IterableWindowedImageAutoencoderDataset(
+    WindowedImageAutoencoderDataset, IterableDataset
+):
+    """Iterable windowed autoencoder dataset that shards images by worker.
+
+    The yielded samples match ``WindowedImageAutoencoderDataset`` but each
+    DataLoader worker receives a disjoint subset of source rasters, preventing
+    multiple workers from reading the same GeoTIFF concurrently.
+
+    Args:
+        **kwargs: Parameters accepted by
+            :class:`WindowedImageAutoencoderDataset`.
+
+    Returns:
+        Dict[str, Any]: Items with ``image``, ``target`` and ``path`` keys.
+
+    Example YAML:
+        val_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.IterableWindowedImageAutoencoderDataset
+          image_dir: /data/images
+          crop_size: [224, 224]
+          stride: 224
+          verify_windows: true
+          data_loader:
+            shuffle: false
+            num_workers: 4
+    """
+
+    def __iter__(self):
+        """Yield reconstruction windows for this worker's source images."""
+        for info, row_off, col_off in self._iter_worker_window_specs():
+            try:
+                yield self._build_item_from_window(info, row_off, col_off)
+            except (rasterio.errors.RasterioIOError, Exception) as exc:
+                window = Window(
+                    col_off=col_off,
+                    row_off=row_off,
+                    width=self.crop_size[1],
+                    height=self.crop_size[0],
+                )
+                logger.error(
+                    "Error reading window %s from %s: %s",
+                    window,
+                    info["path"],
+                    exc,
+                )

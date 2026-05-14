@@ -169,6 +169,28 @@ The `verify_windows` and `window_index_cache` parameters are inherited from
 
 ---
 
+## `IterableWindowedImageDataset`
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import IterableWindowedImageDataset
+```
+
+Iterable variant of `WindowedImageDataset`. It yields the same samples but
+shards source images across DataLoader workers so each worker reads complete
+windows from its own subset of rasters.
+
+## `IterableWindowedImageAutoencoderDataset`
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import IterableWindowedImageAutoencoderDataset
+```
+
+Iterable autoencoder variant. Use it for validation/testing with
+`num_workers > 0` when concurrent reads from the same large GeoTIFF cause GDAL
+decoder errors. Configure the DataLoader with `shuffle: false`.
+
+---
+
 ## `RasterPatchDataset`
 
 ```python

@@ -33,6 +33,7 @@
 ## Dataset
 - Added `WindowedImageDataset` for deterministic sliding-window (grid) patch extraction from rasters without requiring pre-generated masks.
 - Added `WindowedImageAutoencoderDataset` specifically for Autoencoder validation/testing, yielding `(image, target)` pairs where `image` can be optionally corrupted while `target` remains clean.
+- Added `IterableWindowedImageDataset` and `IterableWindowedImageAutoencoderDataset`, which shard whole source rasters across DataLoader workers to avoid concurrent reads from the same GeoTIFF.
 - Both datasets support global indexing across multiple images of varying sizes using efficient binary search (bisect).
 - Added `verify_windows` and `window_index_cache` to windowed image datasets so unreadable raster windows can be excluded from indexing during initialisation and the verified window coordinates can be reused on later runs.
 - Added `serialize_rasterio_reads`, `rasterio_lock_dir`, and `reopen_rasterio_on_read` to windowed image and random-crop raster datasets so DataLoader workers can serialize reads from the same compressed GeoTIFF on shared storage and optionally avoid persistent GDAL handles.
