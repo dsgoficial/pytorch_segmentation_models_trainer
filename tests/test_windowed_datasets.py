@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from contextlib import contextmanager
 import json
 
 import numpy as np
@@ -7,6 +8,9 @@ import torch
 import rasterio
 from pathlib import Path
 from rasterio.transform import from_bounds
+from pytorch_segmentation_models_trainer.dataset_loader import (
+    image_dataset as image_dataset_module,
+)
 from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import (
     WindowedImageDataset,
     WindowedImageAutoencoderDataset,
@@ -408,3 +412,33 @@ def test_windowed_image_autoencoder_read_error_fallback(tmp_path, monkeypatch):
 
     assert calls["count"] == 2
     assert sample["target"].shape == (3, 32, 32)
+
+
+def test_windowed_image_dataset_serializes_rasterio_reads(tmp_path, monkeypatch):
+    img_dir = tmp_path / "images"
+    lock_dir = tmp_path / "locks"
+    _write_tif(img_dir / "img.tif", width=64, height=64)
+    calls = []
+
+    @contextmanager
+    def fake_read_lock(path, enabled=False, lock_dir=None):
+        calls.append((Path(path).name, enabled, Path(lock_dir)))
+        yield
+
+    monkeypatch.setattr(
+        image_dataset_module,
+        "_rasterio_read_lock",
+        fake_read_lock,
+    )
+    ds = WindowedImageDataset(
+        image_dir=img_dir,
+        crop_size=[32, 32],
+        stride=32,
+        serialize_rasterio_reads=True,
+        rasterio_lock_dir=lock_dir,
+    )
+
+    sample = ds[0]
+
+    assert sample["image"].shape == (3, 32, 32)
+    assert calls == [("img.tif", True, lock_dir)]

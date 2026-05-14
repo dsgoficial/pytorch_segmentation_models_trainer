@@ -137,6 +137,8 @@ window from disk at `__getitem__` time.
 | `file_cache_maxsize` | `int` | `0` | Max open rasterio handles; `0` auto-sizes from indexed images. |
 | `verify_windows` | `bool` | `False` | Read every candidate window during init and index only readable windows. |
 | `window_index_cache` | `str \| Path \| None` | `None` | JSON cache for the verified window index. Rebuilt when paths, file metadata, crop, stride, bands, dtype, or image key change. |
+| `serialize_rasterio_reads` | `bool` | `False` | Serialize `rasterio` reads per source file across DataLoader workers. |
+| `rasterio_lock_dir` | `str \| Path \| None` | `None` | Directory for lock files when `serialize_rasterio_reads=True`; defaults to `/tmp/psmt_rasterio_locks`. |
 
 ### `__getitem__` Returns
 

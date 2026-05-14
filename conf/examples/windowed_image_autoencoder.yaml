@@ -9,6 +9,12 @@ val_dataset:
   crop_size: [256, 256]
   stride: 256  # Set stride equal to crop_size for a non-overlapping grid
   image_dtype: "uint8"
+  verify_windows: true
+  window_index_cache: /path/to/cache/windowed_autoencoder_val_index.json
+  # Enable when multiple DataLoader workers read patches from the same large
+  # GeoTIFF on shared/network storage.
+  serialize_rasterio_reads: true
+  rasterio_lock_dir: /tmp/psmt_rasterio_locks
 
   # Optional corruption transforms (applied only to the input 'image')
   corruption_augmentation_list:

@@ -129,6 +129,7 @@ class WindowedImageAutoencoderDatasetConfig:
           stride: 224
           verify_windows: true
           window_index_cache: /data/validation/cache/window_index.json
+          serialize_rasterio_reads: true
     """
 
     _target_: str = (
@@ -149,6 +150,8 @@ class WindowedImageAutoencoderDatasetConfig:
     file_cache_maxsize: int = 0
     verify_windows: bool = False
     window_index_cache: Optional[str] = None
+    serialize_rasterio_reads: bool = False
+    rasterio_lock_dir: Optional[str] = None
     corruption_augmentation_list: List = field(default_factory=list)
     gpu_augmentation_list: List = field(default_factory=list)
     augmentation_list: List = field(default_factory=list)
