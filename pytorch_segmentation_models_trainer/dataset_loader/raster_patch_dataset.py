@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 import bisect
 import gc
 import warnings
@@ -315,8 +316,16 @@ class RasterPatchDataset(Dataset):
 
         # 4. Windowed read — never loads the full image
         window = Window(col_off, row_off, self.patch_size, self.patch_size)
-        patch_img = self._read_image(info["img_path"], window)
-        patch_mask = self._read_mask(info["mask_path"], window)
+        try:
+            patch_img = self._read_image(info["img_path"], window)
+            patch_mask = self._read_mask(info["mask_path"], window)
+        except (rasterio.errors.RasterioIOError, Exception) as e:
+            logger.error(
+                f"Error reading window {window} from {info['img_path']} or {info['mask_path']}: {e}"
+            )
+            # Try another index
+            new_idx = (idx + 1) % self._total_patches
+            return self.__getitem__(new_idx)
 
         # 5. Build output
         if self.transform is None:
@@ -331,12 +340,16 @@ class RasterPatchDataset(Dataset):
         transform_func = deepcopy(self.transform)
         output = transform_func(image=patch_img, mask=patch_mask)
         output_dict = {
-            "image": output["image"].clone().detach()
-            if torch.is_tensor(output["image"])
-            else output["image"].copy(),
-            "mask": output["mask"].clone().detach()
-            if torch.is_tensor(output["mask"])
-            else output["mask"].copy(),
+            "image": (
+                output["image"].clone().detach()
+                if torch.is_tensor(output["image"])
+                else output["image"].copy()
+            ),
+            "mask": (
+                output["mask"].clone().detach()
+                if torch.is_tensor(output["mask"])
+                else output["mask"].copy()
+            ),
         }
         del output
         del transform_func

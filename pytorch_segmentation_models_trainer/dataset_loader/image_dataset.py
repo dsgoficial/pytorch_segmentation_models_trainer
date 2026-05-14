@@ -223,16 +223,23 @@ class CSVWindowedImageDataset(ImageDataset):
             height=row[self.patch_size_key],
         )
 
-        with rasterio.open(image_path) as src:
-            data = (
-                src.read(window=window)
-                if self.selected_bands is None
-                else src.read(self.selected_bands, window=window)
+        try:
+            with rasterio.open(image_path) as src:
+                data = (
+                    src.read(window=window)
+                    if self.selected_bands is None
+                    else src.read(self.selected_bands, window=window)
+                )
+                image = np.transpose(data, (1, 2, 0)).copy()
+                if self.image_dtype == "native":
+                    return image
+                return np.array(image, dtype=np.dtype(self.image_dtype))
+        except (rasterio.errors.RasterioIOError, Exception) as e:
+            logger.error(f"Error reading window {window} from {image_path}: {e}")
+            # Try another index
+            return self.load_image(
+                (idx + 1) % self.len, key, is_mask, force_rgb, is_binary_mask
             )
-            image = np.transpose(data, (1, 2, 0)).copy()
-            if self.image_dtype == "native":
-                return image
-            return np.array(image, dtype=np.dtype(self.image_dtype))
 
 
 class TiledInferenceImageDataset(ImageDataset):
@@ -646,12 +653,20 @@ class AutoencoderRandomCropDataset(ImageDataset):
     def _read_crop(self, image_path: str, x: int, y: int) -> np.ndarray:
         crop_h, crop_w = self.crop_size
         window = Window(col_off=x, row_off=y, width=crop_w, height=crop_h)
-        src = self._get_src(image_path)
-        data = (
-            src.read(window=window)
-            if self.selected_bands is None
-            else src.read(self.selected_bands, window=window)
-        )
+        try:
+            src = self._get_src(image_path)
+            data = (
+                src.read(window=window)
+                if self.selected_bands is None
+                else src.read(self.selected_bands, window=window)
+            )
+        except (rasterio.errors.RasterioIOError, Exception) as e:
+            logger.error(f"Error reading window {window} from {image_path}: {e}")
+            # In random crop mode, we can just try another random crop
+            # This is handled by the caller or we can return a zero array
+            # but better to raise a custom exception that can be caught by _get_random_crop
+            raise e
+
         image = np.transpose(data, (1, 2, 0)).copy()
         if self.image_dtype == "native":
             return image
@@ -668,9 +683,12 @@ class AutoencoderRandomCropDataset(ImageDataset):
             x = np.random.randint(0, width - crop_w + 1)
             y = np.random.randint(0, height - crop_h + 1)
             image_path = self.get_path(img_idx, key=self.image_key)
-            image = self._read_crop(image_path, x, y)
-            if image.size > 0:
-                break
+            try:
+                image = self._read_crop(image_path, x, y)
+                if image is not None and image.size > 0:
+                    break
+            except Exception:
+                continue
         self._last_image_idx = img_idx
         return image
 
@@ -863,6 +881,28 @@ class WindowedImageDataset(ImageDataset):
     def __len__(self) -> int:
         return self._total_patches
 
+    def get_path(self, idx: int, key: str = None, add_root_dir: bool = True) -> str:
+        """Get the original image path for a given patch index.
+
+        Args:
+            idx: Global patch index.  If ``idx >= len(self._cumulative)``, it
+                is assumed to be a patch index and mapped to the source image.
+                Otherwise, it is treated as a source image index for backward
+                compatibility with the base class.
+            key: Dataframe column name.
+            add_root_dir: Whether to prepend ``root_dir``.
+
+        Returns:
+            Source image path.
+        """
+        if idx >= len(self.df):
+            # Map global patch index to image index
+            img_idx = bisect.bisect_right(self._cumulative, idx) - 1
+            # Use the mapped image index to get the path
+            return super().get_path(img_idx, key=key, add_root_dir=add_root_dir)
+
+        return super().get_path(idx, key=key, add_root_dir=add_root_dir)
+
     def _get_src(self, path: str):
         return self._file_cache.get(path)
 
@@ -886,12 +926,18 @@ class WindowedImageDataset(ImageDataset):
             width=self.crop_size[1],
             height=self.crop_size[0],
         )
-        src = self._get_src(info["path"])
-        data = (
-            src.read(window=window)
-            if self.selected_bands is None
-            else src.read(self.selected_bands, window=window)
-        )
+        try:
+            src = self._get_src(info["path"])
+            data = (
+                src.read(window=window)
+                if self.selected_bands is None
+                else src.read(self.selected_bands, window=window)
+            )
+        except (rasterio.errors.RasterioIOError, Exception) as e:
+            logger.error(f"Error reading window {window} from {info['path']}: {e}")
+            # Try another index to avoid crashing
+            new_idx = (idx + 1) % self._total_patches
+            return self.__getitem__(new_idx)
 
         image = np.transpose(data, (1, 2, 0)).copy()
         if self.image_dtype != "native":
@@ -984,12 +1030,18 @@ class WindowedImageAutoencoderDataset(WindowedImageDataset):
             width=self.crop_size[1],
             height=self.crop_size[0],
         )
-        src = self._get_src(info["path"])
-        data = (
-            src.read(window=window)
-            if self.selected_bands is None
-            else src.read(self.selected_bands, window=window)
-        )
+        try:
+            src = self._get_src(info["path"])
+            data = (
+                src.read(window=window)
+                if self.selected_bands is None
+                else src.read(self.selected_bands, window=window)
+            )
+        except (rasterio.errors.RasterioIOError, Exception) as e:
+            logger.error(f"Error reading window {window} from {info['path']}: {e}")
+            # Try another index to avoid crashing
+            new_idx = (idx + 1) % self._total_patches
+            return self.__getitem__(new_idx)
 
         image = np.transpose(data, (1, 2, 0)).copy()
         if self.image_dtype != "native":

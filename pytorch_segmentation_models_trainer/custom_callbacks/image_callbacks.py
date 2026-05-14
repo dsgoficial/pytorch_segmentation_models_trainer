@@ -146,7 +146,7 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
             )
             if self.save_outputs:
                 saved_image = self.save_plot_to_disk(
-                    plt_result, plot_title, trainer.current_epoch
+                    fig, plot_title, trainer.current_epoch
                 )
                 self.log_data_to_tensorboard(
                     saved_image, plot_title, logger, trainer.current_epoch
@@ -1254,7 +1254,7 @@ class AutoencoderResultCallback(ImageSegmentationResultCallback):
 
             if self.save_outputs:
                 saved_image = self.save_plot_to_disk(
-                    plt_result, plot_title, trainer.current_epoch
+                    fig, plot_title, trainer.current_epoch
                 )
                 self.log_data_to_tensorboard(
                     saved_image, plot_title, logger, trainer.current_epoch
