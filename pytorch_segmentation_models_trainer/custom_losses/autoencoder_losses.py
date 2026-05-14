@@ -112,4 +112,8 @@ class VariationalAutoencoderLoss(nn.Module):
             "loss": total_loss,
             "reconstruction_loss": reconstruction_loss.detach(),
             "kl_loss": kl_loss.detach(),
+            "weighted_reconstruction_loss": (
+                self.reconstruction_weight * reconstruction_loss
+            ).detach(),
+            "weighted_kl_loss": (self.beta * kl_loss).detach(),
         }

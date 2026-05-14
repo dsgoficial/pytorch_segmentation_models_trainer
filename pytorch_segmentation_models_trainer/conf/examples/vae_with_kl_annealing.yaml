@@ -1,0 +1,72 @@
+# VAE training with KL annealing — cosine schedule over 5000 steps.
+# Drop-in replacement for vae_resnet18_windowed.yaml with scheduled beta.
+
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.variational_autoencoder_model.VariationalAutoencoderModel
+
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.GenericVariationalAutoencoder
+  encoder_name: resnet18
+  use_huggingface: false
+  in_channels: 3
+  latent_dim: 128
+  pretrained: true
+  encoder_depth: 3
+  output_activation: sigmoid   # bound output to [0,1] for uint8 targets
+  logvar_clamp: [-4.0, 4.0]   # fp16-safe log-variance range
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.autoencoder_losses.VariationalAutoencoderLoss
+  reconstruction_loss: mse
+  reconstruction_weight: 1.0
+  beta: 0.0   # starts at 0; KLAnnealingCallback ramps it up
+
+optimizer:
+  _target_: torch.optim.Adam
+  lr: 0.0001
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: 100
+    interval: epoch
+    frequency: 1
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.WindowedImageAutoencoderDataset
+  image_dir: /path/to/train/images
+  image_extensions: [".tif", ".png"]
+  crop_size: [224, 224]
+  stride: 224
+  image_dtype: uint8
+  verify_windows: true
+  window_index_cache: /path/to/cache/train_window_index.json
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.WindowedImageAutoencoderDataset
+  image_dir: /path/to/val/images
+  image_extensions: [".tif", ".png"]
+  crop_size: [224, 224]
+  stride: 224
+  image_dtype: uint8
+  verify_windows: true
+  window_index_cache: /path/to/cache/val_window_index.json
+
+batch_size: 16
+max_epochs: 100
+
+pl_trainer:
+  max_epochs: 100
+  accelerator: auto
+  devices: 1
+  callbacks:
+    - _target_: pytorch_segmentation_models_trainer.custom_callbacks.kl_annealing_callback.KLAnnealingCallback
+      schedule: cosine        # smooth ramp: linear | cosine | cyclical
+      max_beta: 1.0           # target KL weight
+      min_beta: 0.0           # starting weight (free reconstruction warmup)
+      annealing_steps: 5000   # global steps to reach max_beta
+      use_epochs: false       # step-based annealing (set true for epoch-based)
+    - _target_: pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.AutoencoderResultCallback
+      n_samples: 8
+      log_every_k_epochs: 1
+      normalized_input: false

@@ -71,6 +71,33 @@ class VariationalAutoencoderModelConfig:
     )
 
 
+@dataclass
+class KLAnnealingCallbackConfig:
+    """Configuration for ``KLAnnealingCallback``.
+
+    Example YAML:
+        callbacks:
+          - _target_: pytorch_segmentation_models_trainer.custom_callbacks.kl_annealing_callback.KLAnnealingCallback
+            max_beta: 1.0
+            min_beta: 0.0
+            annealing_steps: 5000
+            schedule: cosine
+            use_epochs: false
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_callbacks"
+        ".kl_annealing_callback.KLAnnealingCallback"
+    )
+    max_beta: float = 1.0
+    min_beta: float = 0.0
+    annealing_steps: int = MISSING
+    schedule: str = "linear"
+    use_epochs: bool = False
+    cycle_length: int = 100
+    cycle_ratio: float = 0.5
+
+
 cs = ConfigStore.instance()
 cs.store(
     group="model",
@@ -86,4 +113,9 @@ cs.store(
     group="pl_model",
     name="variational_autoencoder_model",
     node=VariationalAutoencoderModelConfig,
+)
+cs.store(
+    group="callbacks",
+    name="kl_annealing",
+    node=KLAnnealingCallbackConfig,
 )

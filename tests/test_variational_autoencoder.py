@@ -260,7 +260,13 @@ def test_variational_autoencoder_loss_mse_components_and_gradients():
 
     result = loss_fn(output, target)
 
-    assert set(result) == {"loss", "reconstruction_loss", "kl_loss"}
+    assert set(result) == {
+        "loss",
+        "reconstruction_loss",
+        "kl_loss",
+        "weighted_reconstruction_loss",
+        "weighted_kl_loss",
+    }
     assert result["loss"].shape == torch.Size([])
     assert torch.isclose(result["reconstruction_loss"], torch.tensor(1.0))
     assert torch.isclose(result["kl_loss"], torch.tensor(0.0))
@@ -312,6 +318,8 @@ def test_variational_autoencoder_model_logs_train_val_and_test_components():
         "loss": output.reconstruction.mean() + target.mean(),
         "reconstruction_loss": torch.tensor(0.25),
         "kl_loss": torch.tensor(0.5),
+        "weighted_reconstruction_loss": torch.tensor(0.25),
+        "weighted_kl_loss": torch.tensor(0.5),
     }
 
     with patch.object(
@@ -337,6 +345,8 @@ def test_variational_autoencoder_model_logs_train_val_and_test_components():
     assert "train/loss" in logged_names
     assert "train/reconstruction_loss" in logged_names
     assert "train/kl_loss" in logged_names
+    assert "train/weighted_reconstruction_loss" in logged_names
+    assert "train/weighted_kl_loss" in logged_names
     assert "val/loss" in logged_names
     assert "test/loss" in logged_names
 
@@ -475,6 +485,8 @@ def test_variational_autoencoder_model_computes_metrics_when_configured():
         "loss": output.reconstruction.mean() + target.mean(),
         "reconstruction_loss": torch.tensor(0.25),
         "kl_loss": torch.tensor(0.5),
+        "weighted_reconstruction_loss": torch.tensor(0.25),
+        "weighted_kl_loss": torch.tensor(0.5),
     }
 
     with patch.object(

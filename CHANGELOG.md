@@ -1,5 +1,13 @@
 # Unreleased
 
+## KL Annealing (VAE)
+
+- Added `KLAnnealingCallback` (`custom_callbacks/kl_annealing_callback.py`): PyTorch Lightning callback that gradually increases the KL weight (`beta`) in `VariationalAutoencoderLoss` during training. Supports three schedules — `linear`, `cosine`, and `cyclical`. Can operate step-based (default) or epoch-based via `use_epochs`. Logs the current beta to TensorBoard as `scheduler/kl_beta` on every update.
+- Added `KLAnnealingCallbackConfig` dataclass to `config_definitions/autoencoder_config.py` with Hydra ConfigStore registration under `group="callbacks"`, `name="kl_annealing"`.
+- Extended `VariationalAutoencoderLoss.forward()` to return two additional keys — `weighted_reconstruction_loss` and `weighted_kl_loss` — representing the actual contribution of each term to the total ELBO loss. These are automatically logged to TensorBoard alongside the existing `reconstruction_loss` and `kl_loss` keys.
+- Added example config `conf/examples/vae_with_kl_annealing.yaml` demonstrating cosine KL annealing over 5000 steps with a free-reconstruction warmup (`min_beta=0`, `max_beta=1`).
+- Added 20 unit tests in `tests/test_kl_annealing.py` covering schedule shapes, hook routing, beta clamping, TensorBoard logging, and config validation.
+
 ## Bug fixes
 
 - Fixed `VariationalAutoencoderModel` and `AutoencoderModel` not computing or logging YAML-configured `metrics` (e.g. PSNR, SSIM) during training/validation. Both `_shared_step` overrides now extract the reconstruction tensor and call the `MetricCollection` when present.
