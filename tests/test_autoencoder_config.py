@@ -28,6 +28,8 @@ def test_variational_autoencoder_loss_config():
     assert cfg.reconstruction_loss == "mse"
     assert cfg.reconstruction_weight == 1.0
     assert cfg.beta == 1.0
+    assert cfg.free_bits == pytest.approx(0.0)
+    assert cfg.kl_balance is False
 
 
 def test_variational_autoencoder_model_config():

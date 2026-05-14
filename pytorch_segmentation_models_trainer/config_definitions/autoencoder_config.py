@@ -45,6 +45,8 @@ class VariationalAutoencoderLossConfig:
           reconstruction_loss: mse
           reconstruction_weight: 1.0
           beta: 1.0
+          free_bits: 0.25
+          kl_balance: true
     """
 
     _target_: str = (
@@ -54,6 +56,8 @@ class VariationalAutoencoderLossConfig:
     reconstruction_loss: str = "mse"
     reconstruction_weight: float = 1.0
     beta: float = 1.0
+    free_bits: float = 0.0
+    kl_balance: bool = False
 
 
 @dataclass

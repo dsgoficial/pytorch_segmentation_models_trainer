@@ -19,7 +19,9 @@ loss:
   _target_: pytorch_segmentation_models_trainer.custom_losses.autoencoder_losses.VariationalAutoencoderLoss
   reconstruction_loss: mse
   reconstruction_weight: 1.0
-  beta: 0.0   # starts at 0; KLAnnealingCallback ramps it up
+  beta: 0.0        # starts at 0; KLAnnealingCallback ramps it up
+  free_bits: 0.25  # floor per latent position (nats) — prevents posterior collapse
+  kl_balance: true # scale KL by (C*H*W)/(Cz*Hz*Wz) to match theoretical ELBO
 
 optimizer:
   _target_: torch.optim.Adam

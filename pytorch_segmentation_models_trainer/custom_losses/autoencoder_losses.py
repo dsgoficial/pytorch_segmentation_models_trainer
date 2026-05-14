@@ -20,11 +20,28 @@ class VariationalAutoencoderLoss(nn.Module):
             ``"mse"``, ``"l1"``, and ``"bce_with_logits"``.
         reconstruction_weight: Multiplicative weight for the reconstruction term.
         beta: Multiplicative weight for the KL term.
+        free_bits: Minimum KL (in nats) per latent spatial position. Positions
+            below this floor have their KL gradient blocked, preventing
+            over-regularisation of active dimensions while discouraging
+            posterior collapse. Set to 0.0 to disable (default). Recommended
+            range: 0.1–0.5 nats for spatial VAEs.
+        kl_balance: When ``True``, scales the KL term by
+            ``(C * H * W) / (Cz * Hz * Wz)`` so it is proportional to the
+            same total-information budget as the reconstruction term. This
+            matches the theoretical ELBO and is useful when input dimensions
+            greatly exceed latent dimensions (e.g. ``encoder_depth=5``).
+            The raw ``kl_loss`` key in the output dict is never affected;
+            only ``weighted_kl_loss`` and ``loss`` reflect the scaling.
         **kwargs: Reserved for Hydra compatibility.
 
     Returns:
-        A dictionary with scalar tensors ``loss``, ``reconstruction_loss``, and
-        ``kl_loss``.
+        A dictionary with scalar tensors:
+
+        - ``loss``: total ELBO loss.
+        - ``reconstruction_loss``: raw reconstruction term (no weight).
+        - ``kl_loss``: raw KL per latent dim (free_bits applied; no balance/beta).
+        - ``weighted_reconstruction_loss``: ``reconstruction_weight × recon``.
+        - ``weighted_kl_loss``: ``beta × kl_balance_factor × kl``.
 
     Example YAML:
         loss:
@@ -32,6 +49,8 @@ class VariationalAutoencoderLoss(nn.Module):
           reconstruction_loss: mse
           reconstruction_weight: 1.0
           beta: 1.0
+          free_bits: 0.25
+          kl_balance: true
     """
 
     def __init__(
@@ -39,12 +58,16 @@ class VariationalAutoencoderLoss(nn.Module):
         reconstruction_loss: str = "mse",
         reconstruction_weight: float = 1.0,
         beta: float = 1.0,
+        free_bits: float = 0.0,
+        kl_balance: bool = False,
         **kwargs,
     ):
         super().__init__()
         self.reconstruction_loss = reconstruction_loss
         self.reconstruction_weight = reconstruction_weight
         self.beta = beta
+        self.free_bits = free_bits
+        self.kl_balance = kl_balance
         self.extra_kwargs = kwargs
 
         if reconstruction_loss not in {"mse", "l1", "bce_with_logits"}:
@@ -74,14 +97,23 @@ class VariationalAutoencoderLoss(nn.Module):
     def _compute_kl_loss(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
         """Compute KL divergence from ``q(z|x)`` to ``N(0, I)``.
 
+        When ``free_bits > 0``, each latent position's KL is clamped to at
+        least ``free_bits`` nats before averaging. Positions below the floor
+        contribute a constant to the loss (gradient is zero for those
+        positions), which prevents the KL from over-regularising dimensions
+        that the encoder has not yet learned to use.
+
         Args:
-            mu: Posterior mean tensor.
-            logvar: Posterior log-variance tensor.
+            mu: Posterior mean tensor (B, Cz, Hz, Wz).
+            logvar: Posterior log-variance tensor, same shape as ``mu``.
 
         Returns:
-            Scalar KL loss averaged by batch size.
+            Scalar KL loss per latent position (nats).
         """
-        return -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+        kl_per_dim = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
+        if self.free_bits > 0:
+            kl_per_dim = kl_per_dim.clamp(min=self.free_bits)
+        return kl_per_dim.mean()
 
     def forward(
         self, output: VariationalAutoencoderOutput, target: torch.Tensor
@@ -104,8 +136,17 @@ class VariationalAutoencoderLoss(nn.Module):
             output.reconstruction, target
         )
         kl_loss = self._compute_kl_loss(output.mu, output.logvar)
+
+        if self.kl_balance:
+            data_numel = float(target[0].numel())
+            latent_numel = float(output.mu[0].numel())
+            kl_loss_for_total = kl_loss * (data_numel / latent_numel)
+        else:
+            kl_loss_for_total = kl_loss
+
         total_loss = (
-            self.reconstruction_weight * reconstruction_loss + self.beta * kl_loss
+            self.reconstruction_weight * reconstruction_loss
+            + self.beta * kl_loss_for_total
         )
 
         return {
@@ -115,5 +156,5 @@ class VariationalAutoencoderLoss(nn.Module):
             "weighted_reconstruction_loss": (
                 self.reconstruction_weight * reconstruction_loss
             ).detach(),
-            "weighted_kl_loss": (self.beta * kl_loss).detach(),
+            "weighted_kl_loss": (self.beta * kl_loss_for_total).detach(),
         }

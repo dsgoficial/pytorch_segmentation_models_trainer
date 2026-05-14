@@ -453,6 +453,121 @@ def test_vae_logvar_clamp_limits_values():
     assert logvar.max() <= 2.0
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# free_bits tests
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def test_free_bits_floors_collapsed_kl():
+    # mu=0, logvar=0 → kl_per_dim=0 < free_bits=0.5 → clamped to 0.5
+    loss_fn = VariationalAutoencoderLoss(free_bits=0.5)
+    mu = torch.zeros(2, 4, 2, 2)
+    logvar = torch.zeros_like(mu)
+    kl = loss_fn._compute_kl_loss(mu, logvar)
+    assert kl.item() == pytest.approx(0.5)
+
+
+def test_free_bits_no_effect_when_kl_above_threshold():
+    # large mu → kl >> free_bits → result identical with and without floor
+    loss_fn_with = VariationalAutoencoderLoss(free_bits=0.1)
+    loss_fn_without = VariationalAutoencoderLoss(free_bits=0.0)
+    mu = torch.full((2, 4, 2, 2), 3.0)
+    logvar = torch.zeros_like(mu)
+    assert loss_fn_with._compute_kl_loss(mu, logvar).item() == pytest.approx(
+        loss_fn_without._compute_kl_loss(mu, logvar).item()
+    )
+
+
+def test_free_bits_zero_matches_analytic_formula():
+    loss_fn = VariationalAutoencoderLoss(free_bits=0.0)
+    mu = torch.randn(2, 4, 2, 2)
+    logvar = torch.randn(2, 4, 2, 2)
+    kl = loss_fn._compute_kl_loss(mu, logvar)
+    expected = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+    assert kl.item() == pytest.approx(expected.item())
+
+
+def test_free_bits_blocks_gradient_for_collapsed_dims():
+    # Collapsed dim (kl=0 < free_bits=0.5): clamp output is constant → grad=0
+    mu = torch.zeros(1, 1, 1, 1, requires_grad=True)
+    logvar = torch.zeros(1, 1, 1, 1, requires_grad=True)
+    loss_fn = VariationalAutoencoderLoss(free_bits=0.5)
+    loss_fn._compute_kl_loss(mu, logvar).backward()
+    assert mu.grad.abs().max().item() == pytest.approx(0.0)
+    assert logvar.grad.abs().max().item() == pytest.approx(0.0)
+
+
+def test_free_bits_allows_gradient_for_active_dims():
+    # Active dim (kl > free_bits): gradient flows normally
+    mu = torch.full((1, 1, 1, 1), 3.0, requires_grad=True)
+    logvar = torch.zeros(1, 1, 1, 1, requires_grad=True)
+    loss_fn = VariationalAutoencoderLoss(free_bits=0.1)
+    loss_fn._compute_kl_loss(mu, logvar).backward()
+    assert mu.grad.abs().max().item() > 0.0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# kl_balance tests
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def test_kl_balance_scales_weighted_kl_by_dimension_ratio():
+    # target: (2,3,8,8) → data_numel=192; mu: (2,4,2,2) → latent_numel=16; ratio=12
+    target = torch.zeros(2, 3, 8, 8)
+    reconstruction = torch.zeros_like(target)
+    mu = torch.ones(2, 4, 2, 2, requires_grad=True)
+    logvar = torch.zeros(2, 4, 2, 2, requires_grad=True)
+    output = VariationalAutoencoderOutput(reconstruction, mu, logvar, mu)
+
+    result_balanced = VariationalAutoencoderLoss(kl_balance=True)(output, target)
+    result_plain = VariationalAutoencoderLoss(kl_balance=False)(output, target)
+
+    ratio = float(target[0].numel()) / float(mu[0].numel())  # 12.0
+    assert result_balanced["weighted_kl_loss"].item() == pytest.approx(
+        result_plain["weighted_kl_loss"].item() * ratio, rel=1e-5
+    )
+
+
+def test_kl_balance_does_not_affect_raw_kl_loss_key():
+    target = torch.zeros(2, 3, 8, 8)
+    reconstruction = torch.zeros_like(target)
+    mu = torch.ones(2, 4, 2, 2)
+    logvar = torch.zeros_like(mu)
+    output = VariationalAutoencoderOutput(reconstruction, mu, logvar, mu)
+
+    r_with = VariationalAutoencoderLoss(kl_balance=True)(output, target)
+    r_without = VariationalAutoencoderLoss(kl_balance=False)(output, target)
+
+    assert r_with["kl_loss"].item() == pytest.approx(r_without["kl_loss"].item())
+
+
+def test_kl_balance_false_is_default():
+    assert VariationalAutoencoderLoss().kl_balance is False
+
+
+def test_free_bits_default_is_zero():
+    assert VariationalAutoencoderLoss().free_bits == pytest.approx(0.0)
+
+
+def test_free_bits_and_kl_balance_compose():
+    # mu=0 → kl_per_dim=0 < free_bits=0.5 → kl_loss=0.5
+    # kl_balance: ratio = (3*8*8) / (4*2*2) = 192/16 = 12
+    # weighted_kl_loss = beta * kl_loss * ratio = 1.0 * 0.5 * 12 = 6.0
+    target = torch.zeros(2, 3, 8, 8)
+    reconstruction = torch.zeros_like(target)
+    mu = torch.zeros(2, 4, 2, 2)
+    logvar = torch.zeros_like(mu)
+    output = VariationalAutoencoderOutput(reconstruction, mu, logvar, mu)
+
+    result = VariationalAutoencoderLoss(free_bits=0.5, kl_balance=True, beta=1.0)(
+        output, target
+    )
+
+    assert result["kl_loss"].item() == pytest.approx(0.5)
+    ratio = float(target[0].numel()) / float(mu[0].numel())
+    assert result["weighted_kl_loss"].item() == pytest.approx(0.5 * ratio)
+
+
 def test_vae_logvar_clamp_default_is_none():
     with patch(
         "pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.smp"

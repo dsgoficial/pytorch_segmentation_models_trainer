@@ -7,6 +7,9 @@
 - Extended `VariationalAutoencoderLoss.forward()` to return two additional keys — `weighted_reconstruction_loss` and `weighted_kl_loss` — representing the actual contribution of each term to the total ELBO loss. These are automatically logged to TensorBoard alongside the existing `reconstruction_loss` and `kl_loss` keys.
 - Added example config `conf/examples/vae_with_kl_annealing.yaml` demonstrating cosine KL annealing over 5000 steps with a free-reconstruction warmup (`min_beta=0`, `max_beta=1`).
 - Added 20 unit tests in `tests/test_kl_annealing.py` covering schedule shapes, hook routing, beta clamping, TensorBoard logging, and config validation.
+- Added `free_bits: float = 0.0` parameter to `VariationalAutoencoderLoss`. When positive, clamps each latent spatial position's KL to at least `free_bits` nats before averaging — blocking the gradient for collapsed positions so they are not over-regularised while the decoder still gets reconstruction gradients through them. Prevents posterior collapse without requiring careful beta tuning. Recommended: 0.1–0.5 nats for spatial VAEs.
+- Added `kl_balance: bool = False` parameter to `VariationalAutoencoderLoss`. When `True`, scales the KL term by `(C × H × W) / (Cz × Hz × Wz)` so reconstruction and KL are proportional to the same total-information budget (matching the theoretical ELBO). Particularly useful when `encoder_depth` is high (e.g. depth=5 yields a ~24× ratio for 224×224 inputs). The raw `kl_loss` logging key is unaffected; only `weighted_kl_loss` and `loss` reflect the scaling.
+- Updated `conf/examples/vae_with_kl_annealing.yaml` to demonstrate `free_bits: 0.25` and `kl_balance: true` alongside cosine KL annealing.
 
 ## Bug fixes
 
