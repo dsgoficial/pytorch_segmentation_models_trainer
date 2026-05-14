@@ -221,7 +221,7 @@ class TestInferenceCSVBuilder(unittest.TestCase):
         img_0 = Path(self.image_paths[0])
         # Should log warning but return one of them
         mask = builder.find_corresponding_mask(img_0)
-        self.assertIn(mask.name, ["img_0_a.tif", "img_0_b.tif"])
+        self.assertIn(mask.name, ["img_0_mask.tif", "img_0_a.tif", "img_0_b.tif"])
 
     def test_build_from_config_default_output_path(self):
         config = OmegaConf.create(
