@@ -104,6 +104,7 @@ class KLAnnealingCallbackConfig:
     use_epochs: bool = False
     cycle_length: int = 100
     cycle_ratio: float = 0.5
+    start_after: int = 0
 
 
 cs = ConfigStore.instance()

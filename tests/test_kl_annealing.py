@@ -222,6 +222,133 @@ def test_logs_beta_epoch_based():
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# start_after delay
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def test_start_after_holds_min_beta_before_delay():
+    cb = KLAnnealingCallback(
+        min_beta=0.0,
+        max_beta=1.0,
+        annealing_steps=100,
+        schedule="linear",
+        start_after=50,
+    )
+    for t in range(50):
+        assert cb._apply_beta.__func__ or True  # access via public hook below
+    trainer = MagicMock()
+    pl_module = MagicMock()
+    for step in range(50):
+        trainer.global_step = step
+        cb.on_train_batch_start(trainer, pl_module, batch=None, batch_idx=0)
+        assert pl_module.loss_function.beta == pytest.approx(0.0)
+
+
+def test_start_after_annealing_begins_at_delay_boundary():
+    cb = KLAnnealingCallback(
+        min_beta=0.0,
+        max_beta=1.0,
+        annealing_steps=100,
+        schedule="linear",
+        start_after=50,
+    )
+    trainer = MagicMock()
+    pl_module = MagicMock()
+    trainer.global_step = 50
+    cb.on_train_batch_start(trainer, pl_module, batch=None, batch_idx=0)
+    assert pl_module.loss_function.beta == pytest.approx(0.0)
+
+
+def test_start_after_annealing_midpoint_offset():
+    cb = KLAnnealingCallback(
+        min_beta=0.0,
+        max_beta=1.0,
+        annealing_steps=100,
+        schedule="linear",
+        start_after=50,
+    )
+    trainer = MagicMock()
+    pl_module = MagicMock()
+    trainer.global_step = 100  # 50 steps into the annealing ramp
+    cb.on_train_batch_start(trainer, pl_module, batch=None, batch_idx=0)
+    assert pl_module.loss_function.beta == pytest.approx(0.5)
+
+
+def test_start_after_annealing_completes_after_delay_plus_steps():
+    cb = KLAnnealingCallback(
+        min_beta=0.0,
+        max_beta=1.0,
+        annealing_steps=100,
+        schedule="linear",
+        start_after=50,
+    )
+    trainer = MagicMock()
+    pl_module = MagicMock()
+    trainer.global_step = 150  # start_after + annealing_steps
+    cb.on_train_batch_start(trainer, pl_module, batch=None, batch_idx=0)
+    assert pl_module.loss_function.beta == pytest.approx(1.0)
+
+
+def test_start_after_zero_is_identical_to_no_delay():
+    cb_with = KLAnnealingCallback(
+        min_beta=0.0,
+        max_beta=1.0,
+        annealing_steps=100,
+        schedule="cosine",
+        start_after=0,
+    )
+    cb_without = KLAnnealingCallback(
+        min_beta=0.0,
+        max_beta=1.0,
+        annealing_steps=100,
+        schedule="cosine",
+    )
+    for t in range(110):
+        trainer = MagicMock()
+        trainer.global_step = t
+        pm_with = MagicMock()
+        pm_without = MagicMock()
+        cb_with.on_train_batch_start(trainer, pm_with, batch=None, batch_idx=0)
+        cb_without.on_train_batch_start(trainer, pm_without, batch=None, batch_idx=0)
+        assert pm_with.loss_function.beta == pytest.approx(
+            pm_without.loss_function.beta
+        )
+
+
+def test_start_after_epoch_based_holds_min_beta():
+    cb = KLAnnealingCallback(
+        min_beta=0.0,
+        max_beta=1.0,
+        annealing_steps=10,
+        schedule="linear",
+        use_epochs=True,
+        start_after=5,
+    )
+    trainer = MagicMock()
+    pl_module = MagicMock()
+    for epoch in range(5):
+        trainer.current_epoch = epoch
+        cb.on_train_epoch_start(trainer, pl_module)
+        assert pl_module.loss_function.beta == pytest.approx(0.0)
+
+
+def test_start_after_epoch_based_midpoint():
+    cb = KLAnnealingCallback(
+        min_beta=0.0,
+        max_beta=1.0,
+        annealing_steps=10,
+        schedule="linear",
+        use_epochs=True,
+        start_after=5,
+    )
+    trainer = MagicMock()
+    pl_module = MagicMock()
+    trainer.current_epoch = 10  # 5 epochs into the ramp
+    cb.on_train_epoch_start(trainer, pl_module)
+    assert pl_module.loss_function.beta == pytest.approx(0.5)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Validation
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -244,6 +371,7 @@ def test_config_defaults():
     assert cfg.use_epochs is False
     assert cfg.cycle_length == 100
     assert cfg.cycle_ratio == 0.5
+    assert cfg.start_after == 0
 
 
 def test_config_annealing_steps_is_required():

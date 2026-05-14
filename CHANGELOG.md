@@ -11,6 +11,10 @@
 - Updated `GenericVariationalAutoencoderConfig` dataclass with `use_progressive_decoder`, `base_channels`, and `min_channels` fields for Hydra/YAML configuration.
 - Added 22 tests in `tests/test_generic_autoencoder.py` covering standalone shape contracts (scale factors 2–32), activation bounds, non-power-of-2 and invalid-activation guards, gradient flow, and end-to-end integration with both `GenericAutoencoder` and `GenericVariationalAutoencoder`.
 
+## KL Annealing
+
+- Added `start_after` parameter (default `0`) to `KLAnnealingCallback`. When set to a positive integer, beta is held at `min_beta` for the first `start_after` steps (or epochs when `use_epochs=True`) before the annealing ramp begins. The ramp then spans exactly `annealing_steps` units starting from `start_after`. `KLAnnealingCallbackConfig` exposes the same field. Zero preserves previous behaviour unchanged.
+
 ## VAE Loss
 
 - Added `smooth_l1` reconstruction mode to `VariationalAutoencoderLoss` using `F.smooth_l1_loss` (Huber loss). New `smooth_l1_beta` parameter (default `0.1`) controls the L2-to-L1 transition threshold and is independent of the KL `beta` weight. The term is governed by `reconstruction_weight` like all other reconstruction modes.

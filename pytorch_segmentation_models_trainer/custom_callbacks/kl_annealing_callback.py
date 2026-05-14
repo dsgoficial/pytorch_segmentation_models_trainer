@@ -28,6 +28,10 @@ class KLAnnealingCallback(pl.Callback):
         cycle_length: Total length of one cycle (``"cyclical"`` only).
         cycle_ratio: Fraction of each cycle spent ramping up
             (``"cyclical"`` only).
+        start_after: Number of steps (or epochs when ``use_epochs=True``) to
+            hold beta at ``min_beta`` before the annealing ramp begins.
+            Defaults to ``0`` (annealing starts immediately, original
+            behaviour).
         **kwargs: Reserved for Hydra compatibility.
 
     Example YAML:
@@ -37,6 +41,7 @@ class KLAnnealingCallback(pl.Callback):
             min_beta: 0.0
             annealing_steps: 5000
             schedule: cosine
+            start_after: 1000
     """
 
     def __init__(
@@ -48,6 +53,7 @@ class KLAnnealingCallback(pl.Callback):
         use_epochs: bool = False,
         cycle_length: int = 100,
         cycle_ratio: float = 0.5,
+        start_after: int = 0,
         **kwargs,
     ):
         super().__init__()
@@ -62,6 +68,7 @@ class KLAnnealingCallback(pl.Callback):
         self.use_epochs = use_epochs
         self.cycle_length = cycle_length
         self.cycle_ratio = cycle_ratio
+        self.start_after = start_after
 
     def _compute_beta(self, t: int) -> float:
         """Return the annealed beta value at position ``t``.
@@ -89,7 +96,10 @@ class KLAnnealingCallback(pl.Callback):
         return self.min_beta + span * ratio
 
     def _apply_beta(self, trainer, pl_module, t: int, on_step: bool) -> None:
-        beta = self._compute_beta(t)
+        if t < self.start_after:
+            beta = self.min_beta
+        else:
+            beta = self._compute_beta(t - self.start_after)
         if hasattr(pl_module, "loss_function") and hasattr(
             pl_module.loss_function, "beta"
         ):
