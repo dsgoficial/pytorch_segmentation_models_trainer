@@ -1,5 +1,12 @@
 # Unreleased
 
+## ProgressiveDecoder
+
+- Added `ProgressiveDecoder` to `custom_models/generic_autoencoder.py`: multi-stage convolutional decoder that doubles spatial resolution at each step with two conv+ReLU layers, replacing the single bilinear interpolation of `GenericDecoder`. Supports the same `output_activation` options (`None`, `"sigmoid"`, `"tanh"`) and validates that `scale_factor` is a power of 2.
+- Wired `use_progressive_decoder` parameter (default `False`) into `GenericAutoencoder` and `GenericVariationalAutoencoder`. Set to `True` to swap in `ProgressiveDecoder`; also exposed `base_channels` (default 128) and `min_channels` (default 32) for channel schedule control.
+- Updated `GenericVariationalAutoencoderConfig` dataclass with `use_progressive_decoder`, `base_channels`, and `min_channels` fields for Hydra/YAML configuration.
+- Added 22 tests in `tests/test_generic_autoencoder.py` covering standalone shape contracts (scale factors 2–32), activation bounds, non-power-of-2 and invalid-activation guards, gradient flow, and end-to-end integration with both `GenericAutoencoder` and `GenericVariationalAutoencoder`.
+
 ## VAE Loss
 
 - Added `smooth_l1` reconstruction mode to `VariationalAutoencoderLoss` using `F.smooth_l1_loss` (Huber loss). New `smooth_l1_beta` parameter (default `0.1`) controls the L2-to-L1 transition threshold and is independent of the KL `beta` weight. The term is governed by `reconstruction_weight` like all other reconstruction modes.

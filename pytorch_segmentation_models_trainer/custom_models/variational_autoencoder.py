@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from pytorch_segmentation_models_trainer.custom_models.generic_autoencoder import (
     GenericDecoder,
     HuggingFaceEncoderAdapter,
+    ProgressiveDecoder,
     smp,
 )
 
@@ -82,6 +83,13 @@ class GenericVariationalAutoencoder(nn.Module):
         logvar_clamp: Optional ``(min, max)`` range to clamp the log-variance
             tensor before exponentiation.  Prevents fp16 overflow and stabilises
             early training.  Recommended ``(-4.0, 4.0)`` with ``precision="16"``.
+        use_progressive_decoder: When ``True``, uses ``ProgressiveDecoder``
+            instead of ``GenericDecoder``.  Recommended when
+            ``scale_factor >= 4`` (i.e. ``encoder_depth >= 2``).
+        base_channels: Starting channel count for ``ProgressiveDecoder``.
+            Ignored when ``use_progressive_decoder=False``.
+        min_channels: Minimum channel count for ``ProgressiveDecoder`` stages.
+            Ignored when ``use_progressive_decoder=False``.
         **kwargs: Extra arguments forwarded to the HuggingFace adapter.
 
     Raises:
@@ -143,6 +151,9 @@ class GenericVariationalAutoencoder(nn.Module):
         feature_level: Optional[int] = None,
         output_activation: Optional[str] = None,
         logvar_clamp: Optional[Tuple[float, float]] = None,
+        use_progressive_decoder: bool = False,
+        base_channels: int = 128,
+        min_channels: int = 32,
         **kwargs,
     ):
         super().__init__()
@@ -205,12 +216,22 @@ class GenericVariationalAutoencoder(nn.Module):
         # ── Decoder ───────────────────────────────────────────────────────
         # For HuggingFace encoders the scale_factor is set during the first
         # forward pass; pass a placeholder of 0 and update it then.
-        self.decoder = GenericDecoder(
-            in_channels=latent_channels,
-            out_channels=in_channels,
-            scale_factor=0 if use_huggingface else self.scale_factor,
-            output_activation=output_activation,
-        )
+        if use_progressive_decoder and not use_huggingface:
+            self.decoder = ProgressiveDecoder(
+                in_channels=latent_channels,
+                out_channels=in_channels,
+                scale_factor=self.scale_factor,
+                base_channels=base_channels,
+                min_channels=min_channels,
+                output_activation=output_activation,
+            )
+        else:
+            self.decoder = GenericDecoder(
+                in_channels=latent_channels,
+                out_channels=in_channels,
+                scale_factor=0 if use_huggingface else self.scale_factor,
+                output_activation=output_activation,
+            )
 
     # ── Private helpers ───────────────────────────────────────────────────
 

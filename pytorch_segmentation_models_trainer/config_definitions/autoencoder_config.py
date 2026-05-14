@@ -33,6 +33,9 @@ class GenericVariationalAutoencoderConfig:
     pretrained: bool = True
     output_activation: Optional[str] = None
     logvar_clamp: Optional[List[float]] = None
+    use_progressive_decoder: bool = False
+    base_channels: int = 128
+    min_channels: int = 32
 
 
 @dataclass
