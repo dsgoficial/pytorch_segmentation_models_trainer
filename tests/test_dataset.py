@@ -59,7 +59,9 @@ polygon_rnn_root_dir = os.path.join(
     current_dir, "testing_data", "data", "polygon_rnn_data"
 )
 detection_root_dir = os.path.join(current_dir, "testing_data", "data", "detection_data")
-folder_dataset_root_dir = os.path.join(current_dir, "testing_data", "data", "folder_dataset")
+folder_dataset_root_dir = os.path.join(
+    current_dir, "testing_data", "data", "folder_dataset"
+)
 
 
 class Test_Dataset(CustomTestCase):
@@ -763,7 +765,7 @@ class Test_SegmentationDatasetFromFolder(BasicTestCase):
         # area_b/image4.png existe só em images/  →  não deve aparecer
         # area_c/image5.png existe só em masks/   →  não deve aparecer
         image_paths = [ds.df.iloc[i]["image"] for i in range(len(ds))]
-        mask_paths  = [ds.df.iloc[i]["mask"]  for i in range(len(ds))]
+        mask_paths = [ds.df.iloc[i]["mask"] for i in range(len(ds))]
 
         self.assertFalse(any("image4" in p for p in image_paths))
         self.assertFalse(any("image5" in p for p in mask_paths))
@@ -860,4 +862,82 @@ class Test_SegmentationDatasetFromFolder(BasicTestCase):
         for i in range(len(ds)):
             item = ds[i]
             self.assertIn("image", item)
-            self.assertIn("mask", item)
+
+
+class Test_ShuffleIndicesSeed(CustomTestCase):
+    """Testes para o parâmetro shuffle_indices_seed em AbstractDataset/SegmentationDataset."""
+
+    def _make_ds(self, shuffle_indices_seed=None):
+        return SegmentationDataset(
+            input_csv_path=self.csv_ds_file,
+            shuffle_indices_seed=shuffle_indices_seed,
+        )
+
+    def test_no_seed_preserves_sequential_order(self):
+        ds = self._make_ds()
+        self.assertEqual(ds._index_map, list(range(len(ds))))
+
+    def test_seed_changes_order(self):
+        ds_plain = self._make_ds()
+        ds_shuffled = self._make_ds(shuffle_indices_seed=42)
+        self.assertNotEqual(ds_shuffled._index_map, ds_plain._index_map)
+
+    def test_same_seed_is_reproducible(self):
+        ds_a = self._make_ds(shuffle_indices_seed=7)
+        ds_b = self._make_ds(shuffle_indices_seed=7)
+        self.assertEqual(ds_a._index_map, ds_b._index_map)
+
+    def test_different_seeds_give_different_orders(self):
+        ds_a = self._make_ds(shuffle_indices_seed=1)
+        ds_b = self._make_ds(shuffle_indices_seed=2)
+        self.assertNotEqual(ds_a._index_map, ds_b._index_map)
+
+    def test_index_map_length_equals_dataset_length(self):
+        ds = self._make_ds(shuffle_indices_seed=99)
+        self.assertEqual(len(ds._index_map), len(ds))
+
+    def test_index_map_is_permutation(self):
+        ds = self._make_ds(shuffle_indices_seed=42)
+        self.assertEqual(sorted(ds._index_map), list(range(len(ds))))
+
+    def test_get_path_uses_remapped_index(self):
+        ds_plain = self._make_ds()
+        ds_shuffled = self._make_ds(shuffle_indices_seed=42)
+        paths_plain = [ds_plain.get_path(i) for i in range(len(ds_plain))]
+        paths_shuffled = [ds_shuffled.get_path(i) for i in range(len(ds_shuffled))]
+        self.assertEqual(sorted(paths_plain), sorted(paths_shuffled))
+        self.assertNotEqual(paths_plain, paths_shuffled)
+
+    def test_getitem_uses_remapped_index(self):
+        ds_plain = self._make_ds()
+        ds_shuffled = self._make_ds(shuffle_indices_seed=42)
+        # shuffled[0] must match plain[_index_map[0]]
+        remapped = ds_shuffled._index_map[0]
+        import numpy as np
+
+        self.assertTrue(
+            np.array_equal(
+                ds_shuffled[0]["image"].numpy(),
+                ds_plain[remapped]["image"].numpy(),
+            )
+        )
+
+    def test_update_df_rebuilds_index_map_with_seed(self):
+        import pandas as pd
+
+        ds = self._make_ds(shuffle_indices_seed=42)
+        original_map = list(ds._index_map)
+        new_df = ds.df.copy()
+        ds.update_df(new_df)
+        self.assertEqual(len(ds._index_map), len(new_df))
+        self.assertEqual(sorted(ds._index_map), list(range(len(new_df))))
+        # seed preserved — same shuffle
+        self.assertEqual(ds._index_map, original_map)
+
+    def test_update_df_without_seed_gives_sequential_map(self):
+        import pandas as pd
+
+        ds = self._make_ds()
+        new_df = ds.df.copy()
+        ds.update_df(new_df)
+        self.assertEqual(ds._index_map, list(range(len(new_df))))

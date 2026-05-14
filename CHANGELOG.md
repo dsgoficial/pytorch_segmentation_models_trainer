@@ -1,5 +1,9 @@
 # Unreleased
 
+## Dataset
+
+- Added optional `shuffle_indices_seed` parameter to `AbstractDataset` and `SegmentationDataset`. When provided, indices are shuffled once at construction using a fixed `numpy.random.RandomState(seed)`, giving a stable, reproducible permutation. Image callbacks monitoring `val_ds[0..n-1]` will track a diverse, randomly-drawn subset rather than always the first N rows of the CSV. `update_df` preserves the seed and rebuilds the map for the new length. When `None` (default), behaviour is unchanged.
+
 ## ProgressiveDecoder
 
 - Added `ProgressiveDecoder` to `custom_models/generic_autoencoder.py`: multi-stage convolutional decoder that doubles spatial resolution at each step with two conv+ReLU layers, replacing the single bilinear interpolation of `GenericDecoder`. Supports the same `output_activation` options (`None`, `"sigmoid"`, `"tanh"`) and validates that `scale_factor` is a power of 2.
