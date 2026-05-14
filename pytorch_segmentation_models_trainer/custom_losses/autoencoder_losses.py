@@ -81,8 +81,7 @@ class VariationalAutoencoderLoss(nn.Module):
         Returns:
             Scalar KL loss averaged by batch size.
         """
-        kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-        return kl_loss / mu.shape[0]
+        return -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
 
     def forward(
         self, output: VariationalAutoencoderOutput, target: torch.Tensor

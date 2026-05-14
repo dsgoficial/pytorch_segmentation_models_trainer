@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Hydra dataclass configs for deterministic and variational autoencoders."""
 
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
 
 from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING
@@ -31,6 +31,8 @@ class GenericVariationalAutoencoderConfig:
     in_channels: int = 3
     latent_dim: Optional[int] = None
     pretrained: bool = True
+    output_activation: Optional[str] = None
+    logvar_clamp: Optional[List[float]] = None
 
 
 @dataclass

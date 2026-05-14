@@ -369,3 +369,131 @@ def test_variational_autoencoder_model_accepts_plain_loss_tensor():
 
     assert loss.shape == torch.Size([])
     assert "train/loss" in [call.args[0] for call in pl_model.log.call_args_list]
+
+
+@pytest.mark.parametrize(
+    "mu_val,logvar_val",
+    [
+        (0.0, 0.0),
+        (1.0, 0.0),
+        (0.0, 1.0),
+        (2.0, -2.0),
+        (0.0, 3.0),
+    ],
+)
+def test_kl_loss_always_nonneg(mu_val, logvar_val):
+    loss_fn = VariationalAutoencoderLoss(reconstruction_loss="mse")
+    mu = torch.full((2, 4, 4, 4), mu_val)
+    logvar = torch.full((2, 4, 4, 4), logvar_val)
+    kl = loss_fn._compute_kl_loss(mu, logvar)
+    assert kl >= 0.0, f"KL negative at mu={mu_val}, logvar={logvar_val}: {kl}"
+
+
+def test_kl_loss_mean_scale_comparable_to_mse():
+    loss_fn = VariationalAutoencoderLoss(reconstruction_loss="mse", beta=1.0)
+    target = torch.rand(4, 3, 16, 16)
+    reconstruction = torch.rand_like(target, requires_grad=True)
+    mu = torch.randn(4, 4, 4, 4, requires_grad=True)
+    logvar = torch.zeros_like(mu, requires_grad=True)
+    output = VariationalAutoencoderOutput(reconstruction, mu, logvar, mu)
+
+    result = loss_fn(output, target)
+
+    assert result["reconstruction_loss"] < 1.0
+    assert result["kl_loss"] >= 0.0
+
+
+def test_vae_output_activation_sigmoid_bounds_reconstruction():
+    with patch(
+        "pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.smp"
+    ) as smp_mock:
+        smp_mock.encoders.get_encoder.return_value = TinyEncoder()
+        model = GenericVariationalAutoencoder(
+            encoder_name="tiny",
+            in_channels=3,
+            latent_dim=4,
+            pretrained=False,
+            output_activation="sigmoid",
+        )
+
+    x = torch.randn(2, 3, 32, 32) * 5
+    output = model(x)
+
+    assert output.reconstruction.min() >= 0.0
+    assert output.reconstruction.max() <= 1.0
+
+
+def test_vae_logvar_clamp_limits_values():
+    with patch(
+        "pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.smp"
+    ) as smp_mock:
+        smp_mock.encoders.get_encoder.return_value = TinyEncoder()
+        model = GenericVariationalAutoencoder(
+            encoder_name="tiny",
+            in_channels=3,
+            latent_dim=4,
+            pretrained=False,
+            logvar_clamp=(-2.0, 2.0),
+        )
+
+    x = torch.randn(2, 3, 32, 32)
+    mu, logvar = model.encode(x)
+
+    assert logvar.min() >= -2.0
+    assert logvar.max() <= 2.0
+
+
+def test_vae_logvar_clamp_default_is_none():
+    with patch(
+        "pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.smp"
+    ) as smp_mock:
+        smp_mock.encoders.get_encoder.return_value = TinyEncoder()
+        model = GenericVariationalAutoencoder(
+            encoder_name="tiny", in_channels=3, pretrained=False
+        )
+
+    assert model.logvar_clamp is None
+
+
+def test_variational_autoencoder_model_computes_metrics_when_configured():
+    import torchmetrics
+
+    cfg = OmegaConf.create(
+        {
+            "model": {"_target_": "unused"},
+            "loss": {"_target_": "unused"},
+            "optimizer": {"_target_": "torch.optim.Adam", "lr": 0.001},
+            "scheduler_list": [],
+            "metrics": [
+                {"_target_": "torchmetrics.MeanSquaredError"},
+            ],
+        }
+    )
+    domain_model = TinyVAEOutputModel()
+    loss_fn = MagicMock()
+    loss_fn.side_effect = lambda output, target: {
+        "loss": output.reconstruction.mean() + target.mean(),
+        "reconstruction_loss": torch.tensor(0.25),
+        "kl_loss": torch.tensor(0.5),
+    }
+
+    with patch.object(
+        VariationalAutoencoderModel, "get_model", return_value=domain_model
+    ):
+        with patch.object(
+            VariationalAutoencoderModel, "get_loss_function", return_value=loss_fn
+        ):
+            pl_model = VariationalAutoencoderModel(cfg)
+
+    pl_model.log = MagicMock()
+    pl_model.log_dict = MagicMock()
+    batch = {"image": torch.randn(2, 3, 8, 8), "target": torch.randn(2, 3, 8, 8)}
+
+    pl_model.training_step(batch, 0)
+    pl_model.validation_step(batch, 0)
+
+    assert pl_model.log_dict.call_count == 2
+    first_call_keys = set(pl_model.log_dict.call_args_list[0].args[0].keys())
+    assert any("train/" in k for k in first_call_keys)
+    second_call_keys = set(pl_model.log_dict.call_args_list[1].args[0].keys())
+    assert any("val/" in k for k in second_call_keys)

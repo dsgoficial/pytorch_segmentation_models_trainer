@@ -3,6 +3,9 @@
 
 import torch
 
+from pytorch_segmentation_models_trainer.custom_models.variational_autoencoder import (
+    VariationalAutoencoderOutput,
+)
 from pytorch_segmentation_models_trainer.model_loader.model import Model
 
 
@@ -64,17 +67,36 @@ class VariationalAutoencoderModel(Model):
         loss_result = self.loss_function(output, targets)
 
         if isinstance(loss_result, dict):
-            return self._log_loss_dict(loss_result, prefix)
+            loss = self._log_loss_dict(loss_result, prefix)
+        else:
+            loss = loss_result
+            self.log(
+                f"{prefix}/loss",
+                loss_result,
+                on_step=(prefix == "train"),
+                on_epoch=True,
+                prog_bar=True,
+                sync_dist=True,
+            )
 
-        self.log(
-            f"{prefix}/loss",
-            loss_result,
-            on_step=(prefix == "train"),
-            on_epoch=True,
-            prog_bar=True,
-            sync_dist=True,
-        )
-        return loss_result
+        metrics_attr = f"{prefix}_metrics"
+        if hasattr(self, metrics_attr):
+            reconstruction = (
+                output.reconstruction
+                if isinstance(output, VariationalAutoencoderOutput)
+                else output
+            )
+            if isinstance(reconstruction, torch.Tensor):
+                metrics = getattr(self, metrics_attr)(reconstruction, targets)
+                self.log_dict(
+                    metrics,
+                    on_step=(prefix == "train"),
+                    on_epoch=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
+        return loss
 
     def training_step(self, batch, batch_idx):
         """Run one training step.

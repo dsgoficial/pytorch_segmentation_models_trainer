@@ -19,14 +19,9 @@ class AutoencoderModel(Model):
         images = batch["image"]
         targets = batch.get("target", images)
 
-        # Forward pass
         reconstructed = self(images)
-
-        # Compute loss
-        # Note: Model.get_loss_function() was called in __init__
         loss = self.loss_function(reconstructed, targets)
 
-        # Log loss
         self.log(
             f"{prefix}/loss",
             loss,
@@ -35,6 +30,17 @@ class AutoencoderModel(Model):
             prog_bar=True,
             sync_dist=True,
         )
+
+        metrics_attr = f"{prefix}_metrics"
+        if hasattr(self, metrics_attr) and isinstance(reconstructed, torch.Tensor):
+            metrics = getattr(self, metrics_attr)(reconstructed, targets)
+            self.log_dict(
+                metrics,
+                on_step=(prefix == "train"),
+                on_epoch=True,
+                prog_bar=False,
+                sync_dist=True,
+            )
 
         return loss
 
