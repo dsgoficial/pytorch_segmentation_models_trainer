@@ -55,6 +55,15 @@ class TestSetTrainingSeed(BasicTestCase):
         set_training_seed(55)
         self.assertEqual(os.environ.get("PYTHONHASHSEED"), "55")
 
+    def test_sets_pl_global_seed(self):
+        set_training_seed(42)
+        self.assertEqual(os.environ.get("PL_GLOBAL_SEED"), "42")
+
+    def test_pl_global_seed_uses_seed32(self):
+        large_seed = 2**33 + 7
+        set_training_seed(large_seed)
+        self.assertEqual(os.environ.get("PL_GLOBAL_SEED"), str(large_seed % (2**32)))
+
     def test_seed_modulo_32bit(self):
         large_seed = 2**33 + 7
         gen = set_training_seed(large_seed)
@@ -64,27 +73,33 @@ class TestSetTrainingSeed(BasicTestCase):
     def test_deterministic_cudnn_false_by_default(self):
         original_det = torch.backends.cudnn.deterministic
         original_bench = torch.backends.cudnn.benchmark
+        original_algo = torch.are_deterministic_algorithms_enabled()
         try:
             torch.backends.cudnn.deterministic = False
             torch.backends.cudnn.benchmark = True
+            torch.use_deterministic_algorithms(False)
             set_training_seed(1, deterministic_cudnn=False)
-            # Should not change these flags
             self.assertFalse(torch.backends.cudnn.deterministic)
             self.assertTrue(torch.backends.cudnn.benchmark)
+            self.assertFalse(torch.are_deterministic_algorithms_enabled())
         finally:
             torch.backends.cudnn.deterministic = original_det
             torch.backends.cudnn.benchmark = original_bench
+            torch.use_deterministic_algorithms(original_algo)
 
     def test_deterministic_cudnn_true(self):
         original_det = torch.backends.cudnn.deterministic
         original_bench = torch.backends.cudnn.benchmark
+        original_algo = torch.are_deterministic_algorithms_enabled()
         try:
             set_training_seed(1, deterministic_cudnn=True)
             self.assertTrue(torch.backends.cudnn.deterministic)
             self.assertFalse(torch.backends.cudnn.benchmark)
+            self.assertTrue(torch.are_deterministic_algorithms_enabled())
         finally:
             torch.backends.cudnn.deterministic = original_det
             torch.backends.cudnn.benchmark = original_bench
+            torch.use_deterministic_algorithms(original_algo)
 
     def test_two_calls_same_seed_produce_same_sequences(self):
         """Entire sequence (torch + numpy + random) must be identical across two seedings."""
@@ -371,6 +386,57 @@ class TestTrainCallsSeedUtils(BasicTestCase):
             except Exception:
                 pass
             mock_seed.assert_not_called()
+
+    def _make_train_cfg(self, **overrides):
+        from omegaconf import OmegaConf
+
+        base = {"seed": 42, "pl_trainer": {}, "hyperparameters": {}}
+        base.update(overrides)
+        return OmegaConf.create(base)
+
+    def test_trainer_gets_deterministic_true_when_deterministic_cudnn(self):
+        import pytorch_segmentation_models_trainer.train as train_module
+        from unittest.mock import MagicMock, patch
+
+        mock_trainer_cls = MagicMock()
+        mock_model = MagicMock()
+        with (
+            patch.object(
+                train_module, "set_training_seed", return_value=torch.Generator()
+            ),
+            patch.object(train_module, "Trainer", mock_trainer_cls),
+            patch.object(train_module, "Model", return_value=mock_model),
+        ):
+            cfg = self._make_train_cfg(deterministic_cudnn=True)
+            try:
+                train_module.train(cfg)
+            except Exception:
+                pass
+            self.assertIsNotNone(mock_trainer_cls.call_args)
+            _, kwargs = mock_trainer_cls.call_args
+            self.assertTrue(kwargs.get("deterministic"))
+
+    def test_trainer_no_deterministic_when_cudnn_false(self):
+        import pytorch_segmentation_models_trainer.train as train_module
+        from unittest.mock import MagicMock, patch
+
+        mock_trainer_cls = MagicMock()
+        mock_model = MagicMock()
+        with (
+            patch.object(
+                train_module, "set_training_seed", return_value=torch.Generator()
+            ),
+            patch.object(train_module, "Trainer", mock_trainer_cls),
+            patch.object(train_module, "Model", return_value=mock_model),
+        ):
+            cfg = self._make_train_cfg(deterministic_cudnn=False)
+            try:
+                train_module.train(cfg)
+            except Exception:
+                pass
+            self.assertIsNotNone(mock_trainer_cls.call_args)
+            _, kwargs = mock_trainer_cls.call_args
+            self.assertNotIn("deterministic", kwargs)
 
 
 if __name__ == "__main__":

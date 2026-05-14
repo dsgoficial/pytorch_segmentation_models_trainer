@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 import logging
 from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
     FrameFieldComputeWeightNormLossesCallback,
@@ -55,8 +56,9 @@ def train(cfg: DictConfig):
         Trainer: trainer monitoring object
     """
     seed = cfg.get("seed", None)
+    deterministic_cudnn = cfg.get("deterministic_cudnn", False)
     if seed is not None:
-        set_training_seed(seed, deterministic_cudnn=cfg.get("deterministic_cudnn", False))
+        set_training_seed(seed, deterministic_cudnn=deterministic_cudnn)
 
     logger.info(
         "Starting the training of a model with the following configuration: \n%s",
@@ -94,7 +96,10 @@ def train(cfg: DictConfig):
         if not is_norm_loss_added:
             callback_list.append(FrameFieldComputeWeightNormLossesCallback())
     model.setup("fit")
-    trainer = Trainer(**cfg.pl_trainer, logger=trainer_logger, callbacks=callback_list)
+    pl_trainer_cfg = dict(cfg.pl_trainer)
+    if deterministic_cudnn:
+        pl_trainer_cfg.setdefault("deterministic", True)
+    trainer = Trainer(**pl_trainer_cfg, logger=trainer_logger, callbacks=callback_list)
     trainer.fit(model)
     if "test_dataset" in cfg:
         logger.info("test_dataset found in config — running trainer.test()")

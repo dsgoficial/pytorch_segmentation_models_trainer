@@ -1,5 +1,12 @@
 # Unreleased
 
+## Reproducibility / Seed
+
+- `set_training_seed` now delegates to `pytorch_lightning.seed_everything` instead of calling `random.seed`/`np.random.seed`/`torch.manual_seed` directly. This ensures `PL_GLOBAL_SEED` is set so DDP-spawned subprocesses inherit the seed automatically.
+- `deterministic_cudnn=True` now also calls `torch.use_deterministic_algorithms(True)`, matching the behaviour of `Trainer(deterministic=True)` and covering all ops, not just CuDNN.
+- `train()` passes `deterministic=True` to the `Trainer` when `cfg.deterministic_cudnn` is `True`, completing the Lightning integration.
+- Added tests: `test_sets_pl_global_seed`, `test_pl_global_seed_uses_seed32`, `test_trainer_gets_deterministic_true_when_deterministic_cudnn`, `test_trainer_no_deterministic_when_cudnn_false`; updated `test_deterministic_cudnn_true` and `test_deterministic_cudnn_false_by_default` to also assert on `torch.are_deterministic_algorithms_enabled()`.
+
 ## KL Annealing (VAE)
 
 - Added `KLAnnealingCallback` (`custom_callbacks/kl_annealing_callback.py`): PyTorch Lightning callback that gradually increases the KL weight (`beta`) in `VariationalAutoencoderLoss` during training. Supports three schedules — `linear`, `cosine`, and `cyclical`. Can operate step-based (default) or epoch-based via `use_epochs`. Logs the current beta to TensorBoard as `scheduler/kl_beta` on every update.
