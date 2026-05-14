@@ -2848,6 +2848,8 @@ def __getattr__(name: str):
         "TiledInferenceImageDataset",
         "AutoencoderDataset",
         "AutoencoderRandomCropDataset",
+        "IterableWindowedImageDataset",
+        "IterableWindowedImageAutoencoderDataset",
     }
     if name in image_dataset_exports:
         from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import (
@@ -2855,6 +2857,8 @@ def __getattr__(name: str):
             AutoencoderRandomCropDataset,
             CSVWindowedImageDataset,
             ImageDataset,
+            IterableWindowedImageAutoencoderDataset,
+            IterableWindowedImageDataset,
             TiledInferenceImageDataset,
         )
 
@@ -2864,6 +2868,10 @@ def __getattr__(name: str):
             "TiledInferenceImageDataset": TiledInferenceImageDataset,
             "AutoencoderDataset": AutoencoderDataset,
             "AutoencoderRandomCropDataset": AutoencoderRandomCropDataset,
+            "IterableWindowedImageDataset": IterableWindowedImageDataset,
+            "IterableWindowedImageAutoencoderDataset": (
+                IterableWindowedImageAutoencoderDataset
+            ),
         }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

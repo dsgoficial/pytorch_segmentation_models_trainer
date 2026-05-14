@@ -10,6 +10,7 @@ from pytorch_segmentation_models_trainer.config_definitions.dataset_config impor
     DatasetConfig,
     AutoencoderDatasetConfig,
     AutoencoderRandomCropDatasetConfig,
+    IterableWindowedImageAutoencoderDatasetConfig,
     WindowedImageAutoencoderDatasetConfig,
     RasterPatchDatasetConfig,
     CSVWindowedDatasetConfig,
@@ -57,6 +58,15 @@ class TestDatasetConfigs:
         assert cfg.serialize_rasterio_reads is False
         assert cfg.rasterio_lock_dir is None
         assert cfg.reopen_rasterio_on_read is False
+
+    def test_iterable_windowed_image_autoencoder_dataset_config(self):
+        cfg = OmegaConf.structured(IterableWindowedImageAutoencoderDatasetConfig)
+        with pytest.raises(MissingMandatoryValue):
+            _ = cfg.image_dir
+        assert "IterableWindowedImageAutoencoderDataset" in cfg._target_
+        assert cfg.crop_size == [256, 256]
+        assert cfg.verify_windows is False
+        assert cfg.data_loader.shuffle is False
 
     def test_raster_patch_dataset_config(self):
         cfg = OmegaConf.structured(RasterPatchDatasetConfig)

@@ -8,10 +8,13 @@ import torch
 import rasterio
 from pathlib import Path
 from rasterio.transform import from_bounds
+from torch.utils.data import DataLoader
 from pytorch_segmentation_models_trainer.dataset_loader import (
     image_dataset as image_dataset_module,
 )
 from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import (
+    IterableWindowedImageAutoencoderDataset,
+    IterableWindowedImageDataset,
     WindowedImageDataset,
     WindowedImageAutoencoderDataset,
 )
@@ -444,3 +447,41 @@ def test_windowed_image_dataset_serializes_rasterio_reads(tmp_path, monkeypatch)
     assert sample["image"].shape == (3, 32, 32)
     assert calls == [("img.tif", True, lock_dir)]
     assert len(ds._file_cache) == 0
+
+
+def test_iterable_windowed_image_dataset_shards_images_by_worker(tmp_path):
+    img_dir = tmp_path / "images"
+    _write_tif(img_dir / "img1.tif", width=64, height=64)
+    _write_tif(img_dir / "img2.tif", width=64, height=64)
+
+    ds = IterableWindowedImageDataset(
+        image_dir=img_dir,
+        crop_size=[32, 32],
+        stride=32,
+    )
+    loader = DataLoader(ds, batch_size=1, num_workers=2)
+
+    paths = []
+    for batch in loader:
+        paths.extend(batch["path"])
+
+    assert len(paths) == 8
+    assert paths.count(str(img_dir / "img1.tif")) == 4
+    assert paths.count(str(img_dir / "img2.tif")) == 4
+
+
+def test_iterable_windowed_autoencoder_dataset_returns_pairs(tmp_path):
+    img_dir = tmp_path / "images"
+    _write_tif(img_dir / "img.tif", width=64, height=64)
+
+    ds = IterableWindowedImageAutoencoderDataset(
+        image_dir=img_dir,
+        crop_size=[32, 32],
+        stride=32,
+    )
+
+    sample = next(iter(ds))
+
+    assert set(sample) == {"image", "target", "path"}
+    assert sample["image"].shape == (3, 32, 32)
+    assert torch.allclose(sample["image"], sample["target"])
