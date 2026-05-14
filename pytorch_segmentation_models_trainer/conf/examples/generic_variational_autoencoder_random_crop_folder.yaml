@@ -121,3 +121,4 @@ callbacks:
   - _target_: pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.AutoencoderResultCallback
     n_samples: 8
     log_every_k_epochs: 1
+    normalized_input: false  # dataset uses ToFloat (images in [0,1]), no mean/std normalization

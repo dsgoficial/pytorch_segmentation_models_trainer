@@ -3,6 +3,7 @@
 ## Bug fixes
 
 - Fixed `VariationalAutoencoderModel` and `AutoencoderModel` not computing or logging YAML-configured `metrics` (e.g. PSNR, SSIM) during training/validation. Both `_shared_step` overrides now extract the reconstruction tensor and call the `MetricCollection` when present.
+- Fixed `AutoencoderResultCallback` (and base `ImageSegmentationResultCallback`) producing sepia-tinted images when the dataset uses `albumentations.ToFloat` instead of `albumentations.Normalize`. Root cause: `normalized_input=True` was the default, so ImageNet denormalization (`x * std + mean`) was applied to `[0, 1]` images that were never mean/std-normalized, compressing the range and adding an unequal warm channel shift. Fix: (1) added `normalized_input: false` to the `AutoencoderResultCallback` in `generic_variational_autoencoder_random_crop_folder.yaml`; (2) added `np.clip(0, 1)` after denormalization in `prepare_image_to_plot` to prevent out-of-range values from causing rendering artifacts.
 
 ## Autoencoder / VAE stability
 

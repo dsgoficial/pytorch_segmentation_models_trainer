@@ -78,11 +78,9 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
 
     def prepare_image_to_plot(self, image):
         image = image.squeeze(0) if image.shape[0] == 1 else image
-        image = (
-            denormalize_np_array(image, **self.norm_params)
-            if self.normalized_input
-            else image
-        )
+        if self.normalized_input:
+            image = denormalize_np_array(image, **self.norm_params)
+            image = np.clip(image, 0.0, 1.0)
         return (
             np.moveaxis(image, 0, -1) if min(image.shape) == image.shape[0] else image
         )

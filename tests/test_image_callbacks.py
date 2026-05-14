@@ -566,3 +566,60 @@ class TestImageCallbacks(unittest.TestCase):
                                 self.trainer,
                             )
                             mock_bbox.assert_called()
+
+    def test_prepare_image_to_plot_clips_to_0_1_after_denorm(self):
+        # normalized_input=True + extreme values → denorm can exceed [0,1] → must be clipped
+        callback = ImageSegmentationResultCallback(normalized_input=True)
+        # Create an image with large positive values (as if model predicted out-of-range)
+        # After denorm with ImageNet stats, some channels will exceed 1.0
+        extreme_image = np.ones((3, 8, 8), dtype=np.float32) * 3.0
+        result = callback.prepare_image_to_plot(extreme_image)
+        self.assertLessEqual(result.max(), 1.0)
+        self.assertGreaterEqual(result.min(), 0.0)
+        self.assertEqual(result.shape, (8, 8, 3))
+
+    def test_prepare_image_to_plot_clips_negative_after_denorm(self):
+        callback = ImageSegmentationResultCallback(normalized_input=True)
+        extreme_image = np.ones((3, 8, 8), dtype=np.float32) * -3.0
+        result = callback.prepare_image_to_plot(extreme_image)
+        self.assertGreaterEqual(result.min(), 0.0)
+        self.assertLessEqual(result.max(), 1.0)
+
+    def test_autoencoder_callback_no_denorm_when_normalized_input_false(self):
+        # Regression: ToFloat datasets (images in [0,1]) must NOT apply ImageNet denorm.
+        # Applying x*std+mean to [0,1] values → range compression + warm cast (sepia).
+        callback = AutoencoderResultCallback(n_samples=1, normalized_input=False)
+        # Image in [0,1] range (ToFloat output)
+        image_01 = np.ones((3, 8, 8), dtype=np.float32) * 0.5
+        result = callback.prepare_image_to_plot(image_01)
+        # Without denorm, all values should remain 0.5
+        np.testing.assert_allclose(result, np.full((8, 8, 3), 0.5, dtype=np.float32))
+
+    def test_autoencoder_callback_denorm_sepia_regression(self):
+        # When normalized_input=True (wrong for ToFloat data), applying ImageNet denorm
+        # to [0,1] values compresses range and shifts channels unequally (sepia effect).
+        # With normalized_input=False this must NOT happen.
+        callback_wrong = AutoencoderResultCallback(n_samples=1, normalized_input=True)
+        callback_correct = AutoencoderResultCallback(
+            n_samples=1, normalized_input=False
+        )
+        image_01 = np.ones((3, 8, 8), dtype=np.float32) * 0.5
+
+        wrong_result = callback_wrong.prepare_image_to_plot(image_01.copy())
+        correct_result = callback_correct.prepare_image_to_plot(image_01.copy())
+
+        # With wrong config: denorm shifts R/G/B differently → channels NOT equal
+        r_wrong, g_wrong, b_wrong = (
+            wrong_result[:, :, 0],
+            wrong_result[:, :, 1],
+            wrong_result[:, :, 2],
+        )
+        self.assertFalse(
+            np.allclose(r_wrong, b_wrong),
+            "Sepia: R and B should differ when denorm wrongly applied",
+        )
+
+        # With correct config: no denorm → all channels equal (0.5)
+        np.testing.assert_allclose(
+            correct_result, np.full((8, 8, 3), 0.5, dtype=np.float32)
+        )
