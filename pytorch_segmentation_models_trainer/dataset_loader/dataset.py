@@ -1138,12 +1138,15 @@ class RandomCropSegmentationDataset(AbstractDataset):
             col_off=x, row_off=y, width=crop_w, height=crop_h
         )
         try:
+            serialize_rasterio_reads = getattr(self, "serialize_rasterio_reads", False)
+            rasterio_lock_dir = getattr(self, "rasterio_lock_dir", None)
+            reopen_rasterio_on_read = getattr(self, "reopen_rasterio_on_read", False)
             with _rasterio_read_lock(
                 image_path,
-                self.serialize_rasterio_reads,
-                self.rasterio_lock_dir,
+                serialize_rasterio_reads,
+                rasterio_lock_dir,
             ):
-                if self.reopen_rasterio_on_read:
+                if reopen_rasterio_on_read:
                     with rasterio.open(image_path) as src:
                         data = self._read_crop_data(src, window, is_mask)
                 else:
