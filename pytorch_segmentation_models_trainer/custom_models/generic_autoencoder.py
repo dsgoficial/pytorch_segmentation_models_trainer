@@ -63,13 +63,40 @@ class HuggingFaceEncoderAdapter(nn.Module):
 
 
 class GenericDecoder(nn.Module):
-    """
-    Simple decoder to reconstruct image from bottleneck.
+    """Simple convolutional decoder that reconstructs an image from a bottleneck tensor.
+
+    Args:
+        in_channels: Number of input channels from the bottleneck.
+        out_channels: Number of output channels (usually the input image channels).
+        scale_factor: Spatial upsampling factor applied via bilinear interpolation.
+            Set to ``0`` to skip upsampling (e.g. when the encoder and input
+            share the same spatial size).
+        output_activation: Optional final activation applied to the logit output.
+            Supported values: ``None`` (no activation, unbounded output),
+            ``"sigmoid"`` (output in ``[0, 1]``, use with targets in ``[0, 1]``),
+            ``"tanh"`` (output in ``[-1, 1]``, use with targets in ``[-1, 1]``).
+
+    Raises:
+        ValueError: If ``output_activation`` is not one of the supported values.
     """
 
-    def __init__(self, in_channels: int, out_channels: int, scale_factor: int = 32):
+    _VALID_ACTIVATIONS = (None, "sigmoid", "tanh")
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        scale_factor: int = 32,
+        output_activation: Optional[str] = None,
+    ):
         super().__init__()
+        if output_activation not in self._VALID_ACTIVATIONS:
+            raise ValueError(
+                f"output_activation must be one of {self._VALID_ACTIVATIONS}; "
+                f"got {output_activation!r}"
+            )
         self.scale_factor = scale_factor
+        self.output_activation = output_activation
         self.conv1 = nn.Conv2d(in_channels, in_channels // 2, kernel_size=3, padding=1)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv2d(in_channels // 2, out_channels, kernel_size=3, padding=1)
@@ -83,12 +110,27 @@ class GenericDecoder(nn.Module):
                 mode="bilinear",
                 align_corners=False,
             )
-        return self.conv2(x)
+        x = self.conv2(x)
+        if self.output_activation == "sigmoid":
+            return torch.sigmoid(x)
+        if self.output_activation == "tanh":
+            return torch.tanh(x)
+        return x
 
 
 class GenericAutoencoder(nn.Module):
-    """
-    Generic Autoencoder that can use SMP or HuggingFace encoders.
+    """Generic Autoencoder that can use SMP or HuggingFace encoders.
+
+    Args:
+        encoder_name: SMP encoder name or HuggingFace model identifier.
+        use_huggingface: When ``True``, builds a HuggingFace encoder adapter.
+        in_channels: Number of input and reconstruction channels.
+        latent_dim: Optional bottleneck channel reduction via a 1×1 conv.
+        pretrained: Whether to request ImageNet weights for SMP encoders.
+        output_activation: Optional final activation on the decoder output.
+            Use ``"sigmoid"`` when targets are in ``[0, 1]`` (e.g. uint8/255),
+            ``"tanh"`` for ``[-1, 1]``, or ``None`` for unbounded output.
+        **kwargs: Extra arguments forwarded to the HuggingFace adapter.
 
     Example YAML:
         model:
@@ -96,6 +138,7 @@ class GenericAutoencoder(nn.Module):
           encoder_name: resnet18
           use_huggingface: false
           in_channels: 3
+          output_activation: sigmoid
     """
 
     def __init__(
@@ -105,6 +148,7 @@ class GenericAutoencoder(nn.Module):
         in_channels: int = 3,
         latent_dim: Optional[int] = None,
         pretrained: bool = True,
+        output_activation: Optional[str] = None,
         **kwargs,
     ):
         super().__init__()
@@ -137,6 +181,7 @@ class GenericAutoencoder(nn.Module):
             in_channels=encoder_out_channels,
             out_channels=in_channels,
             scale_factor=self.scale_factor,
+            output_activation=output_activation,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

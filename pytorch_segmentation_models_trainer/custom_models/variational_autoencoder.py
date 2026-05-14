@@ -3,7 +3,7 @@
 """Variational autoencoder architectures for image reconstruction."""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -76,6 +76,12 @@ class GenericVariationalAutoencoder(nn.Module):
             selects the feature map used as the VAE bottleneck.  Negative
             indices count from the deepest level (``-1``).  Ignored when
             ``use_huggingface=False``.  Defaults to ``-1`` (deepest level).
+        output_activation: Optional final activation on the decoder output.
+            Use ``"sigmoid"`` when targets are in ``[0, 1]`` (e.g. uint8/255),
+            ``"tanh"`` for ``[-1, 1]``, or ``None`` for unbounded output.
+        logvar_clamp: Optional ``(min, max)`` range to clamp the log-variance
+            tensor before exponentiation.  Prevents fp16 overflow and stabilises
+            early training.  Recommended ``(-4.0, 4.0)`` with ``precision="16"``.
         **kwargs: Extra arguments forwarded to the HuggingFace adapter.
 
     Raises:
@@ -135,9 +141,12 @@ class GenericVariationalAutoencoder(nn.Module):
         pretrained: bool = True,
         encoder_depth: Optional[int] = None,
         feature_level: Optional[int] = None,
+        output_activation: Optional[str] = None,
+        logvar_clamp: Optional[Tuple[float, float]] = None,
         **kwargs,
     ):
         super().__init__()
+        self.logvar_clamp = logvar_clamp
 
         self.use_huggingface = use_huggingface
 
@@ -200,6 +209,7 @@ class GenericVariationalAutoencoder(nn.Module):
             in_channels=latent_channels,
             out_channels=in_channels,
             scale_factor=0 if use_huggingface else self.scale_factor,
+            output_activation=output_activation,
         )
 
     # ── Private helpers ───────────────────────────────────────────────────
@@ -247,7 +257,11 @@ class GenericVariationalAutoencoder(nn.Module):
         else:
             bottleneck = self._get_smp_bottleneck(x)
 
-        return self.mu_proj(bottleneck), self.logvar_proj(bottleneck)
+        mu = self.mu_proj(bottleneck)
+        logvar = self.logvar_proj(bottleneck)
+        if self.logvar_clamp is not None:
+            logvar = logvar.clamp(*self.logvar_clamp)
+        return mu, logvar
 
     def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
         """Sample a latent tensor with the reparameterization trick.

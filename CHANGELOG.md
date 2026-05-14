@@ -1,5 +1,16 @@
 # Unreleased
 
+## Bug fixes
+
+- Fixed `VariationalAutoencoderModel` and `AutoencoderModel` not computing or logging YAML-configured `metrics` (e.g. PSNR, SSIM) during training/validation. Both `_shared_step` overrides now extract the reconstruction tensor and call the `MetricCollection` when present.
+
+## Autoencoder / VAE stability
+
+- Added `output_activation` parameter to `GenericDecoder`, `GenericAutoencoder`, and `GenericVariationalAutoencoder`. Supported values: `None` (default, unchanged behaviour), `"sigmoid"` (output bounded to `[0, 1]`, correct for uint8/255 targets), `"tanh"` (output bounded to `[-1, 1]`). Without this, the unbounded decoder logits caused PSNR to go negative whenever MSE > 1.
+- Fixed KL divergence scaling in `VariationalAutoencoderLoss`: replaced `torch.sum(...) / batch_size` with `torch.mean(...)` so the KL term is a per-element average, matching the scale of `F.mse_loss` and preventing the KL from dominating the total loss with large spatial latents.
+- Added `logvar_clamp` parameter to `GenericVariationalAutoencoder`. Clamping log-variance before exponentiation prevents fp16 overflow in `exp(logvar)` and eliminates numerically negative KL values seen with `precision="16"`. Recommended value: `(-4.0, 4.0)` for fp16 training.
+- Updated `GenericVariationalAutoencoderConfig` to expose `output_activation` and `logvar_clamp`.
+
 ## Tooling CLI
 
 - Added `pytorch-smt-tools` entry point as a generic CLI tooling hub for command-line utilities.
