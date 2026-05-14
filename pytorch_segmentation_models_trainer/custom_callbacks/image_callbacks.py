@@ -67,6 +67,7 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
         normalized_input=True,
         norm_params=None,
         log_every_k_epochs=1,
+        **kwargs,
     ) -> None:
         super().__init__()
         self.n_samples = n_samples
@@ -276,6 +277,7 @@ class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
         norm_params=None,
         log_every_k_epochs=1,
         threshold=0.5,
+        **kwargs,
     ) -> None:
         super().__init__(
             n_samples=n_samples,
@@ -411,6 +413,7 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
         log_every_k_epochs=1,
         threshold=0.5,
         show_label_scores=False,
+        **kwargs,
     ) -> None:
         super().__init__(
             n_samples=n_samples,
@@ -549,6 +552,7 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         max_workers: int = 4,
         save_dpi: int = 100,
         verbose: bool = True,
+        **kwargs,
     ) -> None:
         """
         Enhanced callback for image segmentation visualization with thread-safe batch processing.
