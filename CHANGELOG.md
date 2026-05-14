@@ -1,5 +1,9 @@
 # Unreleased
 
+## VAE Loss
+
+- Added `smooth_l1` reconstruction mode to `VariationalAutoencoderLoss` using `F.smooth_l1_loss` (Huber loss). New `smooth_l1_beta` parameter (default `0.1`) controls the L2-to-L1 transition threshold and is independent of the KL `beta` weight. The term is governed by `reconstruction_weight` like all other reconstruction modes.
+
 ## Image Callbacks
 
 - Fixed `ImageSegmentationResultCallback.on_validation_epoch_end` ignoring `log_every_k_epochs` — it now skips visualization on non-matching epochs, consistent with `AutoencoderResultCallback` and `EnhancedImageSegmentationResultCallback`.

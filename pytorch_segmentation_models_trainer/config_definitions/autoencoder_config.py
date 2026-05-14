@@ -58,6 +58,7 @@ class VariationalAutoencoderLossConfig:
     beta: float = 1.0
     free_bits: float = 0.0
     kl_balance: bool = False
+    smooth_l1_beta: float = 0.1
 
 
 @dataclass

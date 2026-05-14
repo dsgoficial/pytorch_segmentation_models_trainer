@@ -277,7 +277,7 @@ def test_variational_autoencoder_loss_mse_components_and_gradients():
     assert logvar.grad is not None
 
 
-@pytest.mark.parametrize("reconstruction_loss", ["l1", "bce_with_logits"])
+@pytest.mark.parametrize("reconstruction_loss", ["l1", "bce_with_logits", "smooth_l1"])
 def test_variational_autoencoder_loss_reconstruction_modes(reconstruction_loss):
     loss_fn = VariationalAutoencoderLoss(reconstruction_loss=reconstruction_loss)
     target = torch.zeros(1, 1, 4, 4)
@@ -290,6 +290,76 @@ def test_variational_autoencoder_loss_reconstruction_modes(reconstruction_loss):
 
     assert result["loss"] > result["reconstruction_loss"]
     assert result["kl_loss"] > 0
+
+
+def test_variational_autoencoder_loss_smooth_l1_scalar_and_gradients():
+    loss_fn = VariationalAutoencoderLoss(
+        reconstruction_loss="smooth_l1", smooth_l1_beta=0.1
+    )
+    target = torch.zeros(2, 3, 8, 8)
+    reconstruction = torch.ones_like(target, requires_grad=True)
+    mu = torch.zeros(2, 4, 2, 2, requires_grad=True)
+    logvar = torch.zeros_like(mu, requires_grad=True)
+    output = VariationalAutoencoderOutput(reconstruction, mu, logvar, mu)
+
+    result = loss_fn(output, target)
+
+    assert result["loss"].shape == torch.Size([])
+    assert result["reconstruction_loss"] > 0
+
+    result["loss"].backward()
+    assert reconstruction.grad is not None
+    assert mu.grad is not None
+    assert logvar.grad is not None
+
+
+def test_variational_autoencoder_loss_smooth_l1_beta_affects_value():
+    target = torch.zeros(1, 1, 4, 4)
+    reconstruction = torch.full_like(target, 0.05, requires_grad=False)
+    mu = torch.zeros(1, 2, 1, 1)
+    logvar = torch.zeros_like(mu)
+    output = VariationalAutoencoderOutput(reconstruction, mu, logvar, mu)
+
+    # small beta → L1 regime for error=0.05; large beta → L2 regime
+    loss_small_beta = VariationalAutoencoderLoss(
+        reconstruction_loss="smooth_l1", smooth_l1_beta=0.01
+    )
+    loss_large_beta = VariationalAutoencoderLoss(
+        reconstruction_loss="smooth_l1", smooth_l1_beta=1.0
+    )
+
+    result_small = loss_small_beta(output, target)
+    result_large = loss_large_beta(output, target)
+
+    # In L1 regime: loss ≈ |e| - beta/2; in L2 regime: loss ≈ e²/(2*beta)
+    # Both give different values for same input
+    assert not torch.isclose(
+        result_small["reconstruction_loss"], result_large["reconstruction_loss"]
+    )
+
+
+def test_variational_autoencoder_loss_smooth_l1_governed_by_reconstruction_weight():
+    target = torch.zeros(1, 1, 4, 4)
+    reconstruction = torch.full_like(target, 0.5, requires_grad=False)
+    mu = torch.zeros(1, 2, 1, 1)
+    logvar = torch.zeros_like(mu)
+    output = VariationalAutoencoderOutput(reconstruction, mu, logvar, mu)
+
+    loss_w1 = VariationalAutoencoderLoss(
+        reconstruction_loss="smooth_l1", reconstruction_weight=1.0, beta=0.0
+    )
+    loss_w2 = VariationalAutoencoderLoss(
+        reconstruction_loss="smooth_l1", reconstruction_weight=2.0, beta=0.0
+    )
+
+    result_w1 = loss_w1(output, target)
+    result_w2 = loss_w2(output, target)
+
+    assert torch.isclose(result_w2["loss"], 2.0 * result_w1["loss"])
+    assert torch.isclose(
+        result_w2["weighted_reconstruction_loss"],
+        2.0 * result_w1["weighted_reconstruction_loss"],
+    )
 
 
 def test_variational_autoencoder_loss_validates_reconstruction_mode():

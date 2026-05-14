@@ -17,7 +17,7 @@ class VariationalAutoencoderLoss(nn.Module):
 
     Args:
         reconstruction_loss: Reconstruction term. Supported values are
-            ``"mse"``, ``"l1"``, and ``"bce_with_logits"``.
+            ``"mse"``, ``"l1"``, ``"smooth_l1"``, and ``"bce_with_logits"``.
         reconstruction_weight: Multiplicative weight for the reconstruction term.
         beta: Multiplicative weight for the KL term.
         free_bits: Minimum KL (in nats) per latent spatial position. Positions
@@ -32,6 +32,9 @@ class VariationalAutoencoderLoss(nn.Module):
             greatly exceed latent dimensions (e.g. ``encoder_depth=5``).
             The raw ``kl_loss`` key in the output dict is never affected;
             only ``weighted_kl_loss`` and ``loss`` reflect the scaling.
+        smooth_l1_beta: Threshold for the ``smooth_l1`` reconstruction mode.
+            Controls the L2-to-L1 transition point in Huber loss. Only used
+            when ``reconstruction_loss="smooth_l1"``. Default: ``0.1``.
         **kwargs: Reserved for Hydra compatibility.
 
     Returns:
@@ -46,11 +49,12 @@ class VariationalAutoencoderLoss(nn.Module):
     Example YAML:
         loss:
           _target_: pytorch_segmentation_models_trainer.custom_losses.autoencoder_losses.VariationalAutoencoderLoss
-          reconstruction_loss: mse
+          reconstruction_loss: smooth_l1
           reconstruction_weight: 1.0
           beta: 1.0
           free_bits: 0.25
           kl_balance: true
+          smooth_l1_beta: 0.1
     """
 
     def __init__(
@@ -60,6 +64,7 @@ class VariationalAutoencoderLoss(nn.Module):
         beta: float = 1.0,
         free_bits: float = 0.0,
         kl_balance: bool = False,
+        smooth_l1_beta: float = 0.1,
         **kwargs,
     ):
         super().__init__()
@@ -68,11 +73,12 @@ class VariationalAutoencoderLoss(nn.Module):
         self.beta = beta
         self.free_bits = free_bits
         self.kl_balance = kl_balance
+        self.smooth_l1_beta = smooth_l1_beta
         self.extra_kwargs = kwargs
 
-        if reconstruction_loss not in {"mse", "l1", "bce_with_logits"}:
+        if reconstruction_loss not in {"mse", "l1", "smooth_l1", "bce_with_logits"}:
             raise ValueError(
-                "reconstruction_loss must be one of 'mse', 'l1', or "
+                "reconstruction_loss must be one of 'mse', 'l1', 'smooth_l1', or "
                 f"'bce_with_logits'; got {reconstruction_loss!r}"
             )
 
@@ -92,6 +98,8 @@ class VariationalAutoencoderLoss(nn.Module):
             return F.mse_loss(reconstruction, target)
         if self.reconstruction_loss == "l1":
             return F.l1_loss(reconstruction, target)
+        if self.reconstruction_loss == "smooth_l1":
+            return F.smooth_l1_loss(reconstruction, target, beta=self.smooth_l1_beta)
         return F.binary_cross_entropy_with_logits(reconstruction, target)
 
     def _compute_kl_loss(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
