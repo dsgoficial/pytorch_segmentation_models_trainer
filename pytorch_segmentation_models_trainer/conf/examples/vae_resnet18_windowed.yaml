@@ -30,6 +30,8 @@ train_dataset:
   crop_size: [224, 224]
   stride: 224
   image_dtype: uint8
+  verify_windows: true
+  window_index_cache: /path/to/cache/train_window_index.json
 
 val_dataset:
   _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.WindowedImageAutoencoderDataset
@@ -38,6 +40,8 @@ val_dataset:
   crop_size: [224, 224]
   stride: 224
   image_dtype: uint8
+  verify_windows: true
+  window_index_cache: /path/to/cache/val_window_index.json
 
 # Optimizer
 optimizer:

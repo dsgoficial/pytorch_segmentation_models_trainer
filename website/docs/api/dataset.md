@@ -28,6 +28,8 @@ from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import (
     TiledInferenceImageDataset,
     AutoencoderDataset,
     AutoencoderRandomCropDataset,
+    WindowedImageDataset,
+    WindowedImageAutoencoderDataset,
 )
 ```
 
@@ -42,6 +44,8 @@ torch.utils.data.Dataset
     ├── ImageDataset
     │   ├── AutoencoderDataset
     │   ├── AutoencoderRandomCropDataset
+    │   ├── WindowedImageDataset
+    │   │   └── WindowedImageAutoencoderDataset
     │   ├── CSVWindowedImageDataset
     │   └── TiledInferenceImageDataset
     ├── SegmentationDataset
@@ -108,6 +112,57 @@ at `__getitem__` time.
 | `"image"` | Random crop input. |
 | `"target"` | Clean random crop target. |
 | `"path"` | Source image path used for the crop. |
+
+---
+
+## `WindowedImageDataset`
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import WindowedImageDataset
+```
+
+Deterministic sliding-window dataset for image-only tasks over full-size rasters.
+It computes a global patch index across all images and reads only the requested
+window from disk at `__getitem__` time.
+
+### Constructor Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `image_dir` | `str \| Path \| None` | `None` | Folder scanned recursively when no CSV/DataFrame is provided. |
+| `crop_size` | `List[int]` | `[256, 256]` | Patch size as `[height, width]`. |
+| `stride` | `int \| List[int] \| None` | `crop_size` | Step between patch origins. |
+| `selected_bands` | `List[int] \| None` | `None` | 1-based rasterio bands to read. |
+| `image_dtype` | `str` | `"uint8"` | `"uint8"`, `"uint16"`, `"float32"` or `"native"`. |
+| `file_cache_maxsize` | `int` | `0` | Max open rasterio handles; `0` auto-sizes from indexed images. |
+| `verify_windows` | `bool` | `False` | Read every candidate window during init and index only readable windows. |
+| `window_index_cache` | `str \| Path \| None` | `None` | JSON cache for the verified window index. Rebuilt when paths, file metadata, crop, stride, bands, dtype, or image key change. |
+
+### `__getitem__` Returns
+
+| Key | dtype / shape | Description |
+|---|---|---|
+| `"image"` | `torch.float32`, `(C, H, W)` without transform | Window image patch. |
+| `"path"` | `str` | Source raster path. |
+
+## `WindowedImageAutoencoderDataset`
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import WindowedImageAutoencoderDataset
+```
+
+Autoencoder variant of `WindowedImageDataset`. It returns the clean crop as
+`target` and optionally applies `corruption_augmentation_list` only to `image`.
+The `verify_windows` and `window_index_cache` parameters are inherited from
+`WindowedImageDataset`.
+
+### `__getitem__` Returns
+
+| Key | dtype / shape | Description |
+|---|---|---|
+| `"image"` | `torch.float32`, `(C, H, W)` without transform | Input crop, optionally corrupted. |
+| `"target"` | `torch.float32`, `(C, H, W)` without transform | Clean reconstruction target. |
+| `"path"` | `str` | Source raster path. |
 
 ---
 
