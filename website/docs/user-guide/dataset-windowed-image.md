@@ -32,6 +32,7 @@ val_dataset:
 - **Efficient Reading**: Uses `rasterio` windowed reads to load only the required patch from disk.
 - **Optional Window Verification**: Can validate every candidate patch during initialisation and index only readable windows.
 - **Window Index Cache**: Stores the verified window index in JSON so later runs skip the validation pass when inputs and config are unchanged.
+- **Serialized Raster Reads**: Can serialize window reads per source GeoTIFF when multiple DataLoader workers read the same compressed raster on shared storage.
 - **Corruption Support**: Apply noise, blur, or other corruptions only to the input image.
 - **Synchronized Augmentations**: Standard augmentations (like normalization or flips) are applied identically to both input and target.
 
@@ -45,6 +46,9 @@ test_dataset:
   stride: 256
   verify_windows: true
   window_index_cache: /path/to/cache/test_window_index.json
+  serialize_rasterio_reads: true
+  rasterio_lock_dir: /tmp/psmt_rasterio_locks
+  reopen_rasterio_on_read: true
   corruption_augmentation_list:
     - _target_: albumentations.GaussNoise
       p: 1.0
@@ -63,6 +67,9 @@ test_dataset:
 - **`selected_bands`**: (Optional) 1-based list of raster bands to read.
 - **`verify_windows`**: (Optional, default `false`) When enabled, each candidate window is read once during dataset initialisation. Windows that fail to read or return an unexpected shape are excluded from `len(dataset)` and global indexing.
 - **`window_index_cache`**: (Optional) JSON path used with `verify_windows`. The dataset saves the verified window list plus crop, stride, band selection, dtype, image paths, file sizes, and modification timestamps. If any metadata changes, the cache is rebuilt automatically.
+- **`serialize_rasterio_reads`**: (Optional, default `false`) When enabled, each `rasterio` window read is protected by a per-file interprocess lock. Use this when `num_workers > 0` causes decoder errors while several workers read the same large GeoTIFF.
+- **`rasterio_lock_dir`**: (Optional) Directory for lock files. Defaults to `/tmp/psmt_rasterio_locks`.
+- **`reopen_rasterio_on_read`**: (Optional, default `false`) Opens and closes the raster inside each locked read instead of reusing the per-worker rasterio handle cache. This is slower, but avoids persistent GDAL state when the lock alone is not enough.
 
 ### Verifying and Caching Valid Windows
 
@@ -76,6 +83,9 @@ val_dataset:
   stride: 224
   verify_windows: true
   window_index_cache: /data/validation/cache/window_index.json
+  serialize_rasterio_reads: true
+  rasterio_lock_dir: /tmp/psmt_rasterio_locks
+  reopen_rasterio_on_read: true
 ```
 
 The cache stores only window coordinates, not image pixels. Training still reads pixels on demand with the normal rasterio LRU file-handle cache.

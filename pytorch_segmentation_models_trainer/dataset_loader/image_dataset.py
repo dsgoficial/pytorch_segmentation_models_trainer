@@ -40,6 +40,7 @@ from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     _DTYPE_NORMALIZATION,
     _RasterioLRUCache,
     _VALID_IMAGE_DTYPES,
+    _rasterio_read_lock,
     load_augmentation_object,
 )
 from pytorch_toolbelt.inference.tiles import ImageSlicer
@@ -777,6 +778,15 @@ class WindowedImageDataset(ImageDataset):
             expected shape.
         window_index_cache: Optional JSON cache path used to persist the
             verified window index and avoid repeating the validation pass.
+        serialize_rasterio_reads: If True, serializes rasterio window reads
+            per source file across DataLoader workers using an OS-level lock.
+            This is useful for compressed GeoTIFFs or network filesystems that
+            fail under concurrent reads from the same file.
+        rasterio_lock_dir: Directory used to store lock files when
+            ``serialize_rasterio_reads`` is enabled.
+        reopen_rasterio_on_read: If True, opens the raster inside each
+            serialized read and closes it immediately after reading. This
+            avoids persistent GDAL DatasetReader state in DataLoader workers.
         **kwargs: Compatibility parameters accepted by ``ImageDataset`` and Hydra.
 
     Returns:
@@ -808,6 +818,9 @@ class WindowedImageDataset(ImageDataset):
         file_cache_maxsize: int = 0,
         verify_windows: bool = False,
         window_index_cache: Optional[Union[str, Path]] = None,
+        serialize_rasterio_reads: bool = False,
+        rasterio_lock_dir: Optional[Union[str, Path]] = None,
+        reopen_rasterio_on_read: bool = False,
         **kwargs,
     ) -> None:
         if crop_size is None:
@@ -845,6 +858,11 @@ class WindowedImageDataset(ImageDataset):
         self.window_index_cache = (
             str(window_index_cache) if window_index_cache is not None else None
         )
+        self.serialize_rasterio_reads = serialize_rasterio_reads
+        self.rasterio_lock_dir = (
+            str(rasterio_lock_dir) if rasterio_lock_dir is not None else None
+        )
+        self.reopen_rasterio_on_read = reopen_rasterio_on_read
         self._window_index = None
 
         # Calculate grid for each image
@@ -1144,13 +1162,24 @@ class WindowedImageDataset(ImageDataset):
             width=self.crop_size[1],
             height=self.crop_size[0],
         )
-        src = self._get_src(info["path"])
-        data = (
-            src.read(window=window)
-            if self.selected_bands is None
-            else src.read(self.selected_bands, window=window)
-        )
+        with _rasterio_read_lock(
+            info["path"],
+            self.serialize_rasterio_reads,
+            self.rasterio_lock_dir,
+        ):
+            if self.reopen_rasterio_on_read:
+                with rasterio.open(info["path"]) as src:
+                    data = self._read_window_data(src, window)
+            else:
+                src = self._get_src(info["path"])
+                data = self._read_window_data(src, window)
         return data, window
+
+    def _read_window_data(self, src, window: Window):
+        """Read raw raster data for one window from an open DatasetReader."""
+        if self.selected_bands is None:
+            return src.read(window=window)
+        return src.read(self.selected_bands, window=window)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         if idx < 0 or idx >= self._total_patches:

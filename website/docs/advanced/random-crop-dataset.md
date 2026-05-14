@@ -84,6 +84,9 @@ train_dataset:
 | `soft_labels` | `bool` | `False` | Return float soft-label masks instead of integer hard masks. |
 | `grid_mode` | `bool` | `False` | Use deterministic sliding-window grid positions instead of random crops. |
 | `grid_step` | `int` | `None` | Step between grid crops. Defaults to `crop_size` (no overlap). |
+| `serialize_rasterio_reads` | `bool` | `False` | Serialize reads from the same source raster across DataLoader workers. |
+| `rasterio_lock_dir` | `str` | `/tmp/psmt_rasterio_locks` | Directory used for per-raster lock files. |
+| `reopen_rasterio_on_read` | `bool` | `False` | Open and close the raster inside each locked read instead of reusing per-worker cached handles. |
 | `n_first_rows_to_read` | `int` | `None` | Limit the number of CSV rows read. |
 
 ---
@@ -99,6 +102,20 @@ train_dataset:
   _target_: ...RandomCropSegmentationDataset
   lru_cache_size: 128   # keep up to 128 scenes open per worker
 ```
+
+### Concurrent Reads From One Raster
+
+Some GDAL/libtiff and filesystem combinations fail when multiple DataLoader workers read compressed windows from the same large GeoTIFF concurrently. If errors such as `TIFFReadEncodedTile() failed`, `LZWDecode`, or partial tile reads appear only when `num_workers > 0`, enable serialized reads:
+
+```yaml
+train_dataset:
+  _target_: ...RandomCropSegmentationDataset
+  serialize_rasterio_reads: true
+  rasterio_lock_dir: /tmp/psmt_rasterio_locks
+  reopen_rasterio_on_read: true
+```
+
+Workers can still read different rasters in parallel. Reads from the same raster are processed one at a time.
 
 ---
 

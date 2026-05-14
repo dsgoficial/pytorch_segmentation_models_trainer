@@ -11,6 +11,9 @@ import shutil
 import tempfile
 import unittest
 import warnings
+from contextlib import contextmanager
+from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -24,6 +27,9 @@ import torch
 
 from pytorch_segmentation_models_trainer.custom_losses.loss import (
     WeightedDiceSCELoss,
+)
+from pytorch_segmentation_models_trainer.dataset_loader import (
+    dataset as dataset_module,
 )
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     RandomCropSegmentationDataset,
@@ -99,10 +105,10 @@ class SyntheticDatasetMixin:
         for i in range(self.N_IMAGES):
             # RGB image with distinct quadrant colors
             img = np.zeros((3, h, w), dtype=np.uint8)
-            img[:, :half, :half] = 30 + i * 10      # dark (class 0 region)
-            img[:, :half, half:] = 100 + i * 10      # mid  (class 1 region)
-            img[:, half:, :half] = 170 + i * 5       # bright (class 2 region)
-            img[:, half:, half:] = 220 + i * 3       # very bright (class 3 region)
+            img[:, :half, :half] = 30 + i * 10  # dark (class 0 region)
+            img[:, :half, half:] = 100 + i * 10  # mid  (class 1 region)
+            img[:, half:, :half] = 170 + i * 5  # bright (class 2 region)
+            img[:, half:, half:] = 220 + i * 3  # very bright (class 3 region)
 
             mask = np.zeros((h, w), dtype=np.uint8)
             mask[:half, :half] = 0
@@ -133,6 +139,7 @@ class SyntheticDatasetMixin:
 # ----------------------------------------------------------------------
 # 1. _RasterioLRUCache
 # ----------------------------------------------------------------------
+
 
 class TestRasterioLRUCache(unittest.TestCase, SyntheticDatasetMixin):
 
@@ -176,10 +183,44 @@ class TestRasterioLRUCache(unittest.TestCase, SyntheticDatasetMixin):
             self.assertTrue(h.closed)
         self.assertEqual(len(cache), 0)
 
+    def test_random_crop_dataset_serializes_rasterio_reads(self):
+        calls = []
+
+        @contextmanager
+        def fake_read_lock(path, enabled=False, lock_dir=None):
+            calls.append((Path(path).name, enabled, Path(lock_dir)))
+            yield
+
+        ds = RandomCropSegmentationDataset(
+            input_csv_path=self.csv_path,
+            crop_size=self.CROP_SIZE,
+            samples_per_epoch=1,
+            n_classes=self.N_CLASSES,
+            serialize_rasterio_reads=True,
+            rasterio_lock_dir=os.path.join(self.tmpdir, "locks"),
+            reopen_rasterio_on_read=True,
+        )
+        with patch.object(dataset_module, "_rasterio_read_lock", fake_read_lock):
+            image = ds._read_crop(self.image_paths[0], 0, 0, is_mask=False)
+            mask = ds._read_crop(self.mask_paths[0], 0, 0, is_mask=True)
+
+        self.assertEqual(image.shape, (32, 32, 3))
+        self.assertEqual(mask.shape, (32, 32))
+        self.assertEqual(
+            calls,
+            [
+                ("img_00.tif", True, Path(self.tmpdir) / "locks"),
+                ("msk_00.tif", True, Path(self.tmpdir) / "locks"),
+            ],
+        )
+        self.assertEqual(len(ds._file_cache), 0)
+        ds._close_cache()
+
 
 # ----------------------------------------------------------------------
 # 2. _build_class_position_index
 # ----------------------------------------------------------------------
+
 
 class TestBuildClassPositionIndex(unittest.TestCase, SyntheticDatasetMixin):
 
@@ -218,14 +259,11 @@ class TestBuildClassPositionIndex(unittest.TestCase, SyntheticDatasetMixin):
         for c in range(self.N_CLASSES):
             img_indices = set(ds._class_positions[c][:, 0])
             for idx in ds._valid_indices:
-                self.assertIn(idx, img_indices,
-                              f"Class {c} missing from image {idx}")
+                self.assertIn(idx, img_indices, f"Class {c} missing from image {idx}")
 
     def test_sampling_weights_are_normalized(self):
         ds = self._make_dataset()
-        self.assertAlmostEqual(
-            ds._class_sampling_weights.sum(), 1.0, places=6
-        )
+        self.assertAlmostEqual(ds._class_sampling_weights.sum(), 1.0, places=6)
 
     def test_uniform_distribution_yields_equal_weights(self):
         """With equal-area quadrants, all classes should get equal weight."""
@@ -234,8 +272,10 @@ class TestBuildClassPositionIndex(unittest.TestCase, SyntheticDatasetMixin):
         weights = ds._class_sampling_weights
         for c in range(self.N_CLASSES):
             self.assertAlmostEqual(
-                weights[c], 1.0 / self.N_CLASSES, places=2,
-                msg=f"Weight for class {c} should be ~{1.0/self.N_CLASSES:.3f}"
+                weights[c],
+                1.0 / self.N_CLASSES,
+                places=2,
+                msg=f"Weight for class {c} should be ~{1.0/self.N_CLASSES:.3f}",
             )
 
     def test_rare_class_gets_higher_weight(self):
@@ -274,7 +314,7 @@ class TestBuildClassPositionIndex(unittest.TestCase, SyntheticDatasetMixin):
         self.assertGreater(
             ds._class_sampling_weights[1],
             ds._class_sampling_weights[0],
-            "Rare class should have higher sampling weight"
+            "Rare class should have higher sampling weight",
         )
 
         ds._close_cache()
@@ -284,6 +324,7 @@ class TestBuildClassPositionIndex(unittest.TestCase, SyntheticDatasetMixin):
 # ----------------------------------------------------------------------
 # 3. _sample_class_aware_position
 # ----------------------------------------------------------------------
+
 
 class TestSampleClassAwarePosition(unittest.TestCase, SyntheticDatasetMixin):
 
@@ -322,9 +363,7 @@ class TestSampleClassAwarePosition(unittest.TestCase, SyntheticDatasetMixin):
         exclude = 2
         targeted_classes = []
         for _ in range(n_samples):
-            img_idx, x, y = self.ds._sample_class_aware_position(
-                exclude_class=exclude
-            )
+            img_idx, x, y = self.ds._sample_class_aware_position(exclude_class=exclude)
             # Read the mask at that position to see what class is dominant
             mask_path = self.ds.get_path(img_idx, key=self.ds.mask_key)
             mask_crop = self.ds._read_crop(mask_path, x, y, is_mask=True)
@@ -334,13 +373,15 @@ class TestSampleClassAwarePosition(unittest.TestCase, SyntheticDatasetMixin):
         # The excluded class should NOT be the majority of targets.
         # Due to jitter it may occasionally appear, but shouldn't dominate.
         from collections import Counter
+
         counts = Counter(targeted_classes)
         total = sum(counts.values())
         excluded_ratio = counts.get(exclude, 0) / total
         self.assertLess(
-            excluded_ratio, 0.4,
+            excluded_ratio,
+            0.4,
             f"Excluded class {exclude} appeared as dominant in "
-            f"{excluded_ratio:.0%} of samples (should be rare)"
+            f"{excluded_ratio:.0%} of samples (should be rare)",
         )
 
     def test_jitter_varies_positions(self):
@@ -357,6 +398,7 @@ class TestSampleClassAwarePosition(unittest.TestCase, SyntheticDatasetMixin):
 # ----------------------------------------------------------------------
 # 4. _get_dominant_class
 # ----------------------------------------------------------------------
+
 
 class TestGetDominantClass(unittest.TestCase):
 
@@ -403,6 +445,7 @@ class TestGetDominantClass(unittest.TestCase):
 # ----------------------------------------------------------------------
 # 5. _apply_cutmix
 # ----------------------------------------------------------------------
+
 
 class TestApplyCutMix(unittest.TestCase):
 
@@ -472,6 +515,7 @@ class TestApplyCutMix(unittest.TestCase):
 # 6. _is_crop_valid
 # ----------------------------------------------------------------------
 
+
 class TestIsCropValid(unittest.TestCase):
 
     def setUp(self):
@@ -510,10 +554,10 @@ class TestIsCropValid(unittest.TestCase):
         self.assertFalse(ds._is_crop_valid(img))
 
 
-
 # ----------------------------------------------------------------------
 # 7. _get_random_crop (integration)
 # ----------------------------------------------------------------------
+
 
 class TestGetRandomCrop(unittest.TestCase, SyntheticDatasetMixin):
 
@@ -575,6 +619,7 @@ class TestGetRandomCrop(unittest.TestCase, SyntheticDatasetMixin):
             dominant_classes.append(self.ds._get_dominant_class(mask))
 
         from collections import Counter
+
         counts = Counter(dominant_classes)
         total = sum(counts.values())
         excluded_ratio = counts.get(exclude, 0) / total
@@ -584,6 +629,7 @@ class TestGetRandomCrop(unittest.TestCase, SyntheticDatasetMixin):
 # ----------------------------------------------------------------------
 # 8. __getitem__ with CutMix
 # ----------------------------------------------------------------------
+
 
 class TestGetItemWithCutMix(unittest.TestCase, SyntheticDatasetMixin):
 
@@ -660,6 +706,7 @@ class TestGetItemWithCutMix(unittest.TestCase, SyntheticDatasetMixin):
 # 9. WeightedDiceSCELoss
 # ----------------------------------------------------------------------
 
+
 class TestWeightedDiceSCELoss(unittest.TestCase):
 
     def setUp(self):
@@ -735,12 +782,20 @@ class TestWeightedDiceSCELoss(unittest.TestCase):
         target = torch.randint(0, 4, (2, 32, 32))
 
         loss_high_rce = WeightedDiceSCELoss(
-            num_classes=4, dice_weight=0.0, sce_weight=1.0,
-            sce_alpha=0.0, sce_beta=1.0, ignore_index=255,
+            num_classes=4,
+            dice_weight=0.0,
+            sce_weight=1.0,
+            sce_alpha=0.0,
+            sce_beta=1.0,
+            ignore_index=255,
         )
         loss_high_ce = WeightedDiceSCELoss(
-            num_classes=4, dice_weight=0.0, sce_weight=1.0,
-            sce_alpha=1.0, sce_beta=0.0, ignore_index=255,
+            num_classes=4,
+            dice_weight=0.0,
+            sce_weight=1.0,
+            sce_alpha=1.0,
+            sce_beta=0.0,
+            ignore_index=255,
         )
         val_rce = loss_high_rce(pred, target).item()
         val_ce = loss_high_ce(pred, target).item()
@@ -767,6 +822,7 @@ class TestWeightedDiceSCELoss(unittest.TestCase):
 # ----------------------------------------------------------------------
 # 12. Pickle / Serialization (for DataLoader workers)
 # ----------------------------------------------------------------------
+
 
 class TestDatasetPickle(unittest.TestCase, SyntheticDatasetMixin):
 
@@ -800,6 +856,7 @@ class TestDatasetPickle(unittest.TestCase, SyntheticDatasetMixin):
 
     def test_setstate_restores_functionality(self):
         import pickle
+
         self.ds = RandomCropSegmentationDataset(
             input_csv_path=self.csv_path,
             crop_size=self.CROP_SIZE,
@@ -823,6 +880,7 @@ class TestDatasetPickle(unittest.TestCase, SyntheticDatasetMixin):
 # ----------------------------------------------------------------------
 # 13. Edge cases
 # ----------------------------------------------------------------------
+
 
 class TestEdgeCases(unittest.TestCase):
 
@@ -927,7 +985,7 @@ class TestEdgeCases(unittest.TestCase):
         unique = set(np.unique(mask_out))
         self.assertTrue(
             unique.issubset({0, 1}),
-            f"Binary mask should only have 0 and 1, got {unique}"
+            f"Binary mask should only have 0 and 1, got {unique}",
         )
 
         ds._close_cache()
@@ -938,10 +996,10 @@ class TestEdgeCases(unittest.TestCase):
         tmpdir = tempfile.mkdtemp(prefix="test_cb_bands_")
         # 4-band image (RGBI)
         img = np.zeros((4, 64, 64), dtype=np.uint8)
-        img[0] = 10   # R
-        img[1] = 20   # G
-        img[2] = 30   # B
-        img[3] = 40   # I
+        img[0] = 10  # R
+        img[1] = 20  # G
+        img[2] = 30  # B
+        img[3] = 40  # I
         mask = np.zeros((64, 64), dtype=np.uint8)
 
         ip = os.path.join(tmpdir, "img.tif")
@@ -979,6 +1037,7 @@ class TestEdgeCases(unittest.TestCase):
 # ----------------------------------------------------------------------
 # 14. Statistical validation of class-balanced sampling
 # ----------------------------------------------------------------------
+
 
 class TestBalancedSamplingDistribution(unittest.TestCase):
 
@@ -1043,6 +1102,7 @@ class TestBalancedSamplingDistribution(unittest.TestCase):
             dominant_bal.append(ds_bal._get_dominant_class(m))
 
         from collections import Counter
+
         counts_unbal = Counter(dominant_unbal)
         counts_bal = Counter(dominant_bal)
 
@@ -1052,14 +1112,16 @@ class TestBalancedSamplingDistribution(unittest.TestCase):
         ratio_bal = counts_bal.get(1, 0) / n_samples
 
         self.assertGreater(
-            ratio_bal, ratio_unbal,
+            ratio_bal,
+            ratio_unbal,
             f"Balanced sampling ({ratio_bal:.1%}) should have more class-1 "
-            f"crops than unbalanced ({ratio_unbal:.1%})"
+            f"crops than unbalanced ({ratio_unbal:.1%})",
         )
         # Class 1 with balanced sampling should be at least 30%
         self.assertGreater(
-            ratio_bal, 0.3,
-            f"Balanced sampling should give class 1 at least 30%, got {ratio_bal:.1%}"
+            ratio_bal,
+            0.3,
+            f"Balanced sampling should give class 1 at least 30%, got {ratio_bal:.1%}",
         )
 
         ds_unbal._close_cache()

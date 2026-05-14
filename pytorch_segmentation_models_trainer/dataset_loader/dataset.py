@@ -20,6 +20,7 @@
 """
 
 import contextlib
+import hashlib
 import itertools
 import json
 import logging
@@ -51,6 +52,11 @@ from torch.utils.data import Dataset
 
 import gc
 import kornia as K
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - fcntl is unavailable on Windows.
+    fcntl = None
 
 
 def _sanitize_aug_config(cfg):
@@ -716,6 +722,43 @@ class _RasterioLRUCache:
         return len(self._cache)
 
 
+@contextlib.contextmanager
+def _rasterio_read_lock(
+    path: str,
+    enabled: bool = False,
+    lock_dir: Optional[Union[str, Path]] = None,
+):
+    """Serialize rasterio reads for one source path across DataLoader workers.
+
+    Args:
+        path: Raster path used to derive a stable per-file lock name.
+        enabled: When ``True``, acquire an exclusive OS-level advisory lock
+            before yielding.
+        lock_dir: Directory used to store lock files. Defaults to
+            ``/tmp/psmt_rasterio_locks``.
+
+    Yields:
+        None. Code inside the context runs while holding the lock when
+        enabled.
+    """
+    if not enabled or fcntl is None:
+        yield
+        return
+
+    root = Path(lock_dir or "/tmp/psmt_rasterio_locks")
+    root.mkdir(parents=True, exist_ok=True)
+    resolved_path = str(Path(path).resolve()).encode("utf-8")
+    key = hashlib.sha1(resolved_path).hexdigest()
+    lock_path = root / f"{key}.lock"
+
+    with lock_path.open("w") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
 class RandomCropSegmentationDataset(AbstractDataset):
     """Dataset that performs random crops on-the-fly from full-size images.
 
@@ -752,6 +795,14 @@ class RandomCropSegmentationDataset(AbstractDataset):
             If 0, automatically calculated as 2 * number_of_images
             (to cache image + mask for all). Default 0 (auto).
             On servers with many images, adjust ulimit -n 65536.
+        serialize_rasterio_reads: If True, wraps rasterio window reads in a
+            per-file interprocess lock. This avoids concurrent reads from the
+            same compressed GeoTIFF across DataLoader workers.
+        rasterio_lock_dir: Directory where lock files are stored when
+            ``serialize_rasterio_reads`` is enabled.
+        reopen_rasterio_on_read: If True, opens the raster inside each
+            serialized read and closes it immediately after reading. This
+            avoids persistent GDAL DatasetReader state in DataLoader workers.
         class_balanced_sampling: If True, samples crops biased toward
             under-represented classes using a pre-computed spatial index.
         class_sampling_stride: Stride of the mask scan grid used to
@@ -840,6 +891,9 @@ class RandomCropSegmentationDataset(AbstractDataset):
         pre_mix_color_aug: Optional[list] = None,
         class_presence_cache: str = None,
         grid_cache: str = None,
+        serialize_rasterio_reads: bool = False,
+        rasterio_lock_dir: Optional[str] = None,
+        reopen_rasterio_on_read: bool = False,
         grid_mode: bool = False,
         overlap_x: float = 0.5,
         overlap_y: float = 0.5,
@@ -893,6 +947,9 @@ class RandomCropSegmentationDataset(AbstractDataset):
         )
         self.class_presence_cache = class_presence_cache
         self.grid_cache = grid_cache
+        self.serialize_rasterio_reads = serialize_rasterio_reads
+        self.rasterio_lock_dir = rasterio_lock_dir
+        self.reopen_rasterio_on_read = reopen_rasterio_on_read
         self.grid_mode = grid_mode
         self.overlap_x = overlap_x
         self.overlap_y = overlap_y
@@ -1081,29 +1138,44 @@ class RandomCropSegmentationDataset(AbstractDataset):
             col_off=x, row_off=y, width=crop_w, height=crop_h
         )
         try:
-            src = self._get_src(image_path)
+            with _rasterio_read_lock(
+                image_path,
+                self.serialize_rasterio_reads,
+                self.rasterio_lock_dir,
+            ):
+                if self.reopen_rasterio_on_read:
+                    with rasterio.open(image_path) as src:
+                        data = self._read_crop_data(src, window, is_mask)
+                else:
+                    src = self._get_src(image_path)
+                    data = self._read_crop_data(src, window, is_mask)
+
             if is_mask:
                 if self.soft_labels:
-                    # Soft labels: C-band float32 GeoTIFF → (H, W, C)
-                    data = src.read(window=window)  # (C, H, W) float32
                     return np.transpose(data, (1, 2, 0)).copy()  # (H, W, C)
-                else:
-                    data = src.read(1, window=window)  # (H, W)
-                    return data.astype(np.uint8)
-            else:
-                if self.selected_bands is not None:
-                    data = src.read(self.selected_bands, window=window)
-                else:
-                    data = src.read(window=window)
-                # (C, H, W) -> (H, W, C)
-                image = np.transpose(data, (1, 2, 0)).copy()
-                if self.image_dtype == "native":
-                    return image
-                return image.astype(np.dtype(self.image_dtype))
+                return data.astype(np.uint8)
+
+            # (C, H, W) -> (H, W, C)
+            image = np.transpose(data, (1, 2, 0)).copy()
+            if self.image_dtype == "native":
+                return image
+            return image.astype(np.dtype(self.image_dtype))
         except (rasterio.errors.RasterioIOError, Exception) as e:
             logger.error(f"Error reading window {window} from {image_path}: {e}")
             # Raise exception so caller can retry
             raise e
+
+    def _read_crop_data(self, src, window, is_mask: bool):
+        """Read raw crop data from an already-open rasterio dataset."""
+        if is_mask:
+            if self.soft_labels:
+                # Soft labels: C-band float32 GeoTIFF -> (C, H, W)
+                return src.read(window=window)
+            return src.read(1, window=window)
+
+        if self.selected_bands is not None:
+            return src.read(self.selected_bands, window=window)
+        return src.read(window=window)
 
     def _read_full_mask(self, idx: int) -> np.ndarray:
         """Read full mask for image idx as a single-band hard-label array.
