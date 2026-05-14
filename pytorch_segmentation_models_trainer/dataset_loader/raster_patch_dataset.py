@@ -21,6 +21,7 @@
 
 import bisect
 import gc
+import logging
 import warnings
 from copy import deepcopy
 from pathlib import Path
@@ -37,6 +38,8 @@ from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     _VALID_IMAGE_DTYPES,
     load_augmentation_object,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RasterPatchDataset(Dataset):
@@ -321,7 +324,11 @@ class RasterPatchDataset(Dataset):
             patch_mask = self._read_mask(info["mask_path"], window)
         except (rasterio.errors.RasterioIOError, Exception) as e:
             logger.error(
-                f"Error reading window {window} from {info['img_path']} or {info['mask_path']}: {e}"
+                "Error reading window %s from %s or %s: %s",
+                window,
+                info["img_path"],
+                info["mask_path"],
+                e,
             )
             # Try another index
             new_idx = (idx + 1) % self._total_patches

@@ -10,6 +10,7 @@ from pytorch_segmentation_models_trainer.config_definitions.dataset_config impor
     DatasetConfig,
     AutoencoderDatasetConfig,
     AutoencoderRandomCropDatasetConfig,
+    WindowedImageAutoencoderDatasetConfig,
     RasterPatchDatasetConfig,
     CSVWindowedDatasetConfig,
     CSVWindowedImageDatasetConfig,
@@ -44,6 +45,15 @@ class TestDatasetConfigs:
         assert cfg.crop_size == [256, 256]
         assert cfg.samples_per_epoch == 10000
         assert cfg.split == "all"
+
+    def test_windowed_image_autoencoder_dataset_config(self):
+        cfg = OmegaConf.structured(WindowedImageAutoencoderDatasetConfig)
+        with pytest.raises(MissingMandatoryValue):
+            _ = cfg.image_dir
+        assert "WindowedImageAutoencoderDataset" in cfg._target_
+        assert cfg.crop_size == [256, 256]
+        assert cfg.verify_windows is False
+        assert cfg.window_index_cache is None
 
     def test_raster_patch_dataset_config(self):
         cfg = OmegaConf.structured(RasterPatchDatasetConfig)

@@ -21,6 +21,7 @@
 
 import bisect
 import gc
+import json
 import logging
 import math
 from copy import deepcopy
@@ -771,6 +772,11 @@ class WindowedImageDataset(ImageDataset):
         image_dtype: One of ``"uint8"``, ``"uint16"``, ``"float32"`` or
             ``"native"``.
         file_cache_maxsize: Max number of open rasters in the LRU cache.
+        verify_windows: If ``True``, reads every candidate window during
+            initialisation and indexes only windows that can be read with the
+            expected shape.
+        window_index_cache: Optional JSON cache path used to persist the
+            verified window index and avoid repeating the validation pass.
         **kwargs: Compatibility parameters accepted by ``ImageDataset`` and Hydra.
 
     Returns:
@@ -782,6 +788,8 @@ class WindowedImageDataset(ImageDataset):
           image_dir: /data/images
           crop_size: [256, 256]
           stride: 256
+          verify_windows: true
+          window_index_cache: /data/cache/windowed_image_index.json
     """
 
     def __init__(
@@ -798,6 +806,8 @@ class WindowedImageDataset(ImageDataset):
         selected_bands: Optional[List[int]] = None,
         image_dtype: str = "uint8",
         file_cache_maxsize: int = 0,
+        verify_windows: bool = False,
+        window_index_cache: Optional[Union[str, Path]] = None,
         **kwargs,
     ) -> None:
         if crop_size is None:
@@ -810,6 +820,8 @@ class WindowedImageDataset(ImageDataset):
             self.stride = crop_size
         else:
             self.stride = [stride, stride] if isinstance(stride, int) else stride
+        if len(self.stride) != 2:
+            raise ValueError("stride must be an int or [height, width]")
 
         if df is None and input_csv_path is None and image_dir is not None:
             df = AutoencoderRandomCropDataset._build_dataframe_from_folder(
@@ -829,6 +841,11 @@ class WindowedImageDataset(ImageDataset):
 
         self.selected_bands = selected_bands
         self.image_dtype = image_dtype
+        self.verify_windows = verify_windows
+        self.window_index_cache = (
+            str(window_index_cache) if window_index_cache is not None else None
+        )
+        self._window_index = None
 
         # Calculate grid for each image
         self._image_info = []
@@ -878,6 +895,9 @@ class WindowedImageDataset(ImageDataset):
         )
         self._file_cache = _RasterioLRUCache(maxsize=self.file_cache_maxsize)
 
+        if self.verify_windows:
+            self._build_verified_window_index()
+
     def __len__(self) -> int:
         return self._total_patches
 
@@ -895,6 +915,10 @@ class WindowedImageDataset(ImageDataset):
         Returns:
             Source image path.
         """
+        if self._window_index is not None and idx >= len(self.df):
+            entry = self._window_index[idx]
+            return entry["path"]
+
         if idx >= len(self.df):
             # Map global patch index to image index
             img_idx = bisect.bisect_right(self._cumulative, idx) - 1
@@ -906,20 +930,55 @@ class WindowedImageDataset(ImageDataset):
     def _get_src(self, path: str):
         return self._file_cache.get(path)
 
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        if idx < 0 or idx >= self._total_patches:
-            raise IndexError(f"Index {idx} out of range [0, {self._total_patches})")
+    def _build_verified_window_index(self) -> None:
+        """Build or load the list of readable window positions."""
+        if self.window_index_cache and Path(self.window_index_cache).exists():
+            if self._load_window_index_cache():
+                return
 
-        img_idx = bisect.bisect_right(self._cumulative, idx) - 1
-        info = self._image_info[img_idx]
-        local_idx = idx - self._cumulative[img_idx]
+        window_index = []
+        rejected = 0
+        for image_info_idx, info in enumerate(self._image_info):
+            for row_off, col_off in self._iter_window_offsets(info):
+                if self._is_readable_window(info, row_off, col_off):
+                    window_index.append(
+                        {
+                            "image_info_idx": image_info_idx,
+                            "img_idx": info["img_idx"],
+                            "path": info["path"],
+                            "row_off": row_off,
+                            "col_off": col_off,
+                        }
+                    )
+                else:
+                    rejected += 1
 
-        grid_row = local_idx // info["nx"]
-        grid_col = local_idx % info["nx"]
+        self._window_index = window_index
+        self._total_patches = len(window_index)
+        self._cumulative = [0, self._total_patches]
+        if rejected:
+            logger.info(
+                "WindowedImageDataset: rejected %s unreadable windows during init",
+                rejected,
+            )
+        if not self._window_index:
+            logger.warning(
+                "WindowedImageDataset: No readable windows found for crop %s",
+                self.crop_size,
+            )
+        if self.window_index_cache:
+            self._save_window_index_cache()
 
-        row_off = grid_row * self.stride[0]
-        col_off = grid_col * self.stride[1]
+    def _iter_window_offsets(self, info: Dict[str, Any]):
+        """Yield deterministic row/column offsets for an image grid."""
+        for grid_row in range(info["ny"]):
+            for grid_col in range(info["nx"]):
+                yield grid_row * self.stride[0], grid_col * self.stride[1]
 
+    def _is_readable_window(
+        self, info: Dict[str, Any], row_off: int, col_off: int
+    ) -> bool:
+        """Return whether a candidate raster window can be read completely."""
         window = Window(
             col_off=col_off,
             row_off=row_off,
@@ -927,12 +986,185 @@ class WindowedImageDataset(ImageDataset):
             height=self.crop_size[0],
         )
         try:
-            src = self._get_src(info["path"])
-            data = (
-                src.read(window=window)
-                if self.selected_bands is None
-                else src.read(self.selected_bands, window=window)
+            with rasterio.open(info["path"]) as src:
+                data = (
+                    src.read(window=window)
+                    if self.selected_bands is None
+                    else src.read(self.selected_bands, window=window)
+                )
+        except Exception as exc:
+            logger.warning(
+                "WindowedImageDataset: excluding unreadable window %s from %s: %s",
+                window,
+                info["path"],
+                exc,
             )
+            return False
+
+        expected_bands = (
+            len(self.selected_bands) if self.selected_bands else data.shape[0]
+        )
+        expected_shape = (expected_bands, self.crop_size[0], self.crop_size[1])
+        if data.shape != expected_shape or data.size == 0:
+            logger.warning(
+                "WindowedImageDataset: excluding window %s from %s with shape %s; "
+                "expected %s",
+                window,
+                info["path"],
+                data.shape,
+                expected_shape,
+            )
+            return False
+        return True
+
+    def _window_cache_config(self) -> Dict[str, Any]:
+        """Return the metadata used to validate a persisted window index."""
+        paths = [info["path"] for info in self._image_info]
+        return {
+            "crop_size": list(self.crop_size),
+            "stride": list(self.stride),
+            "selected_bands": self.selected_bands,
+            "image_dtype": self.image_dtype,
+            "image_key": self.image_key,
+            "paths": paths,
+            "files": [self._file_fingerprint(path) for path in paths],
+        }
+
+    @staticmethod
+    def _file_fingerprint(path: str) -> Dict[str, Any]:
+        stat = Path(path).stat()
+        return {
+            "path": path,
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+        }
+
+    def _save_window_index_cache(self) -> None:
+        """Persist the verified window index to JSON."""
+        cache_path = Path(self.window_index_cache)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache = {
+            "config": self._window_cache_config(),
+            "windows": [
+                {
+                    "img_idx": entry["img_idx"],
+                    "path": entry["path"],
+                    "row_off": entry["row_off"],
+                    "col_off": entry["col_off"],
+                }
+                for entry in self._window_index
+            ],
+        }
+        with cache_path.open("w") as f:
+            json.dump(cache, f)
+        logger.info(
+            "WindowedImageDataset: window index cache saved to %s (%s windows)",
+            cache_path,
+            len(self._window_index),
+        )
+
+    def _load_window_index_cache(self) -> bool:
+        """Load a verified window index cache when its metadata still matches."""
+        cache_path = Path(self.window_index_cache)
+        try:
+            with cache_path.open() as f:
+                cache = json.load(f)
+        except Exception as exc:
+            logger.warning(
+                "WindowedImageDataset: failed to load window index cache %s: %s",
+                cache_path,
+                exc,
+            )
+            return False
+
+        current_config = self._window_cache_config()
+        if cache.get("config") != current_config:
+            logger.info(
+                "WindowedImageDataset: window index cache %s is stale; rebuilding",
+                cache_path,
+            )
+            return False
+
+        info_lookup = {
+            (info["img_idx"], info["path"]): image_info_idx
+            for image_info_idx, info in enumerate(self._image_info)
+        }
+        window_index = []
+        for entry in cache.get("windows", []):
+            key = (entry.get("img_idx"), entry.get("path"))
+            if key not in info_lookup:
+                logger.info(
+                    "WindowedImageDataset: window index cache %s references an "
+                    "unknown image; rebuilding",
+                    cache_path,
+                )
+                return False
+            window_index.append(
+                {
+                    "image_info_idx": info_lookup[key],
+                    "img_idx": entry["img_idx"],
+                    "path": entry["path"],
+                    "row_off": entry["row_off"],
+                    "col_off": entry["col_off"],
+                }
+            )
+
+        self._window_index = window_index
+        self._total_patches = len(window_index)
+        self._cumulative = [0, self._total_patches]
+        logger.info(
+            "WindowedImageDataset: window index cache loaded from %s (%s windows)",
+            cache_path,
+            self._total_patches,
+        )
+        return True
+
+    def _get_window_info(self, idx: int):
+        """Map a global patch index to image metadata and raster offsets."""
+        if self._window_index is not None:
+            entry = self._window_index[idx]
+            return (
+                self._image_info[entry["image_info_idx"]],
+                entry["row_off"],
+                entry["col_off"],
+            )
+
+        img_idx = bisect.bisect_right(self._cumulative, idx) - 1
+        info = self._image_info[img_idx]
+        local_idx = idx - self._cumulative[img_idx]
+        grid_row = local_idx // info["nx"]
+        grid_col = local_idx % info["nx"]
+        return info, grid_row * self.stride[0], grid_col * self.stride[1]
+
+    def _read_window(self, info: Dict[str, Any], row_off: int, col_off: int):
+        """Read one indexed raster window."""
+        window = Window(
+            col_off=col_off,
+            row_off=row_off,
+            width=self.crop_size[1],
+            height=self.crop_size[0],
+        )
+        src = self._get_src(info["path"])
+        data = (
+            src.read(window=window)
+            if self.selected_bands is None
+            else src.read(self.selected_bands, window=window)
+        )
+        return data, window
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        if idx < 0 or idx >= self._total_patches:
+            raise IndexError(f"Index {idx} out of range [0, {self._total_patches})")
+
+        info, row_off, col_off = self._get_window_info(idx)
+        window = Window(
+            col_off=col_off,
+            row_off=row_off,
+            width=self.crop_size[1],
+            height=self.crop_size[0],
+        )
+        try:
+            data, window = self._read_window(info, row_off, col_off)
         except (rasterio.errors.RasterioIOError, Exception) as e:
             logger.error(f"Error reading window {window} from {info['path']}: {e}")
             # Try another index to avoid crashing
@@ -1014,16 +1246,7 @@ class WindowedImageAutoencoderDataset(WindowedImageDataset):
         if idx < 0 or idx >= self._total_patches:
             raise IndexError(f"Index {idx} out of range [0, {self._total_patches})")
 
-        img_idx = bisect.bisect_right(self._cumulative, idx) - 1
-        info = self._image_info[img_idx]
-        local_idx = idx - self._cumulative[img_idx]
-
-        grid_row = local_idx // info["nx"]
-        grid_col = local_idx % info["nx"]
-
-        row_off = grid_row * self.stride[0]
-        col_off = grid_col * self.stride[1]
-
+        info, row_off, col_off = self._get_window_info(idx)
         window = Window(
             col_off=col_off,
             row_off=row_off,
@@ -1031,12 +1254,7 @@ class WindowedImageAutoencoderDataset(WindowedImageDataset):
             height=self.crop_size[0],
         )
         try:
-            src = self._get_src(info["path"])
-            data = (
-                src.read(window=window)
-                if self.selected_bands is None
-                else src.read(self.selected_bands, window=window)
-            )
+            data, window = self._read_window(info, row_off, col_off)
         except (rasterio.errors.RasterioIOError, Exception) as e:
             logger.error(f"Error reading window {window} from {info['path']}: {e}")
             # Try another index to avoid crashing

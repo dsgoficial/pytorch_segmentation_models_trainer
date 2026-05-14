@@ -20,7 +20,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from omegaconf import MISSING
 
@@ -110,6 +110,51 @@ class AutoencoderRandomCropDatasetConfig:
     image_key: str = "image"
     n_first_rows_to_read: Optional[int] = None
     max_retries: int = 10
+
+
+@dataclass
+class WindowedImageAutoencoderDatasetConfig:
+    """Configuração para WindowedImageAutoencoderDataset.
+
+    Lê recortes determinísticos de imagens inteiras para validação, teste ou
+    treino de autoencoders. Quando ``verify_windows`` é habilitado, recortes
+    ilegíveis são removidos da indexação durante a inicialização.
+
+    Exemplo de YAML::
+
+        val_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.WindowedImageAutoencoderDataset
+          image_dir: /data/validation/images
+          crop_size: [224, 224]
+          stride: 224
+          verify_windows: true
+          window_index_cache: /data/validation/cache/window_index.json
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".image_dataset.WindowedImageAutoencoderDataset"
+    )
+    image_dir: str = MISSING
+    input_csv_path: Optional[str] = None
+    root_dir: Optional[str] = None
+    image_extensions: Optional[List[str]] = None
+    split: str = "all"
+    val_fraction: float = 0.2
+    split_seed: int = 42
+    crop_size: List[int] = field(default_factory=lambda: [256, 256])
+    stride: Any = None
+    selected_bands: Optional[List[int]] = None
+    image_dtype: str = "uint8"
+    file_cache_maxsize: int = 0
+    verify_windows: bool = False
+    window_index_cache: Optional[str] = None
+    corruption_augmentation_list: List = field(default_factory=list)
+    gpu_augmentation_list: List = field(default_factory=list)
+    augmentation_list: List = field(default_factory=list)
+    data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+    image_key: str = "image"
+    n_first_rows_to_read: Optional[int] = None
 
 
 @dataclass

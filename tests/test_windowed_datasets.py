@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import json
+
 import numpy as np
 import pytest
 import torch
@@ -60,6 +62,8 @@ class TestWindowedDatasets(BasicTestCase):
         assert sample["image"].shape == (3, 50, 50)
         assert "path" in sample
         assert "img1.tif" in sample["path"]
+        with pytest.raises(IndexError):
+            _ = ds[-1]
 
         # Test first patch of second image (index 4)
         sample = ds[4]
@@ -83,6 +87,8 @@ class TestWindowedDatasets(BasicTestCase):
 
         # Without corruption, image and target should be identical
         assert torch.allclose(sample["image"], sample["target"])
+        with pytest.raises(IndexError):
+            _ = ds[-1]
 
     def test_windowed_image_autoencoder_corruption(self):
         # Using a simple corruption (Blur) to verify it only affects "image"
@@ -116,3 +122,289 @@ class TestWindowedDatasets(BasicTestCase):
         assert len(ds) == 2
         for i in range(len(ds)):
             assert "too_small.tif" not in ds[i]["path"]
+
+
+def test_windowed_image_autoencoder_verify_windows_excludes_invalid_windows(
+    tmp_path, monkeypatch
+):
+    img_dir = tmp_path / "images"
+    _write_tif(img_dir / "img.tif", width=100, height=100)
+
+    original = WindowedImageDataset._is_readable_window
+
+    def fake_is_readable(self, info, row_off, col_off):
+        if row_off == 0 and col_off == 50:
+            return False
+        return original(self, info, row_off, col_off)
+
+    monkeypatch.setattr(
+        WindowedImageDataset,
+        "_is_readable_window",
+        fake_is_readable,
+    )
+
+    ds = WindowedImageAutoencoderDataset(
+        image_dir=img_dir,
+        crop_size=[50, 50],
+        stride=50,
+        verify_windows=True,
+    )
+
+    assert len(ds) == 3
+    assert all(
+        not (entry["row_off"] == 0 and entry["col_off"] == 50)
+        for entry in ds._window_index
+    )
+    sample = ds[0]
+    assert set(sample) == {"image", "target", "path"}
+    assert sample["image"].shape == (3, 50, 50)
+    assert sample["target"].dtype == torch.float32
+
+
+def test_windowed_image_autoencoder_window_index_cache_is_reused(tmp_path, monkeypatch):
+    img_dir = tmp_path / "images"
+    cache_path = tmp_path / "cache" / "windows.json"
+    _write_tif(img_dir / "img.tif", width=100, height=100)
+
+    ds = WindowedImageAutoencoderDataset(
+        image_dir=img_dir,
+        crop_size=[50, 50],
+        stride=50,
+        verify_windows=True,
+        window_index_cache=cache_path,
+    )
+
+    assert len(ds) == 4
+    assert cache_path.exists()
+    with cache_path.open() as f:
+        cache = json.load(f)
+    assert cache["config"]["crop_size"] == [50, 50]
+    assert len(cache["windows"]) == 4
+
+    def fail_if_called(self, info, row_off, col_off):
+        raise AssertionError("window verification should have been loaded from cache")
+
+    monkeypatch.setattr(
+        WindowedImageDataset,
+        "_is_readable_window",
+        fail_if_called,
+    )
+    cached = WindowedImageAutoencoderDataset(
+        image_dir=img_dir,
+        crop_size=[50, 50],
+        stride=50,
+        verify_windows=True,
+        window_index_cache=cache_path,
+    )
+
+    assert len(cached) == 4
+    assert cached[3]["image"].shape == (3, 50, 50)
+
+
+def test_windowed_image_autoencoder_window_index_cache_rebuilds_when_stale(
+    tmp_path, monkeypatch
+):
+    img_dir = tmp_path / "images"
+    cache_path = tmp_path / "windows.json"
+    _write_tif(img_dir / "img.tif", width=100, height=100)
+
+    WindowedImageAutoencoderDataset(
+        image_dir=img_dir,
+        crop_size=[50, 50],
+        stride=50,
+        verify_windows=True,
+        window_index_cache=cache_path,
+    )
+
+    calls = {"count": 0}
+    original = WindowedImageDataset._is_readable_window
+
+    def count_calls(self, info, row_off, col_off):
+        calls["count"] += 1
+        return original(self, info, row_off, col_off)
+
+    monkeypatch.setattr(WindowedImageDataset, "_is_readable_window", count_calls)
+    rebuilt = WindowedImageAutoencoderDataset(
+        image_dir=img_dir,
+        crop_size=[25, 25],
+        stride=25,
+        verify_windows=True,
+        window_index_cache=cache_path,
+    )
+
+    assert len(rebuilt) == 16
+    assert calls["count"] == 16
+
+
+def test_windowed_image_dataset_verify_windows_with_selected_bands(tmp_path):
+    img_dir = tmp_path / "images"
+    _write_tif(img_dir / "img.tif", width=64, height=64, bands=3)
+
+    ds = WindowedImageDataset(
+        image_dir=img_dir,
+        crop_size=[32, 32],
+        stride=[32, 32],
+        selected_bands=[1, 3],
+        verify_windows=True,
+    )
+
+    assert len(ds) == 4
+    sample = ds[0]
+    assert sample["image"].shape == (2, 32, 32)
+    assert ds.get_path(1).endswith("img.tif")
+
+
+def test_windowed_image_dataset_invalid_window_options_raise(tmp_path):
+    img_dir = tmp_path / "images"
+    _write_tif(img_dir / "img.tif", width=64, height=64)
+
+    with pytest.raises(ValueError, match="crop_size"):
+        WindowedImageDataset(image_dir=img_dir, crop_size=[32])
+
+    with pytest.raises(ValueError, match="stride"):
+        WindowedImageDataset(image_dir=img_dir, crop_size=[32, 32], stride=[16])
+
+
+def test_windowed_image_dataset_default_crop_and_all_small_images(tmp_path):
+    img_dir = tmp_path / "images"
+    _write_tif(img_dir / "small.tif", width=32, height=32)
+
+    ds = WindowedImageDataset(image_dir=img_dir)
+
+    assert ds.crop_size == [256, 256]
+    assert ds.stride == [256, 256]
+    assert len(ds) == 0
+
+
+def test_windowed_image_dataset_transform_and_read_error_fallback(
+    tmp_path, monkeypatch
+):
+    img_dir = tmp_path / "images"
+    _write_tif(img_dir / "img.tif", width=64, height=32)
+    ds = WindowedImageDataset(
+        image_dir=img_dir,
+        crop_size=[32, 32],
+        stride=32,
+        augmentation_list=[{"_target_": "albumentations.pytorch.ToTensorV2"}],
+    )
+    original = WindowedImageDataset._read_window
+    calls = {"count": 0}
+
+    def fail_once(self, info, row_off, col_off):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise rasterio.errors.RasterioIOError("broken window")
+        return original(self, info, row_off, col_off)
+
+    monkeypatch.setattr(WindowedImageDataset, "_read_window", fail_once)
+
+    sample = ds[0]
+
+    assert calls["count"] == 2
+    assert sample["image"].shape == (3, 32, 32)
+
+
+def test_windowed_image_dataset_malformed_cache_rebuilds(tmp_path):
+    img_dir = tmp_path / "images"
+    cache_path = tmp_path / "bad.json"
+    _write_tif(img_dir / "img.tif", width=64, height=64)
+    cache_path.write_text("{not-json")
+
+    ds = WindowedImageDataset(
+        image_dir=img_dir,
+        crop_size=[32, 32],
+        stride=32,
+        verify_windows=True,
+        window_index_cache=cache_path,
+    )
+
+    assert len(ds) == 4
+
+
+def test_windowed_image_dataset_cache_with_unknown_image_rebuilds(
+    tmp_path, monkeypatch
+):
+    img_dir = tmp_path / "images"
+    cache_path = tmp_path / "windows.json"
+    _write_tif(img_dir / "img.tif", width=64, height=64)
+
+    ds = WindowedImageDataset(
+        image_dir=img_dir,
+        crop_size=[32, 32],
+        stride=32,
+        verify_windows=True,
+        window_index_cache=cache_path,
+    )
+    ds._window_index[0]["path"] = str(img_dir / "missing.tif")
+    ds._save_window_index_cache()
+
+    calls = {"count": 0}
+    original = WindowedImageDataset._is_readable_window
+
+    def count_calls(self, info, row_off, col_off):
+        calls["count"] += 1
+        return original(self, info, row_off, col_off)
+
+    monkeypatch.setattr(WindowedImageDataset, "_is_readable_window", count_calls)
+    rebuilt = WindowedImageDataset(
+        image_dir=img_dir,
+        crop_size=[32, 32],
+        stride=32,
+        verify_windows=True,
+        window_index_cache=cache_path,
+    )
+
+    assert len(rebuilt) == 4
+    assert calls["count"] == 4
+
+
+def test_windowed_image_dataset_verify_windows_can_produce_empty_index(
+    tmp_path, monkeypatch
+):
+    img_dir = tmp_path / "images"
+    cache_path = tmp_path / "empty.json"
+    _write_tif(img_dir / "img.tif", width=64, height=64)
+
+    monkeypatch.setattr(
+        WindowedImageDataset,
+        "_is_readable_window",
+        lambda self, info, row_off, col_off: False,
+    )
+
+    ds = WindowedImageDataset(
+        image_dir=img_dir,
+        crop_size=[32, 32],
+        stride=32,
+        verify_windows=True,
+        window_index_cache=cache_path,
+    )
+
+    assert len(ds) == 0
+    with cache_path.open() as f:
+        cache = json.load(f)
+    assert cache["windows"] == []
+
+
+def test_windowed_image_autoencoder_read_error_fallback(tmp_path, monkeypatch):
+    img_dir = tmp_path / "images"
+    _write_tif(img_dir / "img.tif", width=64, height=32)
+    ds = WindowedImageAutoencoderDataset(
+        image_dir=img_dir,
+        crop_size=[32, 32],
+        stride=32,
+    )
+    original = WindowedImageDataset._read_window
+    calls = {"count": 0}
+
+    def fail_once(self, info, row_off, col_off):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise rasterio.errors.RasterioIOError("broken window")
+        return original(self, info, row_off, col_off)
+
+    monkeypatch.setattr(WindowedImageDataset, "_read_window", fail_once)
+
+    sample = ds[0]
+
+    assert calls["count"] == 2
+    assert sample["target"].shape == (3, 32, 32)
