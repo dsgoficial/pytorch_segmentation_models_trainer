@@ -198,6 +198,7 @@ class TestRasterioLRUCache(unittest.TestCase, SyntheticDatasetMixin):
             n_classes=self.N_CLASSES,
             serialize_rasterio_reads=True,
             rasterio_lock_dir=os.path.join(self.tmpdir, "locks"),
+            reopen_rasterio_on_read=True,
         )
         with patch.object(dataset_module, "_rasterio_read_lock", fake_read_lock):
             image = ds._read_crop(self.image_paths[0], 0, 0, is_mask=False)
@@ -212,6 +213,7 @@ class TestRasterioLRUCache(unittest.TestCase, SyntheticDatasetMixin):
                 ("msk_00.tif", True, Path(self.tmpdir) / "locks"),
             ],
         )
+        self.assertEqual(len(ds._file_cache), 0)
         ds._close_cache()
 
 

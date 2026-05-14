@@ -436,9 +436,11 @@ def test_windowed_image_dataset_serializes_rasterio_reads(tmp_path, monkeypatch)
         stride=32,
         serialize_rasterio_reads=True,
         rasterio_lock_dir=lock_dir,
+        reopen_rasterio_on_read=True,
     )
 
     sample = ds[0]
 
     assert sample["image"].shape == (3, 32, 32)
     assert calls == [("img.tif", True, lock_dir)]
+    assert len(ds._file_cache) == 0

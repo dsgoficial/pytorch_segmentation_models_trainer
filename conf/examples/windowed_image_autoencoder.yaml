@@ -15,6 +15,9 @@ val_dataset:
   # GeoTIFF on shared/network storage.
   serialize_rasterio_reads: true
   rasterio_lock_dir: /tmp/psmt_rasterio_locks
+  # Stronger compatibility mode: open and close the raster inside each
+  # serialized read to avoid persistent GDAL state in DataLoader workers.
+  reopen_rasterio_on_read: true
 
   # Optional corruption transforms (applied only to the input 'image')
   corruption_augmentation_list:

@@ -139,6 +139,7 @@ window from disk at `__getitem__` time.
 | `window_index_cache` | `str \| Path \| None` | `None` | JSON cache for the verified window index. Rebuilt when paths, file metadata, crop, stride, bands, dtype, or image key change. |
 | `serialize_rasterio_reads` | `bool` | `False` | Serialize `rasterio` reads per source file across DataLoader workers. |
 | `rasterio_lock_dir` | `str \| Path \| None` | `None` | Directory for lock files when `serialize_rasterio_reads=True`; defaults to `/tmp/psmt_rasterio_locks`. |
+| `reopen_rasterio_on_read` | `bool` | `False` | Open and close the raster inside each locked read instead of using the per-worker rasterio handle cache. |
 
 ### `__getitem__` Returns
 

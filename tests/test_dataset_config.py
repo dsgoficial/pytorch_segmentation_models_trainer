@@ -56,6 +56,7 @@ class TestDatasetConfigs:
         assert cfg.window_index_cache is None
         assert cfg.serialize_rasterio_reads is False
         assert cfg.rasterio_lock_dir is None
+        assert cfg.reopen_rasterio_on_read is False
 
     def test_raster_patch_dataset_config(self):
         cfg = OmegaConf.structured(RasterPatchDatasetConfig)

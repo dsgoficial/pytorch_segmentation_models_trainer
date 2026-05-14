@@ -800,6 +800,9 @@ class RandomCropSegmentationDataset(AbstractDataset):
             same compressed GeoTIFF across DataLoader workers.
         rasterio_lock_dir: Directory where lock files are stored when
             ``serialize_rasterio_reads`` is enabled.
+        reopen_rasterio_on_read: If True, opens the raster inside each
+            serialized read and closes it immediately after reading. This
+            avoids persistent GDAL DatasetReader state in DataLoader workers.
         class_balanced_sampling: If True, samples crops biased toward
             under-represented classes using a pre-computed spatial index.
         class_sampling_stride: Stride of the mask scan grid used to
@@ -890,6 +893,7 @@ class RandomCropSegmentationDataset(AbstractDataset):
         grid_cache: str = None,
         serialize_rasterio_reads: bool = False,
         rasterio_lock_dir: Optional[str] = None,
+        reopen_rasterio_on_read: bool = False,
         grid_mode: bool = False,
         overlap_x: float = 0.5,
         overlap_y: float = 0.5,
@@ -945,6 +949,7 @@ class RandomCropSegmentationDataset(AbstractDataset):
         self.grid_cache = grid_cache
         self.serialize_rasterio_reads = serialize_rasterio_reads
         self.rasterio_lock_dir = rasterio_lock_dir
+        self.reopen_rasterio_on_read = reopen_rasterio_on_read
         self.grid_mode = grid_mode
         self.overlap_x = overlap_x
         self.overlap_y = overlap_y
@@ -1133,44 +1138,44 @@ class RandomCropSegmentationDataset(AbstractDataset):
             col_off=x, row_off=y, width=crop_w, height=crop_h
         )
         try:
-            src = self._get_src(image_path)
+            with _rasterio_read_lock(
+                image_path,
+                self.serialize_rasterio_reads,
+                self.rasterio_lock_dir,
+            ):
+                if self.reopen_rasterio_on_read:
+                    with rasterio.open(image_path) as src:
+                        data = self._read_crop_data(src, window, is_mask)
+                else:
+                    src = self._get_src(image_path)
+                    data = self._read_crop_data(src, window, is_mask)
+
             if is_mask:
                 if self.soft_labels:
-                    # Soft labels: C-band float32 GeoTIFF → (H, W, C)
-                    with _rasterio_read_lock(
-                        image_path,
-                        self.serialize_rasterio_reads,
-                        self.rasterio_lock_dir,
-                    ):
-                        data = src.read(window=window)  # (C, H, W) float32
                     return np.transpose(data, (1, 2, 0)).copy()  # (H, W, C)
-                else:
-                    with _rasterio_read_lock(
-                        image_path,
-                        self.serialize_rasterio_reads,
-                        self.rasterio_lock_dir,
-                    ):
-                        data = src.read(1, window=window)  # (H, W)
-                    return data.astype(np.uint8)
-            else:
-                with _rasterio_read_lock(
-                    image_path,
-                    self.serialize_rasterio_reads,
-                    self.rasterio_lock_dir,
-                ):
-                    if self.selected_bands is not None:
-                        data = src.read(self.selected_bands, window=window)
-                    else:
-                        data = src.read(window=window)
-                # (C, H, W) -> (H, W, C)
-                image = np.transpose(data, (1, 2, 0)).copy()
-                if self.image_dtype == "native":
-                    return image
-                return image.astype(np.dtype(self.image_dtype))
+                return data.astype(np.uint8)
+
+            # (C, H, W) -> (H, W, C)
+            image = np.transpose(data, (1, 2, 0)).copy()
+            if self.image_dtype == "native":
+                return image
+            return image.astype(np.dtype(self.image_dtype))
         except (rasterio.errors.RasterioIOError, Exception) as e:
             logger.error(f"Error reading window {window} from {image_path}: {e}")
             # Raise exception so caller can retry
             raise e
+
+    def _read_crop_data(self, src, window, is_mask: bool):
+        """Read raw crop data from an already-open rasterio dataset."""
+        if is_mask:
+            if self.soft_labels:
+                # Soft labels: C-band float32 GeoTIFF -> (C, H, W)
+                return src.read(window=window)
+            return src.read(1, window=window)
+
+        if self.selected_bands is not None:
+            return src.read(self.selected_bands, window=window)
+        return src.read(window=window)
 
     def _read_full_mask(self, idx: int) -> np.ndarray:
         """Read full mask for image idx as a single-band hard-label array.
