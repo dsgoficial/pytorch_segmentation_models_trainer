@@ -1,5 +1,9 @@
 # Unreleased
 
+## CI / Coverage
+
+- Fixed `.codecov.yml` by moving `after_n_builds` under `codecov.notify`, matching Codecov's current schema so repository YAML validation succeeds.
+
 ## Autoencoder Latent Metrics
 
 - Added `AutoencoderLatentClusteringMetrics` for validation/test epoch diagnostics of autoencoder encoder spaces. It reuses the framework's PyTorch `MiniBatchKMeans` backend and TorchMetrics clustering functions so embeddings, cluster labels, and scores stay on GPU when training uses GPU.
