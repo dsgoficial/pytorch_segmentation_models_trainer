@@ -231,7 +231,7 @@ class VariationalAutoencoderLoss(nn.Module):
         if self.ms_ssim_loss is None:
             raise RuntimeError("MS-SSIM loss was not initialised")
         reconstruction, target = self._prepare_ms_ssim_inputs(reconstruction, target)
-        return self.ms_ssim_loss(reconstruction, target)
+        return self.ms_ssim_loss(reconstruction, target).clamp_min(0.0)
 
     def _prepare_ms_ssim_inputs(
         self, reconstruction: torch.Tensor, target: torch.Tensor

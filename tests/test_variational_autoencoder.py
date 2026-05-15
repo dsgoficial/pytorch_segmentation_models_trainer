@@ -433,6 +433,31 @@ def test_variational_autoencoder_loss_ms_ssim_random_inputs_are_not_exorbitant()
     assert result["loss"].item() <= 2.0
 
 
+def test_smooth_l1_ms_ssim_near_identical_inputs_are_non_negative():
+    torch.manual_seed(2)
+    target = torch.rand(2, 3, 32, 32)
+    reconstruction = (target + 1e-5 * torch.randn_like(target)).clamp(0.0, 1.0)
+    reconstruction.requires_grad_(True)
+    mu = torch.zeros(2, 4, 8, 8, requires_grad=True)
+    logvar = torch.zeros_like(mu, requires_grad=True)
+    output = VariationalAutoencoderOutput(reconstruction, mu, logvar, mu)
+    loss_fn = VariationalAutoencoderLoss(
+        reconstruction_loss="smooth_l1_ms_ssim",
+        ms_ssim_data_range=1.0,
+        beta=0.0,
+    )
+
+    result = loss_fn(output, target)
+
+    assert result["ms_ssim_loss"].item() >= 0.0
+    assert result["weighted_ms_ssim_loss"].item() >= 0.0
+    assert result["reconstruction_loss"].item() >= 0.0
+    assert result["loss"].item() >= 0.0
+
+    result["loss"].backward()
+    assert reconstruction.grad is not None
+
+
 def test_variational_autoencoder_loss_ms_ssim_denormalizes_imagenet_inputs():
     target_01 = torch.rand(1, 3, 64, 64)
     reconstruction_01 = torch.rand_like(target_01)
