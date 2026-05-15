@@ -116,12 +116,42 @@ loss:
   beta: 1.0
 ```
 
-`VariationalAutoencoderLoss` supports `mse`, `l1`, and `bce_with_logits` as the
-reconstruction term. The `beta` parameter controls the strength of the KL
-regularization. See
+`VariationalAutoencoderLoss` supports `mse`, `l1`, `smooth_l1`, `ms_ssim`,
+`smooth_l1_ms_ssim`, and `bce_with_logits` as the reconstruction term. The
+`beta` parameter controls the strength of the KL regularization. See
 `conf/examples/generic_variational_autoencoder_random_crop_folder.yaml` for a
 complete folder-based random-crop training config with train, validation, and
 test datasets.
+
+### MS-SSIM and Smooth L1 Reconstruction
+
+Use `ms_ssim` when structural similarity matters more than pixel-wise error.
+Use `smooth_l1_ms_ssim` to combine local robust reconstruction with multi-scale
+structure. For datasets converted with `albumentations.ToFloat(max_value=255.0)`,
+keep `ms_ssim_data_range: 1.0`. For raw uint8-scale tensors, use
+`ms_ssim_data_range: 255.0`.
+
+```yaml
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.autoencoder_losses.VariationalAutoencoderLoss
+  reconstruction_loss: smooth_l1_ms_ssim
+  reconstruction_weight: 1.0
+  beta: 1.0
+  smooth_l1_beta: 0.1
+  smooth_l1_weight: 0.8
+  ms_ssim_weight: 0.2
+  ms_ssim_data_range: 1.0
+  ms_ssim_alpha: 1.0
+  ms_ssim_compensation: 1.0
+```
+
+The VAE LightningModule logs the combined `reconstruction_loss` plus component
+terms: `smooth_l1_loss`, `ms_ssim_loss`, `weighted_smooth_l1_loss`, and
+`weighted_ms_ssim_loss`. By default `ms_ssim_alpha: 1.0` disables Kornia's
+internal L1 blend, so `smooth_l1_ms_ssim` means Smooth L1 plus pure MS-SSIM.
+See
+`conf/examples/generic_variational_autoencoder_ms_ssim.yaml` for a complete
+configuration.
 
 ## Usage with HuggingFace
 

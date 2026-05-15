@@ -362,6 +362,118 @@ def test_variational_autoencoder_loss_smooth_l1_governed_by_reconstruction_weigh
     )
 
 
+@pytest.mark.parametrize("batch_size", [1, 2])
+def test_variational_autoencoder_loss_ms_ssim_contract_and_gradients(batch_size):
+    loss_fn = VariationalAutoencoderLoss(
+        reconstruction_loss="ms_ssim",
+        beta=0.25,
+        ms_ssim_data_range=1.0,
+    )
+    target = torch.rand(batch_size, 3, 32, 32)
+    reconstruction = torch.rand_like(target, requires_grad=True)
+    mu = torch.zeros(batch_size, 4, 8, 8, requires_grad=True)
+    logvar = torch.zeros_like(mu, requires_grad=True)
+    output = VariationalAutoencoderOutput(reconstruction, mu, logvar, mu)
+
+    result = loss_fn(output, target)
+
+    assert set(result) == {
+        "loss",
+        "reconstruction_loss",
+        "kl_loss",
+        "weighted_reconstruction_loss",
+        "weighted_kl_loss",
+        "ms_ssim_loss",
+    }
+    assert result["loss"].shape == torch.Size([])
+    assert result["loss"].dtype == reconstruction.dtype
+    assert torch.isfinite(result["loss"])
+    assert torch.isclose(result["reconstruction_loss"], result["ms_ssim_loss"])
+
+    result["loss"].backward()
+    assert reconstruction.grad is not None
+    assert mu.grad is not None
+    assert logvar.grad is not None
+
+
+def test_variational_autoencoder_loss_ms_ssim_identical_target_is_lower():
+    loss_fn = VariationalAutoencoderLoss(
+        reconstruction_loss="ms_ssim",
+        ms_ssim_data_range=1.0,
+        beta=0.0,
+    )
+    target = torch.rand(1, 3, 32, 32)
+    mu = torch.zeros(1, 2, 8, 8)
+    logvar = torch.zeros_like(mu)
+
+    perfect = VariationalAutoencoderOutput(target.clone(), mu, logvar, mu)
+    degraded = VariationalAutoencoderOutput(1.0 - target, mu, logvar, mu)
+
+    perfect_loss = loss_fn(perfect, target)["loss"]
+    degraded_loss = loss_fn(degraded, target)["loss"]
+
+    assert perfect_loss < degraded_loss
+
+
+def test_variational_autoencoder_loss_smooth_l1_ms_ssim_components_and_weights():
+    loss_fn = VariationalAutoencoderLoss(
+        reconstruction_loss="smooth_l1_ms_ssim",
+        smooth_l1_beta=0.2,
+        smooth_l1_weight=0.75,
+        ms_ssim_weight=0.25,
+        ms_ssim_data_range=1.0,
+        beta=0.0,
+    )
+    target = torch.zeros(2, 3, 32, 32)
+    reconstruction = torch.full_like(target, 0.25, requires_grad=True)
+    mu = torch.zeros(2, 4, 8, 8, requires_grad=True)
+    logvar = torch.zeros_like(mu, requires_grad=True)
+    output = VariationalAutoencoderOutput(reconstruction, mu, logvar, mu)
+
+    result = loss_fn(output, target)
+
+    assert {
+        "smooth_l1_loss",
+        "ms_ssim_loss",
+        "weighted_smooth_l1_loss",
+        "weighted_ms_ssim_loss",
+    }.issubset(result)
+    expected_reconstruction = (
+        result["weighted_smooth_l1_loss"] + result["weighted_ms_ssim_loss"]
+    )
+    assert torch.isclose(result["reconstruction_loss"], expected_reconstruction)
+    assert torch.isclose(result["loss"], expected_reconstruction)
+    assert torch.isclose(
+        result["weighted_smooth_l1_loss"], 0.75 * result["smooth_l1_loss"]
+    )
+    assert torch.isclose(result["weighted_ms_ssim_loss"], 0.25 * result["ms_ssim_loss"])
+
+    result["loss"].backward()
+    assert reconstruction.grad is not None
+    assert mu.grad is not None
+    assert logvar.grad is not None
+
+
+def test_variational_autoencoder_loss_ms_ssim_defaults_to_pure_structural_term():
+    loss_fn = VariationalAutoencoderLoss(reconstruction_loss="smooth_l1_ms_ssim")
+
+    assert loss_fn.ms_ssim_alpha == pytest.approx(1.0)
+    assert loss_fn.ms_ssim_compensation == pytest.approx(1.0)
+    assert loss_fn.ms_ssim_loss.alpha == pytest.approx(1.0)
+    assert loss_fn.ms_ssim_loss.compensation == pytest.approx(1.0)
+
+
+def test_variational_autoencoder_loss_rejects_negative_component_weights():
+    with pytest.raises(ValueError, match="smooth_l1_weight"):
+        VariationalAutoencoderLoss(
+            reconstruction_loss="smooth_l1_ms_ssim", smooth_l1_weight=-0.1
+        )
+    with pytest.raises(ValueError, match="ms_ssim_weight"):
+        VariationalAutoencoderLoss(
+            reconstruction_loss="smooth_l1_ms_ssim", ms_ssim_weight=-0.1
+        )
+
+
 def test_variational_autoencoder_loss_validates_reconstruction_mode():
     with pytest.raises(ValueError, match="reconstruction_loss"):
         VariationalAutoencoderLoss(reconstruction_loss="ssim")
@@ -449,6 +561,46 @@ def test_variational_autoencoder_model_accepts_plain_loss_tensor():
 
     assert loss.shape == torch.Size([])
     assert "train/loss" in [call.args[0] for call in pl_model.log.call_args_list]
+
+
+def test_variational_autoencoder_model_logs_smooth_l1_ms_ssim_components():
+    cfg = OmegaConf.create(
+        {
+            "model": {"_target_": "unused"},
+            "loss": {"_target_": "unused"},
+            "optimizer": {"_target_": "torch.optim.Adam", "lr": 0.001},
+            "scheduler_list": [],
+        }
+    )
+    domain_model = TinyVAEOutputModel()
+    loss_fn = VariationalAutoencoderLoss(
+        reconstruction_loss="smooth_l1_ms_ssim",
+        smooth_l1_weight=0.8,
+        ms_ssim_weight=0.2,
+        ms_ssim_data_range=1.0,
+        beta=0.0,
+    )
+
+    with patch.object(
+        VariationalAutoencoderModel, "get_model", return_value=domain_model
+    ):
+        with patch.object(
+            VariationalAutoencoderModel, "get_loss_function", return_value=loss_fn
+        ):
+            pl_model = VariationalAutoencoderModel(cfg)
+
+    pl_model.log = MagicMock()
+    batch = {"image": torch.rand(1, 3, 32, 32), "target": torch.rand(1, 3, 32, 32)}
+
+    loss = pl_model.training_step(batch, 0)
+
+    assert loss.shape == torch.Size([])
+    logged_names = [call.args[0] for call in pl_model.log.call_args_list]
+    assert "train/loss" in logged_names
+    assert "train/smooth_l1_loss" in logged_names
+    assert "train/ms_ssim_loss" in logged_names
+    assert "train/weighted_smooth_l1_loss" in logged_names
+    assert "train/weighted_ms_ssim_loss" in logged_names
 
 
 @pytest.mark.parametrize(

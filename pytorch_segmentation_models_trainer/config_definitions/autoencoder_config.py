@@ -2,7 +2,7 @@
 """Hydra dataclass configs for deterministic and variational autoencoders."""
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING
@@ -46,11 +46,17 @@ class VariationalAutoencoderLossConfig:
     Example YAML:
         loss:
           _target_: pytorch_segmentation_models_trainer.custom_losses.autoencoder_losses.VariationalAutoencoderLoss
-          reconstruction_loss: mse
+          reconstruction_loss: smooth_l1_ms_ssim
           reconstruction_weight: 1.0
           beta: 1.0
           free_bits: 0.25
           kl_balance: true
+          smooth_l1_beta: 0.1
+          smooth_l1_weight: 0.8
+          ms_ssim_weight: 0.2
+          ms_ssim_data_range: 1.0
+          ms_ssim_alpha: 1.0
+          ms_ssim_compensation: 1.0
     """
 
     _target_: str = (
@@ -63,6 +69,14 @@ class VariationalAutoencoderLossConfig:
     free_bits: float = 0.0
     kl_balance: bool = False
     smooth_l1_beta: float = 0.1
+    smooth_l1_weight: float = 0.8
+    ms_ssim_weight: float = 0.2
+    ms_ssim_data_range: float = 1.0
+    ms_ssim_sigmas: List[float] = field(
+        default_factory=lambda: [0.5, 1.0, 2.0, 4.0, 8.0]
+    )
+    ms_ssim_alpha: float = 1.0
+    ms_ssim_compensation: float = 1.0
 
 
 @dataclass

@@ -30,6 +30,13 @@ def test_variational_autoencoder_loss_config():
     assert cfg.beta == 1.0
     assert cfg.free_bits == pytest.approx(0.0)
     assert cfg.kl_balance is False
+    assert cfg.smooth_l1_beta == pytest.approx(0.1)
+    assert cfg.smooth_l1_weight == pytest.approx(0.8)
+    assert cfg.ms_ssim_weight == pytest.approx(0.2)
+    assert cfg.ms_ssim_data_range == pytest.approx(1.0)
+    assert list(cfg.ms_ssim_sigmas) == [0.5, 1.0, 2.0, 4.0, 8.0]
+    assert cfg.ms_ssim_alpha == pytest.approx(1.0)
+    assert cfg.ms_ssim_compensation == pytest.approx(1.0)
 
 
 def test_variational_autoencoder_model_config():

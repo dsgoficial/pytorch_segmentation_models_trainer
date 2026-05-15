@@ -1,0 +1,113 @@
+# Example: Variational Autoencoder with Smooth L1 + MS-SSIM reconstruction loss
+
+defaults:
+  - _self_
+
+hyperparameters:
+  model_name: vae_ms_ssim_random_crop_mit_b2
+  batch_size: 16
+  epochs: 20
+  max_lr: 1e-4
+  in_channels: 3
+
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.variational_autoencoder_model.VariationalAutoencoderModel
+
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.GenericVariationalAutoencoder
+  encoder_name: mit_b2
+  use_huggingface: false
+  in_channels: ${hyperparameters.in_channels}
+  latent_dim: 128
+  pretrained: true
+  output_activation: sigmoid
+  use_progressive_decoder: true
+  upsample_mode: bilinear
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.autoencoder_losses.VariationalAutoencoderLoss
+  reconstruction_loss: smooth_l1_ms_ssim
+  reconstruction_weight: 1.0
+  beta: 1.0
+  free_bits: 0.25
+  kl_balance: true
+  smooth_l1_beta: 0.1
+  smooth_l1_weight: 0.8
+  ms_ssim_weight: 0.2
+  ms_ssim_data_range: 1.0
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1e-4
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: ${hyperparameters.epochs}
+    interval: epoch
+    frequency: 1
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.AutoencoderRandomCropDataset
+  image_dir: /data/unlabeled_images/train_val
+  split: train
+  val_fraction: 0.2
+  split_seed: 42
+  image_extensions: [".tif", ".tiff", ".png", ".jpg", ".jpeg"]
+  crop_size: [256, 256]
+  samples_per_epoch: 20000
+  selected_bands: null
+  image_dtype: uint8
+  corruption_augmentation_list:
+    - _target_: albumentations.GaussNoise
+      p: 0.25
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.VerticalFlip
+      p: 0.5
+    - _target_: albumentations.Transpose
+      p: 0.5
+    - _target_: albumentations.ToFloat
+      max_value: 255.0
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 4
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.AutoencoderRandomCropDataset
+  image_dir: /data/unlabeled_images/train_val
+  split: val
+  val_fraction: 0.2
+  split_seed: 42
+  image_extensions: [".tif", ".tiff", ".png", ".jpg", ".jpeg"]
+  crop_size: [256, 256]
+  samples_per_epoch: 2000
+  selected_bands: null
+  image_dtype: uint8
+  augmentation_list:
+    - _target_: albumentations.ToFloat
+      max_value: 255.0
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 4
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+
+callbacks:
+  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.AutoencoderResultCallback
+    n_samples: 8
+    log_every_k_epochs: 1
+    normalized_input: false

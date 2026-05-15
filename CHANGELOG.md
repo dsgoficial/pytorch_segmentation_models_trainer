@@ -39,6 +39,7 @@
 ## VAE Loss
 
 - Added `smooth_l1` reconstruction mode to `VariationalAutoencoderLoss` using `F.smooth_l1_loss` (Huber loss). New `smooth_l1_beta` parameter (default `0.1`) controls the L2-to-L1 transition threshold and is independent of the KL `beta` weight. The term is governed by `reconstruction_weight` like all other reconstruction modes.
+- Added `ms_ssim` and `smooth_l1_ms_ssim` reconstruction modes to `VariationalAutoencoderLoss` using the existing Kornia `MS_SSIMLoss` configured as pure MS-SSIM by default (`ms_ssim_alpha=1.0`, `ms_ssim_compensation=1.0`). The combined mode exposes `smooth_l1_weight`, `ms_ssim_weight`, `ms_ssim_data_range`, and MS-SSIM kernel parameters, and logs `smooth_l1_loss`, `ms_ssim_loss`, `weighted_smooth_l1_loss`, and `weighted_ms_ssim_loss` alongside the existing VAE loss components.
 
 ## Image Callbacks
 
