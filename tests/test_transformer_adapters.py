@@ -3,6 +3,7 @@
 Tests for ModelOutputAdapter (Phase 1).
 All tests run on CPU with random tensors – no pretrained weights needed.
 """
+
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +13,6 @@ import torch.nn as nn
 from pytorch_segmentation_models_trainer.custom_models.transformer_adapters import (
     ModelOutputAdapter,
 )
-
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -29,12 +29,14 @@ def _random_output(h=H, w=W):
 
 class _TensorModel(nn.Module):
     """Returns a plain tensor."""
+
     def forward(self, x):
         return _random_output()
 
 
 class _DictOutModel(nn.Module):
     """Returns a dict with a configurable key."""
+
     def __init__(self, key="logits"):
         super().__init__()
         self.key = key
@@ -45,18 +47,21 @@ class _DictOutModel(nn.Module):
 
 class _DataclassModel(nn.Module):
     """Returns a NamedTuple/dataclass-like object with .logits."""
+
     def forward(self, x):
         return SimpleNamespace(logits=_random_output())
 
 
 class _TupleModel(nn.Module):
     """Returns a tuple (tensor, aux)."""
+
     def forward(self, x):
         return (_random_output(), torch.zeros(1))
 
 
 class _LowResModel(nn.Module):
     """Returns logits at 1/4 resolution (e.g. Segformer)."""
+
     def forward(self, x):
         h, w = x.shape[-2] // 4, x.shape[-1] // 4
         return _random_output(h, w)
@@ -64,11 +69,13 @@ class _LowResModel(nn.Module):
 
 class _ListModel(nn.Module):
     """Returns a list of tensors (unsupported raw output)."""
+
     def forward(self, x):
         return [_random_output(), _random_output()]
 
 
 # ─── Tests ───────────────────────────────────────────────────────────────────
+
 
 class TestModelOutputAdapterPassthrough:
     def test_plain_tensor_passthrough(self):
@@ -80,9 +87,11 @@ class TestModelOutputAdapterPassthrough:
     def test_plain_tensor_is_not_copied(self):
         """When output is already correct, the same storage should be returned."""
         inner_out = _random_output()
+
         class _FixedModel(nn.Module):
             def forward(self, x):
                 return inner_out
+
         adapter = ModelOutputAdapter(model=_FixedModel(), output_size=None)
         out = adapter(_random_input())
         assert out.data_ptr() == inner_out.data_ptr()
@@ -127,6 +136,7 @@ class TestModelOutputAdapterDictOutputs:
         class _WeirdDictModel(nn.Module):
             def forward(self, x):
                 return {"unknown_key": _random_output()}
+
         adapter = ModelOutputAdapter(model=_WeirdDictModel(), output_size=None)
         with pytest.raises(KeyError):
             adapter(_random_input())
@@ -146,6 +156,15 @@ class TestModelOutputAdapterTupleOutput:
         out = adapter(_random_input())
         assert isinstance(out, torch.Tensor)
         assert out.shape[-2:] == (H, W)
+
+    def test_tuple_first_element_must_be_tensor(self):
+        class _BadTupleModel(nn.Module):
+            def forward(self, x):
+                return ("not-a-tensor", torch.zeros(1))
+
+        adapter = ModelOutputAdapter(model=_BadTupleModel(), output_size=None)
+        with pytest.raises(TypeError, match="first element"):
+            adapter(_random_input())
 
 
 class TestModelOutputAdapterUpsampling:
@@ -180,6 +199,7 @@ class TestModelOutputAdapterErrors:
         class _BadModel(nn.Module):
             def forward(self, x):
                 return 42  # int – unsupported
+
         adapter = ModelOutputAdapter(model=_BadModel(), output_size=None)
         with pytest.raises(TypeError, match="unsupported output type"):
             adapter(_random_input())

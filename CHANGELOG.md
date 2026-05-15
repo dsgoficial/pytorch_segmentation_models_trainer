@@ -3,6 +3,7 @@
 ## CI / Coverage
 
 - Fixed `.codecov.yml` by moving `after_n_builds` under `codecov.notify`, matching Codecov's current schema so repository YAML validation succeeds.
+- Added focused coverage tests so `model_loader/domain_adaptation_model.py`, `model_loader/variational_autoencoder_model.py`, `custom_models/moe_layers.py`, `custom_models/transformer_adapters.py`, and `custom_models/upernet_moe.py` report 100% line coverage in the fast unit suite.
 
 ## Autoencoder Latent Metrics
 

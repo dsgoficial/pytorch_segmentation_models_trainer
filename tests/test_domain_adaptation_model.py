@@ -10,12 +10,13 @@ Covers:
 - validation_step runs without error
 - _get_val_domain_name mapping
 """
+
 from __future__ import annotations
 
 import os
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 import torch
@@ -30,7 +31,6 @@ from pytorch_segmentation_models_trainer.domain_adaptation.base_method import (
 from pytorch_segmentation_models_trainer.model_loader.domain_adaptation_model import (
     DomainAdaptationModel,
 )
-
 
 # ---------------------------------------------------------------------------
 # Minimal helpers
@@ -94,6 +94,12 @@ class _DummyMethodWithExtras(BaseDomainAdaptationMethod):
         return [{"params": list(self.discriminator.parameters()), "lr": 1e-4}]
 
 
+class _DummyFeatureMethod(_DummyMethod):
+    """Dummy DA method that requests feature maps from the segmentation model."""
+
+    requires_features = True
+
+
 class _DummyDataset(Dataset):
     """Returns image + mask dicts of shape (3,8,8) and (8,8).
 
@@ -113,6 +119,20 @@ class _DummyDataset(Dataset):
             "image": torch.randn(3, 8, 8),
             "mask": torch.randint(0, self.num_classes, (8, 8)),
         }
+
+
+class _DummyCollateDataset(_DummyDataset):
+    """Dataset with a custom collate function for dataloader branch coverage."""
+
+    def collate_fn(self, batch):
+        return {"count": len(batch), "items": batch}
+
+
+class _LambdaSchedule:
+    """Minimal lambda schedule used to exercise epoch-based DA weights."""
+
+    def get_lambda(self, epoch, max_epochs):
+        return float(epoch + max_epochs)
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +317,67 @@ class TestDomainAdaptationModelCheckpointLoading:
         # Should not raise
         da_model._load_pretrained_weights(target_model, ckpt_cfg)
 
+    def test_non_strict_loading_logs_unexpected_keys(self, tmp_path):
+        """Unexpected checkpoint keys are surfaced when strict loading is disabled."""
+        ckpt_path = str(tmp_path / "unexpected.pt")
+        torch.save({"unexpected.weight": torch.ones(1)}, ckpt_path)
+        ckpt_cfg = OmegaConf.create(
+            {
+                "path": ckpt_path,
+                "source_format": "pytorch",
+                "strict_loading": False,
+            }
+        )
+
+        da_model = DomainAdaptationModel.__new__(DomainAdaptationModel)
+        da_model.cfg = _make_cfg()
+        with patch(
+            "pytorch_segmentation_models_trainer.model_loader.domain_adaptation_model.logger"
+        ) as logger_mock:
+            da_model._load_pretrained_weights(_DummySegModel(), ckpt_cfg)
+
+        assert logger_mock.warning.call_count == 2
+
+    def test_get_model_returns_parent_model_without_domain_adaptation_cfg(self):
+        """get_model delegates to the parent and skips warm-start when DA config is absent."""
+        da_model = DomainAdaptationModel.__new__(DomainAdaptationModel)
+        da_model.cfg = OmegaConf.create({"model": {"_target_": "unused"}})
+        base_model = _DummySegModel()
+
+        with patch(
+            "pytorch_segmentation_models_trainer.model_loader.model.Model.get_model",
+            return_value=base_model,
+        ):
+            assert DomainAdaptationModel.get_model(da_model) is base_model
+
+    def test_get_model_loads_pretrained_checkpoint_when_configured(self, tmp_path):
+        """Configured warm-start checkpoint is loaded during model construction."""
+        ckpt_path = str(tmp_path / "model.pt")
+        torch.save(_DummySegModel().state_dict(), ckpt_path)
+        cfg = _make_cfg(
+            with_pretrained_ckpt={
+                "path": ckpt_path,
+                "source_format": "pytorch",
+                "strict_loading": True,
+            }
+        )
+        da_model = DomainAdaptationModel.__new__(DomainAdaptationModel)
+        da_model.cfg = cfg
+        base_model = _DummySegModel()
+
+        with (
+            patch(
+                "pytorch_segmentation_models_trainer.model_loader.model.Model.get_model",
+                return_value=base_model,
+            ),
+            patch.object(
+                DomainAdaptationModel, "_load_pretrained_weights"
+            ) as load_mock,
+        ):
+            assert DomainAdaptationModel.get_model(da_model) is base_model
+
+        load_mock.assert_called_once()
+
 
 class TestDomainAdaptationModelDataLoaders:
     def _build_model(self, **cfg_kwargs):
@@ -333,6 +414,33 @@ class TestDomainAdaptationModelDataLoaders:
         loader = model.val_dataloader()
         assert isinstance(loader, CombinedLoader)
 
+    def test_val_dataloader_without_validation_sets_returns_empty_loader(self):
+        from torch.utils.data import DataLoader
+
+        model = self._build_model()
+        loader = model.val_dataloader()
+        assert isinstance(loader, DataLoader)
+        assert list(loader) == []
+
+    def test_make_dataloader_uses_safe_defaults_and_prefetch_for_workers(self):
+        model = self._build_model()
+        loader = model._make_dataloader(_DummyDataset(size=2), None)
+
+        assert loader.batch_size == 8
+        assert loader.num_workers == 4
+        assert loader.prefetch_factor == 2
+        assert loader.drop_last is False
+
+    def test_make_dataloader_uses_custom_collate_function(self):
+        model = self._build_model()
+        loader = model._make_dataloader(
+            _DummyCollateDataset(size=2),
+            OmegaConf.create({"batch_size": 2, "num_workers": 0}),
+        )
+
+        batch = next(iter(loader))
+        assert batch["count"] == 2
+
 
 class TestDomainAdaptationModelOptimizers:
     def test_configure_optimizers_returns_one_optimizer_by_default(self):
@@ -354,6 +462,25 @@ class TestDomainAdaptationModelOptimizers:
         # The extra group should have lr=1e-4
         lrs = [pg["lr"] for pg in optimizer.param_groups]
         assert 1e-4 in lrs
+
+    def test_build_scheduler_list_instantiates_configured_schedulers(self):
+        cfg = _make_cfg(method_target="tests.test_domain_adaptation_model._DummyMethod")
+        cfg.scheduler_list = [
+            {
+                "interval": "epoch",
+                "scheduler": {
+                    "_target_": "torch.optim.lr_scheduler.StepLR",
+                    "step_size": 1,
+                    "gamma": 0.5,
+                },
+            }
+        ]
+        model = DomainAdaptationModel(cfg)
+        optimizers, schedulers = model.configure_optimizers()
+
+        assert len(optimizers) == 1
+        assert len(schedulers) == 1
+        assert schedulers[0]["interval"] == "epoch"
 
 
 class TestDomainAdaptationModelTrainingStep:
@@ -390,6 +517,92 @@ class TestDomainAdaptationModelTrainingStep:
         loss = model.training_step(batch, 0)
         assert torch.isfinite(loss)
 
+    def test_training_step_logs_individual_losses_and_uses_current_lambda(self):
+        cfg = _make_cfg(method_target="tests.test_domain_adaptation_model._DummyMethod")
+        model = DomainAdaptationModel(cfg)
+        model.method._current_lambda = 0.25
+        model.trainer = MagicMock(max_epochs=10)
+        model.log = MagicMock()
+        seg_loss = torch.tensor(2.0, requires_grad=True)
+
+        with patch.object(
+            model,
+            "_compute_loss",
+            return_value=(seg_loss, {"ce": torch.tensor(2.0)}, {}),
+        ):
+            loss = model.training_step(self._make_batch(), 0)
+
+        assert loss.shape == torch.Size([])
+        logged_names = [call.args[0] for call in model.log.call_args_list]
+        assert "losses/train_ce" in logged_names
+
+    def test_get_lambda_da_uses_schedule_when_no_current_lambda(self):
+        cfg = _make_cfg(method_target="tests.test_domain_adaptation_model._DummyMethod")
+        model = DomainAdaptationModel(cfg)
+        model.method.lambda_schedule = _LambdaSchedule()
+        model.trainer = MagicMock(max_epochs=7)
+
+        with patch.object(
+            DomainAdaptationModel, "current_epoch", new_callable=PropertyMock
+        ) as current_epoch:
+            current_epoch.return_value = 3
+            assert model._get_lambda_da() == 10.0
+
+    def test_get_lambda_da_uses_schedule_default_max_epochs_without_trainer(self):
+        cfg = _make_cfg(method_target="tests.test_domain_adaptation_model._DummyMethod")
+        model = DomainAdaptationModel(cfg)
+        model.method.lambda_schedule = _LambdaSchedule()
+
+        with patch.object(
+            DomainAdaptationModel, "trainer", new_callable=PropertyMock
+        ) as trainer_mock:
+            trainer_mock.return_value = None
+            assert model._get_lambda_da() == 1.0
+
+
+class TestDomainAdaptationModelFeatureHooks:
+    def test_init_with_metrics_and_empty_feature_layers_warns(self):
+        cfg = _make_cfg(
+            method_target="tests.test_domain_adaptation_model._DummyFeatureMethod",
+            feature_layers=[],
+        )
+        cfg.metrics = [{"_target_": "torchmetrics.MeanMetric"}]
+
+        with patch(
+            "pytorch_segmentation_models_trainer.model_loader.domain_adaptation_model.logger"
+        ) as logger_mock:
+            model = DomainAdaptationModel(cfg)
+
+        assert hasattr(model, "train_metrics")
+        assert model._feature_hook is None
+        logger_mock.warning.assert_called()
+
+    def test_forward_with_features_clears_and_returns_hook_features(self):
+        cfg = _make_cfg(
+            method_target="tests.test_domain_adaptation_model._DummyFeatureMethod",
+            feature_layers=["encoder"],
+        )
+        model = DomainAdaptationModel(cfg)
+        images = torch.randn(2, 3, 8, 8)
+
+        output, features = model._forward_with_features(images)
+
+        assert output.shape == (2, 2, 8, 8)
+        assert "encoder" in features
+
+    def test_on_fit_end_removes_feature_hook(self):
+        cfg = _make_cfg(
+            method_target="tests.test_domain_adaptation_model._DummyFeatureMethod",
+            feature_layers=["encoder"],
+        )
+        model = DomainAdaptationModel(cfg)
+        hook = model._feature_hook
+        hook.remove = MagicMock()
+
+        model.on_fit_end()
+
+        hook.remove.assert_called_once()
+
 
 class TestDomainAdaptationModelValDomainName:
     def test_only_source_val(self):
@@ -417,3 +630,74 @@ class TestDomainAdaptationModelValDomainName:
         model = DomainAdaptationModel(cfg)
         assert model._get_val_domain_name(0) == "source"
         assert model._get_val_domain_name(1) == "target"
+
+
+class TestDomainAdaptationModelValidationStep:
+    def test_validation_step_returns_none_without_mask(self):
+        cfg = _make_cfg(method_target="tests.test_domain_adaptation_model._DummyMethod")
+        model = DomainAdaptationModel(cfg)
+
+        assert model.validation_step({"image": torch.randn(1, 3, 8, 8)}, 0) is None
+
+    def test_validation_step_squeezes_channel_mask_and_logs_individual_losses(self):
+        cfg = _make_cfg(
+            method_target="tests.test_domain_adaptation_model._DummyMethod",
+            with_source_val=True,
+        )
+        model = DomainAdaptationModel(cfg)
+        model.log = MagicMock()
+        batch = {
+            "image": torch.randn(2, 3, 8, 8),
+            "mask": torch.randint(0, 2, (2, 1, 8, 8)),
+        }
+
+        with patch.object(
+            model,
+            "_compute_loss",
+            return_value=(torch.tensor(1.0), {"ce": torch.tensor(1.0)}, {}),
+        ) as compute_loss:
+            loss = model.validation_step(batch, 0)
+
+        assert loss.shape == torch.Size([])
+        assert compute_loss.call_args.args[1].shape == (2, 8, 8)
+        logged_names = [call.args[0] for call in model.log.call_args_list]
+        assert "loss/val_source" in logged_names
+        assert "losses/val_source_ce" in logged_names
+
+
+class TestDomainAdaptationModelLifecycle:
+    def test_lifecycle_hooks_forward_to_method(self):
+        cfg = _make_cfg(method_target="tests.test_domain_adaptation_model._DummyMethod")
+        model = DomainAdaptationModel(cfg)
+        model.method.on_fit_start = MagicMock()
+        model.method.on_train_epoch_start = MagicMock()
+        model.method.on_train_batch_start = MagicMock()
+        model.method.on_train_epoch_end = MagicMock()
+        model.trainer = MagicMock(num_training_batches=9)
+
+        with patch.object(
+            DomainAdaptationModel, "current_epoch", new_callable=PropertyMock
+        ) as current_epoch:
+            current_epoch.return_value = 4
+            model.on_fit_start()
+            model.on_train_epoch_start()
+            model.on_train_batch_start({}, 3)
+            model.on_train_epoch_end()
+
+        model.method.on_fit_start.assert_called_once_with(model)
+        model.method.on_train_epoch_start.assert_called_once_with(model, 4)
+        model.method.on_train_batch_start.assert_called_once_with(model, 3, 9)
+        model.method.on_train_epoch_end.assert_called_once_with(model, 4)
+
+    def test_train_batch_start_uses_one_batch_without_trainer(self):
+        cfg = _make_cfg(method_target="tests.test_domain_adaptation_model._DummyMethod")
+        model = DomainAdaptationModel(cfg)
+        model.method.on_train_batch_start = MagicMock()
+
+        with patch.object(
+            DomainAdaptationModel, "trainer", new_callable=PropertyMock
+        ) as trainer_mock:
+            trainer_mock.return_value = None
+            model.on_train_batch_start({}, 2)
+
+        model.method.on_train_batch_start.assert_called_once_with(model, 2, 1)

@@ -28,7 +28,6 @@ from pytorch_segmentation_models_trainer.custom_models.upernet_moe import (
     UPerNetMoEDecoder,
 )
 
-
 # ----------------------------------------------------------------------
 # A. NoisyTopKRouter (v1 — token-choice)
 # ----------------------------------------------------------------------
@@ -70,9 +69,7 @@ class TestNoisyTopKRouter(unittest.TestCase):
 
     def test_different_top_k(self):
         for k in [1, 2, 4]:
-            router = NoisyTopKRouter(
-                in_channels=64, num_experts=8, top_k=k
-            )
+            router = NoisyTopKRouter(in_channels=64, num_experts=8, top_k=k)
             x = torch.randn(1, 64, 4, 4)
             w, _ = router(x)
             non_zero = (w > 0).sum(dim=1)
@@ -169,8 +166,10 @@ class TestMoEConv2dReLU(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore")
         self.moe = MoEConv2dReLU(
-            in_channels=256, out_channels=128,
-            num_experts=4, top_k=2,
+            in_channels=256,
+            out_channels=128,
+            num_experts=4,
+            top_k=2,
         )
 
     def test_output_shape(self):
@@ -193,8 +192,10 @@ class TestMoEConv2dReLU(unittest.TestCase):
     def test_fusion_block_dimensions(self):
         """Test with fusion block dimensions: 1024 -> 256."""
         moe = MoEConv2dReLU(
-            in_channels=1024, out_channels=256,
-            num_experts=8, top_k=2,
+            in_channels=1024,
+            out_channels=256,
+            num_experts=8,
+            top_k=2,
         )
         x = torch.randn(1, 1024, 16, 16)
         output, aux_loss = moe(x)
@@ -208,8 +209,10 @@ class TestMoEConv2dReLU(unittest.TestCase):
     def test_single_expert(self):
         """With top_k=1 and 1 expert, should be equivalent to a single Conv2dReLU."""
         moe = MoEConv2dReLU(
-            in_channels=64, out_channels=64,
-            num_experts=1, top_k=1,
+            in_channels=64,
+            out_channels=64,
+            num_experts=1,
+            top_k=1,
         )
         x = torch.randn(1, 64, 4, 4)
         output, aux_loss = moe(x)
@@ -217,11 +220,19 @@ class TestMoEConv2dReLU(unittest.TestCase):
 
     def test_no_shared_expert_by_default(self):
         self.assertFalse(self.moe.use_shared_expert)
-        self.assertFalse(hasattr(self.moe, 'shared_expert'))
+        self.assertFalse(hasattr(self.moe, "shared_expert"))
 
     def test_token_choice_routing_by_default(self):
         self.assertEqual(self.moe.routing, "token_choice")
         self.assertIsInstance(self.moe.router, NoisyTopKRouter)
+
+    def test_invalid_routing_raises(self):
+        with self.assertRaisesRegex(ValueError, "routing"):
+            MoEConv2dReLU(
+                in_channels=64,
+                out_channels=64,
+                routing="bad-routing",
+            )
 
 
 # ----------------------------------------------------------------------
@@ -234,9 +245,12 @@ class TestMoEConv2dReLUV2(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore")
         self.moe = MoEConv2dReLU(
-            in_channels=256, out_channels=128,
-            num_experts=6, use_shared_expert=True,
-            routing="expert_choice", capacity_factor=1.25,
+            in_channels=256,
+            out_channels=128,
+            num_experts=6,
+            use_shared_expert=True,
+            routing="expert_choice",
+            capacity_factor=1.25,
         )
 
     def test_output_shape(self):
@@ -285,9 +299,12 @@ class TestMoEConv2dReLUV2(unittest.TestCase):
     def test_fusion_block_large(self):
         """Test with ConvNeXtV2-Large fusion dimensions."""
         moe = MoEConv2dReLU(
-            in_channels=768, out_channels=256,
-            num_experts=6, use_shared_expert=True,
-            routing="expert_choice", capacity_factor=1.25,
+            in_channels=768,
+            out_channels=256,
+            num_experts=6,
+            use_shared_expert=True,
+            routing="expert_choice",
+            capacity_factor=1.25,
         )
         x = torch.randn(1, 768, 16, 16)
         output, aux_loss = moe(x)
@@ -296,8 +313,10 @@ class TestMoEConv2dReLUV2(unittest.TestCase):
 
     def test_backward_pass_v2(self):
         moe = MoEConv2dReLU(
-            in_channels=128, out_channels=64,
-            num_experts=4, use_shared_expert=True,
+            in_channels=128,
+            out_channels=64,
+            num_experts=4,
+            use_shared_expert=True,
             routing="expert_choice",
         )
         x = torch.randn(2, 128, 8, 8)
@@ -418,7 +437,7 @@ class TestUPerNetMoE(unittest.TestCase):
         loss.backward()
         has_router_grad = False
         for name, p in model.decoder.named_parameters():
-            if 'router' in name and p.requires_grad:
+            if "router" in name and p.requires_grad:
                 self.assertIsNotNone(p.grad, f"No gradient for {name}")
                 has_router_grad = True
         self.assertTrue(has_router_grad, "No router parameters found")
@@ -447,6 +466,22 @@ class TestUPerNetMoE(unittest.TestCase):
         with torch.no_grad():
             out = model(x)
         self.assertEqual(out.shape, (1, 7, 128, 128))
+
+    def test_decoder_rejects_encoder_depth_below_three(self):
+        with self.assertRaisesRegex(ValueError, "cannot be less than 3"):
+            UPerNetMoEDecoder(
+                encoder_channels=[3, 16],
+                encoder_depth=2,
+            )
+
+    def test_expert_class_affinity_empty_without_active_moe_blocks(self):
+        model = UPerNetMoE.__new__(UPerNetMoE)
+        model.num_classes = 3
+        model._get_active_moe_blocks = Mock(return_value=[])
+
+        diagnostics = model.get_expert_class_affinity(torch.zeros(1, 8, 8).long())
+
+        self.assertEqual(diagnostics, {})
 
 
 # ----------------------------------------------------------------------
@@ -513,14 +548,14 @@ class TestUPerNetMoEV2(unittest.TestCase):
         # Check router gradients flow
         has_router_grad = False
         for name, p in model.decoder.named_parameters():
-            if 'router' in name and p.requires_grad:
+            if "router" in name and p.requires_grad:
                 self.assertIsNotNone(p.grad, f"No gradient for {name}")
                 has_router_grad = True
         self.assertTrue(has_router_grad)
         # Check shared expert gradients
         has_shared_grad = False
         for name, p in model.decoder.named_parameters():
-            if 'shared_expert' in name and p.requires_grad:
+            if "shared_expert" in name and p.requires_grad:
                 self.assertIsNotNone(p.grad, f"No gradient for {name}")
                 has_shared_grad = True
         self.assertTrue(has_shared_grad)
@@ -573,7 +608,10 @@ class TestMoETrainingIntegration(unittest.TestCase):
         mock_model.last_aux_loss = torch.tensor(0.5)
 
         base_loss = torch.tensor(1.0)
-        if hasattr(mock_model, 'last_aux_loss') and mock_model.last_aux_loss is not None:
+        if (
+            hasattr(mock_model, "last_aux_loss")
+            and mock_model.last_aux_loss is not None
+        ):
             total_loss = base_loss + mock_model.last_aux_loss
         else:
             total_loss = base_loss
@@ -585,7 +623,10 @@ class TestMoETrainingIntegration(unittest.TestCase):
         mock_model = Mock(spec=[])
 
         base_loss = torch.tensor(1.0)
-        if hasattr(mock_model, 'last_aux_loss') and mock_model.last_aux_loss is not None:
+        if (
+            hasattr(mock_model, "last_aux_loss")
+            and mock_model.last_aux_loss is not None
+        ):
             total_loss = base_loss + mock_model.last_aux_loss
         else:
             total_loss = base_loss
@@ -598,7 +639,10 @@ class TestMoETrainingIntegration(unittest.TestCase):
         mock_model.last_aux_loss = None
 
         base_loss = torch.tensor(1.0)
-        if hasattr(mock_model, 'last_aux_loss') and mock_model.last_aux_loss is not None:
+        if (
+            hasattr(mock_model, "last_aux_loss")
+            and mock_model.last_aux_loss is not None
+        ):
             total_loss = base_loss + mock_model.last_aux_loss
         else:
             total_loss = base_loss
@@ -611,7 +655,10 @@ class TestMoETrainingIntegration(unittest.TestCase):
         mock_model.last_aux_loss = torch.tensor(0.0)
 
         base_loss = torch.tensor(1.0)
-        if hasattr(mock_model, 'last_aux_loss') and mock_model.last_aux_loss is not None:
+        if (
+            hasattr(mock_model, "last_aux_loss")
+            and mock_model.last_aux_loss is not None
+        ):
             total_loss = base_loss + mock_model.last_aux_loss
         else:
             total_loss = base_loss
