@@ -9,6 +9,10 @@
 - Added user documentation at `website/docs/user-guide/autoencoder_clustering_losses.md` with training protocol and metric monitoring guide.
 - Added `ClusterCentersWarmStartCallback` (`custom_callbacks/cluster_centers_warm_start_callback.py`): runs once at `on_train_start`, iterates the training dataloader, collects latent embeddings (`mu` or `z`), fits K-Means, and initialises `ClusteringAwareVAELoss.cluster_centers` before the first training epoch. No-op if `pl_module.loss_function` is not a `ClusteringAwareVAELoss`. Supports flat and spatial latents. Added corresponding `ClusterCentersWarmStartCallbackConfig` dataclass registered in Hydra ConfigStore under `callbacks/cluster_centers_warm_start`.
 
+## Training Callbacks
+
+- Added `PatienceWarmupCallback` (`custom_callbacks/training_callbacks.py`): freezes the encoder at `on_fit_start` and unfreezes it when a monitored metric stops improving for `patience` consecutive validation epochs. Works like `EarlyStopping` but for encoder unfreezing — eliminates the need to guess a fixed `warmup_epochs` value. Supports `mode="min"` (loss) or `mode="max"` (e.g. silhouette), `min_delta` threshold, and `min_epochs` guard. Calls `pl_module.set_encoder_trainable` so compatible with `Model` and `VariationalAutoencoderModel`. Added `PatienceWarmupCallbackConfig` dataclass registered in Hydra ConfigStore under `callbacks/patience_warmup`.
+
 ## CI / Coverage
 
 - Fixed `.codecov.yml` by moving `after_n_builds` under `codecov.notify`, matching Codecov's current schema so repository YAML validation succeeds.
