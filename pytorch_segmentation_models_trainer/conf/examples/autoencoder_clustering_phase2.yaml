@@ -1,0 +1,32 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Phase-2 DCEC-style fine-tuning config for clustering-aware VAE training.
+#
+# Usage: start from a pre-trained checkpoint (Phase 1, MSE-only) and fine-tune
+# with this loss.  Before training begins, call
+# ClusteringAwareVAELoss.initialize_centers_from_embeddings() to warm-start
+# the cluster centers from a K-Means fit on the pre-trained encoder output.
+#
+# References:
+#   Xie et al., "Unsupervised Deep Embedding for Clustering Analysis", ICML 2016
+#   Guo et al., "Deep Convolutional Embedded Clustering", IJCAI 2017
+#   Wen et al., "A Discriminative Feature Learning Approach ...", ECCV 2016
+# ──────────────────────────────────────────────────────────────────────────────
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.autoencoder_clustering_losses.ClusteringAwareVAELoss
+
+  # Clustering parameters
+  n_clusters: 8          # number of target clusters K
+  embedding_dim: 128     # must match encoder latent dim D (after reduction)
+  gamma: 0.1             # weight for DEC soft-assignment KL loss
+  delta: 0.01            # weight for center loss (intra-cluster compactness)
+  vae_latent: mu         # "mu" (deterministic) or "z" (stochastic)
+  latent_reduction: adaptive_avg_pool  # "adaptive_avg_pool" or "flatten"
+  alpha: 1.0             # Student-t degrees of freedom for soft assignment
+
+  # VAE reconstruction loss (identical to VariationalAutoencoderLoss)
+  reconstruction_loss: mse
+  reconstruction_weight: 1.0
+  beta: 0.0001           # small KL weight — avoids destroying PSNR
+  free_bits: 0.1
+  kl_balance: false

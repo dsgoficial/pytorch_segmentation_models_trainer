@@ -781,3 +781,144 @@ class FinalMetricsCallback(pl.callbacks.Callback):
         with open(path, "w") as f:
             json.dump(existing, f, indent=2)
         logger.info("Test metrics merged into %s", path)
+
+
+class PatienceWarmupCallback(pl.callbacks.Callback):
+    """Freeze the encoder until a monitored metric stops improving.
+
+    Works like ``EarlyStopping`` but instead of stopping training it unfreezes
+    the encoder when no improvement is detected.  This is preferable to a
+    fixed ``warmup_epochs`` because the decoder converges at different speeds
+    depending on architecture and data.
+
+    On ``on_fit_start`` the encoder is frozen via
+    ``pl_module.set_encoder_trainable(trainable=False)``.  After each
+    validation epoch the monitored metric is compared to the best seen so far.
+    If it does not improve by at least ``min_delta`` for ``patience``
+    consecutive epochs (and ``min_epochs`` have passed), the encoder is
+    unfrozen and the callback becomes a no-op for the rest of training.
+
+    Args:
+        monitor: Metric key to watch.  Must appear in
+            ``trainer.callback_metrics`` after each validation epoch.
+        patience: Number of epochs without improvement before unfreezing.
+            Must be ≥ 1.
+        min_delta: Minimum change in monitored metric to count as improvement.
+            Must be ≥ 0.  Default ``1e-4``.
+        mode: ``"min"`` (lower is better, e.g. loss) or ``"max"`` (higher is
+            better, e.g. silhouette score).
+        min_epochs: Minimum number of epochs to keep the encoder frozen,
+            regardless of patience.  Default ``1``.
+        **kwargs: Ignored extra Hydra arguments.
+
+    Returns:
+        ``None``.  Mutates ``pl_module`` in-place by toggling
+        ``requires_grad`` on encoder parameters.
+
+    Example YAML:
+        callbacks:
+          - _target_: pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks.PatienceWarmupCallback
+            monitor: val/reconstruction_loss
+            patience: 5
+            min_delta: 0.001
+            mode: min
+            min_epochs: 3
+    """
+
+    def __init__(
+        self,
+        monitor: str,
+        patience: int = 5,
+        min_delta: float = 1e-4,
+        mode: str = "min",
+        min_epochs: int = 0,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+        if mode not in ("min", "max"):
+            raise ValueError(f"mode must be 'min' or 'max', got {mode!r}.")
+        if patience < 1:
+            raise ValueError(f"patience must be >= 1, got {patience}.")
+        if min_delta < 0:
+            raise ValueError(f"min_delta must be >= 0, got {min_delta}.")
+        self.monitor = monitor
+        self.patience = patience
+        self.min_delta = min_delta
+        self.mode = mode
+        self.min_epochs = min_epochs
+        self._best = None
+        self._wait = 0
+        self._warmed_up = False
+
+    def on_fit_start(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    ) -> None:
+        """Freeze the encoder at the start of training.
+
+        Args:
+            trainer: Lightning trainer.
+            pl_module: The LightningModule being trained.
+
+        Returns:
+            ``None``.
+        """
+        if not self._warmed_up:
+            pl_module.set_encoder_trainable(trainable=False)
+
+    def on_validation_epoch_end(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    ) -> None:
+        """Check metric and unfreeze encoder when patience is exhausted.
+
+        Args:
+            trainer: Lightning trainer (provides ``callback_metrics`` and
+                ``current_epoch``).
+            pl_module: The LightningModule being trained.
+
+        Returns:
+            ``None``.
+        """
+        if self._warmed_up:
+            return
+        if trainer.current_epoch < self.min_epochs:
+            return
+
+        current = trainer.callback_metrics.get(self.monitor)
+        if current is None:
+            return
+        current = float(current)
+
+        if self._best is None:
+            self._best = current
+            return
+
+        improved = (
+            current < self._best - self.min_delta
+            if self.mode == "min"
+            else current > self._best + self.min_delta
+        )
+
+        if improved:
+            self._best = current
+            self._wait = 0
+        else:
+            self._wait += 1
+
+        if self._wait >= self.patience:
+            logger.info(
+                "PatienceWarmupCallback: no improvement in '%s' for %d epochs. "
+                "Unfreezing encoder at epoch %d.",
+                self.monitor,
+                self.patience,
+                trainer.current_epoch,
+            )
+            pl_module.set_encoder_trainable(trainable=True)
+            pl_module.log(
+                "warmup/unfrozen_epoch",
+                float(trainer.current_epoch),
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
+                sync_dist=True,
+            )
+            self._warmed_up = True

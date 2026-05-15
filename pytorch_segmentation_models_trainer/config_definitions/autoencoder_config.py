@@ -138,6 +138,55 @@ class AutoencoderLatentClusteringCallbackConfig:
 
 
 @dataclass
+class PatienceWarmupCallbackConfig:
+    """Configuration for ``PatienceWarmupCallback``.
+
+    Example YAML:
+        callbacks:
+          - _target_: pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks.PatienceWarmupCallback
+            monitor: val/reconstruction_loss
+            patience: 5
+            min_delta: 0.001
+            mode: min
+            min_epochs: 3
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_callbacks"
+        ".training_callbacks.PatienceWarmupCallback"
+    )
+    monitor: str = "val/reconstruction_loss"
+    patience: int = 5
+    min_delta: float = 1e-4
+    mode: str = "min"
+    min_epochs: int = 0
+
+
+@dataclass
+class ClusterCentersWarmStartCallbackConfig:
+    """Configuration for ``ClusterCentersWarmStartCallback``.
+
+    Example YAML:
+        callbacks:
+          - _target_: pytorch_segmentation_models_trainer.custom_callbacks.ClusterCentersWarmStartCallback
+            max_samples: 4096
+            image_key: image
+            vae_latent: mu
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_callbacks"
+        ".ClusterCentersWarmStartCallback"
+    )
+    max_samples: int = 4096
+    image_key: str = "image"
+    vae_latent: str = "mu"
+    kmeans_max_iter: int = 100
+    kmeans_batch_size: int = 1024
+    random_state: Optional[int] = None
+
+
+@dataclass
 class KLAnnealingCallbackConfig:
     """Configuration for ``KLAnnealingCallback``.
 
@@ -190,4 +239,14 @@ cs.store(
     group="callbacks",
     name="kl_annealing",
     node=KLAnnealingCallbackConfig,
+)
+cs.store(
+    group="callbacks",
+    name="cluster_centers_warm_start",
+    node=ClusterCentersWarmStartCallbackConfig,
+)
+cs.store(
+    group="callbacks",
+    name="patience_warmup",
+    node=PatienceWarmupCallbackConfig,
 )
