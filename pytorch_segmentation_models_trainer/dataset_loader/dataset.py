@@ -394,6 +394,44 @@ class SegmentationDataset(AbstractDataset):
 logger = logging.getLogger(__name__)
 
 
+class FullImageSegmentationDataset(SegmentationDataset):
+    """Full-image segmentation dataset for sliding-window test evaluation.
+
+    Identical to :class:`SegmentationDataset` but also returns the source
+    image path under the ``"image_path"`` key so that ``Model.test_step``
+    can save predictions geo-referenced to the original raster.
+
+    The ``augmentation_list`` **must not** include random spatial crops —
+    the entire image is returned as-is.  Normalisation transforms are fine.
+
+    ``batch_size`` must be 1 when images have variable spatial dimensions.
+
+    Args:
+        All arguments are forwarded to :class:`SegmentationDataset`.
+
+    YAML example::
+
+        test_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.FullImageSegmentationDataset
+          input_csv_path: /data/test.csv
+          augmentation_list:
+            - _target_: albumentations.Normalize
+              mean: [0.485, 0.456, 0.406]
+              std:  [0.229, 0.224, 0.225]
+            - _target_: albumentations.pytorch.ToTensorV2
+          data_loader:
+            num_workers: 4
+            pin_memory: true
+    """
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        """Returns dataset item with ``image_path`` key added."""
+        result = super().__getitem__(idx)
+        real_idx = idx % self.len
+        result["image_path"] = str(self.get_path(real_idx, key=self.image_key))
+        return result
+
+
 class SegmentationDatasetFromFolder(SegmentationDataset):
     """Dataset de segmentação que descobre pares imagem/máscara recursivamente a partir
     de duas pastas raiz, sem necessitar de um arquivo CSV em disco.

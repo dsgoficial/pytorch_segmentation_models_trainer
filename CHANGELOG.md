@@ -1,5 +1,12 @@
 # Unreleased
 
+## Sliding-Window Full-Image Test Evaluation
+
+- Added `SlidingWindowCore` (`tools/inference/sliding_window.py`): pure tensor-in / tensor-out sliding-window inference engine using `pytorch_toolbelt` `ImageSlicer`/`TileMerger`. Supports three tile blending modes (`mean`, `pyramid`, `gaussian`), TTA with all D4 dihedral augmentations (or any subset), MC Dropout with `n_mc_samples` stochastic passes, and all four combinations of those modes. Returns a `SlidingWindowOutput` dataclass with `prediction`, optional `tta_uncertainty` (per-pixel std across TTA passes), and optional `mc_uncertainty` (per-pixel entropy or mutual information from MC Dropout).
+- Added `FullImageSegmentationDataset` (`dataset_loader/dataset.py`): subclass of `SegmentationDataset` that appends an `"image_path"` key to each sample so `Model.test_step` can georeference prediction output back to the source raster. Designed for use with `batch_size=1` when images have variable spatial dimensions.
+- Extended `Model` (`model_loader/model.py`) with sliding-window test mode: set `use_sliding_window_test: true` in the model config to activate full-image inference during `trainer.test()`. New methods `_test_step_sliding_window`, `_build_sw_core`, and `_save_test_prediction` handle per-image inference, lazy `SlidingWindowCore` construction from `cfg.sliding_window_test`, and optional GeoTIFF export via `rasterio`. Metrics now use `torchmetrics.update()` per step and `compute()` in `on_test_epoch_end` so IoU/F1 is computed over complete images rather than averaged over tiles — correct for DDP as well.
+- Added `SlidingWindowTestConfig` dataclass (`config_definitions/sliding_window_test_config.py`) with Hydra `ConfigStore` registration under group `sliding_window_test/default`. Covers all `SlidingWindowCore` parameters plus `output_dir` for GeoTIFF export.
+
 ## Training Callbacks
 
 - Added `FinalMetricsCallback`: saves all epoch-averaged metrics and losses from the last training epoch to a JSON file via `trainer.callback_metrics`. Relative `output_path` values resolve against `trainer.log_dir` so the file lands alongside TensorBoard/CSV logs. A second hook (`on_test_end`) merges test-set metrics into the same file without overwriting train/val entries. Safe for multi-GPU training via `@rank_zero_only`. Exported from `custom_callbacks` and usable as a Hydra callback with `_target_: pytorch_segmentation_models_trainer.custom_callbacks.FinalMetricsCallback`.

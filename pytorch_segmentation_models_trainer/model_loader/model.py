@@ -1138,7 +1138,18 @@ class Model(pl.LightningModule):
         )
 
     def test_step(self, batch, batch_idx):
-        """Test step — runs once after training via trainer.test()."""
+        """Test step — runs once after training via trainer.test().
+
+        When ``cfg.use_sliding_window_test: true`` the step delegates to
+        :meth:`_test_step_sliding_window` which performs full-image inference
+        with :class:`~pytorch_segmentation_models_trainer.tools.inference.sliding_window.SlidingWindowCore`
+        and accumulates metrics via ``update()`` for epoch-level aggregation in
+        :meth:`on_test_epoch_end`.  Otherwise the original patch-based behaviour
+        is preserved unchanged.
+        """
+        if getattr(self.cfg, "use_sliding_window_test", False):
+            return self._test_step_sliding_window(batch, batch_idx)
+
         images, masks = self._unpack_batch(batch)
         if self.gpu_test_transform is not None:
             images = self.gpu_test_transform(images)
@@ -1194,6 +1205,188 @@ class Model(pl.LightningModule):
                 )
 
         return loss
+
+    def _test_step_sliding_window(self, batch, batch_idx):
+        """Full-image sliding-window test step.
+
+        Processes each image in the batch independently through
+        :class:`~pytorch_segmentation_models_trainer.tools.inference.sliding_window.SlidingWindowCore`.
+        Metrics are accumulated via ``update()``; :meth:`on_test_epoch_end`
+        calls ``compute()`` so metrics are computed over complete images, not
+        averaged over tiles.
+
+        Args:
+            batch: Dict containing ``image``, ``mask``, and optionally
+                ``image_path`` (from
+                :class:`~pytorch_segmentation_models_trainer.dataset_loader.dataset.FullImageSegmentationDataset`).
+            batch_idx: Index of the current batch (unused but required by Lightning).
+
+        Returns:
+            Mean loss over images in the batch.
+        """
+        images, masks = self._unpack_batch(batch)
+        if self.gpu_test_transform is not None:
+            images = self.gpu_test_transform(images)
+        masks = masks.long()
+
+        image_paths = (
+            list(batch.get("image_path", [])) if isinstance(batch, dict) else []
+        )
+
+        sw_core = self._build_sw_core()
+        total_loss = torch.tensor(0.0, device=self.device, dtype=torch.float32)
+
+        for i in range(images.shape[0]):
+            sw_output = sw_core.predict(images[i])  # [1, C, H, W]
+            predicted_masks = sw_output.prediction  # [1, C, H, W]
+            mask_i = masks[i].unsqueeze(0)  # [1, H, W]
+
+            loss, _, _ = self._compute_loss(predicted_masks, mask_i)
+            total_loss = total_loss + loss
+
+            if hasattr(self, "test_metrics"):
+                preds_for_metrics = self._prepare_preds_for_metrics(predicted_masks)
+                if preds_for_metrics is not None:
+                    self.test_metrics.update(preds_for_metrics, mask_i)
+
+            if i < len(image_paths) and image_paths[i] is not None:
+                self._save_test_prediction(sw_output, image_paths[i])
+
+        mean_loss = total_loss / images.shape[0]
+        self.log(
+            "loss/test",
+            mean_loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+        return mean_loss
+
+    def on_test_epoch_end(self) -> None:
+        """Compute and log accumulated test metrics after sliding-window evaluation.
+
+        Only active when ``cfg.use_sliding_window_test: true``.  In that mode,
+        :meth:`_test_step_sliding_window` calls ``test_metrics.update()`` per
+        image so that torchmetrics accumulates numerators/denominators across
+        the entire dataset before a single ``compute()`` here.  This yields
+        correct IoU/F1 over full images rather than an average of per-tile values.
+
+        In DDP, ``compute()`` automatically synchronises across ranks.
+        """
+        if not getattr(self.cfg, "use_sliding_window_test", False):
+            return
+        if not hasattr(self, "test_metrics"):
+            return
+        metrics = self.test_metrics.compute()
+        self.log_dict(metrics, sync_dist=True)
+        self.test_metrics.reset()
+
+    # ------------------------------------------------------------------
+    # Sliding-window helpers
+    # ------------------------------------------------------------------
+
+    def _build_sw_core(self):
+        """Lazily build and cache a :class:`~pytorch_segmentation_models_trainer.tools.inference.sliding_window.SlidingWindowCore`.
+
+        Reads parameters from ``cfg.sliding_window_test``.  The instance is
+        cached on ``self._sw_core`` so it is built only once per test run.
+
+        Returns:
+            :class:`~pytorch_segmentation_models_trainer.tools.inference.sliding_window.SlidingWindowCore`
+        """
+        if hasattr(self, "_sw_core") and self._sw_core is not None:
+            return self._sw_core
+
+        from pytorch_segmentation_models_trainer.tools.inference.sliding_window import (
+            SlidingWindowCore,
+        )
+
+        sw_cfg = self.cfg.sliding_window_test
+        tta_augmentations = (
+            list(sw_cfg.tta_augmentations)
+            if hasattr(sw_cfg, "tta_augmentations") and sw_cfg.tta_augmentations
+            else []
+        )
+        self._sw_core = SlidingWindowCore(
+            model_fn=self,
+            device=self.device,
+            tile_size=tuple(sw_cfg.tile_size),
+            tile_step=tuple(sw_cfg.tile_step),
+            num_classes=sw_cfg.get("num_classes", 1),
+            batch_size=sw_cfg.get("batch_size", 4),
+            tile_weight=sw_cfg.get("tile_weight", "mean"),
+            tta_augmentations=tta_augmentations,
+            compute_tta_uncertainty=sw_cfg.get("compute_tta_uncertainty", False),
+            use_mc_dropout=sw_cfg.get("use_mc_dropout", False),
+            n_mc_samples=sw_cfg.get("n_mc_samples", 10),
+            compute_mc_uncertainty=sw_cfg.get("compute_mc_uncertainty", False),
+            uncertainty_mode=sw_cfg.get("uncertainty_mode", "entropy"),
+        )
+        return self._sw_core
+
+    def _save_test_prediction(self, sw_output, image_path: str) -> None:
+        """Save prediction and uncertainty maps as GeoTIFF files.
+
+        Reads the CRS and transform from *image_path* (via ``rasterio``) so
+        the output GeoTIFFs are georeferenced.  Silently skips when
+        ``rasterio`` is not installed or when ``cfg.sliding_window_test.output_dir``
+        is not set.
+
+        Args:
+            sw_output: :class:`~pytorch_segmentation_models_trainer.tools.inference.sliding_window.SlidingWindowOutput`
+                containing ``prediction [1, C, H, W]`` and optional uncertainty maps.
+            image_path: Absolute path of the source image (used for profile).
+
+        Files written (``{output_dir}/{stem}_*.tif``):
+            * ``_prediction.tif`` — class logits / probabilities, one band per class.
+            * ``_tta_uncertainty.tif`` — TTA std map (if requested and available).
+            * ``_mc_uncertainty.tif`` — MC Dropout uncertainty map (if requested).
+        """
+        try:
+            import rasterio  # noqa: F401
+        except ImportError:
+            logger.warning("rasterio not installed; skipping GeoTIFF export.")
+            return
+
+        output_dir = self.cfg.sliding_window_test.get("output_dir", None)
+        if output_dir is None:
+            return
+
+        from pathlib import Path
+        import numpy as np
+        import rasterio
+
+        stem = Path(image_path).stem
+        out_dir = Path(output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        with rasterio.open(image_path) as src:
+            profile = src.profile.copy()
+
+        pred = sw_output.prediction.squeeze(0)  # [C, H, W]
+        num_classes = pred.shape[0]
+        profile.update(driver="GTiff", dtype="float32", count=num_classes, nodata=None)
+
+        pred_path = out_dir / f"{stem}_prediction.tif"
+        with rasterio.open(pred_path, "w", **profile) as dst:
+            dst.write(pred.cpu().numpy().astype(np.float32))
+
+        if sw_output.tta_uncertainty is not None:
+            unc = sw_output.tta_uncertainty.squeeze(0)  # [1, H, W]
+            profile.update(count=1)
+            with rasterio.open(
+                out_dir / f"{stem}_tta_uncertainty.tif", "w", **profile
+            ) as dst:
+                dst.write(unc.cpu().numpy().astype(np.float32))
+
+        if sw_output.mc_uncertainty is not None:
+            unc = sw_output.mc_uncertainty.squeeze(0)  # [1, H, W]
+            profile.update(count=1)
+            with rasterio.open(
+                out_dir / f"{stem}_mc_uncertainty.tif", "w", **profile
+            ) as dst:
+                dst.write(unc.cpu().numpy().astype(np.float32))
 
     def check_if_should_normalize(self):
         self.should_normalize = False
