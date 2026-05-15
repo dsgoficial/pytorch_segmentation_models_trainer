@@ -138,6 +138,30 @@ class AutoencoderLatentClusteringCallbackConfig:
 
 
 @dataclass
+class ClusterCentersWarmStartCallbackConfig:
+    """Configuration for ``ClusterCentersWarmStartCallback``.
+
+    Example YAML:
+        callbacks:
+          - _target_: pytorch_segmentation_models_trainer.custom_callbacks.ClusterCentersWarmStartCallback
+            max_samples: 4096
+            image_key: image
+            vae_latent: mu
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_callbacks"
+        ".ClusterCentersWarmStartCallback"
+    )
+    max_samples: int = 4096
+    image_key: str = "image"
+    vae_latent: str = "mu"
+    kmeans_max_iter: int = 100
+    kmeans_batch_size: int = 1024
+    random_state: Optional[int] = None
+
+
+@dataclass
 class KLAnnealingCallbackConfig:
     """Configuration for ``KLAnnealingCallback``.
 
@@ -190,4 +214,9 @@ cs.store(
     group="callbacks",
     name="kl_annealing",
     node=KLAnnealingCallbackConfig,
+)
+cs.store(
+    group="callbacks",
+    name="cluster_centers_warm_start",
+    node=ClusterCentersWarmStartCallbackConfig,
 )

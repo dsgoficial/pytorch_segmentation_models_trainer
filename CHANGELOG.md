@@ -1,5 +1,14 @@
 # Unreleased
 
+## Autoencoder Clustering Losses
+
+- Added `DECSoftAssignmentLoss` (`custom_losses/autoencoder_clustering_losses.py`): soft-assignment KL loss (DEC, Xie et al. ICML 2016) that pushes the encoder toward confident, well-separated cluster assignments via a Student-t kernel and a sharpened target distribution P. Includes `initialize_centers` for K-Means warm-start.
+- Added `CenterLoss`: intra-cluster compactness loss (Wen et al. ECCV 2016) that minimises the mean squared distance from each embedding to its nearest cluster center, with a configurable `lambda_center` weight.
+- Added `ClusteringAwareVAELoss`: composite VAE loss combining reconstruction, KL, DEC, and center losses in a single module (`L = L_recon + β·L_KL + γ·L_DEC + δ·L_center`). Owns a single shared `cluster_centers` parameter to avoid duplicate optimizer updates. Provides `initialize_centers_from_embeddings` for Phase-2 DCEC-style fine-tuning: pre-train with MSE-only (Phase 1) then fine-tune with this loss to maintain PSNR while improving latent cluster structure. Supports both flat `(B, D)` and spatial `(B, C, H, W)` latents via `latent_reduction`.
+- Added `conf/examples/autoencoder_clustering_phase2.yaml` with recommended hyperparameters for Phase-2 training.
+- Added user documentation at `website/docs/user-guide/autoencoder_clustering_losses.md` with training protocol and metric monitoring guide.
+- Added `ClusterCentersWarmStartCallback` (`custom_callbacks/cluster_centers_warm_start_callback.py`): runs once at `on_train_start`, iterates the training dataloader, collects latent embeddings (`mu` or `z`), fits K-Means, and initialises `ClusteringAwareVAELoss.cluster_centers` before the first training epoch. No-op if `pl_module.loss_function` is not a `ClusteringAwareVAELoss`. Supports flat and spatial latents. Added corresponding `ClusterCentersWarmStartCallbackConfig` dataclass registered in Hydra ConfigStore under `callbacks/cluster_centers_warm_start`.
+
 ## CI / Coverage
 
 - Fixed `.codecov.yml` by moving `after_n_builds` under `codecov.notify`, matching Codecov's current schema so repository YAML validation succeeds.
