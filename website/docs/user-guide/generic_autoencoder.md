@@ -210,6 +210,52 @@ model:
 See `conf/examples/autoencoder_decoder_upsample_modes.yaml` for a complete
 training config comparing all three modes.
 
+## Latent Clustering Metrics
+
+`AutoencoderModel` and `VariationalAutoencoderModel` can log epoch-level
+clustering diagnostics for the encoder latent space. The implementation keeps
+the accumulated embeddings on the active torch device, clusters them with the
+framework's PyTorch `MiniBatchKMeans`, and computes TorchMetrics clustering
+scores without moving tensors through scikit-learn.
+
+```yaml
+latent_metrics:
+  _target_: pytorch_segmentation_models_trainer.custom_metrics.autoencoder_latent_clustering.AutoencoderLatentClusteringMetrics
+  n_clusters: 8
+  max_samples: 2048
+  kmeans_max_iter: 50
+  kmeans_batch_size: 1024
+  random_state: 42
+  normalize: true
+  latent_reduction: adaptive_avg_pool
+  compute_silhouette: true
+  compute_dunn: false
+  label_key: null
+```
+
+The default metrics are logged at validation/test epoch end:
+
+- `latent_calinski_harabasz`
+- `latent_davies_bouldin`
+- `latent_silhouette` when `compute_silhouette: true`
+- `latent_dunn` when `compute_dunn: true`
+- `latent_adjusted_rand` and `latent_normalized_mutual_info` when `label_key`
+  points to a batch label tensor
+
+For VAEs, `vae_latent: mu` is the default because the posterior mean is
+deterministic. Set `vae_latent: z` to cluster sampled latents instead.
+
+```yaml
+latent_metrics:
+  _target_: pytorch_segmentation_models_trainer.custom_metrics.autoencoder_latent_clustering.AutoencoderLatentClusteringMetrics
+  n_clusters: 8
+  vae_latent: mu
+  max_samples: 2048
+```
+
+See `conf/examples/autoencoder_latent_clustering.yaml` for a complete
+configuration.
+
 ## Monitoring and Visualization
 
 To monitor the reconstruction quality during training, you can use the `AutoencoderResultCallback`. This callback logs input and reconstructed images side-by-side to TensorBoard and saves them to the log directory.

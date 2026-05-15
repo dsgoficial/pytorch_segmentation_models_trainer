@@ -292,14 +292,25 @@ class GenericAutoencoder(nn.Module):
                 upsample_mode=upsample_mode,
             )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
+        """Encode an image batch into the deterministic latent tensor.
+
+        Args:
+            x: Input image tensor with shape ``(B, C, H, W)``.
+
+        Returns:
+            Latent tensor after the optional ``latent_proj`` layer.
+        """
         if isinstance(self.encoder, HuggingFaceEncoderAdapter):
             bottleneck = self.encoder(x)
         else:
             features = self.encoder(x)
             bottleneck = features[-1]
 
-        latent = self.latent_proj(bottleneck)
+        return self.latent_proj(bottleneck)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        latent = self.encode(x)
         reconstructed = self.decoder(latent)
 
         # Ensure output size matches input size exactly

@@ -1,5 +1,12 @@
 # Unreleased
 
+## Autoencoder Latent Metrics
+
+- Added `AutoencoderLatentClusteringMetrics` for validation/test epoch diagnostics of autoencoder encoder spaces. It reuses the framework's PyTorch `MiniBatchKMeans` backend and TorchMetrics clustering functions so embeddings, cluster labels, and scores stay on GPU when training uses GPU.
+- `GenericAutoencoder` now exposes `encode(x)` and reuses it in `forward()`, allowing deterministic autoencoders to report latent metrics without duplicating encoder logic.
+- `AutoencoderModel` and `VariationalAutoencoderModel` now accept a Hydra `latent_metrics` block. They accumulate validation/test latents, log Calinski-Harabasz and Davies-Bouldin by default, optionally log Dunn and PyTorch Silhouette, and log ARI/NMI when a configured batch label key is available. VAEs use posterior `mu` by default, with `vae_latent: z` available for sampled latents.
+- Added `AutoencoderLatentClusteringMetricsConfig`, user documentation, `conf/examples/autoencoder_latent_clustering.yaml`, and focused tests covering device preservation, spatial latent reduction, optional supervised labels, existing `MiniBatchKMeans` reuse, CUDA execution, and LightningModule integration.
+
 ## Sliding-Window Full-Image Test Evaluation
 
 - Added `SlidingWindowCore` (`tools/inference/sliding_window.py`): pure tensor-in / tensor-out sliding-window inference engine using `pytorch_toolbelt` `ImageSlicer`/`TileMerger`. Supports three tile blending modes (`mean`, `pyramid`, `gaussian`), TTA with all D4 dihedral augmentations (or any subset), MC Dropout with `n_mc_samples` stochastic passes, and all four combinations of those modes. Returns a `SlidingWindowOutput` dataclass with `prediction`, optional `tta_uncertainty` (per-pixel std across TTA passes), and optional `mc_uncertainty` (per-pixel entropy or mutual information from MC Dropout).

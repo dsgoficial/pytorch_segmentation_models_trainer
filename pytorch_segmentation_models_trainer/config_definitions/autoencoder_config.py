@@ -95,6 +95,40 @@ class VariationalAutoencoderModelConfig:
 
 
 @dataclass
+class AutoencoderLatentClusteringMetricsConfig:
+    """Configuration for autoencoder latent clustering diagnostics.
+
+    Example YAML:
+        latent_metrics:
+          _target_: pytorch_segmentation_models_trainer.custom_metrics.autoencoder_latent_clustering.AutoencoderLatentClusteringMetrics
+          n_clusters: 8
+          max_samples: 2048
+          kmeans_max_iter: 50
+          normalize: true
+          compute_silhouette: true
+          label_key: domain
+          vae_latent: mu
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_metrics"
+        ".autoencoder_latent_clustering.AutoencoderLatentClusteringMetrics"
+    )
+    n_clusters: int = MISSING
+    max_samples: Optional[int] = 2048
+    kmeans_max_iter: int = 50
+    kmeans_batch_size: int = 1024
+    tol: float = 1e-4
+    random_state: Optional[int] = None
+    normalize: bool = True
+    latent_reduction: str = "adaptive_avg_pool"
+    compute_silhouette: bool = False
+    compute_dunn: bool = False
+    label_key: Optional[str] = None
+    vae_latent: str = "mu"
+
+
+@dataclass
 class KLAnnealingCallbackConfig:
     """Configuration for ``KLAnnealingCallback``.
 
@@ -137,6 +171,11 @@ cs.store(
     group="pl_model",
     name="variational_autoencoder_model",
     node=VariationalAutoencoderModelConfig,
+)
+cs.store(
+    group="latent_metrics",
+    name="autoencoder_latent_clustering",
+    node=AutoencoderLatentClusteringMetricsConfig,
 )
 cs.store(
     group="callbacks",
