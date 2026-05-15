@@ -127,9 +127,12 @@ test datasets.
 
 Use `ms_ssim` when structural similarity matters more than pixel-wise error.
 Use `smooth_l1_ms_ssim` to combine local robust reconstruction with multi-scale
-structure. For datasets converted with `albumentations.ToFloat(max_value=255.0)`,
-keep `ms_ssim_data_range: 1.0`. For raw uint8-scale tensors, use
-`ms_ssim_data_range: 255.0`.
+structure. MS-SSIM must receive image-intensity tensors, not standardized
+`Normalize(mean, std)` tensors. For datasets converted with
+`albumentations.ToFloat(max_value=255.0)`, keep `ms_ssim_data_range: 1.0`. For
+raw uint8-scale tensors, use `ms_ssim_data_range: 255.0`. If your dataset uses
+`albumentations.Normalize`, set `ms_ssim_input_is_normalized: true` and pass the
+same mean/std values used by the augmentation.
 
 ```yaml
 loss:
@@ -143,12 +146,17 @@ loss:
   ms_ssim_data_range: 1.0
   ms_ssim_alpha: 1.0
   ms_ssim_compensation: 1.0
+  ms_ssim_input_is_normalized: true
+  ms_ssim_mean: [0.485, 0.456, 0.406]
+  ms_ssim_std: [0.229, 0.224, 0.225]
 ```
 
 The VAE LightningModule logs the combined `reconstruction_loss` plus component
 terms: `smooth_l1_loss`, `ms_ssim_loss`, `weighted_smooth_l1_loss`, and
 `weighted_ms_ssim_loss`. By default `ms_ssim_alpha: 1.0` disables Kornia's
 internal L1 blend, so `smooth_l1_ms_ssim` means Smooth L1 plus pure MS-SSIM.
+Denormalization is applied only to the MS-SSIM branch; Smooth L1 remains in the
+training tensor space, so it still matches what the decoder is optimizing.
 See
 `conf/examples/generic_variational_autoencoder_ms_ssim.yaml` for a complete
 configuration.

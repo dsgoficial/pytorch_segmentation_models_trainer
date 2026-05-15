@@ -44,6 +44,10 @@ def test_variational_autoencoder_loss_config():
     assert list(cfg.ms_ssim_sigmas) == [0.5, 1.0, 2.0, 4.0, 8.0]
     assert cfg.ms_ssim_alpha == pytest.approx(1.0)
     assert cfg.ms_ssim_compensation == pytest.approx(1.0)
+    assert cfg.ms_ssim_input_is_normalized is False
+    assert cfg.ms_ssim_mean is None
+    assert cfg.ms_ssim_std is None
+    assert cfg.ms_ssim_clamp is True
 
 
 def test_variational_autoencoder_model_config():

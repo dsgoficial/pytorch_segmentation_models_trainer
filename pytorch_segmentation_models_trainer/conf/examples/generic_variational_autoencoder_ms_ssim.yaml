@@ -35,6 +35,9 @@ loss:
   smooth_l1_weight: 0.8
   ms_ssim_weight: 0.2
   ms_ssim_data_range: 1.0
+  ms_ssim_input_is_normalized: false
+  ms_ssim_mean: null
+  ms_ssim_std: null
 
 optimizer:
   _target_: torch.optim.AdamW

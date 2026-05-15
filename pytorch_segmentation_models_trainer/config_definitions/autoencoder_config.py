@@ -57,6 +57,9 @@ class VariationalAutoencoderLossConfig:
           ms_ssim_data_range: 1.0
           ms_ssim_alpha: 1.0
           ms_ssim_compensation: 1.0
+          ms_ssim_input_is_normalized: true
+          ms_ssim_mean: [0.485, 0.456, 0.406]
+          ms_ssim_std: [0.229, 0.224, 0.225]
     """
 
     _target_: str = (
@@ -77,6 +80,10 @@ class VariationalAutoencoderLossConfig:
     )
     ms_ssim_alpha: float = 1.0
     ms_ssim_compensation: float = 1.0
+    ms_ssim_input_is_normalized: bool = False
+    ms_ssim_mean: Optional[List[float]] = None
+    ms_ssim_std: Optional[List[float]] = None
+    ms_ssim_clamp: bool = True
 
 
 @dataclass

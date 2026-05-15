@@ -52,6 +52,17 @@ class VariationalAutoencoderLoss(nn.Module):
             pure MS-SSIM loss.
         ms_ssim_compensation: Compensation factor forwarded to
             ``kornia.losses.MS_SSIMLoss``.
+        ms_ssim_input_is_normalized: When ``True``, denormalizes the
+            reconstruction and target before computing MS-SSIM. Use this when
+            the dataset applies ``albumentations.Normalize`` and the model
+            reconstructs tensors in that normalized space.
+        ms_ssim_mean: Per-channel mean used to denormalize tensors before
+            MS-SSIM. Required when ``ms_ssim_input_is_normalized=True``.
+        ms_ssim_std: Per-channel standard deviation used to denormalize tensors
+            before MS-SSIM. Required when
+            ``ms_ssim_input_is_normalized=True``.
+        ms_ssim_clamp: When ``True``, clamps MS-SSIM inputs to
+            ``[0, ms_ssim_data_range]`` after optional denormalization.
         **kwargs: Reserved for Hydra compatibility.
 
     Returns:
@@ -75,6 +86,9 @@ class VariationalAutoencoderLoss(nn.Module):
           smooth_l1_weight: 0.8
           ms_ssim_weight: 0.2
           ms_ssim_data_range: 1.0
+          ms_ssim_input_is_normalized: true
+          ms_ssim_mean: [0.485, 0.456, 0.406]
+          ms_ssim_std: [0.229, 0.224, 0.225]
     """
 
     _VALID_RECONSTRUCTION_LOSSES = {
@@ -100,6 +114,10 @@ class VariationalAutoencoderLoss(nn.Module):
         ms_ssim_sigmas: Sequence[float] = (0.5, 1.0, 2.0, 4.0, 8.0),
         ms_ssim_alpha: float = 1.0,
         ms_ssim_compensation: float = 1.0,
+        ms_ssim_input_is_normalized: bool = False,
+        ms_ssim_mean: Sequence[float] | None = None,
+        ms_ssim_std: Sequence[float] | None = None,
+        ms_ssim_clamp: bool = True,
         **kwargs,
     ):
         super().__init__()
@@ -115,6 +133,8 @@ class VariationalAutoencoderLoss(nn.Module):
         self.ms_ssim_sigmas = tuple(ms_ssim_sigmas)
         self.ms_ssim_alpha = ms_ssim_alpha
         self.ms_ssim_compensation = ms_ssim_compensation
+        self.ms_ssim_input_is_normalized = ms_ssim_input_is_normalized
+        self.ms_ssim_clamp = ms_ssim_clamp
         self.extra_kwargs = kwargs
 
         if reconstruction_loss not in self._VALID_RECONSTRUCTION_LOSSES:
@@ -127,6 +147,25 @@ class VariationalAutoencoderLoss(nn.Module):
         if smooth_l1_weight < 0 or ms_ssim_weight < 0:
             raise ValueError("smooth_l1_weight and ms_ssim_weight must be >= 0")
 
+        if ms_ssim_input_is_normalized and (
+            ms_ssim_mean is None or ms_ssim_std is None
+        ):
+            raise ValueError(
+                "ms_ssim_mean and ms_ssim_std are required when "
+                "ms_ssim_input_is_normalized=True"
+            )
+
+        self.register_buffer(
+            "_ms_ssim_mean",
+            self._make_channel_buffer(ms_ssim_mean),
+            persistent=False,
+        )
+        self.register_buffer(
+            "_ms_ssim_std",
+            self._make_channel_buffer(ms_ssim_std),
+            persistent=False,
+        )
+
         self.ms_ssim_loss = None
         if reconstruction_loss in {"ms_ssim", "smooth_l1_ms_ssim"}:
             self.ms_ssim_loss = MS_SSIMLoss(
@@ -136,6 +175,21 @@ class VariationalAutoencoderLoss(nn.Module):
                 compensation=ms_ssim_compensation,
                 reduction="mean",
             )
+
+    @staticmethod
+    def _make_channel_buffer(values: Sequence[float] | None) -> torch.Tensor:
+        """Create a broadcastable per-channel tensor for image normalization.
+
+        Args:
+            values: Per-channel values or ``None``.
+
+        Returns:
+            Tensor with shape ``(1, C, 1, 1)`` or an empty tensor when values
+            are not configured.
+        """
+        if values is None:
+            return torch.empty(0)
+        return torch.tensor(values, dtype=torch.float32).view(1, -1, 1, 1)
 
     def _compute_reconstruction_loss(
         self, reconstruction: torch.Tensor, target: torch.Tensor
@@ -176,7 +230,36 @@ class VariationalAutoencoderLoss(nn.Module):
         """
         if self.ms_ssim_loss is None:
             raise RuntimeError("MS-SSIM loss was not initialised")
+        reconstruction, target = self._prepare_ms_ssim_inputs(reconstruction, target)
         return self.ms_ssim_loss(reconstruction, target)
+
+    def _prepare_ms_ssim_inputs(
+        self, reconstruction: torch.Tensor, target: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Prepare reconstruction tensors for MS-SSIM.
+
+        Args:
+            reconstruction: Reconstructed image tensor.
+            target: Target image tensor.
+
+        Returns:
+            Pair of tensors in the image intensity range expected by MS-SSIM.
+        """
+        if self.ms_ssim_input_is_normalized:
+            mean = self._ms_ssim_mean.to(
+                device=reconstruction.device, dtype=reconstruction.dtype
+            )
+            std = self._ms_ssim_std.to(
+                device=reconstruction.device, dtype=reconstruction.dtype
+            )
+            reconstruction = reconstruction * std + mean
+            target = target * std + mean
+
+        if self.ms_ssim_clamp:
+            reconstruction = reconstruction.clamp(0.0, float(self.ms_ssim_data_range))
+            target = target.clamp(0.0, float(self.ms_ssim_data_range))
+
+        return reconstruction, target
 
     def _compute_reconstruction_components(
         self, reconstruction: torch.Tensor, target: torch.Tensor

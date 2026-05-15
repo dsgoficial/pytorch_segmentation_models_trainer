@@ -415,6 +415,87 @@ def test_variational_autoencoder_loss_ms_ssim_identical_target_is_lower():
     assert perfect_loss < degraded_loss
 
 
+def test_variational_autoencoder_loss_ms_ssim_random_inputs_are_not_exorbitant():
+    loss_fn = VariationalAutoencoderLoss(
+        reconstruction_loss="ms_ssim",
+        ms_ssim_data_range=1.0,
+        beta=0.0,
+    )
+    target = torch.rand(2, 3, 64, 64)
+    reconstruction = torch.rand_like(target, requires_grad=True)
+    mu = torch.zeros(2, 4, 16, 16)
+    logvar = torch.zeros_like(mu)
+    output = VariationalAutoencoderOutput(reconstruction, mu, logvar, mu)
+
+    result = loss_fn(output, target)
+
+    assert result["ms_ssim_loss"].item() <= 2.0
+    assert result["loss"].item() <= 2.0
+
+
+def test_variational_autoencoder_loss_ms_ssim_denormalizes_imagenet_inputs():
+    target_01 = torch.rand(1, 3, 64, 64)
+    reconstruction_01 = torch.rand_like(target_01)
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+    mean_tensor = torch.tensor(mean).view(1, 3, 1, 1)
+    std_tensor = torch.tensor(std).view(1, 3, 1, 1)
+    target_norm = (target_01 - mean_tensor) / std_tensor
+    reconstruction_norm = (reconstruction_01 - mean_tensor) / std_tensor
+    mu = torch.zeros(1, 4, 16, 16)
+    output_01 = VariationalAutoencoderOutput(reconstruction_01, mu, mu, mu)
+    output_norm = VariationalAutoencoderOutput(reconstruction_norm, mu, mu, mu)
+
+    plain_loss = VariationalAutoencoderLoss(
+        reconstruction_loss="ms_ssim",
+        ms_ssim_data_range=1.0,
+        beta=0.0,
+    )
+    denorm_loss = VariationalAutoencoderLoss(
+        reconstruction_loss="ms_ssim",
+        ms_ssim_data_range=1.0,
+        ms_ssim_input_is_normalized=True,
+        ms_ssim_mean=mean,
+        ms_ssim_std=std,
+        beta=0.0,
+    )
+
+    expected = plain_loss(output_01, target_01)["ms_ssim_loss"]
+    actual = denorm_loss(output_norm, target_norm)["ms_ssim_loss"]
+
+    assert actual.item() == pytest.approx(expected.item(), rel=1e-5)
+
+
+def test_smooth_l1_ms_ssim_denormalization_only_affects_ms_ssim_component():
+    target_01 = torch.rand(1, 3, 64, 64)
+    reconstruction_01 = torch.rand_like(target_01)
+    mean = [0.5, 0.5, 0.5]
+    std = [0.25, 0.25, 0.25]
+    mean_tensor = torch.tensor(mean).view(1, 3, 1, 1)
+    std_tensor = torch.tensor(std).view(1, 3, 1, 1)
+    target_norm = (target_01 - mean_tensor) / std_tensor
+    reconstruction_norm = (reconstruction_01 - mean_tensor) / std_tensor
+    mu = torch.zeros(1, 4, 16, 16)
+    output_norm = VariationalAutoencoderOutput(reconstruction_norm, mu, mu, mu)
+
+    loss_fn = VariationalAutoencoderLoss(
+        reconstruction_loss="smooth_l1_ms_ssim",
+        smooth_l1_weight=0.8,
+        ms_ssim_weight=0.2,
+        ms_ssim_input_is_normalized=True,
+        ms_ssim_mean=mean,
+        ms_ssim_std=std,
+        beta=0.0,
+    )
+    result = loss_fn(output_norm, target_norm)
+
+    expected_smooth_l1 = torch.nn.functional.smooth_l1_loss(
+        reconstruction_norm, target_norm, beta=loss_fn.smooth_l1_beta
+    )
+    assert result["smooth_l1_loss"].item() == pytest.approx(expected_smooth_l1.item())
+    assert result["ms_ssim_loss"].item() <= 2.0
+
+
 def test_variational_autoencoder_loss_smooth_l1_ms_ssim_components_and_weights():
     loss_fn = VariationalAutoencoderLoss(
         reconstruction_loss="smooth_l1_ms_ssim",
