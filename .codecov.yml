@@ -1,7 +1,8 @@
 # Codecov configuration
 codecov:
   require_ci_to_pass: yes
-  after_n_builds: 2
+  notify:
+    after_n_builds: 2
 
 coverage:
   precision: 2
