@@ -1,0 +1,126 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: Autoencoder / VAE with configurable decoder upsampling modes
+# ──────────────────────────────────────────────────────────────────────────────
+# upsample_mode controls how each decoder stage doubles spatial resolution.
+# Supported values:
+#   "bilinear"       — F.interpolate / nn.Upsample (default, no extra params)
+#   "transposed_conv"— learnable ConvTranspose2d per stage (or single-shot in
+#                      GenericDecoder); avoids fixed interpolation kernel
+#   "pixel_shuffle"  — sub-pixel convolution (ESPCN); ProgressiveDecoder only
+#
+# All three modes are backward-compatible: omitting upsample_mode is the same
+# as setting it to "bilinear".
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+hyperparameters:
+  model_name: vae_pixel_shuffle_resnet18
+  batch_size: 16
+  epochs: 50
+  max_lr: 1e-4
+  in_channels: 3
+
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.variational_autoencoder_model.VariationalAutoencoderModel
+
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.GenericVariationalAutoencoder
+  encoder_name: resnet18
+  use_huggingface: false
+  in_channels: ${hyperparameters.in_channels}
+  latent_dim: 8
+  pretrained: true
+  encoder_depth: 3          # 2^3 = 8× downsampling → 28×28 latent for 224×224
+  output_activation: sigmoid
+  use_progressive_decoder: true
+  base_channels: 128
+  min_channels: 32
+  upsample_mode: pixel_shuffle   # change to "bilinear" or "transposed_conv" to compare
+
+  # ── Alternative modes (swap upsample_mode to use) ────────────────────────
+  # upsample_mode: bilinear        # classic: no extra parameters
+  # upsample_mode: transposed_conv # learnable; works with both decoder types
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.autoencoder_losses.VariationalAutoencoderLoss
+  reconstruction_loss: mse
+  reconstruction_weight: 1.0
+  beta: 0.0          # start at 0; ramp via KLAnnealingCallback
+  free_bits: 0.25
+  kl_balance: true
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1e-4
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: ${hyperparameters.epochs}
+    interval: epoch
+    frequency: 1
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.AutoencoderRandomCropDataset
+  image_dir: /data/unlabeled_images/train_val
+  split: train
+  val_fraction: 0.2
+  split_seed: 42
+  image_extensions: [".tif", ".tiff", ".png", ".jpg", ".jpeg"]
+  crop_size: [224, 224]
+  samples_per_epoch: 20000
+  image_dtype: uint8
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.VerticalFlip
+      p: 0.5
+    - _target_: albumentations.ToFloat
+      max_value: 255.0
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 4
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.AutoencoderRandomCropDataset
+  image_dir: /data/unlabeled_images/train_val
+  split: val
+  val_fraction: 0.2
+  split_seed: 42
+  image_extensions: [".tif", ".tiff", ".png", ".jpg", ".jpeg"]
+  crop_size: [224, 224]
+  samples_per_epoch: 2000
+  image_dtype: uint8
+  augmentation_list:
+    - _target_: albumentations.ToFloat
+      max_value: 255.0
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 4
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+  callbacks:
+    - _target_: pytorch_segmentation_models_trainer.custom_callbacks.kl_annealing_callback.KLAnnealingCallback
+      schedule: cosine
+      max_beta: 1.0
+      min_beta: 0.0
+      annealing_steps: 5000
+      use_epochs: false
+    - _target_: pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.AutoencoderResultCallback
+      n_samples: 8
+      log_every_k_epochs: 1
+      normalized_input: false

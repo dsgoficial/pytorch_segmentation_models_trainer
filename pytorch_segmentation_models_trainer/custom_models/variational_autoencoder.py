@@ -90,6 +90,9 @@ class GenericVariationalAutoencoder(nn.Module):
             Ignored when ``use_progressive_decoder=False``.
         min_channels: Minimum channel count for ``ProgressiveDecoder`` stages.
             Ignored when ``use_progressive_decoder=False``.
+        upsample_mode: Per-stage upsampling strategy for the decoder.
+            ``"bilinear"`` (default), ``"transposed_conv"``, or
+            ``"pixel_shuffle"`` (``ProgressiveDecoder`` only).
         **kwargs: Extra arguments forwarded to the HuggingFace adapter.
 
     Raises:
@@ -154,6 +157,7 @@ class GenericVariationalAutoencoder(nn.Module):
         use_progressive_decoder: bool = False,
         base_channels: int = 128,
         min_channels: int = 32,
+        upsample_mode: str = "bilinear",
         **kwargs,
     ):
         super().__init__()
@@ -224,6 +228,7 @@ class GenericVariationalAutoencoder(nn.Module):
                 base_channels=base_channels,
                 min_channels=min_channels,
                 output_activation=output_activation,
+                upsample_mode=upsample_mode,
             )
         else:
             self.decoder = GenericDecoder(
@@ -231,6 +236,7 @@ class GenericVariationalAutoencoder(nn.Module):
                 out_channels=in_channels,
                 scale_factor=0 if use_huggingface else self.scale_factor,
                 output_activation=output_activation,
+                upsample_mode=upsample_mode,
             )
 
     # ── Private helpers ───────────────────────────────────────────────────

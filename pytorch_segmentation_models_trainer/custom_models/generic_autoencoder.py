@@ -18,6 +18,52 @@ try:
 except ImportError:
     AutoModel = None
 
+_VALID_UPSAMPLE_MODES = ("bilinear", "transposed_conv", "pixel_shuffle")
+
+
+def _make_upsample_block(mode: str, ch_in: int, ch_out: int) -> nn.Sequential:
+    """Create a 2× upsampling block for one ProgressiveDecoder stage.
+
+    Args:
+        mode: One of ``"bilinear"``, ``"transposed_conv"``, or ``"pixel_shuffle"``.
+        ch_in: Input channel count entering the block.
+        ch_out: Output channel count leaving the block.
+
+    Returns:
+        ``nn.Sequential`` that doubles the spatial resolution of its input.
+
+    Raises:
+        ValueError: If ``mode`` is not one of the supported values.
+    """
+    if mode == "bilinear":
+        return nn.Sequential(
+            nn.Upsample(scale_factor=2.0, mode="bilinear", align_corners=False),
+            nn.Conv2d(ch_in, ch_out, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(ch_out, ch_out, 3, padding=1),
+            nn.ReLU(inplace=True),
+        )
+    if mode == "transposed_conv":
+        # ConvTranspose2d with kernel=4, stride=2, pad=1 gives exact 2× upsampling.
+        return nn.Sequential(
+            nn.ConvTranspose2d(ch_in, ch_out, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(ch_out, ch_out, 3, padding=1),
+            nn.ReLU(inplace=True),
+        )
+    if mode == "pixel_shuffle":
+        # Expand to ch_out×r² then PixelShuffle(r=2) → 2× upsampling.
+        return nn.Sequential(
+            nn.Conv2d(ch_in, ch_out * 4, 1),
+            nn.PixelShuffle(2),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(ch_out, ch_out, 3, padding=1),
+            nn.ReLU(inplace=True),
+        )
+    raise ValueError(
+        f"upsample_mode must be one of {_VALID_UPSAMPLE_MODES}; got {mode!r}"
+    )
+
 
 class HuggingFaceEncoderAdapter(nn.Module):
     """
@@ -68,19 +114,22 @@ class GenericDecoder(nn.Module):
     Args:
         in_channels: Number of input channels from the bottleneck.
         out_channels: Number of output channels (usually the input image channels).
-        scale_factor: Spatial upsampling factor applied via bilinear interpolation.
-            Set to ``0`` to skip upsampling (e.g. when the encoder and input
-            share the same spatial size).
-        output_activation: Optional final activation applied to the logit output.
-            Supported values: ``None`` (no activation, unbounded output),
-            ``"sigmoid"`` (output in ``[0, 1]``, use with targets in ``[0, 1]``),
-            ``"tanh"`` (output in ``[-1, 1]``, use with targets in ``[-1, 1]``).
+        scale_factor: Spatial upsampling factor. Set to ``0`` to skip upsampling.
+        output_activation: Optional final activation. ``None``, ``"sigmoid"``,
+            or ``"tanh"``.
+        upsample_mode: Upsampling strategy. ``"bilinear"`` (default) uses
+            ``F.interpolate``; ``"transposed_conv"`` uses a learnable
+            ``ConvTranspose2d`` with ``stride=scale_factor``.
+            ``"pixel_shuffle"`` is **not** supported here because it requires
+            channel expansion of ``out_channels × scale_factor²`` — use
+            ``ProgressiveDecoder`` with ``upsample_mode="pixel_shuffle"`` instead.
 
     Raises:
-        ValueError: If ``output_activation`` is not one of the supported values.
+        ValueError: If ``output_activation`` or ``upsample_mode`` is invalid.
     """
 
     _VALID_ACTIVATIONS = (None, "sigmoid", "tanh")
+    _VALID_UPSAMPLE_MODES = ("bilinear", "transposed_conv")
 
     def __init__(
         self,
@@ -88,6 +137,7 @@ class GenericDecoder(nn.Module):
         out_channels: int,
         scale_factor: int = 32,
         output_activation: Optional[str] = None,
+        upsample_mode: str = "bilinear",
     ):
         super().__init__()
         if output_activation not in self._VALID_ACTIVATIONS:
@@ -95,21 +145,51 @@ class GenericDecoder(nn.Module):
                 f"output_activation must be one of {self._VALID_ACTIVATIONS}; "
                 f"got {output_activation!r}"
             )
+        if upsample_mode == "pixel_shuffle":
+            raise ValueError(
+                "'pixel_shuffle' requires progressive upsampling (channel expansion "
+                "of out_channels × scale_factor² is impractical for large scale_factor). "
+                "Use ProgressiveDecoder with upsample_mode='pixel_shuffle' instead."
+            )
+        if upsample_mode not in self._VALID_UPSAMPLE_MODES:
+            raise ValueError(
+                f"upsample_mode must be one of {self._VALID_UPSAMPLE_MODES}; "
+                f"got {upsample_mode!r}"
+            )
         self.scale_factor = scale_factor
         self.output_activation = output_activation
+        self.upsample_mode = upsample_mode
         self.conv1 = nn.Conv2d(in_channels, in_channels // 2, kernel_size=3, padding=1)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv2d(in_channels // 2, out_channels, kernel_size=3, padding=1)
 
+        self.upsample_layer: Optional[nn.Module] = None
+        if scale_factor > 0 and upsample_mode == "transposed_conv":
+            mid = in_channels // 2
+            # kernel_size=2*s, stride=s, padding=s//2 gives exact s× upsampling.
+            self.upsample_layer = nn.ConvTranspose2d(
+                mid,
+                mid,
+                kernel_size=2 * scale_factor,
+                stride=scale_factor,
+                padding=scale_factor // 2,
+            )
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.relu(self.conv1(x))
         if self.scale_factor > 0:
-            x = F.interpolate(
-                x,
-                scale_factor=float(self.scale_factor),
-                mode="bilinear",
-                align_corners=False,
-            )
+            if (
+                self.upsample_mode == "transposed_conv"
+                and self.upsample_layer is not None
+            ):
+                x = self.upsample_layer(x)
+            else:
+                x = F.interpolate(
+                    x,
+                    scale_factor=float(self.scale_factor),
+                    mode="bilinear",
+                    align_corners=False,
+                )
         x = self.conv2(x)
         if self.output_activation == "sigmoid":
             return torch.sigmoid(x)
@@ -137,6 +217,9 @@ class GenericAutoencoder(nn.Module):
             Ignored when ``use_progressive_decoder=False``.
         min_channels: Minimum channel count for ``ProgressiveDecoder`` stages.
             Ignored when ``use_progressive_decoder=False``.
+        upsample_mode: Upsampling strategy for the decoder.  ``"bilinear"``
+            (default), ``"transposed_conv"``, or ``"pixel_shuffle"``
+            (``ProgressiveDecoder`` only).
         **kwargs: Extra arguments forwarded to the HuggingFace adapter.
 
     Example YAML:
@@ -147,6 +230,7 @@ class GenericAutoencoder(nn.Module):
           in_channels: 3
           output_activation: sigmoid
           use_progressive_decoder: true
+          upsample_mode: pixel_shuffle
     """
 
     def __init__(
@@ -160,6 +244,7 @@ class GenericAutoencoder(nn.Module):
         use_progressive_decoder: bool = False,
         base_channels: int = 128,
         min_channels: int = 32,
+        upsample_mode: str = "bilinear",
         **kwargs,
     ):
         super().__init__()
@@ -196,6 +281,7 @@ class GenericAutoencoder(nn.Module):
                 base_channels=base_channels,
                 min_channels=min_channels,
                 output_activation=output_activation,
+                upsample_mode=upsample_mode,
             )
         else:
             self.decoder = GenericDecoder(
@@ -203,6 +289,7 @@ class GenericAutoencoder(nn.Module):
                 out_channels=in_channels,
                 scale_factor=self.scale_factor,
                 output_activation=output_activation,
+                upsample_mode=upsample_mode,
             )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -247,10 +334,12 @@ class ProgressiveDecoder(nn.Module):
         min_channels: Minimum number of channels in any decoder stage.
         output_activation: Final activation.  ``None``, ``"sigmoid"``,
             or ``"tanh"``.
+        upsample_mode: Per-stage upsampling strategy.  ``"bilinear"`` (default),
+            ``"transposed_conv"``, or ``"pixel_shuffle"``.
 
     Raises:
         ValueError: If ``scale_factor`` is not a power of 2, or if
-            ``output_activation`` is not one of the supported values.
+            ``output_activation`` or ``upsample_mode`` is not supported.
 
     Example — replacing GenericDecoder in GenericVariationalAutoencoder:
 
@@ -262,6 +351,7 @@ class ProgressiveDecoder(nn.Module):
             scale_factor=self.scale_factor,   # 8 for encoder_depth=3
             base_channels=128,
             output_activation=output_activation,
+            upsample_mode="pixel_shuffle",
         )
     """
 
@@ -275,6 +365,7 @@ class ProgressiveDecoder(nn.Module):
         base_channels: int = 128,
         min_channels: int = 32,
         output_activation: Optional[str] = None,
+        upsample_mode: str = "bilinear",
     ):
         super().__init__()
 
@@ -282,6 +373,11 @@ class ProgressiveDecoder(nn.Module):
             raise ValueError(
                 f"output_activation must be one of {self._VALID_ACTIVATIONS}; "
                 f"got {output_activation!r}"
+            )
+        if upsample_mode not in _VALID_UPSAMPLE_MODES:
+            raise ValueError(
+                f"upsample_mode must be one of {_VALID_UPSAMPLE_MODES}; "
+                f"got {upsample_mode!r}"
             )
 
         import math
@@ -292,6 +388,7 @@ class ProgressiveDecoder(nn.Module):
 
         self.scale_factor = scale_factor
         self.output_activation = output_activation
+        self.upsample_mode = upsample_mode
 
         # ── Input projection: bottleneck → base_channels ──────────────────
         self.input_proj = nn.Sequential(
@@ -302,18 +399,9 @@ class ProgressiveDecoder(nn.Module):
         # ── Progressive upsampling stages ─────────────────────────────────
         stages = []
         ch_in = base_channels
-        for i in range(n_stages):
+        for _ in range(n_stages):
             ch_out = max(ch_in // 2, min_channels)
-            stages.append(
-                nn.Sequential(
-                    # Bilinear upsample 2× then refine with two convolutions.
-                    nn.Upsample(scale_factor=2.0, mode="bilinear", align_corners=False),
-                    nn.Conv2d(ch_in, ch_out, kernel_size=3, padding=1),
-                    nn.ReLU(inplace=True),
-                    nn.Conv2d(ch_out, ch_out, kernel_size=3, padding=1),
-                    nn.ReLU(inplace=True),
-                )
-            )
+            stages.append(_make_upsample_block(upsample_mode, ch_in, ch_out))
             ch_in = ch_out
 
         self.stages = nn.ModuleList(stages)

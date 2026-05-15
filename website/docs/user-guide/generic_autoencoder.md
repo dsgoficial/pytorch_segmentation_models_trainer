@@ -137,6 +137,49 @@ model:
 
 The model will automatically attempt to reshape the `last_hidden_state` into a 2D spatial map based on the number of tokens.
 
+## Decoder Upsampling Modes
+
+Both `GenericAutoencoder` and `GenericVariationalAutoencoder` accept an `upsample_mode`
+parameter that controls how each decoder stage doubles spatial resolution.
+
+| Mode | Mechanism | Works in | Notes |
+|---|---|---|---|
+| `"bilinear"` | `F.interpolate` / `nn.Upsample` | `GenericDecoder`, `ProgressiveDecoder` | Default; no extra parameters |
+| `"transposed_conv"` | Learnable `ConvTranspose2d` | `GenericDecoder`, `ProgressiveDecoder` | Avoids fixed interpolation kernel |
+| `"pixel_shuffle"` | Sub-pixel conv (ESPCN) | `ProgressiveDecoder` only | Best quality-per-param for upsampling |
+
+> **Note:** `"pixel_shuffle"` requires `use_progressive_decoder: true`. Using it with
+> `GenericDecoder` raises a `ValueError` because single-shot channel expansion
+> (`out_channels × scale_factor²`) is impractical for large `scale_factor` values.
+
+### Example — ProgressiveDecoder with pixel shuffle
+
+```yaml
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.variational_autoencoder.GenericVariationalAutoencoder
+  encoder_name: resnet18
+  in_channels: 3
+  latent_dim: 8
+  encoder_depth: 3
+  output_activation: sigmoid
+  use_progressive_decoder: true
+  upsample_mode: pixel_shuffle   # or "bilinear" / "transposed_conv"
+```
+
+### Example — GenericDecoder with transposed conv
+
+```yaml
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.generic_autoencoder.GenericAutoencoder
+  encoder_name: resnet18
+  in_channels: 3
+  use_progressive_decoder: false
+  upsample_mode: transposed_conv
+```
+
+See `conf/examples/autoencoder_decoder_upsample_modes.yaml` for a complete
+training config comparing all three modes.
+
 ## Monitoring and Visualization
 
 To monitor the reconstruction quality during training, you can use the `AutoencoderResultCallback`. This callback logs input and reconstructed images side-by-side to TensorBoard and saves them to the log directory.

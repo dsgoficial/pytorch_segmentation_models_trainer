@@ -36,6 +36,7 @@ class GenericVariationalAutoencoderConfig:
     use_progressive_decoder: bool = False
     base_channels: int = 128
     min_channels: int = 32
+    upsample_mode: str = "bilinear"
 
 
 @dataclass

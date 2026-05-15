@@ -15,6 +15,16 @@
 
 - Added `shuffle_indices_seed` parameter (default `None`) to `ImageSegmentationResultCallback` (and all subclasses via inheritance, including `AutoencoderResultCallback`). When set, `AutoencoderResultCallback` samples a reproducible random subset of validation indices instead of always visualizing the first N rows. The seed is applied once per epoch via `numpy.random.RandomState`, so the shown subset is stable across epochs. When `None`, behaviour is unchanged (first N samples).
 
+## Decoder Upsampling Modes
+
+- Added `upsample_mode` parameter (default `"bilinear"`, fully backward-compatible) to `ProgressiveDecoder`, `GenericDecoder`, `GenericAutoencoder`, and `GenericVariationalAutoencoder`. Three modes available:
+  - `"bilinear"`: existing behaviour, `F.interpolate` or `nn.Upsample` + conv refinement.
+  - `"transposed_conv"`: learnable `ConvTranspose2d`-based upsampling; supported by both `GenericDecoder` and `ProgressiveDecoder`. Each `ProgressiveDecoder` stage uses a 4×4 / stride-2 transposed conv; `GenericDecoder` uses a single stride-`scale_factor` kernel.
+  - `"pixel_shuffle"`: sub-pixel convolution (`Conv2d` → `PixelShuffle(2)`) per stage; supported by `ProgressiveDecoder` only (single-shot channel expansion of `out_channels × scale_factor²` is impractical in `GenericDecoder`, which raises `ValueError` instead).
+- Added module-level `_make_upsample_block(mode, ch_in, ch_out)` factory in `generic_autoencoder.py` that constructs a 2× upsampling `nn.Sequential` for any supported mode.
+- Updated `GenericVariationalAutoencoderConfig` with `upsample_mode: str = "bilinear"`.
+- Added tests for all three modes: shape contracts, gradient flow, dtype preservation, and error guards for invalid/unsupported modes.
+
 ## ProgressiveDecoder
 
 - Added `ProgressiveDecoder` to `custom_models/generic_autoencoder.py`: multi-stage convolutional decoder that doubles spatial resolution at each step with two conv+ReLU layers, replacing the single bilinear interpolation of `GenericDecoder`. Supports the same `output_activation` options (`None`, `"sigmoid"`, `"tanh"`) and validates that `scale_factor` is a power of 2.

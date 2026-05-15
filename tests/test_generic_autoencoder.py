@@ -7,6 +7,7 @@ from pytorch_segmentation_models_trainer.custom_models.generic_autoencoder impor
     GenericAutoencoder,
     GenericDecoder,
     ProgressiveDecoder,
+    _make_upsample_block,
 )
 from pytorch_segmentation_models_trainer.model_loader.autoencoder_model import (
     AutoencoderModel,
@@ -371,3 +372,153 @@ def test_variational_autoencoder_progressive_decoder_gradient_flow():
     output.reconstruction.sum().backward()
     for name, param in model.decoder.named_parameters():
         assert param.grad is not None, f"No gradient for decoder.{name}"
+
+
+# ── upsample_mode: GenericDecoder ─────────────────────────────────────────────
+
+
+def test_generic_decoder_pixel_shuffle_raises():
+    with pytest.raises(ValueError, match="pixel_shuffle"):
+        GenericDecoder(in_channels=8, out_channels=3, upsample_mode="pixel_shuffle")
+
+
+def test_generic_decoder_invalid_upsample_mode_raises():
+    with pytest.raises(ValueError, match="upsample_mode"):
+        GenericDecoder(in_channels=8, out_channels=3, upsample_mode="nearest")
+
+
+def test_generic_decoder_transposed_conv_output_shape():
+    decoder = GenericDecoder(
+        in_channels=64, out_channels=3, scale_factor=8, upsample_mode="transposed_conv"
+    )
+    x = torch.randn(2, 64, 4, 4)
+    out = decoder(x)
+    assert out.shape == (2, 3, 32, 32)
+
+
+def test_generic_decoder_transposed_conv_gradient_flow():
+    decoder = GenericDecoder(
+        in_channels=16, out_channels=3, scale_factor=4, upsample_mode="transposed_conv"
+    )
+    x = torch.randn(1, 16, 8, 8, requires_grad=True)
+    out = decoder(x)
+    out.sum().backward()
+    assert x.grad is not None
+    assert not torch.all(x.grad == 0)
+
+
+def test_generic_decoder_transposed_conv_no_scale_factor():
+    decoder = GenericDecoder(
+        in_channels=8, out_channels=3, scale_factor=0, upsample_mode="transposed_conv"
+    )
+    x = torch.randn(1, 8, 16, 16)
+    out = decoder(x)
+    assert out.shape == (1, 3, 16, 16)
+
+
+# ── upsample_mode: ProgressiveDecoder ─────────────────────────────────────────
+
+
+def test_make_upsample_block_invalid_mode_raises():
+    with pytest.raises(ValueError, match="upsample_mode"):
+        _make_upsample_block("nearest", 32, 16)
+
+
+def test_progressive_decoder_invalid_upsample_mode_raises():
+    with pytest.raises(ValueError, match="upsample_mode"):
+        ProgressiveDecoder(in_channels=32, out_channels=3, upsample_mode="nearest")
+
+
+@pytest.mark.parametrize("mode", ["bilinear", "transposed_conv", "pixel_shuffle"])
+@pytest.mark.parametrize("scale_factor", [2, 4, 8])
+def test_progressive_decoder_upsample_mode_output_shape(mode, scale_factor):
+    decoder = ProgressiveDecoder(
+        in_channels=64, out_channels=3, scale_factor=scale_factor, upsample_mode=mode
+    )
+    x = torch.randn(2, 64, 4, 4)
+    out = decoder(x)
+    assert out.shape == (2, 3, 4 * scale_factor, 4 * scale_factor)
+
+
+@pytest.mark.parametrize("mode", ["bilinear", "transposed_conv", "pixel_shuffle"])
+def test_progressive_decoder_upsample_mode_gradient_flow(mode):
+    decoder = ProgressiveDecoder(
+        in_channels=32, out_channels=3, scale_factor=4, upsample_mode=mode
+    )
+    x = torch.randn(1, 32, 8, 8, requires_grad=True)
+    out = decoder(x)
+    out.sum().backward()
+    assert x.grad is not None
+    assert not torch.all(x.grad == 0)
+
+
+@pytest.mark.parametrize("mode", ["bilinear", "transposed_conv", "pixel_shuffle"])
+def test_progressive_decoder_upsample_mode_dtype_preserved(mode):
+    decoder = ProgressiveDecoder(
+        in_channels=32, out_channels=3, scale_factor=4, upsample_mode=mode
+    )
+    x = torch.randn(1, 32, 4, 4)
+    out = decoder(x)
+    assert out.dtype == x.dtype
+
+
+# ── upsample_mode: GenericAutoencoder integration ─────────────────────────────
+
+
+@pytest.mark.parametrize("mode", ["bilinear", "transposed_conv", "pixel_shuffle"])
+def test_generic_autoencoder_upsample_mode_forward(mode):
+    model = GenericAutoencoder(
+        encoder_name="resnet18",
+        pretrained=False,
+        use_progressive_decoder=True,
+        upsample_mode=mode,
+    )
+    x = torch.randn(1, 3, 64, 64)
+    with torch.no_grad():
+        out = model(x)
+    assert out.shape == (1, 3, 64, 64)
+    assert isinstance(model.decoder, ProgressiveDecoder)
+    assert model.decoder.upsample_mode == mode
+
+
+@pytest.mark.parametrize("mode", ["bilinear", "transposed_conv"])
+def test_generic_autoencoder_generic_decoder_upsample_mode(mode):
+    model = GenericAutoencoder(
+        encoder_name="resnet18",
+        pretrained=False,
+        use_progressive_decoder=False,
+        upsample_mode=mode,
+    )
+    x = torch.randn(1, 3, 64, 64)
+    with torch.no_grad():
+        out = model(x)
+    assert out.shape == (1, 3, 64, 64)
+    assert model.decoder.upsample_mode == mode
+
+
+# ── upsample_mode: GenericVariationalAutoencoder integration ──────────────────
+
+
+@pytest.mark.parametrize("mode", ["bilinear", "transposed_conv", "pixel_shuffle"])
+def test_variational_autoencoder_upsample_mode_forward(mode):
+    from pytorch_segmentation_models_trainer.custom_models.variational_autoencoder import (
+        GenericVariationalAutoencoder,
+        VariationalAutoencoderOutput,
+    )
+
+    model = GenericVariationalAutoencoder(
+        encoder_name="resnet18",
+        pretrained=False,
+        encoder_depth=3,
+        latent_dim=8,
+        use_progressive_decoder=True,
+        upsample_mode=mode,
+    )
+    assert isinstance(model.decoder, ProgressiveDecoder)
+    assert model.decoder.upsample_mode == mode
+
+    x = torch.randn(1, 3, 64, 64)
+    with torch.no_grad():
+        output = model(x)
+    assert isinstance(output, VariationalAutoencoderOutput)
+    assert output.reconstruction.shape == (1, 3, 64, 64)
