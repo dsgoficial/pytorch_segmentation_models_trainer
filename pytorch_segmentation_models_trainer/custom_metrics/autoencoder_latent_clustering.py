@@ -50,17 +50,16 @@ class AutoencoderLatentClusteringMetrics:
         ``compute`` returns a dictionary of scalar tensors suitable for
         ``LightningModule.log_dict``.
 
-    Example YAML:
-        latent_metrics:
-          _target_: pytorch_segmentation_models_trainer.custom_metrics.\
-autoencoder_latent_clustering.AutoencoderLatentClusteringMetrics
-          n_clusters: 8
-          max_samples: 2048
-          kmeans_max_iter: 50
-          normalize: true
-          compute_silhouette: true
-          label_key: domain
-          vae_latent: mu
+    Example:
+        metric = AutoencoderLatentClusteringMetrics(
+            n_clusters=8,
+            max_samples=2048,
+            kmeans_max_iter=50,
+            normalize=True,
+            compute_silhouette=True,
+            label_key="domain",
+            vae_latent="mu",
+        )
     """
 
     def __init__(

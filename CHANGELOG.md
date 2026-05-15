@@ -2,10 +2,10 @@
 
 ## Autoencoder Latent Metrics
 
-- Added `AutoencoderLatentClusteringMetrics` for validation/test epoch diagnostics of autoencoder encoder spaces. It reuses the framework's PyTorch `MiniBatchKMeans` backend and TorchMetrics clustering functions so embeddings, cluster labels, and scores stay on GPU when training uses GPU.
+- Added `AutoencoderLatentClusteringCallback` for validation/test epoch diagnostics of autoencoder encoder spaces. It reuses the framework's PyTorch `MiniBatchKMeans` backend and TorchMetrics clustering functions so embeddings, cluster labels, and scores stay on GPU when training uses GPU.
 - `GenericAutoencoder` now exposes `encode(x)` and reuses it in `forward()`, allowing deterministic autoencoders to report latent metrics without duplicating encoder logic.
-- `AutoencoderModel` and `VariationalAutoencoderModel` now accept a Hydra `latent_metrics` block. They accumulate validation/test latents, log Calinski-Harabasz and Davies-Bouldin by default, optionally log Dunn and PyTorch Silhouette, and log ARI/NMI when a configured batch label key is available. VAEs use posterior `mu` by default, with `vae_latent: z` available for sampled latents.
-- Added `AutoencoderLatentClusteringMetricsConfig`, user documentation, `conf/examples/autoencoder_latent_clustering.yaml`, and focused tests covering device preservation, spatial latent reduction, optional supervised labels, existing `MiniBatchKMeans` reuse, CUDA execution, and LightningModule integration.
+- Autoencoder latent clustering is configured through `callbacks:` instead of a model-specific top-level `latent_metrics` block, keeping diagnostic orchestration out of `AutoencoderModel` and `VariationalAutoencoderModel`. The callback accumulates validation/test latents, logs Calinski-Harabasz and Davies-Bouldin by default, optionally logs Dunn and PyTorch Silhouette, and logs ARI/NMI when a configured batch label key is available. VAEs use posterior `mu` by default, with `vae_latent: z` available for sampled latents.
+- Added `AutoencoderLatentClusteringCallbackConfig`, user documentation, `conf/examples/autoencoder_latent_clustering.yaml`, and focused tests covering device preservation, spatial latent reduction, optional supervised labels, existing `MiniBatchKMeans` reuse, CUDA execution, and callback integration.
 
 ## Sliding-Window Full-Image Test Evaluation
 

@@ -26,19 +26,6 @@ model:
 loss:
   _target_: torch.nn.MSELoss
 
-latent_metrics:
-  _target_: pytorch_segmentation_models_trainer.custom_metrics.autoencoder_latent_clustering.AutoencoderLatentClusteringMetrics
-  n_clusters: 8
-  max_samples: 2048
-  kmeans_max_iter: 50
-  kmeans_batch_size: 1024
-  random_state: 42
-  normalize: true
-  latent_reduction: adaptive_avg_pool
-  compute_silhouette: true
-  compute_dunn: false
-  label_key: null
-
 optimizer:
   _target_: torch.optim.AdamW
   lr: ${hyperparameters.max_lr}
@@ -85,3 +72,18 @@ pl_trainer:
   max_epochs: ${hyperparameters.epochs}
   accelerator: auto
   devices: 1
+
+callbacks:
+  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.AutoencoderLatentClusteringCallback
+    n_clusters: 8
+    max_samples: 2048
+    kmeans_max_iter: 50
+    kmeans_batch_size: 1024
+    random_state: 42
+    normalize: true
+    latent_reduction: adaptive_avg_pool
+    compute_silhouette: true
+    compute_dunn: false
+    label_key: null
+    latent_source: auto
+    image_key: image

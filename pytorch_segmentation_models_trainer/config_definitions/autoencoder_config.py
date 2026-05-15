@@ -102,12 +102,12 @@ class VariationalAutoencoderModelConfig:
 
 
 @dataclass
-class AutoencoderLatentClusteringMetricsConfig:
-    """Configuration for autoencoder latent clustering diagnostics.
+class AutoencoderLatentClusteringCallbackConfig:
+    """Configuration for autoencoder latent clustering callback.
 
     Example YAML:
-        latent_metrics:
-          _target_: pytorch_segmentation_models_trainer.custom_metrics.autoencoder_latent_clustering.AutoencoderLatentClusteringMetrics
+        callbacks:
+          - _target_: pytorch_segmentation_models_trainer.custom_callbacks.AutoencoderLatentClusteringCallback
           n_clusters: 8
           max_samples: 2048
           kmeans_max_iter: 50
@@ -118,8 +118,8 @@ class AutoencoderLatentClusteringMetricsConfig:
     """
 
     _target_: str = (
-        "pytorch_segmentation_models_trainer.custom_metrics"
-        ".autoencoder_latent_clustering.AutoencoderLatentClusteringMetrics"
+        "pytorch_segmentation_models_trainer.custom_callbacks"
+        ".AutoencoderLatentClusteringCallback"
     )
     n_clusters: int = MISSING
     max_samples: Optional[int] = 2048
@@ -133,6 +133,8 @@ class AutoencoderLatentClusteringMetricsConfig:
     compute_dunn: bool = False
     label_key: Optional[str] = None
     vae_latent: str = "mu"
+    latent_source: str = "auto"
+    image_key: str = "image"
 
 
 @dataclass
@@ -180,9 +182,9 @@ cs.store(
     node=VariationalAutoencoderModelConfig,
 )
 cs.store(
-    group="latent_metrics",
+    group="callbacks",
     name="autoencoder_latent_clustering",
-    node=AutoencoderLatentClusteringMetricsConfig,
+    node=AutoencoderLatentClusteringCallbackConfig,
 )
 cs.store(
     group="callbacks",

@@ -220,25 +220,25 @@ training config comparing all three modes.
 
 ## Latent Clustering Metrics
 
-`AutoencoderModel` and `VariationalAutoencoderModel` can log epoch-level
-clustering diagnostics for the encoder latent space. The implementation keeps
-the accumulated embeddings on the active torch device, clusters them with the
-framework's PyTorch `MiniBatchKMeans`, and computes TorchMetrics clustering
-scores without moving tensors through scikit-learn.
+`AutoencoderLatentClusteringCallback` can log epoch-level clustering
+diagnostics for the encoder latent space. The implementation keeps accumulated
+embeddings on the active torch device, clusters them with the framework's
+PyTorch `MiniBatchKMeans`, and computes TorchMetrics clustering scores without
+moving tensors through scikit-learn.
 
 ```yaml
-latent_metrics:
-  _target_: pytorch_segmentation_models_trainer.custom_metrics.autoencoder_latent_clustering.AutoencoderLatentClusteringMetrics
-  n_clusters: 8
-  max_samples: 2048
-  kmeans_max_iter: 50
-  kmeans_batch_size: 1024
-  random_state: 42
-  normalize: true
-  latent_reduction: adaptive_avg_pool
-  compute_silhouette: true
-  compute_dunn: false
-  label_key: null
+callbacks:
+  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.AutoencoderLatentClusteringCallback
+    n_clusters: 8
+    max_samples: 2048
+    kmeans_max_iter: 50
+    kmeans_batch_size: 1024
+    random_state: 42
+    normalize: true
+    latent_reduction: adaptive_avg_pool
+    compute_silhouette: true
+    compute_dunn: false
+    label_key: null
 ```
 
 The default metrics are logged at validation/test epoch end:
@@ -254,11 +254,11 @@ For VAEs, `vae_latent: mu` is the default because the posterior mean is
 deterministic. Set `vae_latent: z` to cluster sampled latents instead.
 
 ```yaml
-latent_metrics:
-  _target_: pytorch_segmentation_models_trainer.custom_metrics.autoencoder_latent_clustering.AutoencoderLatentClusteringMetrics
-  n_clusters: 8
-  vae_latent: mu
-  max_samples: 2048
+callbacks:
+  - _target_: pytorch_segmentation_models_trainer.custom_callbacks.AutoencoderLatentClusteringCallback
+    n_clusters: 8
+    vae_latent: mu
+    max_samples: 2048
 ```
 
 See `conf/examples/autoencoder_latent_clustering.yaml` for a complete

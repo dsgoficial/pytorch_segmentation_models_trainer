@@ -9,6 +9,9 @@ from omegaconf import OmegaConf
 from pytorch_segmentation_models_trainer.custom_metrics import (
     autoencoder_latent_clustering as latent_clustering,
 )
+from pytorch_segmentation_models_trainer.custom_callbacks.latent_clustering_callback import (
+    AutoencoderLatentClusteringCallback,
+)
 from pytorch_segmentation_models_trainer.custom_models import (
     variational_autoencoder as vae_models,
 )
@@ -57,6 +60,13 @@ class TinyLatentVAE(nn.Module):
         z = mu + 1.0
         reconstruction = self.decoder_conv(mu)
         return VariationalAutoencoderOutput(reconstruction, mu, logvar, z)
+
+
+class TinyLatentVAEWithEncode(TinyLatentVAE):
+    def encode(self, x):
+        mu = self.encoder_conv(x)
+        logvar = torch.zeros_like(mu)
+        return mu, logvar
 
 
 def _clustered_embeddings(device):
@@ -179,20 +189,13 @@ def test_latent_clustering_metrics_keep_computation_on_cuda():
     assert all(value.device.type == "cuda" for value in result.values())
 
 
-def test_autoencoder_model_logs_latent_metrics_on_validation_epoch_end():
+def test_latent_clustering_callback_logs_autoencoder_validation_epoch_end():
     cfg = OmegaConf.create(
         {
             "model": {"_target_": "unused"},
             "loss": {"_target_": "unused"},
             "optimizer": {"_target_": "torch.optim.Adam", "lr": 0.001},
             "scheduler_list": [],
-            "latent_metrics": {
-                "_target_": LATENT_METRICS_TARGET,
-                "n_clusters": 2,
-                "max_samples": 4,
-                "kmeans_max_iter": 5,
-                "random_state": 0,
-            },
         }
     )
 
@@ -210,6 +213,12 @@ def test_autoencoder_model_logs_latent_metrics_on_validation_epoch_end():
 
     pl_model.log = MagicMock()
     pl_model.log_dict = MagicMock()
+    callback = AutoencoderLatentClusteringCallback(
+        n_clusters=2,
+        max_samples=4,
+        kmeans_max_iter=5,
+        random_state=0,
+    )
     batch = {
         "image": torch.cat(
             [torch.zeros(2, 3, 4, 4), torch.ones(2, 3, 4, 4)],
@@ -219,27 +228,21 @@ def test_autoencoder_model_logs_latent_metrics_on_validation_epoch_end():
     }
 
     pl_model.validation_step(batch, 0)
-    pl_model.on_validation_epoch_end()
+    callback.on_validation_batch_end(None, pl_model, None, batch, 0)
+    callback.on_validation_epoch_end(None, pl_model)
 
     logged = pl_model.log_dict.call_args.args[0]
     assert "val/latent_calinski_harabasz" in logged
     assert "val/latent_davies_bouldin" in logged
 
 
-def test_variational_autoencoder_model_uses_mu_for_latent_metrics_by_default():
+def test_latent_clustering_callback_uses_mu_for_vae_by_default():
     cfg = OmegaConf.create(
         {
             "model": {"_target_": "unused"},
             "loss": {"_target_": "unused"},
             "optimizer": {"_target_": "torch.optim.Adam", "lr": 0.001},
             "scheduler_list": [],
-            "latent_metrics": {
-                "_target_": LATENT_METRICS_TARGET,
-                "n_clusters": 2,
-                "max_samples": 4,
-                "kmeans_max_iter": 5,
-                "random_state": 0,
-            },
         }
     )
     loss_fn = MagicMock(return_value={"loss": torch.tensor(0.0)})
@@ -258,6 +261,12 @@ def test_variational_autoencoder_model_uses_mu_for_latent_metrics_by_default():
 
     pl_model.log = MagicMock()
     pl_model.log_dict = MagicMock()
+    callback = AutoencoderLatentClusteringCallback(
+        n_clusters=2,
+        max_samples=4,
+        kmeans_max_iter=5,
+        random_state=0,
+    )
     batch = {
         "image": torch.cat(
             [torch.zeros(2, 3, 4, 4), torch.ones(2, 3, 4, 4)],
@@ -267,7 +276,41 @@ def test_variational_autoencoder_model_uses_mu_for_latent_metrics_by_default():
     }
 
     pl_model.validation_step(batch, 0)
+    callback.on_validation_batch_end(None, pl_model, None, batch, 0)
 
-    stored = pl_model.val_latent_metrics._embeddings[0]
+    stored = callback.val_latent_metrics._embeddings[0]
     expected_mu = pl_model.model(batch["image"]).mu.detach()
+    assert torch.allclose(stored, expected_mu)
+
+
+def test_latent_clustering_callback_handles_vae_encode_tuple():
+    cfg = OmegaConf.create(
+        {
+            "model": {"_target_": "unused"},
+            "loss": {"_target_": "unused"},
+            "optimizer": {"_target_": "torch.optim.Adam", "lr": 0.001},
+            "scheduler_list": [],
+        }
+    )
+    loss_fn = MagicMock(return_value={"loss": torch.tensor(0.0)})
+
+    with patch.object(
+        VariationalAutoencoderModel,
+        "get_model",
+        return_value=TinyLatentVAEWithEncode(),
+    ):
+        with patch.object(
+            VariationalAutoencoderModel,
+            "get_loss_function",
+            return_value=loss_fn,
+        ):
+            pl_model = VariationalAutoencoderModel(cfg)
+
+    callback = AutoencoderLatentClusteringCallback(n_clusters=2, max_samples=4)
+    batch = {"image": torch.randn(4, 3, 4, 4), "target": torch.zeros(4, 3, 4, 4)}
+
+    callback.on_validation_batch_end(None, pl_model, None, batch, 0)
+
+    stored = callback.val_latent_metrics._embeddings[0]
+    expected_mu, _ = pl_model.model.encode(batch["image"])
     assert torch.allclose(stored, expected_mu)

@@ -6,8 +6,8 @@ from pytorch_segmentation_models_trainer.config_definitions import (
     autoencoder_config,
 )
 
-AutoencoderLatentClusteringMetricsConfig = (
-    autoencoder_config.AutoencoderLatentClusteringMetricsConfig
+AutoencoderLatentClusteringCallbackConfig = (
+    autoencoder_config.AutoencoderLatentClusteringCallbackConfig
 )
 GenericVariationalAutoencoderConfig = (
     autoencoder_config.GenericVariationalAutoencoderConfig
@@ -56,10 +56,10 @@ def test_variational_autoencoder_model_config():
     assert "VariationalAutoencoderModel" in cfg._target_
 
 
-def test_autoencoder_latent_clustering_metrics_config():
-    cfg = OmegaConf.structured(AutoencoderLatentClusteringMetricsConfig)
+def test_autoencoder_latent_clustering_callback_config():
+    cfg = OmegaConf.structured(AutoencoderLatentClusteringCallbackConfig)
 
-    assert "AutoencoderLatentClusteringMetrics" in cfg._target_
+    assert "AutoencoderLatentClusteringCallback" in cfg._target_
     assert cfg.max_samples == 2048
     assert cfg.kmeans_max_iter == 50
     assert cfg.kmeans_batch_size == 1024
@@ -69,5 +69,7 @@ def test_autoencoder_latent_clustering_metrics_config():
     assert cfg.compute_dunn is False
     assert cfg.label_key is None
     assert cfg.vae_latent == "mu"
+    assert cfg.latent_source == "auto"
+    assert cfg.image_key == "image"
     with pytest.raises(MissingMandatoryValue):
         _ = cfg.n_clusters
