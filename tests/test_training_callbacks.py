@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+import json
+import os
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 import torch
@@ -16,6 +19,7 @@ from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks imp
     ActiveSkeletonsPolygonizerCallback,
     ModPolymapperPolygonizerCallback,
     EMACallback,
+    FinalMetricsCallback,
     MixStyleCallback,
 )
 
@@ -375,6 +379,135 @@ class TestTrainingCallbacks(unittest.TestCase):
 
         cb.on_train_start(self.trainer, self.pl_module)
         self.pl_module.loss_function.sync.assert_called_with(2)
+
+
+class TestFinalMetricsCallback(unittest.TestCase):
+    def setUp(self):
+        self.trainer = MagicMock()
+        self.trainer.current_epoch = 5
+        self.trainer.global_rank = 0
+        self.trainer.log_dir = None
+        self.pl_module = MagicMock()
+
+    def test_json_created_with_correct_keys(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, "metrics.json")
+            self.trainer.callback_metrics = {
+                "loss/val": torch.tensor(0.42),
+                "val/iou": torch.tensor(0.85),
+            }
+            cb = FinalMetricsCallback(output_path=output_path)
+            cb.on_train_end(self.trainer, self.pl_module)
+
+            self.assertTrue(os.path.exists(output_path))
+            with open(output_path) as f:
+                data = json.load(f)
+            self.assertAlmostEqual(data["loss/val"], 0.42, places=4)
+            self.assertAlmostEqual(data["val/iou"], 0.85, places=4)
+            self.assertEqual(data["epoch"], 5)
+
+    def test_tensors_serialized_as_float(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, "metrics.json")
+            self.trainer.callback_metrics = {"loss/train": torch.tensor(1.23)}
+            cb = FinalMetricsCallback(output_path=output_path)
+            cb.on_train_end(self.trainer, self.pl_module)
+
+            with open(output_path) as f:
+                data = json.load(f)
+            self.assertIsInstance(data["loss/train"], float)
+
+    def test_relative_path_resolves_to_log_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.trainer.log_dir = tmpdir
+            self.trainer.callback_metrics = {"loss/val": torch.tensor(0.1)}
+            cb = FinalMetricsCallback(output_path="results.json")
+            cb.on_train_end(self.trainer, self.pl_module)
+
+            expected = os.path.join(tmpdir, "results.json")
+            self.assertTrue(os.path.exists(expected))
+
+    def test_test_metrics_merged_into_existing_json(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, "metrics.json")
+            with open(output_path, "w") as f:
+                json.dump({"loss/val": 0.42, "epoch": 5}, f)
+
+            self.trainer.callback_metrics = {"loss/test": torch.tensor(0.38)}
+            cb = FinalMetricsCallback(output_path=output_path)
+            cb.on_test_end(self.trainer, self.pl_module)
+
+            with open(output_path) as f:
+                data = json.load(f)
+            self.assertAlmostEqual(data["loss/val"], 0.42, places=4)
+            self.assertAlmostEqual(data["loss/test"], 0.38, places=4)
+
+    def test_on_test_end_creates_file_if_no_prior_json(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, "metrics.json")
+            self.trainer.callback_metrics = {"loss/test": torch.tensor(0.5)}
+            cb = FinalMetricsCallback(output_path=output_path)
+            cb.on_test_end(self.trainer, self.pl_module)
+
+            self.assertTrue(os.path.exists(output_path))
+            with open(output_path) as f:
+                data = json.load(f)
+            self.assertAlmostEqual(data["loss/test"], 0.5, places=4)
+
+    def test_empty_metrics_writes_only_epoch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, "metrics.json")
+            self.trainer.callback_metrics = {}
+            cb = FinalMetricsCallback(output_path=output_path)
+            cb.on_train_end(self.trainer, self.pl_module)
+
+            with open(output_path) as f:
+                data = json.load(f)
+            self.assertIn("epoch", data)
+            self.assertEqual(data["epoch"], 5)
+
+    def test_rank_nonzero_does_not_write(self):
+        from pytorch_lightning.utilities.rank_zero import rank_zero_only as rzo
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, "metrics.json")
+            self.trainer.callback_metrics = {"loss/val": torch.tensor(0.42)}
+            cb = FinalMetricsCallback(output_path=output_path)
+
+            original_rank = rzo.rank
+            rzo.rank = 1
+            try:
+                cb.on_train_end(self.trainer, self.pl_module)
+            finally:
+                rzo.rank = original_rank
+
+            self.assertFalse(os.path.exists(output_path))
+
+    def test_non_serializable_value_converted_to_string(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, "metrics.json")
+            self.trainer.callback_metrics = {"custom": object()}
+            cb = FinalMetricsCallback(output_path=output_path)
+            cb.on_train_end(self.trainer, self.pl_module)
+
+            with open(output_path) as f:
+                data = json.load(f)
+            self.assertIsInstance(data["custom"], str)
+
+    def test_output_path_nested_dirs_created(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, "a", "b", "metrics.json")
+            self.trainer.callback_metrics = {"loss/val": torch.tensor(0.1)}
+            cb = FinalMetricsCallback(output_path=output_path)
+            cb.on_train_end(self.trainer, self.pl_module)
+
+            self.assertTrue(os.path.exists(output_path))
+
+    def test_serialize_metrics_plain_float(self):
+        metrics = {"loss": 0.5, "acc": 0.9}
+        result = FinalMetricsCallback._serialize_metrics(metrics)
+        self.assertEqual(result["loss"], 0.5)
+        self.assertEqual(result["acc"], 0.9)
 
 
 if __name__ == "__main__":

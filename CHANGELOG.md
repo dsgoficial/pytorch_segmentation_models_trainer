@@ -1,5 +1,9 @@
 # Unreleased
 
+## Training Callbacks
+
+- Added `FinalMetricsCallback`: saves all epoch-averaged metrics and losses from the last training epoch to a JSON file via `trainer.callback_metrics`. Relative `output_path` values resolve against `trainer.log_dir` so the file lands alongside TensorBoard/CSV logs. A second hook (`on_test_end`) merges test-set metrics into the same file without overwriting train/val entries. Safe for multi-GPU training via `@rank_zero_only`. Exported from `custom_callbacks` and usable as a Hydra callback with `_target_: pytorch_segmentation_models_trainer.custom_callbacks.FinalMetricsCallback`.
+
 ## Image Callbacks
 
 - Added `shuffle_indices_seed` parameter (default `None`) to `ImageSegmentationResultCallback` (and all subclasses via inheritance, including `AutoencoderResultCallback`). When set, `AutoencoderResultCallback` samples a reproducible random subset of validation indices instead of always visualizing the first N rows. The seed is applied once per epoch via `numpy.random.RandomState`, so the shown subset is stable across epochs. When `None`, behaviour is unchanged (first N samples).

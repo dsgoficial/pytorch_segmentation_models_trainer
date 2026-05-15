@@ -19,6 +19,7 @@
  ****
 """
 
+import json
 import logging
 from pathlib import Path
 import pytorch_lightning as pl
@@ -710,3 +711,73 @@ class MixStyleCallback(pl.callbacks.Callback):
         for hook in self._hooks:
             hook.remove()
         self._hooks = []
+
+
+class FinalMetricsCallback(pl.callbacks.Callback):
+    """Saves metrics and losses from the last training epoch to a JSON file.
+
+    On training end reads ``trainer.callback_metrics`` (epoch-averaged values from
+    the last epoch) and writes them to a JSON file.  On test end merges test
+    metrics into the same file.
+
+    Relative ``output_path`` values are resolved against ``trainer.log_dir`` so
+    the file lands next to TensorBoard/CSV logs.
+
+    Args:
+        output_path: Destination file.  Relative paths resolve against
+            ``trainer.log_dir``.  Defaults to ``"final_metrics.json"``.
+
+    Example YAML::
+
+        callbacks:
+          - _target_: pytorch_segmentation_models_trainer.custom_callbacks.FinalMetricsCallback
+            output_path: final_metrics.json
+    """
+
+    def __init__(self, output_path: str = "final_metrics.json") -> None:
+        super().__init__()
+        self.output_path = output_path
+
+    def _resolve_path(self, trainer) -> Path:
+        path = Path(self.output_path)
+        if not path.is_absolute():
+            log_dir = getattr(trainer, "log_dir", None) or "."
+            path = Path(log_dir) / path
+        return path
+
+    @staticmethod
+    def _serialize_metrics(metrics: dict) -> dict:
+        result = {}
+        for k, v in metrics.items():
+            if isinstance(v, torch.Tensor):
+                result[k] = v.item()
+            else:
+                try:
+                    result[k] = float(v)
+                except (TypeError, ValueError):
+                    result[k] = str(v)
+        return result
+
+    @rank_zero_only
+    def on_train_end(self, trainer, pl_module) -> None:
+        metrics = self._serialize_metrics(dict(trainer.callback_metrics))
+        metrics["epoch"] = trainer.current_epoch
+        path = self._resolve_path(trainer)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(metrics, f, indent=2)
+        logger.info("Final metrics saved to %s", path)
+
+    @rank_zero_only
+    def on_test_end(self, trainer, pl_module) -> None:
+        test_metrics = self._serialize_metrics(dict(trainer.callback_metrics))
+        path = self._resolve_path(trainer)
+        existing = {}
+        if path.exists():
+            with open(path) as f:
+                existing = json.load(f)
+        existing.update(test_metrics)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(existing, f, indent=2)
+        logger.info("Test metrics merged into %s", path)
