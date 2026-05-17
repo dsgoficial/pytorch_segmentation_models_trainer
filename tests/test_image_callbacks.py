@@ -367,6 +367,52 @@ class TestImageCallbacks(unittest.TestCase):
         )
         callback.on_validation_epoch_end(self.trainer, self.pl_module)
 
+    def test_log_data_to_tensorboard_deletes_file_when_flag_set(self):
+        """ImageSegmentationResultCallback deletes PNG after TensorBoard log when delete_after_log=True."""
+        callback = ImageSegmentationResultCallback(n_samples=1, delete_after_log=True)
+        img_path = os.path.join(self.tmp_dir, "to_delete.png")
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        callback.log_data_to_tensorboard(img_path, "test_tag", self.trainer.logger, 0)
+
+        self.assertFalse(Path(img_path).exists(), "File should be deleted after log")
+
+    def test_log_data_to_tensorboard_keeps_file_by_default(self):
+        """ImageSegmentationResultCallback keeps PNG by default (delete_after_log=False)."""
+        callback = ImageSegmentationResultCallback(n_samples=1)
+        img_path = os.path.join(self.tmp_dir, "to_keep.png")
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        callback.log_data_to_tensorboard(img_path, "test_tag", self.trainer.logger, 0)
+
+        self.assertTrue(
+            Path(img_path).exists(), "File should remain when delete_after_log=False"
+        )
+
+    def test_enhanced_log_data_to_tensorboard_deletes_file_when_flag_set(self):
+        """EnhancedImageSegmentationResultCallback deletes PNG after TensorBoard log when delete_after_log=True."""
+        callback = EnhancedImageSegmentationResultCallback(
+            num_classes=2, delete_after_log=True
+        )
+        img_path = os.path.join(self.tmp_dir, "enhanced_to_delete.png")
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        callback.log_data_to_tensorboard(img_path, "test_tag", self.trainer.logger, 0)
+
+        self.assertFalse(Path(img_path).exists(), "File should be deleted after log")
+
+    def test_enhanced_log_data_to_tensorboard_keeps_file_by_default(self):
+        """EnhancedImageSegmentationResultCallback keeps PNG by default (delete_after_log=False)."""
+        callback = EnhancedImageSegmentationResultCallback(num_classes=2)
+        img_path = os.path.join(self.tmp_dir, "enhanced_to_keep.png")
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        callback.log_data_to_tensorboard(img_path, "test_tag", self.trainer.logger, 0)
+
+        self.assertTrue(
+            Path(img_path).exists(), "File should remain when delete_after_log=False"
+        )
+
     def test_enhanced_prepare_image_min_max_scaling(self):
         callback = EnhancedImageSegmentationResultCallback(
             num_classes=2, normalized_input=False

@@ -21,6 +21,7 @@
 
 import logging
 from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
+    FinalMetricsCallback,
     FrameFieldComputeWeightNormLossesCallback,
 )
 from pytorch_segmentation_models_trainer.model_loader.model import Model
@@ -95,6 +96,9 @@ def train(cfg: DictConfig):
                 break
         if not is_norm_loss_added:
             callback_list.append(FrameFieldComputeWeightNormLossesCallback())
+    if cfg.get("add_final_metrics_callback", True):
+        if not any(isinstance(cb, FinalMetricsCallback) for cb in callback_list):
+            callback_list.append(FinalMetricsCallback())
     model.setup("fit")
     pl_trainer_cfg = dict(cfg.pl_trainer)
     if deterministic_cudnn:

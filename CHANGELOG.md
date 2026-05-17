@@ -1,7 +1,12 @@
 # Unreleased
 
+## Training
+
+- `FinalMetricsCallback` agora é injetado automaticamente em todo treinamento via `train.py`, sem necessidade de declaração manual no YAML. Para suprimir, adicionar `add_final_metrics_callback: false` na config. Se o usuário já declarou `FinalMetricsCallback` no campo `callbacks`, nenhuma duplicata é criada. Campo `add_final_metrics_callback: bool = True` adicionado ao dataclass `TrainConfig`.
+
 ## Image Callbacks
 
+- Added `delete_after_log: bool = False` parameter to `ImageSegmentationResultCallback` (e todas as subclasses via herança) e `EnhancedImageSegmentationResultCallback`. Quando `True`, o arquivo PNG salvo em `image_logs/` é deletado imediatamente após o envio ao TensorBoard, reduzindo uso de disco em experimentos longos. Padrão `False` mantém comportamento anterior.
 - Added `use_basename_as_title: bool = False` option to all image callbacks (`ImageSegmentationResultCallback`, `EnhancedImageSegmentationResultCallback`, `FrameFieldResultCallback`, `FrameFieldOverlayedResultCallback`, `ObjectDetectionResultCallback`, `PolygonRNNResultCallback`, `ModPolyMapperResultCallback`, `AutoencoderResultCallback`). When `True`, plot titles and TensorBoard tags use only the file stem (e.g. `tile_001` instead of `/data/images/tile_001.tif`), making TensorBoard runs easier to read and compare when images come from deeply nested directories. Access via `_get_title(path)` helper on each class.
 
 ## Autoencoder Clustering Losses

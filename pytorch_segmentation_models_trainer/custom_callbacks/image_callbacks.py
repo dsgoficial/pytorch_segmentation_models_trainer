@@ -69,6 +69,7 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
         log_every_k_epochs=1,
         shuffle_indices_seed: Optional[int] = None,
         use_basename_as_title: bool = False,
+        delete_after_log: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -80,6 +81,7 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
         self.log_every_k_epochs = log_every_k_epochs
         self.shuffle_indices_seed = shuffle_indices_seed
         self.use_basename_as_title = use_basename_as_title
+        self.delete_after_log = delete_after_log
 
     def _get_title(self, path: str) -> str:
         if self.use_basename_as_title:
@@ -104,6 +106,8 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
         data = np.moveaxis(data, -1, 0)
         data = torch.from_numpy(data)
         logger.experiment.add_image(image_path, data, current_epoch)
+        if self.delete_after_log:
+            Path(saved_image).unlink(missing_ok=True)
 
     def save_plot_to_disk(self, plot, image_name, current_epoch, sample_idx=None):
         stem = Path(image_name).name.split(".")[0]
@@ -564,6 +568,7 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         save_dpi: int = 100,
         verbose: bool = True,
         use_basename_as_title: bool = False,
+        delete_after_log: bool = False,
         **kwargs,
     ) -> None:
         """
@@ -586,6 +591,7 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
             save_dpi: DPI for saved images (lower = faster, smaller files)
             verbose: Whether to print detailed progress messages
             use_basename_as_title: When True, use only the file stem (no directory, no ext) as title
+            delete_after_log: When True, delete saved PNG files after logging to TensorBoard.
         """
         super().__init__()
         self.n_samples = n_samples
@@ -596,6 +602,7 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         self.log_every_k_epochs = log_every_k_epochs
         self.verbose = verbose
         self.use_basename_as_title = use_basename_as_title
+        self.delete_after_log = delete_after_log
 
         # Color and class configuration
         self.colormap_name = colormap
@@ -841,6 +848,8 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
             data = np.moveaxis(data, -1, 0)
             data = torch.from_numpy(data)
             logger.experiment.add_image(image_path, data, current_epoch)
+            if self.delete_after_log:
+                Path(saved_image).unlink(missing_ok=True)
         except Exception as e:
             self._log(f"Error logging to tensorboard: {e}", prefix="❌")
 
