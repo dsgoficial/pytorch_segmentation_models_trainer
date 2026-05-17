@@ -818,3 +818,329 @@ class TestImageCallbacks(unittest.TestCase):
                     callback.on_validation_epoch_end(self.trainer, self.pl_module)
 
         self.assertEqual(accessed, [0, 1, 2, 3])
+
+    # ------------------------------------------------------------------ #
+    # use_basename_as_title                                                #
+    # ------------------------------------------------------------------ #
+
+    def test_get_title_default_returns_full_path(self):
+        callback = ImageSegmentationResultCallback()
+        self.assertEqual(
+            callback._get_title("/some/dir/image_001.tif"),
+            "/some/dir/image_001.tif",
+        )
+
+    def test_get_title_basename_mode_returns_stem(self):
+        callback = ImageSegmentationResultCallback(use_basename_as_title=True)
+        self.assertEqual(callback._get_title("/some/dir/image_001.tif"), "image_001")
+
+    def test_get_title_dotted_name_drops_last_extension_only(self):
+        callback = ImageSegmentationResultCallback(use_basename_as_title=True)
+        self.assertEqual(callback._get_title("/path/to/tile.v2.tif"), "tile.v2")
+
+    def test_image_segmentation_basename_title_in_visualization(self):
+        self.dataset.get_path.side_effect = lambda i: f"/some/path/image_{i}.tif"
+        callback = ImageSegmentationResultCallback(
+            n_samples=1, use_basename_as_title=True
+        )
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_vis.return_value = (MagicMock(), MagicMock())
+            with patch.object(
+                self.pl_module, "forward", return_value=torch.zeros(1, 1, 10, 10)
+            ):
+                with patch.object(
+                    callback, "save_plot_to_disk", return_value="dummy.png"
+                ):
+                    with patch.object(callback, "log_data_to_tensorboard"):
+                        callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+        _, kwargs = mock_vis.call_args
+        self.assertEqual(kwargs["fig_title"], "image_0")
+
+    def test_autoencoder_basename_title_in_visualization(self):
+        self.dataset.__getitem__.side_effect = lambda i: {
+            "image": torch.zeros(3, 10, 10)
+        }
+        self.dataset.__len__ = MagicMock(return_value=1)
+        self.dataset.get_path.side_effect = lambda i: f"/some/path/image_{i}.tif"
+
+        callback = AutoencoderResultCallback(n_samples=1, use_basename_as_title=True)
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+        self.pl_module.return_value = torch.zeros(1, 3, 10, 10)
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_vis.return_value = (MagicMock(), MagicMock())
+            with patch.object(callback, "save_plot_to_disk", return_value="dummy.png"):
+                with patch.object(callback, "log_data_to_tensorboard"):
+                    callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+        _, kwargs = mock_vis.call_args
+        self.assertEqual(kwargs["fig_title"], "image_0")
+
+    def test_enhanced_callback_basename_title_in_visualization(self):
+        self.dataset.get_path.side_effect = lambda i: f"/some/path/image_{i}.tif"
+        callback = EnhancedImageSegmentationResultCallback(
+            n_samples=1,
+            verbose=False,
+            num_classes=2,
+            max_workers=1,
+            use_basename_as_title=True,
+        )
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+        self.pl_module.return_value = torch.zeros(1, 2, 10, 10)
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_vis.return_value = (np.zeros((3, 10, 10)), MagicMock())
+            with patch.object(callback, "_wait_and_log_to_tensorboard"):
+                callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+        _, kwargs = mock_vis.call_args
+        self.assertEqual(kwargs["fig_title"], "image_0")
+
+    def test_frame_field_callback_basename_title(self):
+        callback = FrameFieldResultCallback(n_samples=1, use_basename_as_title=True)
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+        self.dataloader.__iter__.return_value = iter(
+            [
+                {
+                    "image": torch.ones(1, 3, 10, 10),
+                    "gt_polygons_image": torch.zeros(1, 2, 10, 10),
+                    "path": ["/some/path/test.tif"],
+                }
+            ]
+        )
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_vis.return_value = (MagicMock(), MagicMock())
+            with patch.object(
+                self.pl_module,
+                "forward",
+                return_value={"seg": torch.zeros(1, 2, 10, 10)},
+            ):
+                with patch.object(
+                    callback, "save_plot_to_disk", return_value="dummy.png"
+                ):
+                    with patch.object(callback, "log_data_to_tensorboard"):
+                        callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+        _, kwargs = mock_vis.call_args
+        self.assertEqual(kwargs["fig_title"], "test")
+
+    def test_frame_field_overlayed_basename_title(self):
+        callback = FrameFieldOverlayedResultCallback(
+            n_samples=1, use_basename_as_title=True
+        )
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+        self.dataloader.__iter__.return_value = iter(
+            [
+                {
+                    "image": torch.ones(1, 3, 10, 10),
+                    "path": ["/some/path/test.tif"],
+                }
+            ]
+        )
+        self.pl_module.return_value = {
+            "seg": torch.zeros(1, 2, 10, 10),
+        }
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.get_tensorboard_image_seg_display",
+            return_value=torch.zeros(1, 3, 10, 10),
+        ):
+            callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+        call_args = self.trainer.logger.experiment.add_images.call_args
+        tag = call_args[0][0]
+        self.assertIn("test", tag)
+        self.assertNotIn("/some/path/", tag)
+
+    def test_polygon_rnn_callback_basename_title(self):
+        callback = PolygonRNNResultCallback(n_samples=1, use_basename_as_title=True)
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+
+        self.dataset.get_n_image_path_dict_list.return_value = {
+            "/some/path/test.tif": {
+                "croped_images": torch.ones(1, 3, 224, 224),
+                "shapely_polygon_list": [],
+                "scale_h": torch.tensor([1.0]),
+                "scale_w": torch.tensor([1.0]),
+                "min_col": torch.tensor([0]),
+                "min_row": torch.tensor([0]),
+                "original_image": np.zeros((128, 128, 3)),
+            }
+        }
+        self.pl_module.model.test.return_value = torch.zeros(1, 10)
+        self.pl_module.val_seq_len = 10
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_fig = MagicMock()
+            mock_fig.get_axes.return_value = [MagicMock(), MagicMock()]
+            mock_vis.return_value = (MagicMock(), mock_fig)
+            with patch("matplotlib.pyplot.gcf", return_value=mock_fig):
+                with patch.object(
+                    callback, "save_plot_to_disk", return_value="dummy.png"
+                ):
+                    with patch.object(callback, "log_data_to_tensorboard"):
+                        callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+        _, kwargs = mock_vis.call_args
+        self.assertEqual(kwargs["fig_title"], "test")
+
+    def test_mod_polymapper_basename_title(self):
+        callback = ModPolyMapperResultCallback(n_samples=1, use_basename_as_title=True)
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+
+        detection_dict = {
+            "boxes": torch.tensor([[0, 0, 10, 10]]),
+            "labels": torch.tensor([1]),
+            "scores": torch.tensor([0.9]),
+            "polygonrnn_output": torch.zeros(1, 10),
+            "scale_h": torch.tensor([1.0]),
+            "scale_w": torch.tensor([1.0]),
+            "min_row": torch.tensor([0]),
+            "min_col": torch.tensor([0]),
+        }
+        prepared_item = {
+            "original_image": np.zeros((100, 100, 3)),
+            "shapely_polygon_list": [],
+        }
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_fig = MagicMock()
+            mock_fig.get_axes.return_value = [MagicMock(), MagicMock(), MagicMock()]
+            mock_vis.return_value = (MagicMock(), mock_fig)
+            with patch("matplotlib.pyplot.gcf", return_value=mock_fig):
+                with patch.object(
+                    callback, "save_plot_to_disk", return_value="dummy.png"
+                ):
+                    with patch.object(callback, "log_data_to_tensorboard"):
+                        callback.build_obj_det_and_polygon_vis(
+                            "/some/path/tile.tif",
+                            prepared_item["original_image"],
+                            detection_dict,
+                            [],
+                            [],
+                            self.trainer,
+                        )
+
+        _, kwargs = mock_vis.call_args
+        self.assertEqual(kwargs["fig_title"], "tile")
+
+    def test_object_detection_basename_title(self):
+        callback = ObjectDetectionResultCallback(
+            n_samples=1, use_basename_as_title=True
+        )
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+
+        mock_outputs = [
+            {"boxes": torch.tensor([[0, 0, 10, 10]]), "scores": torch.tensor([0.9])}
+        ]
+        self.dataset.get_path.side_effect = lambda i: f"/some/path/image_{i}.tif"
+
+        with patch.object(self.pl_module, "forward", return_value=mock_outputs):
+            self.dataloader.__iter__.return_value = iter(
+                [
+                    (
+                        torch.ones(1, 3, 128, 128),
+                        [{"boxes": torch.tensor([[0, 0, 10, 10]])}],
+                        torch.tensor([0]),
+                    )
+                ]
+            )
+            with patch(
+                "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.visualize_image_with_bboxes"
+            ) as mock_vis:
+                mock_vis.return_value = [torch.ones(3, 128, 128)]
+                callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+        call_args = self.trainer.logger.experiment.add_image.call_args
+        tag = call_args[0][0]
+        self.assertEqual(tag, "image_0")
+
+    def test_enhanced_callback_batch_paths_basename_title(self):
+        """Enhanced callback uses _get_title for batch paths when dataset has no get_path."""
+        dataset_no_path = MagicMock(spec=["__len__", "__getitem__"])
+        dataset_no_path.__len__.return_value = 1
+        dataloader = MagicMock()
+        dataloader.dataset = dataset_no_path
+        dataloader.batch_size = 1
+        dataloader.__iter__.return_value = iter(
+            [
+                {
+                    "image": torch.zeros(1, 3, 10, 10),
+                    "mask": torch.zeros(1, 1, 10, 10),
+                    "path": ["/some/path/test.tif"],
+                }
+            ]
+        )
+        self.pl_module.val_dataloader.return_value = dataloader
+
+        callback = EnhancedImageSegmentationResultCallback(
+            n_samples=1,
+            verbose=False,
+            num_classes=2,
+            max_workers=1,
+            use_basename_as_title=True,
+        )
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+        self.pl_module.return_value = torch.zeros(1, 2, 10, 10)
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_vis.return_value = (np.zeros((3, 10, 10)), MagicMock())
+            with patch.object(callback, "_wait_and_log_to_tensorboard"):
+                callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+        _, kwargs = mock_vis.call_args
+        self.assertEqual(kwargs["fig_title"], "test")
+
+    def test_enhanced_callback_generic_sample_name_when_no_paths(self):
+        """Enhanced callback falls back to sample_N when no get_path and no batch paths."""
+        dataset_no_path = MagicMock(spec=["__len__", "__getitem__"])
+        dataset_no_path.__len__.return_value = 1
+        dataloader = MagicMock()
+        dataloader.dataset = dataset_no_path
+        dataloader.batch_size = 1
+        dataloader.__iter__.return_value = iter(
+            [
+                {
+                    "image": torch.zeros(1, 3, 10, 10),
+                    "mask": torch.zeros(1, 1, 10, 10),
+                }
+            ]
+        )
+        self.pl_module.val_dataloader.return_value = dataloader
+
+        callback = EnhancedImageSegmentationResultCallback(
+            n_samples=1,
+            verbose=False,
+            num_classes=2,
+            max_workers=1,
+        )
+        callback.on_sanity_check_end(self.trainer, self.pl_module)
+        self.pl_module.return_value = torch.zeros(1, 2, 10, 10)
+
+        with patch(
+            "pytorch_segmentation_models_trainer.custom_callbacks.image_callbacks.generate_visualization"
+        ) as mock_vis:
+            mock_vis.return_value = (np.zeros((3, 10, 10)), MagicMock())
+            with patch.object(callback, "_wait_and_log_to_tensorboard"):
+                callback.on_validation_epoch_end(self.trainer, self.pl_module)
+
+        _, kwargs = mock_vis.call_args
+        self.assertIn("sample_", kwargs["fig_title"])

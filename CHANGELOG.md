@@ -1,5 +1,9 @@
 # Unreleased
 
+## Image Callbacks
+
+- Added `use_basename_as_title: bool = False` option to all image callbacks (`ImageSegmentationResultCallback`, `EnhancedImageSegmentationResultCallback`, `FrameFieldResultCallback`, `FrameFieldOverlayedResultCallback`, `ObjectDetectionResultCallback`, `PolygonRNNResultCallback`, `ModPolyMapperResultCallback`, `AutoencoderResultCallback`). When `True`, plot titles and TensorBoard tags use only the file stem (e.g. `tile_001` instead of `/data/images/tile_001.tif`), making TensorBoard runs easier to read and compare when images come from deeply nested directories. Access via `_get_title(path)` helper on each class.
+
 ## Autoencoder Clustering Losses
 
 - Added `DECSoftAssignmentLoss` (`custom_losses/autoencoder_clustering_losses.py`): soft-assignment KL loss (DEC, Xie et al. ICML 2016) that pushes the encoder toward confident, well-separated cluster assignments via a Student-t kernel and a sharpened target distribution P. Includes `initialize_centers` for K-Means warm-start.

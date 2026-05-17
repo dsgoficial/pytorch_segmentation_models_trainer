@@ -68,6 +68,7 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
         norm_params=None,
         log_every_k_epochs=1,
         shuffle_indices_seed: Optional[int] = None,
+        use_basename_as_title: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -78,6 +79,12 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
         self.save_outputs = False
         self.log_every_k_epochs = log_every_k_epochs
         self.shuffle_indices_seed = shuffle_indices_seed
+        self.use_basename_as_title = use_basename_as_title
+
+    def _get_title(self, path: str) -> str:
+        if self.use_basename_as_title:
+            return Path(path).stem
+        return path
 
     def prepare_image_to_plot(self, image):
         image = image.squeeze(0) if image.shape[0] == 1 else image
@@ -151,7 +158,7 @@ class ImageSegmentationResultCallback(pl.callbacks.Callback):
             predicted_mask = pl_module(image)
             image = image.to("cpu")
             predicted_mask = predicted_mask.to("cpu")
-            plot_title = val_ds.get_path(i)
+            plot_title = self._get_title(val_ds.get_path(i))
             tb_tag = f"{plot_title}_idx{i}"
             plt_result, fig = generate_visualization(
                 fig_title=plot_title,
@@ -200,7 +207,7 @@ class FrameFieldResultCallback(ImageSegmentationResultCallback):
                 mask = batch["gt_polygons_image"][i]
                 predicted_mask = pred["seg"][i]
                 predicted_mask = predicted_mask.to("cpu")
-                plot_title = batch["path"][i]
+                plot_title = self._get_title(batch["path"][i])
                 image_to_plot = np.transpose(image_display[i], (1, 2, 0))
                 axarr, fig = generate_visualization(
                     fig_title=plot_title,
@@ -263,7 +270,7 @@ class FrameFieldOverlayedResultCallback(ImageSegmentationResultCallback):
                     ),
                 )
                 trainer.logger.experiment.add_images(
-                    f"overlay-{batch['path'][idx]}_idx{current_item}",
+                    f"overlay-{self._get_title(batch['path'][idx])}_idx{current_item}",
                     image_seg_display,
                     trainer.current_epoch,
                 )
@@ -287,6 +294,7 @@ class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
             normalized_input=normalized_input,
             norm_params=norm_params,
             log_every_k_epochs=log_every_k_epochs,
+            **kwargs,
         )
         self.threshold = threshold
 
@@ -315,7 +323,7 @@ class ObjectDetectionResultCallback(ImageSegmentationResultCallback):
             )
             for idx, vis in enumerate(visualization_list):
                 trainer.logger.experiment.add_image(
-                    val_ds.dataset.get_path(int(indexes[idx])),
+                    self._get_title(val_ds.dataset.get_path(int(indexes[idx]))),
                     vis,
                     trainer.current_epoch,
                 )
@@ -344,7 +352,7 @@ class PolygonRNNResultCallback(ImageSegmentationResultCallback):
         predicted_polygon_list,
         trainer,
     ):
-        plot_title = image_path
+        plot_title = self._get_title(image_path)
         plt_result, fig = generate_visualization(
             fig_title=plot_title,
             fig_size=(10, 6),
@@ -423,6 +431,7 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
             normalized_input=normalized_input,
             norm_params=norm_params,
             log_every_k_epochs=log_every_k_epochs,
+            **kwargs,
         )
         self.threshold = threshold
         self.show_label_scores = show_label_scores
@@ -502,7 +511,7 @@ class ModPolyMapperResultCallback(PolygonRNNResultCallback):
         predicted_polygon_list,
         trainer,
     ):
-        plot_title = image_path
+        plot_title = self._get_title(image_path)
         plt_result, fig = generate_visualization(
             fig_title=plot_title,
             fig_size=(10, 6),
@@ -554,6 +563,7 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         max_workers: int = 4,
         save_dpi: int = 100,
         verbose: bool = True,
+        use_basename_as_title: bool = False,
         **kwargs,
     ) -> None:
         """
@@ -575,6 +585,7 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
             max_workers: Number of parallel workers for saving visualizations
             save_dpi: DPI for saved images (lower = faster, smaller files)
             verbose: Whether to print detailed progress messages
+            use_basename_as_title: When True, use only the file stem (no directory, no ext) as title
         """
         super().__init__()
         self.n_samples = n_samples
@@ -584,6 +595,7 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
         self.save_outputs = False
         self.log_every_k_epochs = log_every_k_epochs
         self.verbose = verbose
+        self.use_basename_as_title = use_basename_as_title
 
         # Color and class configuration
         self.colormap_name = colormap
@@ -609,6 +621,11 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
 
         # Turn off interactive plotting for better performance
         plt.ioff()
+
+    def _get_title(self, path: str) -> str:
+        if self.use_basename_as_title:
+            return Path(path).stem
+        return path
 
     def _log(self, message: str, prefix: str = "📊"):
         """Print log message if verbose mode is enabled."""
@@ -999,16 +1016,15 @@ class EnhancedImageSegmentationResultCallback(pl.callbacks.Callback):
                         global_idx = batch_idx * val_dataloader.batch_size + i
 
                         if has_get_path:
-                            # Use dataset's get_path method to get full path
-                            plot_title = dataset.get_path(global_idx)
+                            plot_title = self._get_title(dataset.get_path(global_idx))
                         elif batch_paths is not None:
-                            # Fall back to batch paths if available
-                            if isinstance(batch_paths, (list, tuple)):
-                                plot_title = batch_paths[i]
-                            else:
-                                plot_title = batch_paths
+                            raw = (
+                                batch_paths[i]
+                                if isinstance(batch_paths, (list, tuple))
+                                else batch_paths
+                            )
+                            plot_title = self._get_title(raw)
                         else:
-                            # Last resort: generic name
                             plot_title = f"sample_{global_idx}"
 
                         # Prepare data for visualization
@@ -1288,9 +1304,10 @@ class AutoencoderResultCallback(ImageSegmentationResultCallback):
             image_cpu = image.squeeze(0).cpu().numpy()
             reconstructed_cpu = reconstructed.squeeze(0).cpu().numpy()
 
-            plot_title = (
+            raw_path = (
                 val_ds.get_path(i) if hasattr(val_ds, "get_path") else f"sample_{i}"
             )
+            plot_title = self._get_title(raw_path)
             tb_tag = f"{plot_title}_idx{i}"
 
             _, fig = generate_visualization(
