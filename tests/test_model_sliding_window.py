@@ -240,7 +240,7 @@ class TestOnTestEpochEnd:
     def test_compute_then_log_then_reset(self):
         model = _make_model(_sw_cfg_dict())
         mock_metrics = MagicMock()
-        mock_metrics.compute.return_value = {"test/f1": torch.tensor(0.9)}
+        mock_metrics.compute.return_value = {"f1/test": torch.tensor(0.9)}
         model.test_metrics = mock_metrics
         model.log_dict = MagicMock()
         model.on_test_epoch_end()

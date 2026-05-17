@@ -630,13 +630,13 @@ def test_variational_autoencoder_model_logs_train_val_and_test_components():
     assert test_loss.shape == torch.Size([])
     assert loss_fn.call_count == 3
     logged_names = [call.args[0] for call in pl_model.log.call_args_list]
-    assert "train/loss" in logged_names
-    assert "train/reconstruction_loss" in logged_names
-    assert "train/kl_loss" in logged_names
-    assert "train/weighted_reconstruction_loss" in logged_names
-    assert "train/weighted_kl_loss" in logged_names
-    assert "val/loss" in logged_names
-    assert "test/loss" in logged_names
+    assert "loss/train" in logged_names
+    assert "reconstruction_loss/train" in logged_names
+    assert "kl_loss/train" in logged_names
+    assert "weighted_reconstruction_loss/train" in logged_names
+    assert "weighted_kl_loss/train" in logged_names
+    assert "loss/val" in logged_names
+    assert "loss/test" in logged_names
 
 
 def test_variational_autoencoder_model_accepts_plain_loss_tensor():
@@ -666,7 +666,7 @@ def test_variational_autoencoder_model_accepts_plain_loss_tensor():
     loss = pl_model.training_step(batch, 0)
 
     assert loss.shape == torch.Size([])
-    assert "train/loss" in [call.args[0] for call in pl_model.log.call_args_list]
+    assert "loss/train" in [call.args[0] for call in pl_model.log.call_args_list]
 
 
 def test_variational_autoencoder_model_logs_smooth_l1_ms_ssim_components():
@@ -702,11 +702,11 @@ def test_variational_autoencoder_model_logs_smooth_l1_ms_ssim_components():
 
     assert loss.shape == torch.Size([])
     logged_names = [call.args[0] for call in pl_model.log.call_args_list]
-    assert "train/loss" in logged_names
-    assert "train/smooth_l1_loss" in logged_names
-    assert "train/ms_ssim_loss" in logged_names
-    assert "train/weighted_smooth_l1_loss" in logged_names
-    assert "train/weighted_ms_ssim_loss" in logged_names
+    assert "loss/train" in logged_names
+    assert "smooth_l1_loss/train" in logged_names
+    assert "ms_ssim_loss/train" in logged_names
+    assert "weighted_smooth_l1_loss/train" in logged_names
+    assert "weighted_ms_ssim_loss/train" in logged_names
 
 
 @pytest.mark.parametrize(
@@ -949,6 +949,6 @@ def test_variational_autoencoder_model_computes_metrics_when_configured():
 
     assert pl_model.log_dict.call_count == 2
     first_call_keys = set(pl_model.log_dict.call_args_list[0].args[0].keys())
-    assert any("train/" in k for k in first_call_keys)
+    assert any("/train" in k for k in first_call_keys)
     second_call_keys = set(pl_model.log_dict.call_args_list[1].args[0].keys())
-    assert any("val/" in k for k in second_call_keys)
+    assert any("/val" in k for k in second_call_keys)

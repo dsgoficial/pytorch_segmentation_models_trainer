@@ -38,7 +38,7 @@ AutoencoderLatentClusteringCallback
         loss = self.loss_function(reconstructed, targets)
 
         self.log(
-            f"{prefix}/loss",
+            f"loss/{prefix}",
             loss,
             on_step=(prefix == "train"),
             on_epoch=True,

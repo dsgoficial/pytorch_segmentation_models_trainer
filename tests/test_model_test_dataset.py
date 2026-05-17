@@ -5,10 +5,11 @@ Tests for test_dataset support in Model and FrameFieldSegmentationPLModel.
 Covers:
   - test_ds instantiation from config (present / absent)
   - gpu_test_transform guard
-  - test_metrics MetricCollection with "test/" prefix
+  - test_metrics MetricCollection with "/test" postfix
   - test_dataloader() returning None vs real DataLoader
   - test_step() loss value, logging keys, compound loss, metrics
 """
+
 import logging
 from unittest.mock import MagicMock, patch, PropertyMock
 
@@ -27,22 +28,24 @@ B, H, W, CLASSES = 2, 32, 32, 2
 
 def _make_cfg(**extra):
     """Minimal config with no dataset keys by default."""
-    return OmegaConf.create({
-        "model": {
-            "_target_": "segmentation_models_pytorch.Unet",
-            "encoder_name": "resnet18",
-            "encoder_weights": None,
-            "in_channels": 3,
-            "classes": CLASSES,
-        },
-        "loss": {"_target_": "torch.nn.CrossEntropyLoss"},
-        "hyperparameters": {
-            "batch_size": B,
-            "devices": 1,
-            "accelerator": "cpu",
-        },
-        **extra,
-    })
+    return OmegaConf.create(
+        {
+            "model": {
+                "_target_": "segmentation_models_pytorch.Unet",
+                "encoder_name": "resnet18",
+                "encoder_weights": None,
+                "in_channels": 3,
+                "classes": CLASSES,
+            },
+            "loss": {"_target_": "torch.nn.CrossEntropyLoss"},
+            "hyperparameters": {
+                "batch_size": B,
+                "devices": 1,
+                "accelerator": "cpu",
+            },
+            **extra,
+        }
+    )
 
 
 def _make_model(cfg=None):
@@ -65,6 +68,7 @@ def _make_tiny_dataset():
 
 # ─── Model.__init__ with test_dataset ────────────────────────────────────────
 
+
 class TestModelInitTestDataset:
     def test_test_ds_is_none_when_not_in_config(self):
         model = _make_model()
@@ -85,23 +89,35 @@ class TestModelInitTestDataset:
         assert not hasattr(model, "test_metrics")
 
     def test_test_metrics_created_with_test_prefix(self):
-        cfg = _make_cfg(**{
-            "metrics": [
-                {"_target_": "torchmetrics.F1Score", "task": "multiclass", "num_classes": CLASSES}
-            ]
-        })
+        cfg = _make_cfg(
+            **{
+                "metrics": [
+                    {
+                        "_target_": "torchmetrics.F1Score",
+                        "task": "multiclass",
+                        "num_classes": CLASSES,
+                    }
+                ]
+            }
+        )
         model = _make_model(cfg)
         assert hasattr(model, "test_metrics")
-        # Metric names must carry the "test/" prefix
+        # Metric names must carry the "/test" postfix
         metric_keys = list(model.test_metrics.keys())
-        assert all(k.startswith("test/") for k in metric_keys)
+        assert all(k.endswith("/test") for k in metric_keys)
 
     def test_all_three_metric_collections_created(self):
-        cfg = _make_cfg(**{
-            "metrics": [
-                {"_target_": "torchmetrics.F1Score", "task": "multiclass", "num_classes": CLASSES}
-            ]
-        })
+        cfg = _make_cfg(
+            **{
+                "metrics": [
+                    {
+                        "_target_": "torchmetrics.F1Score",
+                        "task": "multiclass",
+                        "num_classes": CLASSES,
+                    }
+                ]
+            }
+        )
         model = _make_model(cfg)
         assert hasattr(model, "train_metrics")
         assert hasattr(model, "val_metrics")
@@ -109,6 +125,7 @@ class TestModelInitTestDataset:
 
 
 # ─── test_dataloader ─────────────────────────────────────────────────────────
+
 
 class TestTestDataloader:
     def test_returns_none_when_test_ds_is_none(self):
@@ -121,18 +138,23 @@ class TestTestDataloader:
         model = _make_model()
         model.test_ds = _make_tiny_dataset()
         # Inject minimal test_dataset config so the dataloader can read params
-        model.cfg = OmegaConf.merge(model.cfg, OmegaConf.create({
-            "test_dataset": {
-                "data_loader": {
-                    "shuffle": False,
-                    "num_workers": 0,
-                    "pin_memory": False,
-                    "drop_last": False,
-                    "prefetch_factor": 2,
-                    "persistent_workers": False,
+        model.cfg = OmegaConf.merge(
+            model.cfg,
+            OmegaConf.create(
+                {
+                    "test_dataset": {
+                        "data_loader": {
+                            "shuffle": False,
+                            "num_workers": 0,
+                            "pin_memory": False,
+                            "drop_last": False,
+                            "prefetch_factor": 2,
+                            "persistent_workers": False,
+                        }
+                    }
                 }
-            }
-        }))
+            ),
+        )
         dl = model.test_dataloader()
         assert isinstance(dl, DataLoader)
 
@@ -141,17 +163,23 @@ class TestTestDataloader:
 
         model = _make_model()
         model.test_ds = _make_tiny_dataset()
-        model.cfg = OmegaConf.merge(model.cfg, OmegaConf.create({
-            "test_dataset": {
-                "data_loader": {"num_workers": 0, "pin_memory": False}
-            }
-        }))
+        model.cfg = OmegaConf.merge(
+            model.cfg,
+            OmegaConf.create(
+                {
+                    "test_dataset": {
+                        "data_loader": {"num_workers": 0, "pin_memory": False}
+                    }
+                }
+            ),
+        )
         dl = model.test_dataloader()
         assert isinstance(dl, DataLoader)
         assert dl.dataset is model.test_ds
 
 
 # ─── test_step ───────────────────────────────────────────────────────────────
+
 
 class TestTestStep:
     def test_returns_scalar_loss(self):
@@ -189,7 +217,9 @@ class TestTestStep:
 
     def test_logs_individual_losses_with_test_prefix(self):
         """With compound loss, individual losses must use losses/test_* prefix."""
-        from pytorch_segmentation_models_trainer.custom_losses.base_loss import MultiLoss
+        from pytorch_segmentation_models_trainer.custom_losses.base_loss import (
+            MultiLoss,
+        )
         from unittest.mock import PropertyMock
 
         model = _make_model()
@@ -201,9 +231,12 @@ class TestTestStep:
         )
         object.__setattr__(model, "loss_function", mock_loss_fn)
         model.use_compound_loss = True
-        model.cfg = OmegaConf.merge(model.cfg, OmegaConf.create({
-            "loss_params": {"compound_loss": {"normalize_losses": False}}
-        }))
+        model.cfg = OmegaConf.merge(
+            model.cfg,
+            OmegaConf.create(
+                {"loss_params": {"compound_loss": {"normalize_losses": False}}}
+            ),
+        )
         type(model).current_epoch = PropertyMock(return_value=0)
         model.log = MagicMock()
 
@@ -213,7 +246,9 @@ class TestTestStep:
         assert "losses/test_crossfield" in logged_keys
 
     def test_logs_extra_info_with_test_prefix(self):
-        from pytorch_segmentation_models_trainer.custom_losses.base_loss import MultiLoss
+        from pytorch_segmentation_models_trainer.custom_losses.base_loss import (
+            MultiLoss,
+        )
         from unittest.mock import PropertyMock
 
         model = _make_model()
@@ -225,9 +260,12 @@ class TestTestStep:
         )
         object.__setattr__(model, "loss_function", mock_loss_fn)
         model.use_compound_loss = True
-        model.cfg = OmegaConf.merge(model.cfg, OmegaConf.create({
-            "loss_params": {"compound_loss": {"normalize_losses": False}}
-        }))
+        model.cfg = OmegaConf.merge(
+            model.cfg,
+            OmegaConf.create(
+                {"loss_params": {"compound_loss": {"normalize_losses": False}}}
+            ),
+        )
         type(model).current_epoch = PropertyMock(return_value=0)
         model.log = MagicMock()
 
@@ -236,18 +274,24 @@ class TestTestStep:
         assert "extra/test_seg_iou" in logged_keys
 
     def test_computes_metrics_with_test_prefix(self):
-        cfg = _make_cfg(**{
-            "metrics": [
-                {"_target_": "torchmetrics.F1Score", "task": "multiclass", "num_classes": CLASSES}
-            ]
-        })
+        cfg = _make_cfg(
+            **{
+                "metrics": [
+                    {
+                        "_target_": "torchmetrics.F1Score",
+                        "task": "multiclass",
+                        "num_classes": CLASSES,
+                    }
+                ]
+            }
+        )
         model = _make_model(cfg)
         model.log = MagicMock()
         model.log_dict = MagicMock()
         model.test_step(_make_batch(), 0)
         assert model.log_dict.called
         logged_dict = model.log_dict.call_args_list[-1].args[0]
-        assert any(k.startswith("test/") for k in logged_dict)
+        assert any(k.endswith("/test") for k in logged_dict)
 
     def test_works_without_test_metrics(self):
         """test_step must not crash when cfg has no metrics section."""

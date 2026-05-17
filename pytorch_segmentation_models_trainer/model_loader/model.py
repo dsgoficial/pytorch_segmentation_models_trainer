@@ -94,10 +94,9 @@ class Model(pl.LightningModule):
             metrics = torchmetrics.MetricCollection(
                 [instantiate(i, _recursive_=False) for i in self.cfg.metrics]
             )
-            # Use forward slash for grouping in TensorBoard
-            self.train_metrics = metrics.clone(prefix="train/")
-            self.val_metrics = metrics.clone(prefix="val/")
-            self.test_metrics = metrics.clone(prefix="test/")
+            self.train_metrics = metrics.clone(postfix="/train")
+            self.val_metrics = metrics.clone(postfix="/val")
+            self.test_metrics = metrics.clone(postfix="/test")
 
         # Per-class IoU: automatically enabled when class_definitions is present
         self._per_class_iou = None

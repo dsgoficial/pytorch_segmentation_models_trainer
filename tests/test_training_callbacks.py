@@ -394,7 +394,7 @@ class TestFinalMetricsCallback(unittest.TestCase):
             output_path = os.path.join(tmpdir, "metrics.json")
             self.trainer.callback_metrics = {
                 "loss/val": torch.tensor(0.42),
-                "val/iou": torch.tensor(0.85),
+                "iou/val": torch.tensor(0.85),
             }
             cb = FinalMetricsCallback(output_path=output_path)
             cb.on_train_end(self.trainer, self.pl_module)
@@ -403,7 +403,7 @@ class TestFinalMetricsCallback(unittest.TestCase):
             with open(output_path) as f:
                 data = json.load(f)
             self.assertAlmostEqual(data["loss/val"], 0.42, places=4)
-            self.assertAlmostEqual(data["val/iou"], 0.85, places=4)
+            self.assertAlmostEqual(data["iou/val"], 0.85, places=4)
             self.assertEqual(data["epoch"], 5)
 
     def test_tensors_serialized_as_float(self):

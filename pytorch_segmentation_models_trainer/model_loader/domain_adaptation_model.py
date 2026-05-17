@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 from __future__ import annotations
 
 import logging
@@ -111,8 +112,8 @@ class DomainAdaptationModel(Model):
             metrics = torchmetrics.MetricCollection(
                 [instantiate(i, _recursive_=False) for i in self.cfg.metrics]
             )
-            self.train_metrics = metrics.clone(prefix="train/")
-            self.val_metrics = metrics.clone(prefix="val/")
+            self.train_metrics = metrics.clone(postfix="/train")
+            self.val_metrics = metrics.clone(postfix="/val")
 
         self.check_if_should_normalize()
 
@@ -269,26 +270,30 @@ class DomainAdaptationModel(Model):
         if self.source_val_ds is not None:
             loaders["source_val"] = self._make_dataloader(
                 self.source_val_ds,
-                self.cfg.domain_adaptation.source_val_dataset.data_loader
-                if getattr(self.cfg.domain_adaptation, "source_val_dataset", None)
-                is not None
-                and hasattr(
-                    self.cfg.domain_adaptation.source_val_dataset, "data_loader"
-                )
-                else None,
+                (
+                    self.cfg.domain_adaptation.source_val_dataset.data_loader
+                    if getattr(self.cfg.domain_adaptation, "source_val_dataset", None)
+                    is not None
+                    and hasattr(
+                        self.cfg.domain_adaptation.source_val_dataset, "data_loader"
+                    )
+                    else None
+                ),
                 shuffle=False,
             )
 
         if self.target_val_ds is not None:
             loaders["target_val"] = self._make_dataloader(
                 self.target_val_ds,
-                self.cfg.domain_adaptation.target_val_dataset.data_loader
-                if getattr(self.cfg.domain_adaptation, "target_val_dataset", None)
-                is not None
-                and hasattr(
-                    self.cfg.domain_adaptation.target_val_dataset, "data_loader"
-                )
-                else None,
+                (
+                    self.cfg.domain_adaptation.target_val_dataset.data_loader
+                    if getattr(self.cfg.domain_adaptation, "target_val_dataset", None)
+                    is not None
+                    and hasattr(
+                        self.cfg.domain_adaptation.target_val_dataset, "data_loader"
+                    )
+                    else None
+                ),
                 shuffle=False,
             )
 

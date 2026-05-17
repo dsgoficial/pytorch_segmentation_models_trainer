@@ -85,9 +85,9 @@ def test_autoencoder_model_computes_metrics_when_configured():
 
     assert pl_model.log_dict.call_count == 2
     first_keys = set(pl_model.log_dict.call_args_list[0].args[0].keys())
-    assert any("train/" in k for k in first_keys)
+    assert any("/train" in k for k in first_keys)
     second_keys = set(pl_model.log_dict.call_args_list[1].args[0].keys())
-    assert any("val/" in k for k in second_keys)
+    assert any("/val" in k for k in second_keys)
 
 
 def test_generic_decoder_output_activation_default_is_none():
