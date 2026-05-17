@@ -74,6 +74,84 @@ def compute_stats_cmd(
     )
 
 
+@cli.command("export-tb-images")
+@click.argument("log_dir", type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "--list-tags",
+    "list_tags",
+    is_flag=True,
+    default=False,
+    help="List available image tags found in event files and exit.",
+)
+@click.option(
+    "--tags",
+    default=None,
+    help="Comma-separated image tags to export. Omit to export all tags.",
+)
+@click.option(
+    "--steps",
+    default=None,
+    help=(
+        "Steps to export. Accepts integers, ranges, and combinations: "
+        "'5', '0-20', '0,10,20', '0-5,10'."
+    ),
+)
+@click.option(
+    "--output",
+    "-o",
+    default="tb_exports",
+    show_default=True,
+    help="Output directory for exported PNG files.",
+)
+def export_tb_images_cmd(log_dir, list_tags, tags, steps, output):
+    """Export images from TensorBoard event files.
+
+    LOG_DIR is searched recursively for TFRecord event files.
+    Images are saved as PNG files named <tag>_step<step>.png.
+
+    Examples:
+
+    \b
+        # List available tags
+        pytorch-smt-tools export-tb-images runs/exp1 --list-tags
+
+    \b
+        # Export one tag, all steps
+        pytorch-smt-tools export-tb-images runs/exp1 --tags tile_001_idx0 -o exports/
+
+    \b
+        # Export two tags, epochs 10-20
+        pytorch-smt-tools export-tb-images runs/exp1 \\
+            --tags "tile_001_idx0,tile_005_idx4" --steps 10-20 -o exports/
+    """
+    from pathlib import Path
+    from pytorch_segmentation_models_trainer.tools.export_tb_images import (
+        export_images,
+        list_image_tags,
+    )
+
+    log_path = Path(log_dir)
+
+    if list_tags:
+        available = sorted(list_image_tags(log_path))
+        if not available:
+            click.echo("No image tags found in event files.")
+            return
+        click.echo(f"Found {len(available)} image tag(s):")
+        for t in available:
+            click.echo(f"  {t}")
+        return
+
+    tag_list = [t.strip() for t in tags.split(",")] if tags else None
+    count = export_images(
+        log_dir=log_path,
+        output_dir=Path(output),
+        tags=tag_list,
+        steps=steps,
+    )
+    click.echo(f"Exported {count} image(s) to '{output}'.")
+
+
 def entry():
     """Entry point registered in pyproject.toml."""
     cli()

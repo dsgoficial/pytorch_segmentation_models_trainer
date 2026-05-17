@@ -1,5 +1,9 @@
 # Unreleased
 
+## CLI Tools
+
+- Novo subcomando `pytorch-smt-tools export-tb-images`: exporta imagens de event files do TensorBoard para PNG sem necessidade do pacote `tensorboard`. Usa os protos do `tensorboardX` (já dependência do projeto) para parsear TFRecords. Suporta filtro por tag (`--tags`) e por step/epoch (`--steps`, aceita inteiros, ranges e combinações: `"0-10,20"`). `--list-tags` lista todas as tags disponíveis no diretório de logs. Destinado ao workflow de treinar com `delete_after_log=True` (sem acúmulo de PNGs) e exportar seletivamente apenas as imagens de interesse após análise no TensorBoard.
+
 ## Training
 
 - `FinalMetricsCallback` agora é injetado automaticamente em todo treinamento via `train.py`, sem necessidade de declaração manual no YAML. Para suprimir, adicionar `add_final_metrics_callback: false` na config. Se o usuário já declarou `FinalMetricsCallback` no campo `callbacks`, nenhuma duplicata é criada. Campo `add_final_metrics_callback: bool = True` adicionado ao dataclass `TrainConfig`.
