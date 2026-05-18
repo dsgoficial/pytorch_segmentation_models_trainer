@@ -1,5 +1,7 @@
 # Unreleased
 
+## [1.2.0] - 2026-05-18
+
 ## Dataset Distillation
 
 - Added VAE-backed DDOQ image distillation (`tools/dataset_distillation/vae_ddoq_distillation.py`) that loads a trained VAE checkpoint, extracts embeddings for all configured input images, reuses `KMeansClusteringTool` for Mini-Batch K-Means, decodes one cluster center per distilled image, and writes both `embeddings.parquet` (source image path, embedding, cluster id) and `distilled_images.parquet` (distilled image path, cluster id, center embedding, DDOQ weight).
