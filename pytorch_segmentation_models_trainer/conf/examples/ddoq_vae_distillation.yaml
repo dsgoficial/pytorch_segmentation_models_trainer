@@ -1,0 +1,41 @@
+# Example: DDOQ image distillation from a trained VAE.
+#
+# CLI:
+#   pytorch-smt-tools ddoq-vae pytorch_segmentation_models_trainer/conf/examples/ddoq_vae_distillation.yaml
+#
+# Hydra:
+#   pytorch-smt --config-path pytorch_segmentation_models_trainer/conf/examples \
+#     --config-name ddoq_vae_distillation mode=ddoq-vae-distill
+
+defaults:
+  - _self_
+
+mode: ddoq-vae-distill
+
+dataset_distillation:
+  mode: vae_decode
+  k: 500
+  num_clusters: 500
+
+  # Trained VAE source.
+  vae_config_path: /data/configs/vae_train.yaml
+  vae_checkpoint_path: /data/checkpoints/vae.ckpt
+
+  # Dataset source. If omitted, the VAE config path is reused.
+  dataset_config_path: /data/configs/vae_train.yaml
+  dataset_key: train_dataset
+
+  # Encoding and clustering.
+  latent: mu
+  latent_reduction: flatten
+  weight_mode: sqrt
+  kmeans_max_iter: 100
+  kmeans_batch_size: 1024
+  batch_size: 32
+  num_workers: 4
+  device: cuda
+  random_seed: 42
+
+  # Outputs.
+  output_dir: /data/ddoq_outputs/vae_ddoq_k500
+  distilled_image_format: auto  # auto | tif | png | jpg | pt

@@ -4,13 +4,10 @@ Dataset distillation utilities using Coreset of Medoids.
 Inspired by "Dataset Distillation as Pushforward Optimal Quantization".
 """
 
-import os
-from typing import Any, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader
 import pytorch_lightning as pl
-import numpy as np
 from tqdm import tqdm
 
 from pytorch_segmentation_models_trainer.tools.kmeans.kmeans_calculator import (
@@ -24,9 +21,15 @@ class KMeansClusteringTool:
     Handles clustering, weight calculation (Voronoi weights), and Medoid search.
     """
 
-    def __init__(self, n_clusters: int, device: torch.device):
+    def __init__(
+        self,
+        n_clusters: int,
+        device: torch.device,
+        random_state: int = 42,
+    ):
         self.n_clusters = n_clusters
         self.device = device
+        self.random_state = random_state
         self.model = None
 
     def fit(self, latents: torch.Tensor, batch_size: int = 1024, max_iter: int = 100):
@@ -34,14 +37,29 @@ class KMeansClusteringTool:
         self.model = MiniBatchKMeans(
             n_clusters=self.n_clusters,
             device=self.device,
-            random_state=42,
+            random_state=self.random_state,
             batch_size=batch_size,
             max_iter=max_iter,
         )
         self.model.fit(latents)
         return self
 
-    def get_cluster_weights(self, mode: str = "density") -> torch.Tensor:
+    def predict(self, latents: torch.Tensor) -> torch.Tensor:
+        """Assign embeddings to the fitted cluster centers.
+
+        Args:
+            latents: Embedding tensor with shape ``(N, D)``.
+
+        Returns:
+            Cluster id tensor with shape ``(N,)``.
+        """
+        if self.model is None:
+            raise ValueError("Model must be fitted before predicting clusters.")
+        return self.model.predict(latents)
+
+    def get_cluster_weights(
+        self, mode: str = "density", labels: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """
         Calculates cluster weights for Student training.
 
@@ -50,17 +68,24 @@ class KMeansClusteringTool:
                 - "uniform": Classical K-Means coreset (all weights = 1.0).
                 - "density": Vanilla DDOQ (weights proportional to counts).
                 - "sqrt": Improved DDOQ (weights proportional to sqrt of counts).
+            labels: Optional cluster assignment for every original image. When
+                provided, weights use exact Voronoi masses from those labels;
+                otherwise they fall back to Mini-Batch K-Means internal counts.
         """
         if mode == "uniform":
-            # Classical K-Means: returns equal weights (1.0) without further processing.
+            # Classical K-Means: equal weights without density scaling.
             return torch.ones(self.n_clusters)
 
-        if self.model is None or self.model.counts is None:
+        if labels is not None:
+            counts = torch.bincount(
+                labels.detach().cpu().long(), minlength=self.n_clusters
+            ).float()
+        elif self.model is not None and self.model.counts is not None:
+            counts = self.model.counts.clone().float().cpu()
+        else:
             raise ValueError(
                 "Model must be fitted before calculating density-based weights."
             )
-
-        counts = self.model.counts.clone().float().cpu()
         if mode == "density":
             weights = counts
         elif mode == "sqrt":
@@ -69,7 +94,7 @@ class KMeansClusteringTool:
             raise ValueError(f"Invalid weight mode: {mode}")
 
         # DDOQ Normalization: Scales weights so the average is 1/sqrt(K).
-        # This keeps the Loss magnitude consistent across different modes and Coreset sizes (K),
+        # This keeps Loss magnitude consistent across modes and coreset sizes.
         # preserving the original gradient scale for the optimizer.
         weights = (weights / (torch.sum(weights) + 1e-8)) * torch.sqrt(
             torch.tensor(self.n_clusters)

@@ -1,5 +1,11 @@
 # Unreleased
 
+## Dataset Distillation
+
+- Added VAE-backed DDOQ image distillation (`tools/dataset_distillation/vae_ddoq_distillation.py`) that loads a trained VAE checkpoint, extracts embeddings for all configured input images, reuses `KMeansClusteringTool` for Mini-Batch K-Means, decodes one cluster center per distilled image, and writes both `embeddings.parquet` (source image path, embedding, cluster id) and `distilled_images.parquet` (distilled image path, cluster id, center embedding, DDOQ weight).
+- Added `pytorch-smt-tools ddoq-vae` and Hydra mode `ddoq-vae-distill` so the VAE DDOQ pipeline can run either as a tool command or from YAML configuration. Added `conf/examples/ddoq_vae_distillation.yaml`.
+- Extended `KMeansClusteringTool` with `predict()` and exact label-based Voronoi weight calculation, so DDOQ weights can be tied to the full input-image cluster assignments instead of only Mini-Batch K-Means internal update counts.
+
 ## CLI Tools
 
 - Novo subcomando `pytorch-smt-tools export-tb-images`: exporta imagens de event files do TensorBoard para PNG sem necessidade do pacote `tensorboard`. Usa os protos do `tensorboardX` (já dependência do projeto) para parsear TFRecords. Suporta filtro por tag (`--tags`) e por step/epoch (`--steps`, aceita inteiros, ranges e combinações: `"0-10,20"`). `--list-tags` lista todas as tags disponíveis no diretório de logs. Destinado ao workflow de treinar com `delete_after_log=True` (sem acúmulo de PNGs) e exportar seletivamente apenas as imagens de interesse após análise no TensorBoard.

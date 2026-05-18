@@ -152,6 +152,54 @@ def export_tb_images_cmd(log_dir, list_tags, tags, steps, output):
     click.echo(f"Exported {count} image(s) to '{output}'.")
 
 
+@cli.command("ddoq-vae")
+@click.argument("yaml_path", type=click.Path(exists=True, dir_okay=False))
+@click.option("--k", default=None, type=int, help="Override number of clusters.")
+@click.option(
+    "--checkpoint",
+    "checkpoint_path",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Override trained VAE checkpoint path.",
+)
+@click.option(
+    "--output",
+    "output_dir",
+    default=None,
+    type=click.Path(file_okay=False),
+    help="Override output directory.",
+)
+@click.option(
+    "--format",
+    "distilled_image_format",
+    default=None,
+    type=click.Choice(["auto", "tif", "png", "jpg", "pt"], case_sensitive=False),
+    help="Override distilled image format.",
+)
+def ddoq_vae_cmd(yaml_path, k, checkpoint_path, output_dir, distilled_image_format):
+    """Run VAE-backed DDOQ image distillation from YAML_PATH.
+
+    The config writes ``embeddings.parquet`` with all input embeddings and
+    ``distilled_images.parquet`` with one row per decoded cluster center.
+    """
+    from pytorch_segmentation_models_trainer.tools.dataset_distillation import (
+        vae_ddoq_distillation,
+    )
+
+    result = vae_ddoq_distillation.run_vae_ddoq_from_config_file(
+        yaml_path=yaml_path,
+        k=k,
+        checkpoint_path=checkpoint_path,
+        output_dir=output_dir,
+        distilled_image_format=distilled_image_format,
+    )
+    click.echo(f"Wrote embeddings parquet: {result.embeddings_parquet_path}")
+    click.echo(
+        f"Wrote distilled images parquet: {result.distilled_images_parquet_path}"
+    )
+    click.echo(f"Wrote {len(result.distilled_image_paths)} distilled image(s).")
+
+
 def entry():
     """Entry point registered in pyproject.toml."""
     cli()

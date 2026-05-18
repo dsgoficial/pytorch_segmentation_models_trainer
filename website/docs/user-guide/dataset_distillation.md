@@ -17,14 +17,21 @@ The core innovation of DDOQ (supported by **Theorem 1** in the study) is the mat
 
 1.  **Encoding**: A pre-trained VAE maps original high-dimensional images into a low-dimensional latent space.
 2.  **Clustering & Weight Calculation**: Mini-Batch k-means (or CLVQ) finds $K$ centroids. Cluster mass is captured as weights, with a **square root heuristic** applied for variance reduction.
-3.  **Image Synthesis / Selection (Decoding)**:
-    *   *Original Paper*: Latent centroids are transformed into synthetic images via a Diffusion Model.
-    *   *LULC Adaptation*: We perform a **Nearest Neighbor** search to select the real original image (Medoid) closest to the centroid.
+3.  **Image Synthesis / Selection**:
+    *   *VAE Decode*: Latent centroids are decoded by the trained VAE into `K` distilled images.
+    *   *Medoid*: The nearest real input image is selected for each centroid.
 4.  **Weighted Training**: The Student model is trained by multiplying the loss of each image by its corresponding weight ($\min_{\theta} \sum w \cdot \ell(x, y, \theta)$).
 
 ## 3. Semantic Segmentation Adaptation: Medoids vs. Soft-labels
 
 While the original DDOQ was designed for image classification using synthetic data, our framework introduces critical adaptations for **Semantic Segmentation**:
+
+### VAE Decode vs. Medoids
+
+The framework supports two offline artifacts:
+
+*   **VAE Decode**: decodes each cluster center and saves one distilled image per cluster. This produces a compact `K`-image synthetic dataset.
+*   **Medoid**: selects the nearest real image per cluster. This preserves original radiometry and boundaries when decoded images are not acceptable for segmentation.
 
 ### Medoid vs. Synthetic Images (Avoiding Artifacts)
 In standard DDOQ, decoding a centroid into a synthetic image works well for global classification. However, for **Semantic Segmentation**, synthetic images often suffer from:
@@ -42,18 +49,63 @@ Standard DDOQ uses global soft-labels (class probabilities). In our adaptation:
 ## 4. Workflow & Usage
 
 ### Step 1: Latent Extraction
-Obtain fixed-size embedding vectors using `GenericAutoencoder`.
+Obtain fixed-size embedding vectors using a trained `GenericVariationalAutoencoder`.
 
 ### Step 2: Optimal Quantization
 Partition the latent space into $K$ clusters. Use `find_optimal_k_elbow_method` to find the optimal budget mathematically.
 
-### Step 3: Medoid Search & Weighting
-Find the real medoids and calculate Voronoi weights (`uniform`, `density`, or `sqrt`).
+### Step 3: Decode or Medoid Search & Weighting
+Decode each cluster center with the VAE or find the real medoids. Calculate Voronoi weights (`uniform`, `density`, or `sqrt`).
 
 ### Step 4: Training
 Train a `StudentSegmentationModel` with a `DDOQDistilledDataset` (supporting both Hard-labels for Active Learning or Soft-labels for Distillation).
 
 ## 5. Configuration
+
+### VAE Decode Pipeline
+
+The VAE pipeline writes:
+
+*   `embeddings.parquet`: all input images with columns `image_path`, `embedding`, and `cluster_id`.
+*   `distilled_images.parquet`: `K` distilled images with columns `distilled_image_path`, `cluster_id`, `cluster_embedding`, and `weight`.
+*   `distilled_images/cluster_000000.<ext>` through `cluster_K.<ext>`: decoded images.
+*   `cluster_centers.pt`, `cluster_labels.pt`, `cluster_weights.pt`, and `manifest.json`.
+
+```yaml
+mode: ddoq-vae-distill
+
+dataset_distillation:
+  mode: vae_decode
+  k: 500
+  vae_config_path: /data/configs/vae_train.yaml
+  vae_checkpoint_path: /data/checkpoints/vae.ckpt
+  dataset_config_path: /data/configs/vae_train.yaml
+  dataset_key: train_dataset
+  output_dir: /data/ddoq_outputs/vae_ddoq_k500
+
+  latent: mu
+  latent_reduction: flatten
+  weight_mode: sqrt
+  distilled_image_format: auto  # auto | tif | png | jpg | pt
+  batch_size: 32
+  num_workers: 4
+  device: cuda
+```
+
+Run as a tool:
+
+```bash
+pytorch-smt-tools ddoq-vae conf/examples/ddoq_vae_distillation.yaml
+```
+
+Run via Hydra mode:
+
+```bash
+pytorch-smt --config-path pytorch_segmentation_models_trainer/conf/examples \
+  --config-name ddoq_vae_distillation mode=ddoq-vae-distill
+```
+
+### Medoid Pipeline
 
 ```yaml
 dataset_distillation:
@@ -72,11 +124,31 @@ dataset_distillation:
 latents = extract_all_latents(autoencoder, loader, device)
 tool = KMeansClusteringTool(n_clusters=500, device=device)
 tool.fit(latents)
-weights = tool.get_cluster_weights(mode="sqrt")
+labels = tool.predict(latents)
+weights = tool.get_cluster_weights(mode="sqrt", labels=labels)
 indices = tool.get_medoids_from_dataloader(loader)
 
 # 2. Save
 save_ddoq_results(indices, weights, "ddoq_results.pt")
+```
+
+### VAE Decode (Offline Phase)
+
+```python
+from pytorch_segmentation_models_trainer.tools.dataset_distillation import (
+    VaeDdoqDistillationPipeline,
+)
+
+pipeline = VaeDdoqDistillationPipeline(
+    vae=trained_vae,
+    dataloader=image_loader,
+    output_dir="outputs/ddoq_vae",
+    k=500,
+    latent="mu",
+    weight_mode="sqrt",
+    distilled_image_format="auto",
+)
+result = pipeline.run()
 ```
 
 ### Training (Student Phase)
