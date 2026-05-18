@@ -1,0 +1,232 @@
+# -*- coding: utf-8 -*-
+"""Tests for VAE-backed DDOQ image distillation."""
+
+from pathlib import Path
+
+import pandas as pd
+import pytest
+import torch
+import torch.nn as nn
+from click.testing import CliRunner
+from torch.utils.data import DataLoader, Dataset
+
+from pytorch_segmentation_models_trainer.tools.dataset_distillation import (
+    vae_ddoq_distillation as ddoq_module,
+)
+
+vae_ddoq_distillation = ddoq_module
+VaeDdoqDistillationPipeline = ddoq_module.VaeDdoqDistillationPipeline
+VaeDdoqDistillationResult = ddoq_module.VaeDdoqDistillationResult
+_flatten_embedding = ddoq_module._flatten_embedding
+_resolve_output_format = ddoq_module._resolve_output_format
+write_distilled_images_parquet = ddoq_module.write_distilled_images_parquet
+write_embeddings_parquet = ddoq_module.write_embeddings_parquet
+
+
+class TinyPathImageDataset(Dataset):
+    """Small deterministic image dataset exposing file paths in each sample."""
+
+    def __init__(self, root: Path, n_samples: int = 6):
+        self.paths = [
+            str((root / f"image_{i}.png").resolve()) for i in range(n_samples)
+        ]
+        self.images = torch.linspace(0.0, 1.0, n_samples * 3 * 8 * 8).reshape(
+            n_samples, 3, 8, 8
+        )
+
+    def __len__(self):
+        return len(self.paths)
+
+    def __getitem__(self, idx):
+        return {"image": self.images[idx], "path": self.paths[idx]}
+
+
+class TinyVAE(nn.Module):
+    """VAE-like module with deterministic posterior means and decoder."""
+
+    def encode(self, x):
+        mean = x.mean(dim=(2, 3), keepdim=True)
+        mu = torch.cat([mean[:, :1], mean[:, 1:2]], dim=1)
+        logvar = torch.zeros_like(mu)
+        return mu, logvar
+
+    def decode(self, z, output_size):
+        if z.ndim == 2:
+            z = z[:, :, None, None]
+        if z.shape[1] < 3:
+            pad = torch.zeros(
+                z.shape[0],
+                3 - z.shape[1],
+                z.shape[2],
+                z.shape[3],
+                device=z.device,
+                dtype=z.dtype,
+            )
+            z = torch.cat([z, pad], dim=1)
+        return torch.nn.functional.interpolate(
+            z[:, :3], size=output_size, mode="nearest"
+        )
+
+
+def test_flatten_embedding_contract():
+    emb = torch.arange(2 * 3 * 4 * 4, dtype=torch.float32).reshape(2, 3, 4, 4)
+    flat = _flatten_embedding(emb)
+    assert flat.shape == (2, 48)
+    assert flat.dtype == torch.float32
+
+    mean = _flatten_embedding(emb, reduction="mean_spatial")
+    assert mean.shape == (2, 3)
+
+    with pytest.raises(ValueError, match="latent_reduction"):
+        _flatten_embedding(emb, reduction="bad")
+
+
+def test_resolve_output_format_auto_from_input_path(tmp_path):
+    fmt = _resolve_output_format("auto", [str(tmp_path / "sample.tif")])
+    assert fmt == "tif"
+
+    with pytest.raises(ValueError, match="Cannot infer"):
+        _resolve_output_format("auto", [])
+
+    with pytest.raises(ValueError, match="Unsupported"):
+        _resolve_output_format("bmp", [str(tmp_path / "sample.tif")])
+
+
+def test_parquet_writers_preserve_contract(tmp_path):
+    embeddings_path = tmp_path / "embeddings.parquet"
+    distilled_path = tmp_path / "distilled_images.parquet"
+
+    write_embeddings_parquet(
+        image_paths=["/tmp/a.png", "/tmp/b.png"],
+        embeddings=torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+        cluster_ids=torch.tensor([0, 1]),
+        output_path=embeddings_path,
+    )
+    write_distilled_images_parquet(
+        distilled_image_paths=["/tmp/d0.png", "/tmp/d1.png"],
+        cluster_ids=torch.tensor([0, 1]),
+        cluster_embeddings=torch.tensor([[0.1, 0.2], [0.3, 0.4]]),
+        weights=torch.tensor([0.5, 0.7]),
+        output_path=distilled_path,
+    )
+
+    embeddings_df = pd.read_parquet(embeddings_path)
+    assert list(embeddings_df.columns) == ["image_path", "embedding", "cluster_id"]
+    assert embeddings_df["embedding"].iloc[0].tolist() == [1.0, 2.0]
+    assert embeddings_df["cluster_id"].tolist() == [0, 1]
+
+    distilled_df = pd.read_parquet(distilled_path)
+    assert list(distilled_df.columns) == [
+        "distilled_image_path",
+        "cluster_id",
+        "cluster_embedding",
+        "weight",
+    ]
+    assert distilled_df["cluster_embedding"].iloc[1].tolist() == pytest.approx(
+        [0.3, 0.4]
+    )
+    assert distilled_df["weight"].tolist() == pytest.approx([0.5, 0.7])
+
+
+def test_pipeline_writes_k_distilled_images_and_all_embeddings(tmp_path):
+    dataset = TinyPathImageDataset(tmp_path, n_samples=6)
+    dataloader = DataLoader(dataset, batch_size=2, shuffle=False)
+    pipeline = VaeDdoqDistillationPipeline(
+        vae=TinyVAE(),
+        dataloader=dataloader,
+        output_dir=tmp_path / "ddoq",
+        k=2,
+        device="cpu",
+        output_size=(8, 8),
+        distilled_image_format="png",
+        kmeans_max_iter=4,
+        kmeans_batch_size=4,
+        random_seed=123,
+    )
+
+    result = pipeline.run()
+
+    embeddings_df = pd.read_parquet(result.embeddings_parquet_path)
+    distilled_df = pd.read_parquet(result.distilled_images_parquet_path)
+
+    assert len(embeddings_df) == len(dataset)
+    assert len(distilled_df) == 2
+    assert set(embeddings_df.columns) == {"image_path", "embedding", "cluster_id"}
+    assert set(distilled_df.columns) == {
+        "distilled_image_path",
+        "cluster_id",
+        "cluster_embedding",
+        "weight",
+    }
+    assert all(Path(path).is_absolute() for path in embeddings_df["image_path"])
+    assert all(Path(path).exists() for path in distilled_df["distilled_image_path"])
+    assert sorted(distilled_df["cluster_id"].tolist()) == [0, 1]
+    assert result.embeddings.shape == (6, 2)
+    assert result.cluster_centers.shape == (2, 2)
+    assert result.cluster_labels.shape == (6,)
+    assert result.weights.shape == (2,)
+
+
+def test_pipeline_rejects_k_larger_than_dataset(tmp_path):
+    dataset = TinyPathImageDataset(tmp_path, n_samples=2)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    pipeline = VaeDdoqDistillationPipeline(
+        vae=TinyVAE(),
+        dataloader=dataloader,
+        output_dir=tmp_path / "ddoq",
+        k=3,
+        device="cpu",
+        output_size=(8, 8),
+    )
+
+    with pytest.raises(ValueError, match="k must be <= number of embeddings"):
+        pipeline.run()
+
+
+def test_ddoq_vae_cli_passes_overrides(tmp_path, monkeypatch):
+    yaml_path = tmp_path / "ddoq.yaml"
+    checkpoint_path = tmp_path / "vae.ckpt"
+    yaml_path.write_text("dataset_distillation:\n  k: 2\n")
+    checkpoint_path.write_text("checkpoint")
+    calls = {}
+
+    def fake_run(**kwargs):
+        calls.update(kwargs)
+        return VaeDdoqDistillationResult(
+            embeddings=torch.empty(0, 2),
+            cluster_centers=torch.empty(0, 2),
+            cluster_labels=torch.empty(0, dtype=torch.long),
+            weights=torch.empty(0),
+            embeddings_parquet_path=tmp_path / "embeddings.parquet",
+            distilled_images_parquet_path=tmp_path / "distilled_images.parquet",
+            distilled_image_paths=[tmp_path / "cluster_000000.png"],
+        )
+
+    monkeypatch.setattr(
+        vae_ddoq_distillation, "run_vae_ddoq_from_config_file", fake_run
+    )
+
+    from pytorch_segmentation_models_trainer.tools.cli import cli
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "ddoq-vae",
+            str(yaml_path),
+            "--k",
+            "5",
+            "--checkpoint",
+            str(checkpoint_path),
+            "--output",
+            str(tmp_path / "out"),
+            "--format",
+            "png",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls["yaml_path"] == str(yaml_path)
+    assert calls["k"] == 5
+    assert calls["checkpoint_path"] == str(checkpoint_path)
+    assert calls["output_dir"] == str(tmp_path / "out")
+    assert calls["distilled_image_format"] == "png"

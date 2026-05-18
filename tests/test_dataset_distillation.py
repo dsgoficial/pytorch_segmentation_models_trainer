@@ -85,7 +85,7 @@ def test_extract_all_latents_variations():
     assert latents.shape == (4, 64)
 
     # Case 2: Use HuggingFace branch
-    # Em MockModel, if use_huggingface is True, extract_all_latents calls encoder directly
+    # With use_huggingface=True, extract_all_latents calls encoder directly.
     # Our MockModel encoder returns 128 channels.
     model_hf = MockModel(latent_dim=64, use_huggingface=True, no_proj=True)
     latents = extract_all_latents(MockSystem(model_hf), dataloader, device)
@@ -182,6 +182,19 @@ def test_kmeans_clustering_tool_weights():
     # Test invalid mode
     with pytest.raises(ValueError, match="Invalid weight mode"):
         tool.get_cluster_weights(mode="invalid")
+
+
+def test_kmeans_clustering_tool_weights_from_labels_are_exact():
+    device = torch.device("cpu")
+    tool = KMeansClusteringTool(n_clusters=3, device=device)
+    tool.model = object()
+
+    labels = torch.tensor([0, 0, 1, 2, 2, 2])
+    weights = tool.get_cluster_weights(mode="density", labels=labels)
+
+    expected = torch.tensor([2.0, 1.0, 3.0])
+    expected = (expected / expected.sum()) * torch.sqrt(torch.tensor(3.0))
+    assert torch.allclose(weights, expected)
 
 
 def test_kmeans_clustering_tool_medoids():

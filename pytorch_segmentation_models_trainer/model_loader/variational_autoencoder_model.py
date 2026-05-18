@@ -62,7 +62,7 @@ AutoencoderLatentClusteringCallback
         loss = loss_dict["loss"]
         for name, value in loss_dict.items():
             self.log(
-                f"{prefix}/{name}",
+                f"{name}/{prefix}",
                 value,
                 on_step=(prefix == "train"),
                 on_epoch=True,
@@ -91,7 +91,7 @@ AutoencoderLatentClusteringCallback
         else:
             loss = loss_result
             self.log(
-                f"{prefix}/loss",
+                f"loss/{prefix}",
                 loss_result,
                 on_step=(prefix == "train"),
                 on_epoch=True,

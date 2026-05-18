@@ -1,5 +1,26 @@
 # Unreleased
 
+## [1.3.0] - 2026-05-18
+
+## Dataset Distillation
+
+- Added VAE-backed DDOQ image distillation (`tools/dataset_distillation/vae_ddoq_distillation.py`) that loads a trained VAE checkpoint, extracts embeddings for all configured input images, reuses `KMeansClusteringTool` for Mini-Batch K-Means, decodes one cluster center per distilled image, and writes both `embeddings.parquet` (source image path, embedding, cluster id) and `distilled_images.parquet` (distilled image path, cluster id, center embedding, DDOQ weight).
+- Added `pytorch-smt-tools ddoq-vae` and Hydra mode `ddoq-vae-distill` so the VAE DDOQ pipeline can run either as a tool command or from YAML configuration. Added `conf/examples/ddoq_vae_distillation.yaml`.
+- Extended `KMeansClusteringTool` with `predict()` and exact label-based Voronoi weight calculation, so DDOQ weights can be tied to the full input-image cluster assignments instead of only Mini-Batch K-Means internal update counts.
+
+## CLI Tools
+
+- Novo subcomando `pytorch-smt-tools export-tb-images`: exporta imagens de event files do TensorBoard para PNG sem necessidade do pacote `tensorboard`. Usa os protos do `tensorboardX` (já dependência do projeto) para parsear TFRecords. Suporta filtro por tag (`--tags`) e por step/epoch (`--steps`, aceita inteiros, ranges e combinações: `"0-10,20"`). `--list-tags` lista todas as tags disponíveis no diretório de logs. Destinado ao workflow de treinar com `delete_after_log=True` (sem acúmulo de PNGs) e exportar seletivamente apenas as imagens de interesse após análise no TensorBoard.
+
+## Training
+
+- `FinalMetricsCallback` agora é injetado automaticamente em todo treinamento via `train.py`, sem necessidade de declaração manual no YAML. Para suprimir, adicionar `add_final_metrics_callback: false` na config. Se o usuário já declarou `FinalMetricsCallback` no campo `callbacks`, nenhuma duplicata é criada. Campo `add_final_metrics_callback: bool = True` adicionado ao dataclass `TrainConfig`.
+
+## Image Callbacks
+
+- Added `delete_after_log: bool = False` parameter to `ImageSegmentationResultCallback` (e todas as subclasses via herança) e `EnhancedImageSegmentationResultCallback`. Quando `True`, o arquivo PNG salvo em `image_logs/` é deletado imediatamente após o envio ao TensorBoard, reduzindo uso de disco em experimentos longos. Padrão `False` mantém comportamento anterior.
+- Added `use_basename_as_title: bool = False` option to all image callbacks (`ImageSegmentationResultCallback`, `EnhancedImageSegmentationResultCallback`, `FrameFieldResultCallback`, `FrameFieldOverlayedResultCallback`, `ObjectDetectionResultCallback`, `PolygonRNNResultCallback`, `ModPolyMapperResultCallback`, `AutoencoderResultCallback`). When `True`, plot titles and TensorBoard tags use only the file stem (e.g. `tile_001` instead of `/data/images/tile_001.tif`), making TensorBoard runs easier to read and compare when images come from deeply nested directories. Access via `_get_title(path)` helper on each class.
+
 ## Autoencoder Clustering Losses
 
 - Added `DECSoftAssignmentLoss` (`custom_losses/autoencoder_clustering_losses.py`): soft-assignment KL loss (DEC, Xie et al. ICML 2016) that pushes the encoder toward confident, well-separated cluster assignments via a Student-t kernel and a sharpened target distribution P. Includes `initialize_centers` for K-Means warm-start.

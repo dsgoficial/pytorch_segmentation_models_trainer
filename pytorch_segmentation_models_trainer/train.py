@@ -20,7 +20,10 @@
 """
 
 import logging
+import re
+
 from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
+    FinalMetricsCallback,
     FrameFieldComputeWeightNormLossesCallback,
 )
 from pytorch_segmentation_models_trainer.model_loader.model import Model
@@ -38,6 +41,59 @@ from pytorch_segmentation_models_trainer.utils.os_utils import import_module_fro
 from pytorch_segmentation_models_trainer.utils.seed_utils import set_training_seed
 
 logger = logging.getLogger(__name__)
+
+_OLD_MONITOR_RE = re.compile(r"^(train|val|test)/(.+)$")
+_OLD_FILENAME_RE = re.compile(r"\{(train|val|test)/[^}]+\}")
+
+
+def fix_callback_metric_convention(cfg: DictConfig) -> DictConfig:
+    """Detect and auto-correct {prefix}/{name} monitor keys to {name}/{prefix}.
+
+    Scans all callback entries in ``cfg.callbacks`` for a ``monitor`` key
+    using the deprecated ``{train|val|test}/metric`` convention and rewrites
+    it to ``metric/{train|val|test}``, which groups train and val curves on
+    the same TensorBoard chart.
+
+    Also warns when a ``filename`` template contains ``{val/...}`` or similar
+    patterns that the OS interprets as path separators.
+
+    Args:
+        cfg: Hydra DictConfig for the training run.
+
+    Returns:
+        Updated DictConfig (same object when no changes are needed).
+    """
+    if "callbacks" not in cfg:
+        return cfg
+
+    for i, cb in enumerate(cfg.callbacks):
+        monitor = cb.get("monitor", None)
+        if isinstance(monitor, str):
+            m = _OLD_MONITOR_RE.match(monitor)
+            if m:
+                prefix, name = m.group(1), m.group(2)
+                corrected = f"{name}/{prefix}"
+                logger.warning(
+                    "callbacks[%d].monitor='%s' uses deprecated {prefix}/{name} "
+                    "convention — auto-correcting to '%s'.",
+                    i,
+                    monitor,
+                    corrected,
+                )
+                OmegaConf.update(cfg, f"callbacks.{i}.monitor", corrected)
+
+        filename = cb.get("filename", None)
+        if isinstance(filename, str) and _OLD_FILENAME_RE.search(filename):
+            logger.warning(
+                "callbacks[%d].filename='%s' contains a metric key with '/' "
+                "(e.g. {val/loss:.4f}). The OS will interpret this as a directory "
+                "separator and save_top_k will not work correctly. "
+                "Remove the metric from the filename or rename the metric.",
+                i,
+                filename,
+            )
+
+    return cfg
 
 
 @hydra.main(config_path=None, version_base="1.2")
@@ -59,6 +115,8 @@ def train(cfg: DictConfig):
     deterministic_cudnn = cfg.get("deterministic_cudnn", False)
     if seed is not None:
         set_training_seed(seed, deterministic_cudnn=deterministic_cudnn)
+
+    cfg = fix_callback_metric_convention(cfg)
 
     logger.info(
         "Starting the training of a model with the following configuration: \n%s",
@@ -95,6 +153,9 @@ def train(cfg: DictConfig):
                 break
         if not is_norm_loss_added:
             callback_list.append(FrameFieldComputeWeightNormLossesCallback())
+    if cfg.get("add_final_metrics_callback", True):
+        if not any(isinstance(cb, FinalMetricsCallback) for cb in callback_list):
+            callback_list.append(FinalMetricsCallback())
     model.setup("fit")
     pl_trainer_cfg = dict(cfg.pl_trainer)
     if deterministic_cudnn:

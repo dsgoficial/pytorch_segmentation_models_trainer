@@ -35,6 +35,7 @@ from omegaconf import DictConfig
 
 import logging
 import warnings
+
 # CRITICO no Windows: importar torch ANTES de rasterio/GDAL
 # para evitar conflito de DLLs (fbgemm.dll vs gdal*.dll)
 import torch.multiprocessing as mp
@@ -53,35 +54,52 @@ def main(cfg: DictConfig):
     warnings.filterwarnings("ignore", category=DeprecationWarning)
     if cfg.mode == "train":
         from pytorch_segmentation_models_trainer.train import train
+
         return train(cfg)
     elif cfg.mode == "predict":
         from pytorch_segmentation_models_trainer.predict import predict
+
         return predict(cfg)
     elif cfg.mode == "predict-from-batch":
-        from pytorch_segmentation_models_trainer.predict_from_batch import predict_from_batch
+        from pytorch_segmentation_models_trainer.predict_from_batch import (
+            predict_from_batch,
+        )
+
         return predict_from_batch(cfg)
     elif cfg.mode == "predict-mod-polymapper-from-batch":
         from pytorch_segmentation_models_trainer.predict_mod_polymapper_from_batch import (
             predict_mod_polymapper_from_batch,
         )
+
         return predict_mod_polymapper_from_batch(cfg)
     elif cfg.mode == "validate-config":
         from pytorch_segmentation_models_trainer.config_utils import validate_config
+
         return validate_config(cfg)
     elif cfg.mode == "build-mask":
         from pytorch_segmentation_models_trainer.build_mask import build_masks
+
         return build_masks(cfg)
     elif cfg.mode == "convert-dataset":
         from pytorch_segmentation_models_trainer.convert_ds import convert_dataset
+
         return convert_dataset(cfg)
     elif cfg.mode == "evaluate-experiments":
         from pytorch_segmentation_models_trainer.evaluate_experiments import evaluate
+
         return evaluate(cfg)
     elif cfg.mode == "run-experiments":
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
+
         return ExperimentsRunner(cfg).run()
+    elif cfg.mode == "ddoq-vae-distill":
+        from pytorch_segmentation_models_trainer.tools.dataset_distillation.vae_ddoq_distillation import (
+            run_vae_ddoq_from_config,
+        )
+
+        return run_vae_ddoq_from_config(cfg)
     else:
         raise NotImplementedError
 
@@ -94,5 +112,5 @@ def entry():
 
 
 if __name__ == "__main__":
-    mp.set_start_method('spawn', force=True)
+    mp.set_start_method("spawn", force=True)
     main()

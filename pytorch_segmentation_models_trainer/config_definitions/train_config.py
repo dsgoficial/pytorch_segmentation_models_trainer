@@ -132,3 +132,4 @@ class TrainConfig:
     metrics: List[MetricConfig] = MISSING
     seed: Optional[int] = None
     deterministic_cudnn: bool = False
+    add_final_metrics_callback: bool = True
