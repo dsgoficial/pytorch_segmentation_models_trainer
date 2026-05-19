@@ -26,12 +26,29 @@ class TestOsUtils(unittest.TestCase):
         self.assertEqual(res, folder_path)
         self.assertTrue(os.path.exists(folder_path))
 
+        # Existing folders are returned unchanged.
+        self.assertEqual(create_folder(folder_path), folder_path)
+
         # Test remove_folder
         self.assertTrue(remove_folder(folder_path))
         self.assertFalse(os.path.exists(folder_path))
 
         # Test remove non-existent
         self.assertTrue(remove_folder(os.path.join(self.test_path, "not_here")))
+
+    def test_remove_folder_returns_false_on_error(self):
+        from unittest.mock import patch
+
+        folder_path = os.path.join(self.test_path, "bad_folder")
+        with patch(
+            "pytorch_segmentation_models_trainer.utils.os_utils.os.path.exists",
+            return_value=True,
+        ):
+            with patch(
+                "pytorch_segmentation_models_trainer.utils.os_utils.shutil.rmtree",
+                side_effect=OSError("boom"),
+            ):
+                self.assertFalse(remove_folder(folder_path))
 
     def test_hash_file(self):
         file_path = os.path.join(self.test_path, "test.txt")

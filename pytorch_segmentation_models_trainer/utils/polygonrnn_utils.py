@@ -380,7 +380,9 @@ def validate_polygon(geom: Polygon) -> List[Union[Polygon, MultiPolygon]]:
     valid_output = make_valid(geom)
     if isinstance(valid_output, (Polygon, MultiPolygon)):
         return [valid_output]
-    if isinstance(valid_output, (list, GeometryCollection)):
+    if isinstance(valid_output, GeometryCollection):
+        return [p for p in valid_output.geoms if isinstance(p, (Polygon, MultiPolygon))]
+    if isinstance(valid_output, list):
         return [p for p in valid_output if isinstance(p, (Polygon, MultiPolygon))]
     else:
         return []
@@ -400,7 +402,7 @@ def crop_polygons_to_bounding_boxes(
                 if isinstance(polygon, Polygon):
                     polygons_to_crop.append(polygon)
                 elif isinstance(polygon, MultiPolygon):
-                    polygons_to_crop.extend(list(polygon))
+                    polygons_to_crop.extend(list(polygon.geoms))
     valid_polygons = itertools.chain.from_iterable(
         list(map(validate_polygon, polygons_to_crop))
     )
