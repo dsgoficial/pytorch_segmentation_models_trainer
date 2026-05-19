@@ -2,11 +2,13 @@
 import torch
 import numpy as np
 import unittest
+from shapely.geometry import LineString, Polygon
 from pytorch_segmentation_models_trainer.utils.frame_field_utils import (
     LaplacianPenalty,
     framefield_align_error,
     c0c2_to_uv,
     compute_closest_in_uv,
+    detect_corners,
     compute_crossfield_to_plot,
 )
 
@@ -60,6 +62,37 @@ class TestFrameFieldUtils(unittest.TestCase):
         angle = np.array([[0.0, np.pi / 4], [np.pi / 2, np.pi]])
         crossfield = compute_crossfield_to_plot(angle)
         self.assertEqual(crossfield.shape, (1, 4, 2, 2))
+
+    def test_compute_crossfield_to_plot_accepts_tensor_and_shape(self):
+        angle = torch.zeros(1, 2, 2)
+        crossfield = compute_crossfield_to_plot(angle, crossfield_shape=(1, 4, 2, 2))
+        self.assertEqual(crossfield.shape, (1, 4, 2, 2))
+
+    def test_framefield_align_error_validates_shapes_and_complex_dim(self):
+        c0 = torch.randn(1, 2, 4, 4)
+        c2 = torch.randn(1, 2, 4, 4)
+        z = torch.randn(1, 2, 4, 5)
+        with self.assertRaises(AssertionError):
+            framefield_align_error(c0, c2, z, complex_dim=1)
+        with self.assertRaises(AssertionError):
+            framefield_align_error(c0, c2, torch.randn(1, 3, 4, 4), complex_dim=1)
+
+    def test_detect_corners_handles_numpy_shapely_and_empty_middle(self):
+        u = np.ones((5, 5), dtype=np.complex64)
+        v = 1j * np.ones((5, 5), dtype=np.complex64)
+        closed = Polygon([(1, 1), (3, 1), (3, 3), (1, 1)])
+        open_line = LineString([(0, 0), (2, 0), (2, 2)])
+        two_point = np.array([[0.0, 0.0], [1.0, 1.0]])
+
+        masks = detect_corners([closed, open_line, two_point], u, v)
+
+        self.assertEqual(len(masks), 3)
+        self.assertEqual(masks[0].shape[0], 4)
+        self.assertTrue(masks[0][-1] == masks[0][0])
+        self.assertTrue(masks[1][0])
+        self.assertTrue(masks[1][-1])
+        self.assertTrue(masks[2][0])
+        self.assertTrue(masks[2][-1])
 
 
 if __name__ == "__main__":

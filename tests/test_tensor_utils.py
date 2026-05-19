@@ -30,10 +30,12 @@ import matplotlib.pyplot as plt
 from matplotlib.testing.compare import compare_images
 from parameterized.parameterized import parameterized
 from pytorch_segmentation_models_trainer.utils.tensor_utils import (
+    TensorPoly,
     polygons_to_tensorpoly,
     tensorpoly_pad,
     SpatialGradient,
     get_scharr_kernel2d,
+    get_spatial_gradient_kernel2d,
     batch_to_cuda,
     tensor_dict_to_device,
 )
@@ -123,6 +125,23 @@ class Test_TensorUtils(BasicTestCase):
                 ]
             ),
         )
+        tensorpoly.to(device)
+
+    def test_closed_polygon_and_left_padding_repeat(self) -> None:
+        polygon = np.array(
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0]], dtype=np.float32
+        )
+        tensorpoly = polygons_to_tensorpoly([[polygon]])
+
+        self.assertEqual(tensorpoly.pos.shape, torch.Size([3, 2]))
+        self.assertFalse(tensorpoly.is_endpoint.any())
+
+        padded = tensorpoly_pad(tensorpoly, (5, 1))
+        self.assertEqual(padded.to_padded_index.shape, torch.Size([9]))
+        self.assertTrue(
+            torch.equal(padded.to_unpadded_poly_slice, torch.tensor([[5, 8]]))
+        )
+        padded.to("cpu")
 
     def test_spatial_gradient(self):
         input_tensor = torch.rand(1, 1, 10, 10)
@@ -135,6 +154,28 @@ class Test_TensorUtils(BasicTestCase):
         output_2 = grad_layer_2(input_tensor)
         # Expected shape: (B, C, 3, H, W) for order 2
         self.assertEqual(output_2.shape, (1, 1, 3, 10, 10))
+        self.assertIn("SpatialGradient", repr(grad_layer_2))
+
+    def test_spatial_gradient_rejects_invalid_input(self):
+        grad_layer = SpatialGradient(mode="sobel", order=1)
+        with self.assertRaises(TypeError):
+            grad_layer("not-a-tensor")
+        with self.assertRaises(ValueError):
+            grad_layer(torch.rand(1, 10, 10))
+
+    def test_gradient_kernel_modes_and_errors(self):
+        self.assertEqual(get_scharr_kernel2d("ij").shape, (2, 3, 3))
+        self.assertEqual(get_spatial_gradient_kernel2d("diff", 1).shape[0], 2)
+        self.assertEqual(get_spatial_gradient_kernel2d("diff", 2).shape[0], 3)
+        self.assertEqual(get_spatial_gradient_kernel2d("scharr", 1).shape, (2, 3, 3))
+        with self.assertRaises(TypeError):
+            get_spatial_gradient_kernel2d("bad", 1)
+        with self.assertRaises(TypeError):
+            get_spatial_gradient_kernel2d("sobel", 3)
+        with self.assertRaises(NotImplementedError):
+            get_spatial_gradient_kernel2d("scharr", 2)
+        with self.assertRaises(AssertionError):
+            get_scharr_kernel2d("bad")
 
     def test_scharr_kernel(self):
         kernel = get_scharr_kernel2d()

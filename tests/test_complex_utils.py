@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 import torch
 import unittest
+import runpy
+import warnings
+from unittest.mock import patch
 from pytorch_segmentation_models_trainer.utils.complex_utils import (
     get_real,
     get_imag,
@@ -9,6 +12,7 @@ from pytorch_segmentation_models_trainer.utils.complex_utils import (
     complex_abs_squared,
     complex_abs,
     complex_arg,
+    main,
 )
 
 
@@ -64,6 +68,23 @@ class TestComplexUtils(unittest.TestCase):
         expected = torch.tensor([[2.0, 0.0], [0.0, 2.0]])
         # torch.allclose might have small precision issues with trig functions
         self.assertTrue(torch.allclose(res, expected, atol=1e-6))
+
+    def test_main_runs_demo(self):
+        with patch("builtins.print") as print_mock:
+            main()
+
+        self.assertEqual(print_mock.call_count, 4)
+
+    def test_module_main_guard_runs_demo(self):
+        with patch("builtins.print") as print_mock:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                runpy.run_module(
+                    "pytorch_segmentation_models_trainer.utils.complex_utils",
+                    run_name="__main__",
+                )
+
+        self.assertEqual(print_mock.call_count, 4)
 
 
 if __name__ == "__main__":
