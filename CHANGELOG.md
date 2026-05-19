@@ -38,6 +38,12 @@
 
 - Fixed `.codecov.yml` by moving `after_n_builds` under `codecov.notify`, matching Codecov's current schema so repository YAML validation succeeds.
 - Added focused coverage tests so `model_loader/domain_adaptation_model.py`, `model_loader/variational_autoencoder_model.py`, `custom_models/moe_layers.py`, `custom_models/transformer_adapters.py`, and `custom_models/upernet_moe.py` report 100% line coverage in the fast unit suite.
+- Added focused utility coverage tests so `config_utils.py`, `custom_models/utils.py`, and every module under `utils/` report 100% line coverage without running slow network/checkpoint tests.
+
+## Bug fixes
+
+- Fixed Shapely 2 compatibility in polygon utilities by iterating over `.geoms` for `GeometryCollection`/`MultiPolygon`, preserving existing Shapely polygons in plotting/path helpers, and using coordinate arrays when building matplotlib polygon paths.
+- Fixed `compute_polygon_contour_measures` passing `metric_name` to `compute_contour_measure` by accepting the parameter for compatibility with the public call signature.
 
 ## Autoencoder Latent Metrics
 
