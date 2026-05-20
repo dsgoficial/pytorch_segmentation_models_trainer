@@ -1,5 +1,56 @@
 # Unreleased
 
+## Classic ML GPU Pipeline
+
+- Added `pytorch_segmentation_models_trainer/classic_ml/` subpackage providing a
+  complete GPU-accelerated classic ML segmentation pipeline that falls back
+  transparently to CPU when NVIDIA hardware is unavailable.
+- **Feature Engineering** (`classic_ml/feature_engineering.py`):
+  - `GaborFilterExtractor` — Gabor filter bank at configurable frequencies and
+    orientations; uses `cucim.skimage.filters.gabor` on GPU arrays and
+    `skimage.filters.gabor` on CPU.
+  - `GradientExtractor` — horizontal/vertical Sobel gradients and magnitude via
+    `cucim` or `skimage`.
+  - `MultiscaleExtractor` — Gaussian pyramid at configurable sigmas.
+  - `FeatureEngineeringPipeline` — composes extractors, returns ``(H*W, n_features)``
+    feature matrices.  All extractors accept ``numpy`` or ``cupy`` arrays and always
+    return ``numpy`` arrays.  GPU dispatch uses `cupy.get_array_module()`.
+- **Estimators** (`classic_ml/estimators.py`):
+  - `GPUAcceleratedRandomForest`, `GPUAcceleratedSVM`, `GPUAcceleratedKMeans` —
+    thin wrappers around `sklearn` estimators exposing `.fit()`, `.predict()`,
+    `.predict_proba()`.  `KMeans.predict_proba()` returns inverse-distance soft
+    assignments.
+  - `enable_gpu_acceleration()` — explicit opt-in function that calls
+    `cuml.accel.install()` to patch sklearn globally with RAPIDS cuml backends.
+    Not called at import time to avoid unexpected side-effects on existing sklearn
+    code (k-fold splitter, clustering metrics, etc.).
+- **Post-processing** (`classic_ml/postprocessing.py`):
+  - `DenseCRFPostprocessor` — fully-connected Dense CRF via `pydensecrf` with
+    bilateral appearance and Gaussian smoothness pairwise terms.  Raises
+    `ImportError` at instantiation if `pydensecrf` is absent.
+  - `GraphCutsPostprocessor` — Min-Cut/Max-Flow energy minimisation via `pygco`
+    with image-gradient edge weights.  Raises `ImportError` at instantiation if
+    `pygco` is absent.
+  - `PostprocessingPipeline` — chains postprocessors; each receives the original
+    probability map; returns the last postprocessor's output.
+- **Orchestrator** (`classic_ml/orchestrator.py`):
+  - `ClassicMLOrchestrator` — plain Python class (not `pl.LightningModule`) that
+    glues feature pipeline + classifier + optional postprocessor.  Exposes
+    `.fit(images, masks)`, `.predict(image, return_probabilities)`, `.save()`, and
+    `.load()` (pickle-based).
+- **Tensor utilities** (`utils/tensor_conversion.py`):
+  - `tensor_to_numpy`, `numpy_to_tensor`, `tensor_to_cupy` (zero-copy),
+    `cupy_to_tensor` (zero-copy), `ensure_numpy` — work across numpy / PyTorch /
+    CuPy array types.
+- **Hydra configs** (`config_definitions/classic_ml_config.py`): dataclasses for
+  all new classes registered in the Hydra ConfigStore under the
+  `classic_ml/` group hierarchy.
+- **Example YAML** (`conf/examples/classic_ml_random_forest.yaml`): end-to-end
+  Random Forest pipeline with Gabor + gradient + multi-scale features and Dense
+  CRF post-processing.
+- **Optional extras** (`pyproject.toml`): new `[gpu-ml]` extras group listing
+  `cupy-cuda12x`, `cucim-cu12`, `cuml-cu12`, `pydensecrf`, and `pygco`.
+
 ## K-Fold Cross-Validation
 
 - Added `SpatialKFoldSplitter` in `utils/spatial_kfold.py` with two strategies:

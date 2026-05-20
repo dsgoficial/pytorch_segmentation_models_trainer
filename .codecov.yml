@@ -2,7 +2,7 @@
 codecov:
   require_ci_to_pass: yes
   notify:
-    after_n_builds: 2
+    after_n_builds: 3
 
 coverage:
   precision: 2
@@ -26,6 +26,10 @@ flags:
       - pytorch_segmentation_models_trainer/
     carryforward: true
   transformers:
+    paths:
+      - pytorch_segmentation_models_trainer/
+    carryforward: true
+  gpu-ml:
     paths:
       - pytorch_segmentation_models_trainer/
     carryforward: true

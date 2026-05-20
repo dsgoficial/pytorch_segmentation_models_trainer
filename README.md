@@ -1,6 +1,6 @@
 # pytorch_segmentation_models_trainer
 
-<img width="2811" height="1386" alt="pytorch_smt_logo" src="https://github.com/user-attachments/assets/4e6a5dad-4014-4ea0-aa4a-0c551ab4bed4" />
+<img width="800" alt="pytorch_smt_logo" src="https://github.com/user-attachments/assets/4e6a5dad-4014-4ea0-aa4a-0c551ab4bed4" />
 
 
 [![Torch](https://img.shields.io/badge/-PyTorch-red?logo=pytorch&labelColor=gray)](https://pytorch.org/get-started/locally/)
@@ -14,6 +14,7 @@
 [![codecov](https://codecov.io/gh/phborba/pytorch_segmentation_models_trainer/branch/main/graph/badge.svg?token=PRJL5GVOL2)](https://codecov.io/gh/dsgoficial/pytorch_segmentation_models_trainer)
 [![CodeQL](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/codeql-analysis.yml)
 [![maintainer](https://img.shields.io/badge/maintainer-phborba-blue.svg)](https://github.com/phborba)
+[![maintainer](https://img.shields.io/badge/maintainer-dinizime-blue.svg)](https://github.com/dinizime)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4573996.svg)](https://doi.org/10.5281/zenodo.4573996)
 
 
@@ -52,6 +53,10 @@ A Python script (`scripts/generate_schema.py`) introspects the installed version
 - **Geometry-Aware Training**: Frame field (crossfield) model for boundary and polygon prediction with alignment/smoothness losses
 - **Polygon Extraction**: RNN-based polygon boundary tracing, template-based polygonization, frame field polygon generation
 - **Mixture of Experts**: MoE layers and UPerNet+MoE variants for dynamic expert routing in the decoder
+- **Classic ML Segmentation Pipeline**: GPU-accelerated feature engineering (Gabor, gradients, multi-scale), sklearn/cuml estimators (RandomForest, SVM, KMeans), and post-processing (Dense CRF, Graph Cuts) — all transparently fall back to CPU when no CUDA hardware is available
+- **K-Fold Spatial Cross-Validation**: `SpatialKFoldSplitter` with `by_image` (GroupKFold, eliminates patch leakage) and `by_spatial_region` (horizontal bands with configurable buffer zone) strategies; `ExperimentsRunner` automates fold × seed grid
+- **Variational Autoencoder**: Full VAE implementation with reparameterization trick, KL + reconstruction loss, and autoencoder-specific dataset and latent clustering metrics
+- **Dataset Distillation**: VAE-backed DDOQ pipeline (`pytorch-smt-tools ddoq-vae`) that distills large image sets to representative subsets via latent-space K-Means clustering
 - **Advanced Inference**: Sliding window inference with configurable overlap and Test-Time Augmentation (TTA)
 - **Comprehensive Evaluation**: Multi-experiment evaluation pipeline with spatial alignment and parallel processing
 - **Hydra Configuration**: Full configuration composition and management with typed YAML dataclasses
@@ -87,6 +92,19 @@ cd pytorch_segmentation_models_trainer
 # Install in editable mode
 pip install -e .
 ```
+
+### Optional Extras
+
+Several feature groups are gated behind optional extras to avoid pulling heavy or platform-specific dependencies into the base install:
+
+| Extra | What it enables | Install |
+|---|---|---|
+| `transformers` | HuggingFace, TIMM, TerraTorch wrappers, LoRA fine-tuning | `uv sync --extra transformers` |
+| `gpu-ml` | Classic ML GPU pipeline (`cupy`, `cucim`, `cuml`, `pydensecrf`, `pygco`) | `uv sync --extra gpu-ml` *(requires CUDA)* |
+| `tests` | Full test suite dependencies | `uv sync --extra tests` |
+| `all` | All non-GPU extras combined | `uv sync --all-extras` |
+
+> **Note**: `gpu-ml` is intentionally excluded from `all` because `cupy`/`cuml` cannot be installed on CPU-only machines. Install it separately on a CUDA-capable machine.
 
 ### Dependencies
 
@@ -803,6 +821,89 @@ df = evaluator.create_evaluation_csv("/output/eval.csv")
 results = evaluator.evaluate(df)
 ```
 
+## K-Fold Spatial Cross-Validation
+
+`SpatialKFoldSplitter` generates spatially-aware train/val folds from a patch CSV, eliminating data leakage that would occur with random splits on overlapping tiles.
+
+### Split strategies
+
+| Strategy | When to use |
+|---|---|
+| `by_image` | Patches cut from the same source image should never appear in both train and val. GroupKFold over the image filename. |
+| `by_spatial_region` | Split by horizontal geographic bands. Use `buffer_px >= patch_size` to exclude boundary patches and reduce spatial autocorrelation. |
+
+```yaml
+# conf/examples/kfold_segmentation.yaml
+experiments_runner:
+  experiments:
+    - name: unet_r34_kfold
+      config: configs/train_unet.yaml
+
+  kfold:
+    n_splits: 5
+    strategy: by_image        # or by_spatial_region
+    group_col: image           # column in the CSV that identifies the source image
+    output_dir: /data/folds
+    seeds: [42, 123, 456]      # 5 folds × 3 seeds = 15 runs total
+    # buffer_px: 256           # only for by_spatial_region
+```
+
+`ExperimentsRunner` automatically iterates all fold × seed combinations, overrides `train_dataset.input_csv_path` and `val_dataset.input_csv_path`, writes outputs to `fold_XX_seedYYY/` directories, and supports `resume: true` to skip already-completed runs. See `website/docs/user-guide/kfold.md` for the full parameter reference.
+
+## Classic ML Segmentation Pipeline
+
+A GPU-accelerated classic ML pipeline for pixel-wise classification. All components transparently fall back to CPU when no CUDA hardware is available — no code changes needed.
+
+```
+Image (H×W×C)
+    │
+    ▼
+FeatureEngineeringPipeline  →  (H×W, F)  feature matrix
+    ├── GaborFilterExtractor        GPU: cucim / CPU: skimage
+    ├── GradientExtractor           GPU: cucim / CPU: skimage
+    └── MultiscaleExtractor         GPU: cucim / CPU: skimage
+    │
+    ▼
+Classifier.fit / predict_proba  →  (H×W, n_classes)  probability map
+    ├── GPUAcceleratedRandomForest  → sklearn RF  (cuml.accel opt-in)
+    ├── GPUAcceleratedSVM
+    └── GPUAcceleratedKMeans
+    │
+    ▼  (optional)
+PostprocessingPipeline  →  (H×W)  label map
+    ├── DenseCRFPostprocessor       requires pydensecrf
+    └── GraphCutsPostprocessor      requires pygco
+```
+
+```python
+from pytorch_segmentation_models_trainer.classic_ml.feature_engineering import (
+    FeatureEngineeringPipeline, GaborFilterExtractor, GradientExtractor
+)
+from pytorch_segmentation_models_trainer.classic_ml.estimators import GPUAcceleratedRandomForest
+from pytorch_segmentation_models_trainer.classic_ml.orchestrator import ClassicMLOrchestrator
+
+pipeline = FeatureEngineeringPipeline(extractors=[
+    GaborFilterExtractor(frequencies=[0.1, 0.25], num_orientations=4),
+    GradientExtractor(),
+])
+orch = ClassicMLOrchestrator(
+    feature_pipeline=pipeline,
+    classifier=GPUAcceleratedRandomForest(n_estimators=100),
+)
+orch.fit(train_images, train_masks)
+labels = orch.predict(image)
+orch.save("model.pkl")
+```
+
+To opt in to RAPIDS cuml GPU acceleration (patches sklearn globally):
+
+```python
+from pytorch_segmentation_models_trainer.classic_ml.estimators import enable_gpu_acceleration
+enable_gpu_acceleration()   # call once before fit(); safe no-op if cuml is absent
+```
+
+Install the optional extras on a CUDA-capable machine: `uv sync --extra gpu-ml`. See `conf/examples/classic_ml_random_forest.yaml` for a complete Hydra config.
+
 ## Advanced Features
 
 ### Custom Loss Functions
@@ -910,11 +1011,15 @@ pytorch_segmentation_models_trainer/
 │   │   ├── model.py           # Core Model (segmentation, TTA, metrics)
 │   │   ├── frame_field_model.py    # Geometry-aware boundary model
 │   │   ├── domain_adaptation_model.py
+│   │   ├── variational_autoencoder_model.py  # VAE Lightning module
 │   │   └── detection_model.py
 │   ├── dataset_loader/        # Dataset classes (CSV-based, raster patches)
+│   │   └── image_dataset/     # ImageDataset, Tiled, Windowed, Autoencoder variants
 │   ├── custom_losses/         # Loss functions
 │   │   ├── base_loss.py       # BaseLoss, MultiLoss (compound), SegLoss
 │   │   ├── edl_loss.py        # Evidential DL losses
+│   │   ├── autoencoder_losses.py          # VAE reconstruction + KL loss
+│   │   ├── autoencoder_clustering_losses.py  # DEC, CenterLoss, ClusteringAwareVAELoss
 │   │   ├── loss.py            # KD, MixUp, LabelSmoothing, Dual-Head losses
 │   │   └── crossfield_losses.py
 │   ├── custom_callbacks/      # Training callbacks (visualization, EMA, etc.)
@@ -926,19 +1031,30 @@ pytorch_segmentation_models_trainer/
 │   │   ├── hrnet_models/      # HRNet + OCR
 │   │   ├── upernet_moe.py     # UPerNet + Mixture of Experts
 │   │   └── upernet_dual_head.py
+│   ├── classic_ml/            # GPU/CPU classic ML segmentation pipeline
+│   │   ├── feature_engineering.py  # Gabor, gradient, multi-scale extractors
+│   │   ├── estimators.py      # RF, SVM, KMeans wrappers + enable_gpu_acceleration()
+│   │   ├── postprocessing.py  # Dense CRF, Graph Cuts, PostprocessingPipeline
+│   │   └── orchestrator.py    # ClassicMLOrchestrator (fit/predict/save/load)
 │   ├── custom_metrics/        # Custom metric implementations
+│   │   └── autoencoder_latent_clustering.py  # Silhouette, DBI, latent cluster metrics
 │   ├── domain_adaptation/     # Domain adaptation methods and schedulers
 │   ├── fine_tuning/           # LoRA and parameter freezing strategies
 │   ├── optimizers/            # PolyOptimizer, gradient centralization
 │   ├── tools/
 │   │   ├── inference/         # Sliding window processors, TTA, export
 │   │   ├── evaluation/        # Multi-experiment evaluation pipeline
+│   │   ├── experiments_runner/  # ExperimentsRunner with k-fold support
+│   │   ├── dataset_distillation/  # VAE-backed DDOQ distillation
 │   │   ├── mask_building/     # Mask generation from vector data
 │   │   ├── polygonization/    # Frame field and RNN polygon extraction
 │   │   ├── tta/               # Test-time augmentation
 │   │   ├── visualization/     # Plot utilities
 │   │   └── data_handlers/     # Raster and vector I/O
-│   ├── utils/                 # Utility functions (math, model, OS)
+│   ├── utils/
+│   │   ├── spatial_kfold.py   # SpatialKFoldSplitter (by_image / by_spatial_region)
+│   │   ├── tensor_conversion.py  # numpy ↔ torch ↔ cupy zero-copy utilities
+│   │   └── ...                # Math, model, OS utilities
 │   ├── config_definitions/    # Typed Hydra dataclass configs
 │   ├── train.py               # Training entry point
 │   ├── predict.py             # Inference entry point
@@ -949,12 +1065,13 @@ pytorch_segmentation_models_trainer/
 │   ├── predict/
 │   └── evaluation/
 ├── conf/                      # Hydra default configs
+│   └── examples/              # Annotated end-to-end YAML examples
 ├── tests/                     # Unit tests
 ├── web/                       # Config Builder web interface (React)
 │   └── src/assets/schema.json # Auto-generated from installed libraries
 ├── scripts/
 │   └── generate_schema.py     # Schema generation for Config Builder
-└── setup.py
+└── pyproject.toml
 ```
 
 ## Troubleshooting
