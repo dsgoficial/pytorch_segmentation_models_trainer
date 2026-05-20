@@ -499,7 +499,7 @@ def compute_polygon_contour_measures(
     # Filter pred_polygons to have at least a precision with gt_polygons of min_precision
     filtered_pred_polygons = [
         pred_polygon
-        for pred_polygon in pred_polygons
+        for pred_polygon in pred_polygons.geoms
         if min_precision
         < pred_polygon.intersection(gt_polygons).area / pred_polygon.area
     ]
@@ -507,7 +507,7 @@ def compute_polygon_contour_measures(
     gt_contours = shapely.geometry.collection.GeometryCollection(
         [
             contour
-            for polygon in gt_polygons
+            for polygon in gt_polygons.geoms
             for contour in [polygon.exterior, *polygon.interiors]
         ]
     )
@@ -535,7 +535,13 @@ def compute_polygon_contour_measures(
     return half_tangent_max_angles
 
 
-def compute_contour_measure(pred_polygon, gt_contours, sampling_spacing, max_stretch):
+def compute_contour_measure(
+    pred_polygon,
+    gt_contours,
+    sampling_spacing,
+    max_stretch,
+    metric_name: str = "cosine",
+):
     pred_contours = shapely.geometry.GeometryCollection(
         [pred_polygon.exterior, *pred_polygon.interiors]
     )
@@ -628,11 +634,13 @@ def _sample_linestring(geom, density):
 
 
 def plot_geometries(axis, geometries, linewidths=1, markersize=3):
+    if hasattr(geometries, "geoms"):
+        geometries = list(geometries.geoms)
     if len(geometries):
         patches = []
         for i, geometry in enumerate(geometries):
             if geometry.geom_type == "Polygon":
-                polygon = shapely.geometry.Polygon(geometry)
+                polygon = geometry
                 if not polygon.is_empty:
                     patch = PolygonPatch(polygon)
                     patches.append(patch)
@@ -688,27 +696,22 @@ def PolygonPath(polygon):
     if hasattr(polygon, "geom_type"):  # Shapely
         ptype = polygon.geom_type
         if ptype == "Polygon":
-            polygon = [Polygon(polygon)]
+            polygon = [polygon]
         elif ptype == "MultiPolygon":
-            polygon = [Polygon(p) for p in polygon]
+            polygon = list(polygon.geoms)
         else:
             raise ValueError("A polygon or multi-polygon representation is required")
 
     else:  # GeoJSON
         polygon = getattr(polygon, "__geo_interface__", polygon)
-        ptype = polygon["type"]
-        if ptype == "Polygon":
-            polygon = [Polygon(polygon)]
-        elif ptype == "MultiPolygon":
-            polygon = [Polygon(p) for p in polygon["coordinates"]]
-        else:
-            raise ValueError("A polygon or multi-polygon representation is required")
+        polygon = shapely.geometry.shape(polygon)
+        return PolygonPath(polygon)
 
     vertices = np.concatenate(
         [
             np.concatenate(
-                [np.asarray(t.exterior)[:, :2]]
-                + [np.asarray(r)[:, :2] for r in t.interiors]
+                [np.asarray(t.exterior.coords)[:, :2]]
+                + [np.asarray(r.coords)[:, :2] for r in t.interiors]
             )
             for t in polygon
         ]
@@ -777,9 +780,7 @@ def project_onto_geometry(geom, target, pool=None):
             project_onto_geometry(interior, target) for interior in geom.interiors
         ]
         try:
-            projected_geom = shapely.geometry.Polygon(
-                projected_exterior, projected_interiors
-            )
+            projected_geom = Polygon(projected_exterior, projected_interiors)
         except shapely.errors.TopologicalError as e:
             import matplotlib.pyplot as plt
 
