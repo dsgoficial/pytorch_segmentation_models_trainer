@@ -18,7 +18,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from hydra.core.config_store import ConfigStore
 
@@ -70,6 +70,7 @@ class ExperimentsRunnerConfig:
     save_summary: bool = True
     summary_metrics: List[str] = field(default_factory=lambda: ["val/loss"])
     resume: bool = False
+    kfold: Optional[Any] = None
 
 
 def _register_configs() -> None:

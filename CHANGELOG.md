@@ -1,5 +1,33 @@
 # Unreleased
 
+## K-Fold Cross-Validation
+
+- Added `SpatialKFoldSplitter` in `utils/spatial_kfold.py` with two strategies:
+  - `"by_image"`: Group K-Fold via `sklearn.model_selection.GroupKFold` grouping all patches
+    by their source image (`group_col`). Completely eliminates data leakage from overlapping
+    patches across folds when `stride < patch_size`.
+  - `"by_spatial_region"`: Divides image height into `n_splits` horizontal bands with an
+    optional `buffer_px` exclusion zone around each boundary. Patches whose footprint
+    intersects the buffer are dropped from both train and val, reducing spatial
+    autocorrelation at fold boundaries. Recommended `buffer_px >= patch_size` for zero
+    pixel overlap, `>= 2 × patch_size` for further autocorrelation reduction.
+- Added `KFoldConfig` dataclass in `config_definitions/kfold_config.py`, registered in the
+  Hydra ConfigStore under `group="kfold"`. Added `kfold: Optional[Any] = None` field to
+  `ExperimentsRunnerConfig`.
+- `ExperimentsRunner` extended with k-fold mode: when `experiments_runner.kfold` is present,
+  the runner iterates `seed × fold` (e.g., 5 folds × 3 seeds = 15 runs). Fold CSVs are
+  generated once via `SpatialKFoldSplitter.generate_and_save_folds` and reused across seeds.
+  `train_dataset.input_csv_path` and `val_dataset.input_csv_path` are overridden
+  automatically per fold. Output directories use `fold_XX_seedYYY` naming. `summary.csv`
+  gains a `fold_idx` column. Resume (`resume: true`) skips completed fold-seed combinations
+  using the existing `runner_state.json` mechanism.
+- Added `RunResult.fold_idx: Optional[int] = None` field (backward-compatible with existing
+  state files that do not contain this key).
+- Added `conf/examples/kfold_segmentation.yaml` with an annotated end-to-end 5-fold example.
+- Added user documentation at `website/docs/user-guide/kfold.md` covering motivation, both
+  split strategies, buffer zone configuration, multi-seed usage, output structure, and a
+  full parameter reference.
+
 ## [1.3.0] - 2026-05-18
 
 ## Dataset Distillation
