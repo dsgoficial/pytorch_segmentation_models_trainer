@@ -28,6 +28,165 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING, DictConfig, OmegaConf
 
 # ============================================================================
+# Modern Segmentation Loss Configurations
+# ============================================================================
+
+
+@dataclass
+class WeightedDiceCrossEntropyLossConfig:
+    """Configuration for ``WeightedDiceCrossEntropyLoss``.
+
+    Example YAML:
+        loss:
+          _target_: pytorch_segmentation_models_trainer.custom_losses.loss.WeightedDiceCrossEntropyLoss
+          num_classes: 7
+          dice_weight: 0.75
+          ce_weight: 0.25
+          smooth_factor: 0.0
+          ignore_index: 255
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_losses.loss.WeightedDiceCrossEntropyLoss"
+    )
+    num_classes: int = MISSING
+    dice_weight: float = 0.75
+    ce_weight: float = 0.25
+    smooth_factor: float = 0.0
+    ignore_index: int = 255
+
+
+@dataclass
+class WeightedLovaszSCELossConfig:
+    """Configuration for ``WeightedLovaszSCELoss``.
+
+    Example YAML:
+        loss:
+          _target_: pytorch_segmentation_models_trainer.custom_losses.loss.WeightedLovaszSCELoss
+          num_classes: 7
+          lovasz_weight: 0.25
+          sce_weight: 0.75
+          ignore_index: 255
+          sce_alpha: 1.0
+          sce_beta: 0.5
+          per_image: false
+          lovasz_classes: present
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_losses.loss.WeightedLovaszSCELoss"
+    )
+    num_classes: int = MISSING
+    lovasz_weight: float = 0.25
+    sce_weight: float = 0.75
+    ignore_index: int = 255
+    sce_alpha: float = 1.0
+    sce_beta: float = 0.5
+    per_image: bool = False
+    lovasz_classes: str = "present"
+
+
+@dataclass
+class WeightedJMLSCELossConfig:
+    """Configuration for ``WeightedJMLSCELoss``.
+
+    Example YAML:
+        loss:
+          _target_: pytorch_segmentation_models_trainer.custom_losses.loss.WeightedJMLSCELoss
+          num_classes: 7
+          jml_weight: 0.25
+          sce_weight: 0.75
+          ignore_index: 255
+          sce_alpha: 1.0
+          sce_beta: 0.5
+          smooth: 0.001
+          jml_classes: present
+          label_smoothing: 0.0
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_losses.loss.WeightedJMLSCELoss"
+    )
+    num_classes: int = MISSING
+    jml_weight: float = 0.25
+    sce_weight: float = 0.75
+    ignore_index: int = 255
+    sce_alpha: float = 1.0
+    sce_beta: float = 0.5
+    smooth: float = 1e-3
+    jml_classes: str = "present"
+    label_smoothing: float = 0.0
+
+
+@dataclass
+class WeightedDiceSCELossConfig:
+    """Configuration for ``WeightedDiceSCELoss``.
+
+    Example YAML:
+        loss:
+          _target_: pytorch_segmentation_models_trainer.custom_losses.loss.WeightedDiceSCELoss
+          num_classes: 7
+          dice_weight: 0.25
+          sce_weight: 0.75
+          smooth_factor: 0.0
+          ignore_index: 255
+          sce_alpha: 1.0
+          sce_beta: 0.5
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_losses.loss.WeightedDiceSCELoss"
+    )
+    num_classes: int = MISSING
+    dice_weight: float = 0.25
+    sce_weight: float = 0.75
+    smooth_factor: float = 0.0
+    ignore_index: int = 255
+    sce_alpha: float = 1.0
+    sce_beta: float = 0.5
+
+
+@dataclass
+class WeightedJMLSCEGCBLLossConfig:
+    """Configuration for ``WeightedJMLSCEGCBLLoss``.
+
+    Example YAML:
+        loss:
+          _target_: pytorch_segmentation_models_trainer.custom_losses.loss.WeightedJMLSCEGCBLLoss
+          num_classes: 7
+          jml_weight: 0.25
+          sce_weight: 0.75
+          ignore_index: 255
+          sce_alpha: 1.0
+          sce_beta: 0.5
+          smooth: 0.001
+          jml_classes: present
+          label_smoothing: 0.0
+          gcbl_weight: 0.1
+          gcbl_embed_dim: 32
+          gcbl_temperature: 0.07
+          gcbl_max_samples: 512
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_losses.loss.WeightedJMLSCEGCBLLoss"
+    )
+    num_classes: int = MISSING
+    jml_weight: float = 0.25
+    sce_weight: float = 0.75
+    ignore_index: int = 255
+    sce_alpha: float = 1.0
+    sce_beta: float = 0.5
+    smooth: float = 1e-3
+    jml_classes: str = "present"
+    label_smoothing: float = 0.0
+    gcbl_weight: float = 0.1
+    gcbl_embed_dim: int = 32
+    gcbl_temperature: float = 0.07
+    gcbl_max_samples: int = 512
+
+
+# ============================================================================
 # Individual Loss Configurations
 # ============================================================================
 
@@ -230,6 +389,19 @@ cs.store(group="loss", name="crossfield_align90_loss", node=CrossfieldAlign90Los
 cs.store(group="loss", name="crossfield_smooth_loss", node=CrossfieldSmoothLossConfig)
 cs.store(group="loss", name="seg_crossfield_loss", node=SegCrossfieldLossConfig)
 cs.store(group="loss", name="seg_edge_interior_loss", node=SegEdgeInteriorLossConfig)
+
+# Register modern segmentation loss configs
+cs.store(
+    group="loss", name="weighted_dice_ce_loss", node=WeightedDiceCrossEntropyLossConfig
+)
+cs.store(
+    group="loss", name="weighted_lovasz_sce_loss", node=WeightedLovaszSCELossConfig
+)
+cs.store(group="loss", name="weighted_jml_sce_loss", node=WeightedJMLSCELossConfig)
+cs.store(group="loss", name="weighted_dice_sce_loss", node=WeightedDiceSCELossConfig)
+cs.store(
+    group="loss", name="weighted_jml_sce_gcbl_loss", node=WeightedJMLSCEGCBLLossConfig
+)
 
 
 # Register legacy configs for backward compatibility

@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import TrainingPage from './pages/TrainingPage'
 import PredictPage from './pages/PredictPage'
+import ExperimentsRunnerPage from './pages/ExperimentsRunnerPage'
 
 const TABS = [
-  { id: 'training', label: 'Training' },
-  { id: 'predict',  label: 'Predict' },
+  { id: 'training',     label: 'Training' },
+  { id: 'predict',      label: 'Predict' },
+  { id: 'experiments',  label: 'Experiments Runner' },
 ]
 
 export default function App() {
@@ -49,8 +51,9 @@ export default function App() {
       </header>
 
       <div style={styles.content}>
-        {activeTab === 'training' && <TrainingPage />}
-        {activeTab === 'predict'  && <PredictPage />}
+        {activeTab === 'training'    && <TrainingPage />}
+        {activeTab === 'predict'     && <PredictPage />}
+        {activeTab === 'experiments' && <ExperimentsRunnerPage />}
       </div>
     </div>
   )

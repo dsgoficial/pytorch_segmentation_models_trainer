@@ -1,5 +1,42 @@
 # Unreleased
 
+## Web Config Builder — Experiments Runner & New Losses
+
+- Added `ExperimentsRunnerSection` component (`web/src/components/ExperimentsRunnerSection.jsx`)
+  for configuring `experiments_runner` YAML blocks: output directory, explicit seeds list or
+  random `n_runs`, `save_summary`, and `resume` flags.
+- Added `ExperimentsRunnerPage` (`web/src/pages/ExperimentsRunnerPage.jsx`) — a full
+  `mode: run-experiments` config page reusing all training sections plus `ExperimentsRunnerSection`.
+- Wired the new page into `App.jsx` as a third "Experiments Runner" navigation tab.
+- Extended `LossSection` with five new segmentation losses:
+  `WeightedDiceSCELoss`, `WeightedLovaszSCELoss`, `WeightedJMLSCELoss`,
+  `WeightedJMLSCEGCBLLoss`, and the existing ones now include full parameter panels.
+- Fixed label accessibility (`htmlFor`/`id`) throughout `LossSection` and
+  `ExperimentsRunnerSection` for screen-reader and test correctness.
+
+## Web Config Builder — Test Infrastructure
+
+- Set up Vitest 3 + React Testing Library (`@testing-library/react`, `@testing-library/user-event`,
+  `@testing-library/jest-dom`, `jsdom`) as the test framework for `web/`.
+- Added test scripts (`npm test`, `npm run test:coverage`) to `web/package.json`.
+- Added Vitest config block to `web/vite.config.js` (jsdom environment, coverage via v8).
+- Wrote 56 frontend tests across four suites:
+  - `LossSection.test.jsx` — LOSS_DEFAULTS exports, per-loss-type rendering, and user interactions.
+  - `ExperimentsRunnerSection.test.jsx` — seeds/n_runs toggle, text parsing, checkbox state.
+  - `ExperimentsRunnerPage.test.jsx` — mode badge, section headings, YAML preview contents.
+  - `App.test.jsx` — tab navigation including the new Experiments Runner tab.
+- Added `test-web` CI job to `.github/workflows/python-app.yml` that installs Node 20,
+  runs `npm ci`, and executes `npm test` on every push/PR.
+
+## Loss Config Definitions
+
+- Added five new Hydra dataclass configs to `config_definitions/loss_config_definition.py`:
+  `WeightedDiceCrossEntropyLossConfig`, `WeightedDiceSCELossConfig`,
+  `WeightedLovaszSCELossConfig`, `WeightedJMLSCELossConfig`, `WeightedJMLSCEGCBLLossConfig`.
+  All registered in Hydra ConfigStore under the `loss` group.
+- Added 17 new tests in `tests/test_loss_config_definition.py` covering defaults, MISSING
+  `num_classes` validation, field overrides, and YAML roundtrip for all five new configs.
+
 ## Classic ML GPU Pipeline
 
 - Added `pytorch_segmentation_models_trainer/classic_ml/` subpackage providing a
