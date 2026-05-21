@@ -9,7 +9,7 @@
 [![Segmentation Models](https://img.shields.io/badge/models-segmentation_models_pytorch-yellow)](https://github.com/qubvel/segmentation_models.pytorch)
 [![Python application](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-app.yml/badge.svg)](https://github.com/dsgoficial/pytorch_segmentation_models_trainer/actions/workflows/python-app.yml)
 [![Upload Python Package](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-publish.yml/badge.svg)](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/python-publish.yml)
-[![pre-commit.ci status](https://results.pre-commit.ci/badge/github/dsgoficial/pytorch_segmentation_models_trainer/main.svg)](https://results.pre-commit.ci/latest/github/phborba/pytorch_segmentation_models_trainer/main)
+[![pre-commit.ci status](https://results.pre-commit.ci/badge/github/phborba/pytorch_segmentation_models_trainer/main.svg)](https://results.pre-commit.ci/latest/github/phborba/pytorch_segmentation_models_trainer/main)
 [![PyPI package](https://img.shields.io/pypi/v/pytorch-segmentation-models-trainer?logo=pypi&color=green)](https://pypi.org/project/pytorch-segmentation-models-trainer/)
 [![codecov](https://codecov.io/gh/dsgoficial/pytorch_segmentation_models_trainer/branch/main/graph/badge.svg?token=PRJL5GVOL2)](https://codecov.io/gh/dsgoficial/pytorch_segmentation_models_trainer)
 [![CodeQL](https://github.com/dsgoficial/pytorch_segmentation_models_trainer/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/phborba/pytorch_segmentation_models_trainer/actions/workflows/codeql-analysis.yml)
