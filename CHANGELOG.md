@@ -1,5 +1,12 @@
 # Unreleased
 
+## Config examples
+
+- Moved `classic_ml_random_forest.yaml`, `kfold_segmentation.yaml`,
+  `iterable_windowed_image_autoencoder.yaml`, and `windowed_image_autoencoder.yaml`
+  from the project root `conf/examples/` to `pytorch_segmentation_models_trainer/conf/examples/`
+  where all Hydra example configs should live.
+
 ## CI
 
 - Fixed CI failure caused by `pydensecrf` and `pygco` being added to the `gpu-ml` optional extras in
