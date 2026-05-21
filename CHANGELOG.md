@@ -2,9 +2,13 @@
 
 ## CI
 
-- Fixed CI failure caused by `pydensecrf==1.0rc3` being pulled in via `--all-extras` on CPU runners.
-  Replaced `uv sync --all-extras` with `uv sync --extra all` in `build` and `test-transformers` jobs,
-  which excludes the `gpu-ml` optional group (requires CUDA) that cannot compile on GitHub-hosted runners.
+- Fixed CI failure caused by `pydensecrf` and `pygco` being added to the `gpu-ml` optional extras in
+  commit `9fbf51a` without updating `uv.lock`. Every `uv sync` detected the inconsistency and tried
+  to compile `pydensecrf==1.0rc3` from source, which is incompatible with Cython 3. Removed both
+  packages from `gpu-ml` extras (they are already fully mocked in the test suite); users who need
+  them can install manually.
+- Replaced `uv sync --all-extras` with `uv sync --extra all` in `build` and `test-transformers` CI
+  jobs to consistently exclude the `gpu-ml` group on CPU-only runners.
 
 ## Web Config Builder — Experiments Runner & New Losses
 
