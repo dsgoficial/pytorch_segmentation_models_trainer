@@ -39,7 +39,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        uv sync --extra all --dev
+        uv sync --frozen --extra all --dev
         uv pip install opencv-python-headless
 
     - name: Lint with flake8
@@ -140,7 +140,7 @@ jobs:
       run: |
         uv venv
         uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-        uv sync --extra all --dev
+        uv sync --frozen --extra all --dev
         uv pip install opencv-python-headless
 
     - name: Lint new files with flake8
@@ -226,7 +226,7 @@ jobs:
       run: |
         uv venv
         uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-        uv sync --extra tests --dev
+        uv sync --frozen --extra tests --dev
         uv pip install opencv-python-headless
 
     - name: Lint new files with flake8

@@ -9,14 +9,17 @@
 
 ## CI
 
-- Removed the entire `gpu-ml` optional extras section from `pyproject.toml`. All packages in that
-  group (`cupy-cuda12x`, `cucim-cu12`, `cuml-cu12`, `pydensecrf`, `pygco`) were added in `9fbf51a`
-  without updating `uv.lock`. Every `uv sync` detected the inconsistency and tried to resolve them,
-  which fails on CPU runners: CUDA packages require `pypi.nvidia.com` and `pydensecrf` is
-  incompatible with Cython 3. All packages are fully mocked in the test suite; users needing them
-  should install via `pip install --extra-index-url https://pypi.nvidia.com cuml-cu12 ...`.
-- Replaced `uv sync --all-extras` with `uv sync --extra all` in `build` and `test-transformers` CI
-  jobs to consistently target only the `tests` and `transformers` extras on CPU-only runners.
+- Restored `[gpu-ml]` optional extras in `pyproject.toml` (`cupy-cuda12x`, `cucim-cu12`,
+  `cuml-cu12`, `pydensecrf`, `pygco`) so users can install GPU packages via
+  `pip install pkg[gpu-ml]`; all packages are fully mocked in the test suite.
+- Added `constraint-dependencies` pinning gpu-ml packages to versions with pre-built wheels
+  (`cuml-cu12==26.4.0`, `cupy-cuda12x==14.0.1`) or stub metadata
+  (`cucim-cu12==26.4.0`, `pydensecrf==1.0rc3`, `pygco==0.0.1`) so `uv lock` can resolve them
+  without CUDA hardware.
+- Added `[[tool.uv.dependency-metadata]]` stubs for `cucim-cu12`, `pydensecrf`, and `pygco`
+  (source-only packages that cannot be compiled in CI) so uv treats them as already-resolved.
+- Added `--frozen` flag to all `uv sync` calls in CI (`build`, `test-transformers`, `test-gpu-ml`
+  jobs) so the existing `uv.lock` is used as-is without re-resolution.
 
 ## Web Config Builder — Experiments Runner & New Losses
 

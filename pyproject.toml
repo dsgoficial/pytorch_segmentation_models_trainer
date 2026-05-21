@@ -86,6 +86,13 @@ transformers = [
     "peft>=0.6.0",
     "timm>=0.9.0",
 ]
+gpu-ml = [
+    "cupy-cuda12x>=12.0.0",
+    "cucim-cu12>=23.0.0",
+    "cuml-cu12>=23.0.0",
+    "pydensecrf",
+    "pygco",
+]
 all = [
     "pytorch_segmentation_models_trainer[tests,transformers]",
 ]
@@ -103,6 +110,33 @@ packages = ["pytorch_segmentation_models_trainer"]
 
 [tool.uv]
 managed = true
+# Pin gpu-ml packages to versions with pre-built wheels or provide stub metadata
+# so uv can lock them without GPU hardware. Real installation still requires CUDA.
+constraint-dependencies = [
+    "cuml-cu12==26.4.0",
+    "cucim-cu12==26.4.0",
+    "cupy-cuda12x==14.0.1",
+    "pydensecrf==1.0rc3",
+    "pygco==0.0.1",
+]
+
+# cucim-cu12, pydensecrf and pygco are source-only packages that cannot be
+# compiled in CI (no CUDA / Cython-3 incompatible). Provide stub metadata so
+# uv can produce a consistent lock file without building them.
+[[tool.uv.dependency-metadata]]
+name = "cucim-cu12"
+version = "26.4.0"
+requires-dist = []
+
+[[tool.uv.dependency-metadata]]
+name = "pydensecrf"
+version = "1.0rc3"
+requires-dist = []
+
+[[tool.uv.dependency-metadata]]
+name = "pygco"
+version = "0.0.1"
+requires-dist = []
 
 [dependency-groups]
 dev = [
