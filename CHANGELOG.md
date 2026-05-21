@@ -9,13 +9,14 @@
 
 ## CI
 
-- Fixed CI failure caused by `pydensecrf` and `pygco` being added to the `gpu-ml` optional extras in
-  commit `9fbf51a` without updating `uv.lock`. Every `uv sync` detected the inconsistency and tried
-  to compile `pydensecrf==1.0rc3` from source, which is incompatible with Cython 3. Removed both
-  packages from `gpu-ml` extras (they are already fully mocked in the test suite); users who need
-  them can install manually.
+- Removed the entire `gpu-ml` optional extras section from `pyproject.toml`. All packages in that
+  group (`cupy-cuda12x`, `cucim-cu12`, `cuml-cu12`, `pydensecrf`, `pygco`) were added in `9fbf51a`
+  without updating `uv.lock`. Every `uv sync` detected the inconsistency and tried to resolve them,
+  which fails on CPU runners: CUDA packages require `pypi.nvidia.com` and `pydensecrf` is
+  incompatible with Cython 3. All packages are fully mocked in the test suite; users needing them
+  should install via `pip install --extra-index-url https://pypi.nvidia.com cuml-cu12 ...`.
 - Replaced `uv sync --all-extras` with `uv sync --extra all` in `build` and `test-transformers` CI
-  jobs to consistently exclude the `gpu-ml` group on CPU-only runners.
+  jobs to consistently target only the `tests` and `transformers` extras on CPU-only runners.
 
 ## Web Config Builder — Experiments Runner & New Losses
 

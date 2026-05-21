@@ -86,11 +86,6 @@ transformers = [
     "peft>=0.6.0",
     "timm>=0.9.0",
 ]
-gpu-ml = [
-    "cupy-cuda12x>=12.0.0",
-    "cucim-cu12>=23.0.0",
-    "cuml-cu12>=23.0.0",
-]
 all = [
     "pytorch_segmentation_models_trainer[tests,transformers]",
 ]
