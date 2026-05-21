@@ -1,5 +1,11 @@
 # Unreleased
 
+## CI
+
+- Fixed CI failure caused by `pydensecrf==1.0rc3` being pulled in via `--all-extras` on CPU runners.
+  Replaced `uv sync --all-extras` with `uv sync --extra all` in `build` and `test-transformers` jobs,
+  which excludes the `gpu-ml` optional group (requires CUDA) that cannot compile on GitHub-hosted runners.
+
 ## Web Config Builder — Experiments Runner & New Losses
 
 - Added `ExperimentsRunnerSection` component (`web/src/components/ExperimentsRunnerSection.jsx`)
