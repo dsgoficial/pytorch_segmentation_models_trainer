@@ -11,6 +11,7 @@ Tests cover:
 
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -236,3 +237,119 @@ class TestGetMergerDict:
         )
         mergers = proc.get_merger_dict(tiler)
         assert "alpha" in mergers
+
+
+class TestMergeAndSave:
+    def _make_profile(self, H=8, W=8):
+        return {
+            "driver": "GTiff",
+            "dtype": "uint8",
+            "width": W,
+            "height": H,
+            "count": 3,
+            "crs": rasterio.crs.CRS.from_epsg(4326),
+            "transform": rasterio.transform.from_origin(0, H, 1, 1),
+            "blockxsize": 16,
+            "blockysize": 16,
+            "tiled": True,
+        }
+
+    def test_integrate_batch_writes_alpha_when_enabled(self):
+        proc = _make_processor(num_classes=K)
+        proc.export_alpha = True
+        merger_dict = {
+            "probs": MagicMock(),
+            "uncertainty": MagicMock(),
+            "alpha": MagicMock(),
+        }
+        pred = {
+            "probs": torch.rand(1, K, 4, 4),
+            "uncertainty": torch.rand(1, 1, 4, 4),
+            "alpha": torch.rand(1, K, 4, 4),
+        }
+
+        proc.integrate_batch(pred, torch.tensor([[0, 0, 4, 4]]), merger_dict)
+
+        merger_dict["alpha"].integrate_batch.assert_called_once()
+
+    def test_merge_masks_crops_alpha(self):
+        class FakeMerger:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def merge(self):
+                return self.tensor
+
+        class FakeTiler:
+            def crop_to_orignal_size(self, array):
+                return array[:4, :4]
+
+        proc = _make_processor(num_classes=K)
+        proc.export_alpha = True
+        output = proc.merge_masks(
+            FakeTiler(),
+            {
+                "probs": FakeMerger(torch.ones(K, 5, 5)),
+                "uncertainty": FakeMerger(torch.ones(1, 5, 5)),
+                "alpha": FakeMerger(torch.ones(K, 5, 5) * 2),
+            },
+        )
+
+        assert output["seg"].shape == (4, 4, K)
+        assert output["uncertainty"].shape == (4, 4, 1)
+        assert output["alpha"].shape == (4, 4, K)
+
+    def test_save_inference_exports_uncertainty_alpha_and_parent(self, tmp_path):
+        proc = _make_processor(
+            num_classes=K,
+            output_uncertainty_path=str(tmp_path / "unc.tif"),
+        )
+        proc.export_alpha = True
+        profile = self._make_profile()
+        inference = {
+            "seg": np.ones((8, 8, K), dtype=np.float32),
+            "uncertainty": np.ones((8, 8, 1), dtype=np.float32) * 0.3,
+            "alpha": np.ones((8, 8, K), dtype=np.float32) * 2,
+        }
+
+        with patch(
+            "pytorch_segmentation_models_trainer.tools.inference.inference_processors.SingleImageInfereceProcessor.save_inference"
+        ) as parent_save:
+            proc.save_inference(
+                "image.tif", 0.5, profile, inference, {}, apply_threshold=True
+            )
+
+        assert (tmp_path / "unc.tif").exists()
+        assert (tmp_path / "unc_alpha.tif").exists()
+        parent_save.assert_called_once()
+
+    def test_save_multiband_accepts_2d_array(self, tmp_path):
+        proc = _make_processor()
+        out_path = tmp_path / "single_as_multiband.tif"
+        proc._save_multiband_raster(
+            np.ones((8, 8), dtype=np.float32),
+            self._make_profile(),
+            out_path,
+        )
+
+        with rasterio.open(out_path) as ds:
+            assert ds.count == 1
+
+    def test_predict_with_uncertainty_temporarily_overrides_path(self, tmp_path):
+        proc = _make_processor(output_uncertainty_path=str(tmp_path / "initial.tif"))
+        original = proc.output_uncertainty_path
+        proc.process = MagicMock(return_value={"seg": np.zeros((2, 2, K))})
+
+        output = proc.predict_with_uncertainty(
+            "image.tif",
+            output_uncertainty_path=tmp_path / "override.tif",
+            threshold=0.25,
+        )
+
+        assert output["seg"].shape == (2, 2, K)
+        assert proc.output_uncertainty_path == original
+        proc.process.assert_called_once_with(
+            image_path="image.tif",
+            threshold=0.25,
+            save_inference_output=True,
+        )

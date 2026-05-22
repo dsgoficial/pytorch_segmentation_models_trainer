@@ -23,11 +23,15 @@
 import os
 import unittest
 import warnings
+from dataclasses import dataclass, field
+from unittest.mock import MagicMock
 
 import geopandas
 import hydra
 import rasterio
 import torch
+import numpy as np
+from shapely.geometry import Polygon
 from geopandas.testing import geom_almost_equals as _geom_almost_equals
 
 
@@ -82,6 +86,8 @@ from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import
     ACMPolygonizerProcessor,
     ASMConfig,
     ASMPolygonizerProcessor,
+    TemplatePolygonizerProcessor,
+    PolygonRNNPolygonizerProcessor,
     SimplePolConfig,
     SimplePolygonizerProcessor,
 )
@@ -235,3 +241,110 @@ class Test_Polygonize(BasicTestCase):
             output_features_gdf["geometry"],
             tolerance=0.05,
         )
+
+    def test_template_polygonizer_abstract_post_init_noop_and_post_process_options(
+        self,
+    ):
+        @dataclass
+        class ConcreteTemplate(TemplatePolygonizerProcessor):
+            config: object = field(default_factory=object)
+
+            def __post_init__(self):
+                return super().__post_init__()
+
+        processor = ConcreteTemplate(data_writer=None)
+        self.assertIsNone(processor.__post_init__())
+        polygon = Polygon([(0, 0), (1, 0), (1, 1), (0, 0)])
+
+        output = processor.post_process(
+            [polygon],
+            profile=None,
+            convert_output_to_world_coords=False,
+        )
+
+        self.assertEqual(len(output), 1)
+
+    def test_template_polygonizer_fallback_single_and_batch_paths(self):
+        @dataclass
+        class ConcreteTemplate(TemplatePolygonizerProcessor):
+            config: object = field(default_factory=object)
+
+            def __post_init__(self):
+                self.polygonize_method = MagicMock(
+                    side_effect=[
+                        RuntimeError("batch failed"),
+                        ([[Polygon([(0, 0), (1, 0), (1, 1), (0, 0)])]], None),
+                        RuntimeError("single failed"),
+                    ]
+                )
+
+            def post_process(self, polygons, profile, parent_dir_name=None, **kwargs):
+                return polygons
+
+        writer = MagicMock()
+        processor = ConcreteTemplate(data_writer=writer)
+        inference = {
+            "seg": torch.ones((2, 1, 4, 4)),
+            "crossfield": torch.ones((2, 2, 4, 4)),
+        }
+
+        output = processor.process(
+            inference,
+            profile=None,
+            pool=None,
+            parent_dir_name=["ok", "bad"],
+            convert_output_to_world_coords=False,
+        )
+
+        self.assertEqual(len(output), 1)
+
+    def test_template_polygonizer_pool_returns_futures(self):
+        @dataclass
+        class ConcreteTemplate(TemplatePolygonizerProcessor):
+            config: object = field(default_factory=object)
+
+            def __post_init__(self):
+                self.polygonize_method = MagicMock(
+                    return_value=(
+                        [
+                            [Polygon([(0, 0), (1, 0), (1, 1), (0, 0)])],
+                            [Polygon([(0, 0), (2, 0), (2, 2), (0, 0)])],
+                        ],
+                        None,
+                    )
+                )
+
+        class DummyPool:
+            def submit(self, func, *args, **kwargs):
+                return (func, args, kwargs)
+
+        processor = ConcreteTemplate(data_writer=None)
+        inference = {
+            "seg": torch.ones((2, 1, 4, 4)),
+            "crossfield": torch.ones((2, 2, 4, 4)),
+        }
+
+        futures = processor.process(
+            inference,
+            profile=[{"crs": None}, {"crs": None}],
+            pool=DummyPool(),
+            parent_dir_name=["a", "b"],
+            convert_output_to_world_coords=False,
+        )
+
+        self.assertEqual(len(futures), 2)
+
+    def test_polygon_rnn_polygonizer_processor_process(self):
+        processor = PolygonRNNPolygonizerProcessor(data_writer=None)
+        processor.polygonize_method = MagicMock(
+            return_value=[Polygon([(0, 0), (1, 0), (1, 1), (0, 0)])]
+        )
+
+        output = processor.process(
+            {"output_batch_polygons": torch.zeros((1, 4, 2))},
+            profile=None,
+            parent_dir_name="poly_rnn",
+            convert_output_to_world_coords=False,
+        )
+
+        self.assertEqual(len(output), 1)

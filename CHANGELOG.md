@@ -1,5 +1,13 @@
 # Unreleased
 
+## Test coverage
+
+- Expanded the `tools` test suite to cover inference processors, evaluation utilities,
+  polygonization helpers, DDOQ VAE distillation, raster/data handlers, plotting, and
+  aggregation edge cases needed for 100% `tools` coverage.
+- Removed an unreachable duplicate `_evaluate_all_experiments_sequential` implementation
+  from the evaluation pipeline so coverage reflects executable code only.
+
 ## Config examples
 
 - Moved `classic_ml_random_forest.yaml`, `kfold_segmentation.yaml`,

@@ -62,6 +62,12 @@ class TestDatasetCSVBuilder(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             DatasetCSVBuilder(config_fail)
 
+        config_missing_masks = OmegaConf.create(
+            {"images_folder": self.images_dir, "masks_folder": "/non/existent/masks"}
+        )
+        with self.assertRaises(FileNotFoundError):
+            DatasetCSVBuilder(config_missing_masks)
+
     def test_build_csv_same_basename(self):
         config = OmegaConf.create(
             {
@@ -244,6 +250,23 @@ class TestDatasetCSVBuilder(unittest.TestCase):
         mask = builder.match_image_to_mask(Path(self.images_dir) / "img_1.tif")
         self.assertIsNone(mask)
 
+    def test_match_custom_regex_no_mask_with_same_id(self):
+        self._create_dummy_raster(os.path.join(self.images_dir, "img_777.tif"))
+
+        config = OmegaConf.create(
+            {
+                "images_folder": self.images_dir,
+                "masks_folder": self.masks_dir,
+                "matching_strategy": "custom_regex",
+                "regex_pattern": r"(?P<id>777)",
+            }
+        )
+        builder = DatasetCSVBuilder(config)
+
+        self.assertIsNone(
+            builder.match_image_to_mask(Path(self.images_dir) / "img_777.tif")
+        )
+
     def test_validate_dataset_duplicates_and_invalid_dims(self):
         config = OmegaConf.create(
             {"images_folder": self.images_dir, "masks_folder": self.masks_dir}
@@ -285,6 +308,20 @@ class TestDatasetCSVBuilder(unittest.TestCase):
         self.assertIsNotNone(mask)
         self.assertEqual(mask.suffix, ".png")
 
+    def test_match_same_basename_exact_path(self):
+        config = OmegaConf.create(
+            {
+                "images_folder": self.images_dir,
+                "masks_folder": self.masks_dir,
+                "mask_pattern": "mask_*.tif",
+            }
+        )
+        builder = DatasetCSVBuilder(config)
+
+        mask = builder.match_image_to_mask(Path(self.images_dir) / "img_1.tif")
+
+        self.assertEqual(mask, Path(self.masks_dir) / "img_1.tif")
+
     def test_match_prefix_suffix_fallback(self):
         # Trigger the fallback glob in _match_prefix_suffix
         self._create_dummy_raster(os.path.join(self.images_dir, "p_stem_s.tif"))
@@ -308,6 +345,21 @@ class TestDatasetCSVBuilder(unittest.TestCase):
         mask = builder.match_image_to_mask(Path(self.images_dir) / "p_stem_s.tif")
         self.assertIsNotNone(mask)
         self.assertEqual(mask.name, "mp_stem_ms.png")
+
+    def test_match_prefix_suffix_returns_none_when_no_candidate_exists(self):
+        config = OmegaConf.create(
+            {
+                "images_folder": self.images_dir,
+                "masks_folder": self.masks_dir,
+                "matching_strategy": "prefix_suffix",
+                "mask_prefix": "missing_",
+            }
+        )
+        builder = DatasetCSVBuilder(config)
+
+        self.assertIsNone(
+            builder.match_image_to_mask(Path(self.images_dir) / "img_1.tif")
+        )
 
     def test_match_prefix_suffix_no_pattern_extension(self):
         # Trigger 'if not mask_extension' in _match_prefix_suffix

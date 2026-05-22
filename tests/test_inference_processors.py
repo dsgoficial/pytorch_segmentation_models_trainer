@@ -118,6 +118,10 @@ class TestAbstractInferenceProcessor(unittest.TestCase):
         np.testing.assert_array_equal(image, self.image_data)
         self.assertEqual(profile["height"], 512)
         self.assertEqual(profile["width"], 512)
+        _, no_geo_profile = self.processor.read_image_and_profile(
+            self.image_path, restore_geo_transform=False
+        )
+        self.assertIsNone(no_geo_profile["crs"])
 
     def test_get_normalization_function(self):
         norm_func = self.processor.get_normalization_function()
@@ -126,6 +130,13 @@ class TestAbstractInferenceProcessor(unittest.TestCase):
         normalized_img = norm_func(image=dummy_img)["image"]
         expected_val = (0 - 0.5 * 255.0) / (0.5 * 255.0)
         self.assertAlmostEqual(normalized_img[0, 0, 0], expected_val)
+
+    def test_abstract_make_inference_super_noop(self):
+        self.assertIsNone(
+            AbstractInferenceProcessor.make_inference(
+                self.processor, np.zeros((2, 2, 3), dtype=np.uint8)
+            )
+        )
 
 
 class TestSingleImageInferenceProcessor(unittest.TestCase):
@@ -220,6 +231,8 @@ class TestSingleImageInferenceProcessor(unittest.TestCase):
     def test_resolve_tile_weight(self):
         self.assertEqual(self.processor._resolve_tile_weight("mean"), "mean")
         self.assertEqual(self.processor._resolve_tile_weight("pyramid"), "pyramid")
+        custom = np.ones(self.model_input_shape, dtype=np.float32)
+        self.assertIs(self.processor._resolve_tile_weight(custom), custom)
         gaussian_weight = self.processor._resolve_tile_weight("gaussian")
         self.assertEqual(gaussian_weight.shape, self.model_input_shape)
         with self.assertRaises(ValueError):
@@ -343,6 +356,52 @@ class TestMultiClassInferenceProcessor(unittest.TestCase):
                 num_classes=self.num_classes,
                 tta_mode="invalid",
             )
+        with self.assertRaises(ValueError):
+            MultiClassInferenceProcessor(
+                self.model,
+                self.device,
+                self.batch_size,
+                self.export_strategy,
+                num_classes=self.num_classes,
+                confidence_mode="bad",
+            )
+        with self.assertRaises(ValueError):
+            MultiClassInferenceProcessor(
+                self.model,
+                self.device,
+                self.batch_size,
+                self.export_strategy,
+                num_classes=self.num_classes,
+                uncertainty_mode="bad",
+            )
+        probs_dir = os.path.join(self.tmp_dir, "probs")
+        unc_dir = os.path.join(self.tmp_dir, "unc")
+        proc = MultiClassInferenceProcessor(
+            self.model,
+            self.device,
+            self.batch_size,
+            self.export_strategy,
+            num_classes=self.num_classes,
+            output_probs_dir=probs_dir,
+            output_uncertainty_dir=unc_dir,
+        )
+        self.assertTrue(os.path.isdir(probs_dir))
+        self.assertTrue(os.path.isdir(unc_dir))
+
+    def test_tta_transform_helpers_and_merger_uncertainty(self):
+        tensor = torch.arange(4, dtype=torch.float32).reshape(1, 1, 2, 2)
+        transformed = self.processor._apply_transform(tensor, 1, True)
+        restored = self.processor._invert_transform(transformed, 1, True)
+        self.assertTrue(torch.equal(restored, tensor))
+        self.assertEqual(len(self.processor._get_tta_transforms()), 1)
+
+        self.processor.tta_mode = "flip"
+        self.processor.export_uncertainty_map = True
+        tiler = MagicMock()
+        tiler.target_shape = (1, 4, 4)
+        tiler.weight = np.ones((4, 4), dtype=np.float32)
+        mergers = self.processor.get_merger_dict(tiler)
+        self.assertIn("uncertainty", mergers)
 
     def test_compute_confidence_maps(self):
         probs = np.array(
@@ -361,6 +420,78 @@ class TestMultiClassInferenceProcessor(unittest.TestCase):
         np.testing.assert_array_almost_equal(
             confidence_maps["margin"], np.array([[0.8, 0.8], [0.0, 0.0]])
         )
+
+    def test_predict_and_merge_tta_paths(self):
+        tiles = [torch.ones(3, 4, 4)]
+        tiler = MagicMock()
+        tiler.crops = [(0, 0, 4, 4)]
+        seg_merger = MagicMock()
+        unc_merger = MagicMock()
+        merger_dict = {"seg": seg_merger, "uncertainty": unc_merger}
+        self.model.side_effect = lambda x: torch.ones(
+            x.shape[0], self.num_classes, x.shape[-2], x.shape[-1]
+        )
+
+        self.processor.tta_mode = "flip"
+        self.processor.export_uncertainty_map = True
+        self.processor.predict_and_merge(tiles, tiler, merger_dict)
+        unc_merger.integrate_batch.assert_called_once()
+        seg_merger.integrate_batch.assert_called_once()
+
+        seg_merger.reset_mock()
+        self.processor.export_uncertainty_map = False
+        self.processor.predict_and_merge(tiles, tiler, {"seg": seg_merger})
+        seg_merger.integrate_batch.assert_called_once()
+
+    def test_merge_masks_with_uncertainty_and_make_inference_with_probs(self):
+        class FakeMerger:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def merge(self):
+                return self.tensor
+
+        tiler = MagicMock()
+        tiler.crop_to_orignal_size.side_effect = lambda x: x[:2, :2]
+        result = self.processor.merge_masks(
+            tiler,
+            {
+                "seg": FakeMerger(
+                    torch.tensor([[[0.1, 0.9], [0.8, 0.2]], [[0.9, 0.1], [0.2, 0.8]]])
+                ),
+                "uncertainty": FakeMerger(torch.ones(1, 2, 2)),
+            },
+        )
+        self.assertEqual(result["seg"].shape, (2, 2, 1))
+        self.assertIn("uncertainty", result)
+
+        with (
+            patch.object(
+                self.processor,
+                "predict_and_merge",
+                lambda _tiles, _tiler, _merger_dict: None,
+            ),
+            patch.object(
+                self.processor,
+                "get_merger_dict",
+                return_value={
+                    "seg": FakeMerger(
+                        torch.stack(
+                            [
+                                torch.ones(256, 256),
+                                torch.zeros(256, 256),
+                                torch.zeros(256, 256),
+                            ]
+                        )
+                    )
+                },
+            ),
+        ):
+            probs_output = self.processor.make_inference_with_probs(
+                np.zeros((256, 256, 3), dtype=np.uint8)
+            )
+        self.assertEqual(probs_output["seg"].shape, (256, 256))
+        self.assertEqual(probs_output["probs"].shape[0], self.num_classes)
 
     @patch("rasterio.open")
     def test_is_large_image(self, mock_rasterio_open):
@@ -382,6 +513,241 @@ class TestMultiClassInferenceProcessor(unittest.TestCase):
         result = self.processor.process(self.image_path)
         mock_make_striped.assert_called_once()
         self.assertEqual(len(result), 0)
+
+    @patch.object(MultiClassInferenceProcessor, "_is_large_image", return_value=True)
+    def test_process_large_image_selects_probs_outputs(self, mock_is_large):
+        self.processor.export_strategy.output_file_path = self.tmp_dir
+        self.processor.output_probs_dir = os.path.join(self.tmp_dir, "explicit_probs")
+        self.processor.make_inference_striped = MagicMock()
+        self.processor.process(self.image_path)
+        self.assertIn(
+            "explicit_probs",
+            self.processor.make_inference_striped.call_args.kwargs["output_probs_path"],
+        )
+
+        self.processor.output_probs_dir = None
+        self.processor.confidence_mode = "basic"
+        self.processor.make_inference_striped.reset_mock()
+        self.processor.process(self.image_path)
+        self.assertIn(
+            "probs",
+            self.processor.make_inference_striped.call_args.kwargs["output_probs_path"],
+        )
+
+    @patch("rasterio.open")
+    @patch.object(MultiClassInferenceProcessor, "_is_large_image", return_value=False)
+    def test_process_confidence_polygonizer_and_output_inferences(
+        self, mock_large, mock_open
+    ):
+        mock_open.return_value = self.mock_raster_ds
+        confidence_export = MagicMock()
+        processor = MultiClassInferenceProcessor(
+            model=self.model,
+            device=self.device,
+            batch_size=self.batch_size,
+            export_strategy=self.export_strategy,
+            num_classes=self.num_classes,
+            model_input_shape=self.model_input_shape,
+            step_shape=self.step_shape,
+            confidence_mode="basic",
+            confidence_export_strategy=confidence_export,
+            group_output_by_image_basename=True,
+        )
+        processor.make_inference_with_probs = MagicMock(
+            return_value={
+                "seg": np.zeros((4, 4, 1), dtype=np.uint8),
+                "probs": np.ones((self.num_classes, 4, 4), dtype=np.float32)
+                / self.num_classes,
+            }
+        )
+        polygonizer = MagicMock()
+        polygonizer.process.return_value = ["poly"]
+        output = processor.process(
+            self.image_path,
+            polygonizer=polygonizer,
+            output_inferences=True,
+        )
+
+        self.assertEqual(output["polygons"], ["poly"])
+        self.assertIn("inference_output", output)
+        confidence_export.save_confidence.assert_called_once()
+
+    @patch("rasterio.open")
+    @patch.object(MultiClassInferenceProcessor, "_is_large_image", return_value=False)
+    def test_process_normal_path_without_confidence(self, mock_large, mock_open):
+        mock_open.return_value = self.mock_raster_ds
+        self.processor.make_inference = MagicMock(
+            return_value={"seg": np.zeros((4, 4, 1), dtype=np.uint8)}
+        )
+        output = self.processor.process(
+            self.image_path,
+            save_inference_output=False,
+            output_inferences=True,
+        )
+
+        self.assertIn("inference_output", output)
+        self.processor.make_inference.assert_called_once()
+
+    def test_save_confidence_maps_full_none_and_uncertainty_save_inference(self):
+        self.processor.confidence_export_strategy = None
+        self.processor._save_confidence_maps(
+            "image.tif",
+            {"count": 3, "dtype": "uint8"},
+            {"max_prob": np.ones((2, 2), dtype=np.float32)},
+        )
+
+        export = MagicMock()
+        self.processor.confidence_export_strategy = export
+        self.processor.confidence_mode = "full"
+        self.processor._save_confidence_maps(
+            "image.tif",
+            {"count": 3, "dtype": "uint8"},
+            {
+                "max_prob": np.ones((2, 2), dtype=np.float32),
+                "entropy": np.zeros((2, 2), dtype=np.float32),
+                "margin": np.ones((2, 2), dtype=np.float32),
+            },
+        )
+        self.assertEqual(export.save_confidence.call_count, 3)
+
+        self.processor.export_uncertainty_map = True
+        self.processor.output_uncertainty_dir = self.tmp_dir
+        output_dict = defaultdict(list)
+        self.processor.save_inference(
+            "image.tif",
+            0.5,
+            {
+                "driver": "GTiff",
+                "height": 2,
+                "width": 2,
+                "count": 3,
+                "dtype": "uint8",
+                "crs": None,
+                "transform": Affine.identity(),
+                "blockxsize": 16,
+                "blockysize": 16,
+                "tiled": True,
+            },
+            {
+                "seg": np.zeros((2, 2, 1), dtype=np.uint8),
+                "uncertainty": np.ones((2, 2, 1), dtype=np.float32),
+            },
+            output_dict,
+        )
+        self.assertEqual(len(output_dict["inference"]), 1)
+
+    def test_predict_batch_to_merger_tta_and_single(self):
+        merger = MagicMock()
+        merger.weight = torch.ones(1)
+        self.model.side_effect = lambda x: torch.ones(
+            x.shape[0], self.num_classes, x.shape[-2], x.shape[-1]
+        )
+        tile = torch.ones(3, 4, 4)
+
+        self.processor._predict_batch_to_merger(
+            [tile],
+            [(0, 0, 4, 4)],
+            merger,
+            [(0, False)],
+            1,
+        )
+        merger.integrate_batch.assert_called()
+
+        merger.reset_mock()
+        self.processor._predict_batch_to_merger(
+            [tile],
+            [(0, 0, 4, 4)],
+            merger,
+            [(0, False), (1, True)],
+            2,
+        )
+        merger.integrate_batch.assert_called()
+
+    def test_infer_stripe_and_make_inference_striped(self):
+        model = DummySegmentationModel(num_classes=self.num_classes)
+        processor = MultiClassInferenceProcessor(
+            model=model,
+            device="cpu",
+            batch_size=2,
+            export_strategy=self.export_strategy,
+            num_classes=self.num_classes,
+            model_input_shape=(4, 4),
+            step_shape=(4, 4),
+            tta_mode="flip",
+        )
+
+        stripe_output = processor._infer_stripe(np.zeros((4, 4, 3), dtype=np.uint8))
+        self.assertEqual(stripe_output.shape, (self.num_classes, 4, 4))
+        stripe_output = processor._infer_stripe(np.zeros((4, 8, 3), dtype=np.uint8))
+        self.assertEqual(stripe_output.shape, (self.num_classes, 4, 8))
+
+        image_path = os.path.join(self.tmp_dir, "striped_input.tif")
+        seg_path = os.path.join(self.tmp_dir, "striped_seg.tif")
+        probs_path = os.path.join(self.tmp_dir, "striped_probs.tif")
+        profile = {
+            "driver": "GTiff",
+            "height": 6,
+            "width": 5,
+            "count": 3,
+            "dtype": "uint8",
+            "crs": None,
+            "transform": Affine.identity(),
+        }
+        with rasterio.open(image_path, "w", **profile) as dst:
+            dst.write(np.zeros((3, 6, 5), dtype=np.uint8))
+
+        def fake_infer(stripe_norm):
+            h, w = stripe_norm.shape[:2]
+            logits = np.zeros((self.num_classes, h, w), dtype=np.float32)
+            logits[1] = 2.0
+            return logits
+
+        processor._infer_stripe = MagicMock(side_effect=fake_infer)
+        processor.make_inference_striped(
+            image_path,
+            seg_path,
+            output_probs_path=probs_path,
+            stripe_height=3,
+        )
+
+        with rasterio.open(seg_path) as ds:
+            self.assertEqual(ds.read(1).shape, (6, 5))
+        with rasterio.open(probs_path) as ds:
+            self.assertEqual(ds.count, self.num_classes)
+
+    def test_uncertainty_raster_directory_fallbacks(self):
+        profile = {
+            "driver": "GTiff",
+            "height": 2,
+            "width": 2,
+            "count": 1,
+            "dtype": "float32",
+            "crs": None,
+            "transform": Affine.identity(),
+        }
+        self.processor.output_uncertainty_dir = None
+        self.processor.export_strategy.output_file_path = self.tmp_dir
+        self.processor._save_uncertainty_raster(
+            np.ones((2, 2), dtype=np.float32),
+            profile,
+            "image.tif",
+            suffix="_from_strategy",
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(self.tmp_dir, "image_from_strategy.tif"))
+        )
+
+        self.processor.export_strategy = None
+        image_path = os.path.join(self.tmp_dir, "source.tif")
+        self.processor._save_uncertainty_raster(
+            np.ones((2, 2), dtype=np.float32),
+            profile,
+            image_path,
+            suffix="_beside_source",
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(self.tmp_dir, "source_beside_source.tif"))
+        )
 
 
 if __name__ == "__main__":

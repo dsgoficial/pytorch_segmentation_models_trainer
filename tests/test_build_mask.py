@@ -44,6 +44,7 @@ from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader impor
 )
 from pytorch_segmentation_models_trainer.tools.mask_building.mask_builder import (
     MaskBuilder,
+    TemplateMaskBuilder,
     build_destination_dirs,
     merge_csv_datasets,
 )
@@ -81,6 +82,17 @@ class Test_BuildMask(BasicTestCase):
         super().setUp()
         self.output_dir = self.make_temp_dir()
         self.replicated_dir = self.make_temp_dir()
+
+    def test_template_mask_builder_process_body_is_noop(self):
+        class ConcreteMaskBuilder(TemplateMaskBuilder):
+            def process(
+                self, input_raster_path: str, output_dir: str, filter_area=None
+            ):
+                return super().process(input_raster_path, output_dir, filter_area)
+
+        builder = object.__new__(ConcreteMaskBuilder)
+
+        self.assertIsNone(builder.process("input.tif", self.output_dir))
 
     def assert_csv_equal(self, expected_csv, output_csv, atol=1e-5):
         def parse_if_list_string(val):

@@ -69,6 +69,9 @@ class TinyVAE(nn.Module):
 
 
 def test_flatten_embedding_contract():
+    emb2d = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+    assert _flatten_embedding(emb2d).shape == (2, 3)
+
     emb = torch.arange(2 * 3 * 4 * 4, dtype=torch.float32).reshape(2, 3, 4, 4)
     flat = _flatten_embedding(emb)
     assert flat.shape == (2, 48)
@@ -76,9 +79,48 @@ def test_flatten_embedding_contract():
 
     mean = _flatten_embedding(emb, reduction="mean_spatial")
     assert mean.shape == (2, 3)
+    seq_mean = _flatten_embedding(torch.ones(2, 4, 3), reduction="mean_spatial")
+    assert seq_mean.shape == (2, 3)
 
     with pytest.raises(ValueError, match="latent_reduction"):
         _flatten_embedding(emb, reduction="bad")
+    with pytest.raises(ValueError, match="Unsupported embedding shape"):
+        _flatten_embedding(torch.ones(2), reduction="mean_spatial")
+
+
+def test_batch_helpers_and_image_format_resolution(tmp_path):
+    assert ddoq_module._extract_batch_images({"x": torch.ones(1, 3, 2, 2)}).shape == (
+        1,
+        3,
+        2,
+        2,
+    )
+    assert ddoq_module._extract_batch_images(
+        (torch.ones(1, 3, 2, 2), "label")
+    ).shape == (
+        1,
+        3,
+        2,
+        2,
+    )
+    assert ddoq_module._extract_batch_images(torch.ones(1, 3, 2, 2)).shape == (
+        1,
+        3,
+        2,
+        2,
+    )
+    with pytest.raises(ValueError, match="Could not extract"):
+        ddoq_module._extract_batch_images({"image": None})
+
+    generated = ddoq_module._extract_batch_paths({}, batch_size=2, start_idx=3)
+    assert generated[0].endswith("sample_3")
+    assert ddoq_module._extract_batch_paths({"path": "one.png"}, 1, 0)[0].endswith(
+        "one.png"
+    )
+    assert (
+        ddoq_module._resolve_output_format(".jpeg", [str(tmp_path / "sample.tif")])
+        == "jpg"
+    )
 
 
 def test_resolve_output_format_auto_from_input_path(tmp_path):
@@ -90,6 +132,32 @@ def test_resolve_output_format_auto_from_input_path(tmp_path):
 
     with pytest.raises(ValueError, match="Unsupported"):
         _resolve_output_format("bmp", [str(tmp_path / "sample.tif")])
+
+
+def test_decoded_image_savers_cover_tensor_formats(tmp_path):
+    with pytest.raises(ValueError, match="Expected image tensor"):
+        ddoq_module._tensor_to_uint8_image(torch.ones(3, 4))
+
+    pt_path = tmp_path / "decoded.pt"
+    ddoq_module._save_decoded_image(torch.ones(3, 4, 4), pt_path, "pt")
+    assert pt_path.exists()
+
+    gray_path = tmp_path / "gray.png"
+    ddoq_module._save_decoded_image(torch.ones(1, 4, 4), gray_path, "png")
+    assert gray_path.exists()
+
+    rgba_path = tmp_path / "rgba.png"
+    ddoq_module._save_decoded_image(torch.ones(4, 4, 4), rgba_path, "png")
+    assert rgba_path.exists()
+
+    with pytest.raises(ValueError, match="Cannot save 5-channel"):
+        ddoq_module._save_decoded_image(
+            torch.ones(5, 4, 4), tmp_path / "bad.png", "png"
+        )
+    with pytest.raises(Exception):
+        ddoq_module._save_decoded_image(
+            torch.ones(5, 4, 4), tmp_path / "bad.tif", "tif"
+        )
 
 
 def test_parquet_writers_preserve_contract(tmp_path):
@@ -181,6 +249,188 @@ def test_pipeline_rejects_k_larger_than_dataset(tmp_path):
 
     with pytest.raises(ValueError, match="k must be <= number of embeddings"):
         pipeline.run()
+
+
+def test_pipeline_encode_cluster_decode_edge_cases(tmp_path):
+    empty_loader = DataLoader([], batch_size=1)
+    pipeline = VaeDdoqDistillationPipeline(
+        vae=TinyVAE(),
+        dataloader=empty_loader,
+        output_dir=tmp_path / "empty",
+        k=1,
+        device="cpu",
+    )
+    with pytest.raises(ValueError, match="No embeddings"):
+        pipeline._encode_all()
+
+    dataset = TinyPathImageDataset(tmp_path, n_samples=2)
+    dataloader = DataLoader(dataset, batch_size=2, shuffle=False)
+    pipeline = VaeDdoqDistillationPipeline(
+        vae=TinyVAE(),
+        dataloader=dataloader,
+        output_dir=tmp_path / "z",
+        k=1,
+        device="cpu",
+        latent="z",
+        latent_reduction="mean_spatial",
+        distilled_image_format="pt",
+        output_size=(8, 8),
+    )
+    embeddings, paths, output_size = pipeline._encode_all()
+    assert embeddings.shape == (2, 2)
+
+    inferred_size_pipeline = VaeDdoqDistillationPipeline(
+        vae=TinyVAE(),
+        dataloader=dataloader,
+        output_dir=tmp_path / "inferred",
+        k=1,
+        device="cpu",
+        output_size=None,
+    )
+    _, _, inferred_size = inferred_size_pipeline._encode_all()
+    assert inferred_size == (8, 8)
+
+    pipeline.latent = "bad"
+    with pytest.raises(ValueError, match="latent must be"):
+        pipeline._encode_all()
+
+    pipeline.k = 0
+    with pytest.raises(ValueError, match="k must be positive"):
+        pipeline._cluster(embeddings)
+
+    pipeline.k = 1
+    centers = torch.zeros(1, 2)
+    saved = pipeline._decode_centers(centers, output_size, paths)
+    assert saved[0].suffix == ".pt"
+
+
+def test_config_loaders_and_runners(tmp_path, monkeypatch):
+    assert (
+        ddoq_module._as_config_node(
+            ddoq_module.OmegaConf.create({"dataset_distillation": {"k": 1}})
+        ).k
+        == 1
+    )
+
+    class LightningModel:
+        model = TinyVAE()
+
+        @classmethod
+        def load_from_checkpoint(cls, *args, **kwargs):
+            return cls()
+
+    monkeypatch.setattr(
+        ddoq_module.OmegaConf,
+        "load",
+        lambda _path: ddoq_module.OmegaConf.create(
+            {"pl_model": {"_target_": "fake.Lightning"}}
+        ),
+    )
+    monkeypatch.setattr(ddoq_module.OmegaConf, "resolve", lambda _cfg: None)
+    monkeypatch.setattr(ddoq_module, "get_class", lambda _target: LightningModel)
+    vae = ddoq_module.load_vae_from_checkpoint("cfg.yaml", "model.ckpt", device="cpu")
+    assert isinstance(vae, TinyVAE)
+
+    monkeypatch.setattr(
+        ddoq_module, "instantiate", lambda cfg, **kwargs: [torch.ones(3, 2, 2)]
+    )
+    monkeypatch.setattr(
+        ddoq_module.OmegaConf,
+        "load",
+        lambda _path: ddoq_module.OmegaConf.create(
+            {
+                "train_dataset": {
+                    "_target_": "fake.Dataset",
+                    "data_loader": {
+                        "batch_size": 2,
+                        "num_workers": 0,
+                        "pin_memory": False,
+                    },
+                }
+            }
+        ),
+    )
+    loader = ddoq_module.build_dataloader_from_config(
+        "dataset.yaml",
+        batch_size=None,
+        num_workers=None,
+        seed=123,
+    )
+    assert loader.batch_size == 2
+
+    monkeypatch.setattr(
+        ddoq_module.OmegaConf,
+        "load",
+        lambda _path: ddoq_module.OmegaConf.create({}),
+    )
+    with pytest.raises(KeyError, match="Dataset key"):
+        ddoq_module.build_dataloader_from_config("dataset.yaml")
+
+    with pytest.raises(ValueError, match="vae_config_path"):
+        ddoq_module.run_vae_ddoq_from_config(ddoq_module.OmegaConf.create({}))
+    with pytest.raises(ValueError, match="vae_checkpoint_path"):
+        ddoq_module.run_vae_ddoq_from_config(
+            ddoq_module.OmegaConf.create({"vae_config_path": "cfg.yaml"})
+        )
+
+    calls = {}
+    monkeypatch.setattr(
+        ddoq_module, "load_vae_from_checkpoint", lambda *args, **kwargs: TinyVAE()
+    )
+    monkeypatch.setattr(
+        ddoq_module, "build_dataloader_from_config", lambda *args, **kwargs: "loader"
+    )
+
+    class FakePipeline:
+        def __init__(self, **kwargs):
+            calls.update(kwargs)
+
+        def run(self):
+            return "result"
+
+    monkeypatch.setattr(ddoq_module, "VaeDdoqDistillationPipeline", FakePipeline)
+    result = ddoq_module.run_vae_ddoq_from_config(
+        ddoq_module.OmegaConf.create(
+            {
+                "dataset_distillation": {
+                    "k": 3,
+                    "vae_config_path": "cfg.yaml",
+                    "vae_checkpoint_path": "ckpt.ckpt",
+                    "use_sqrt_heuristic": False,
+                }
+            }
+        )
+    )
+    assert result == "result"
+    assert calls["weight_mode"] == "density"
+
+
+def test_run_config_file_wraps_plain_config_and_applies_overrides(
+    tmp_path, monkeypatch
+):
+    yaml_path = tmp_path / "ddoq.yaml"
+    yaml_path.write_text(
+        "k: 2\nvae_config_path: cfg.yaml\nvae_checkpoint_path: old.ckpt\n"
+    )
+    captured = {}
+
+    def fake_run(cfg):
+        captured["cfg"] = cfg
+        return "done"
+
+    monkeypatch.setattr(ddoq_module, "run_vae_ddoq_from_config", fake_run)
+    result = ddoq_module.run_vae_ddoq_from_config_file(
+        yaml_path,
+        k=5,
+        checkpoint_path="new.ckpt",
+        output_dir=tmp_path / "out",
+        distilled_image_format="png",
+    )
+
+    assert result == "done"
+    assert captured["cfg"].dataset_distillation.k == 5
+    assert captured["cfg"].dataset_distillation.num_clusters == 5
+    assert captured["cfg"].dataset_distillation.vae_checkpoint_path == "new.ckpt"
 
 
 def test_ddoq_vae_cli_passes_overrides(tmp_path, monkeypatch):

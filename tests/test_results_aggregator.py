@@ -92,11 +92,44 @@ class TestResultsAggregator(unittest.TestCase):
         self.assertIn("exp1", aggregated_metrics)
         self.assertNotIn("exp2", aggregated_metrics)
 
+    def test_aggregate_results_invalid_empty_and_aggregated_output(self):
+        invalid_path = os.path.join(
+            self.base_config.experiments[0].output_folder, "exp1_metrics.json"
+        )
+        with open(invalid_path, "w") as f:
+            f.write("{invalid")
+        empty_path = os.path.join(
+            self.base_config.experiments[1].output_folder, "exp2_metrics.json"
+        )
+        with open(empty_path, "w") as f:
+            json.dump({}, f)
+
+        aggregator = ResultsAggregator(self.base_config)
+        self.assertEqual(aggregator.aggregate_results(), {})
+
+        with open(invalid_path, "w") as f:
+            json.dump({"aggregated": {"iou": 0.6}}, f)
+        os.remove(empty_path)
+        aggregated = aggregator.aggregate_results()
+        self.assertIn("exp1", aggregated)
+        self.assertTrue(os.path.exists(self.output_csv_path))
+
     def test_get_metrics_file_path(self):
         aggregator = ResultsAggregator(self.base_config)
         path = aggregator._get_metrics_file_path(self.base_config.experiments[0])
         self.assertEqual(
             path, os.path.join(self.tmp_dir, "exp1_out", "exp1_metrics.json")
+        )
+        custom_exp = OmegaConf.create(
+            {
+                "name": "custom",
+                "output_folder": self.tmp_dir,
+                "output_metrics_filename": "custom.json",
+            }
+        )
+        self.assertEqual(
+            aggregator._get_metrics_file_path(custom_exp),
+            os.path.join(self.tmp_dir, "custom.json"),
         )
 
     def test_aggregate_method(self):
@@ -128,6 +161,40 @@ class TestResultsAggregator(unittest.TestCase):
         self.assertEqual(aggregated["rankings"]["iou"][0]["experiment"], "exp1")
         self.assertEqual(aggregated["rankings"]["iou"][1]["experiment"], "exp2")
 
+    def test_aggregate_empty_and_none_results(self):
+        aggregator = ResultsAggregator(self.base_config)
+        empty = aggregator.aggregate({})
+        self.assertEqual(empty["num_experiments"], 0)
+
+        empty = aggregator.aggregate({"exp1": None})
+        self.assertEqual(empty["num_experiments"], 0)
+
+    def test_rankings_empty_missing_aggregated_and_none_values(self):
+        aggregator = ResultsAggregator(self.base_config)
+        self.assertEqual(aggregator._create_rankings({}), {})
+        self.assertEqual(aggregator._create_rankings({"exp": {"per_image": []}}), {})
+
+        rankings = aggregator._create_rankings(
+            {
+                "exp1": {"aggregated": {"iou": None, "f1": 0.8}},
+                "exp2": {"aggregated": {"iou": 0.7, "f1": 0.7}},
+            }
+        )
+        self.assertEqual(rankings["iou"][0]["experiment"], "exp2")
+
+    def test_calculate_statistics_skips_empty_numeric_values(self):
+        aggregator = ResultsAggregator(self.base_config)
+        stats = aggregator._calculate_statistics(
+            {
+                "exp": {
+                    "per_image": pd.DataFrame(
+                        {"image": ["a", "b"], "iou": [np.nan, np.nan]}
+                    )
+                }
+            }
+        )
+        self.assertEqual(stats["exp"], {})
+
     def test_create_summary(self):
         all_results = {
             "exp1": {
@@ -154,6 +221,25 @@ class TestResultsAggregator(unittest.TestCase):
 
         self.assertEqual(best["name"], "exp1")
         self.assertEqual(worst["name"], "exp2")
+        self.assertEqual(aggregator._find_best_experiment({}, metric="iou"), {})
+        self.assertEqual(aggregator._find_worst_experiment({}, metric="iou"), {})
+
+    def test_save_helpers_cover_empty_invalid_rankings_and_statistics(self):
+        aggregator = ResultsAggregator(self.base_config)
+        aggregator._save_aggregated_csv({})
+        self.assertTrue(
+            os.path.exists(os.path.join(self.tmp_dir, "aggregated_metrics.csv"))
+        )
+
+        aggregator._save_aggregated_csv({"bad": None})
+        aggregator._save_rankings_csv(
+            {"iou": [{"rank": 1, "experiment": "exp1", "value": 1.0}]}
+        )
+        aggregator._save_statistics_json({"exp1": {"iou": {"mean": 1.0}}})
+
+        reports_dir = os.path.join(self.tmp_dir, "reports")
+        self.assertTrue(os.path.exists(os.path.join(reports_dir, "ranking_iou.csv")))
+        self.assertTrue(os.path.exists(os.path.join(reports_dir, "statistics.json")))
 
     def test_create_comparison_table(self):
         all_results = {
@@ -165,6 +251,13 @@ class TestResultsAggregator(unittest.TestCase):
         self.assertEqual(len(table), 2)
         self.assertIn("iou", table.columns)
         self.assertEqual(table[table["Experiment"] == "exp1"]["iou"].iloc[0], "0.8000")
+
+        table = aggregator.create_comparison_table(
+            {"exp1": {"aggregated": {"iou_class_0": 0.1, "iou_class_1": 0.2}}},
+            metrics=None,
+        )
+        self.assertIn("iou_class_1", table.columns)
+        self.assertNotIn("iou_class_0", table.columns)
 
     def test_get_improvement_matrix(self):
         all_results = {
@@ -179,6 +272,22 @@ class TestResultsAggregator(unittest.TestCase):
         self.assertEqual(matrix["exp1"]["absolute"], 0.25)
         self.assertEqual(matrix["exp1"]["relative"], 0.5)
         self.assertEqual(matrix["exp1"]["percentage"], 50.0)
+
+        self.assertEqual(
+            aggregator.get_improvement_matrix(
+                all_results, baseline_exp="missing", metric="iou"
+            ),
+            {},
+        )
+        zero_matrix = aggregator.get_improvement_matrix(
+            {
+                "baseline": {"aggregated": {"iou": 0.0}},
+                "exp1": {"aggregated": {"iou": 0.2}},
+            },
+            baseline_exp="baseline",
+            metric="iou",
+        )
+        self.assertEqual(zero_matrix["exp1"]["relative"], 0)
 
 
 if __name__ == "__main__":

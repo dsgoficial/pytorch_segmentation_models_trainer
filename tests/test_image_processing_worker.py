@@ -6,7 +6,9 @@ import tempfile
 import numpy as np
 import rasterio
 from rasterio.transform import from_origin
+from rasterio.windows import Window
 import torch
+from unittest.mock import MagicMock, patch
 
 from pytorch_segmentation_models_trainer.tools.evaluation.image_processing_worker import (
     process_single_image_worker,
@@ -84,16 +86,33 @@ class TestImageProcessingWorker(unittest.TestCase):
         self.assertIsNone(res)
 
     def test_read_aligned_rasters_mismatch_crop(self):
-        # Create different sized rasters that overlap
-        pred_big = os.path.join(self.tmp_dir, "pred_big.tif")
-        self._create_dummy_raster(pred_big, width=20, height=20)
+        pred_src = MagicMock()
+        pred_src.read.return_value = np.zeros((6, 5), dtype=np.uint8)
+        gt_src = MagicMock()
+        gt_src.read.return_value = np.zeros((4, 3), dtype=np.uint8)
 
-        # This will trigger the mismatch warning and crop
-        p_mask, g_mask = read_aligned_rasters_worker(
-            pred_big, self.gt_path, num_classes=2
-        )
+        def open_side_effect(path):
+            cm = MagicMock()
+            cm.__enter__.return_value = pred_src if path == "pred.tif" else gt_src
+            return cm
+
+        with (
+            patch(
+                "pytorch_segmentation_models_trainer.tools.evaluation.image_processing_worker.get_spatial_overlap_worker",
+                return_value=(Window(0, 0, 5, 6), Window(0, 0, 3, 4), (4, 3)),
+            ),
+            patch(
+                "pytorch_segmentation_models_trainer.tools.evaluation.image_processing_worker.rasterio.open",
+                side_effect=open_side_effect,
+            ),
+        ):
+            p_mask, g_mask = read_aligned_rasters_worker(
+                "pred.tif", "gt.tif", num_classes=2
+            )
+
         self.assertIsNotNone(p_mask)
-        self.assertEqual(p_mask.shape, (10, 10))
+        self.assertEqual(p_mask.shape, (4, 3))
+        self.assertEqual(g_mask.shape, (4, 3))
 
     def test_process_single_image_worker_precalculated_metrics(self):
         # Test the fallback for pre-calculated metrics in kwargs
@@ -126,15 +145,15 @@ class TestImageProcessingWorker(unittest.TestCase):
         # Pred: 1m resolution
         self._create_dummy_raster(p_path, width=10, height=10)
 
-        # GT: 1.1m resolution (slightly different)
-        data = np.zeros((1, 10, 10), dtype=np.uint8)
-        transform = from_origin(0, 10, 1.1, 1.1)
+        # GT: much finer resolution to trigger window size mismatch adjustment.
+        data = np.zeros((1, 20, 20), dtype=np.uint8)
+        transform = from_origin(0, 10, 0.5, 0.5)
         with rasterio.open(
             g_path,
             "w",
             driver="GTiff",
-            height=10,
-            width=10,
+            height=20,
+            width=20,
             count=1,
             dtype="uint8",
             crs="EPSG:4326",
@@ -144,11 +163,27 @@ class TestImageProcessingWorker(unittest.TestCase):
 
         res = get_spatial_overlap_worker(p_path, g_path)
         self.assertIsNotNone(res)
-        # Should have matched_shape and adjusted windows
+        pred_window, gt_window, matched_shape = res
+        self.assertEqual(pred_window.width, gt_window.width)
+        self.assertEqual(pred_window.height, gt_window.height)
+        self.assertEqual(matched_shape, (10, 10))
 
     def test_read_aligned_rasters_error(self):
         # Trigger exception in read_aligned_rasters_worker
         res = read_aligned_rasters_worker(None, None, 2)
+        self.assertEqual(res, (None, None))
+
+        with (
+            patch(
+                "pytorch_segmentation_models_trainer.tools.evaluation.image_processing_worker.get_spatial_overlap_worker",
+                return_value=(Window(0, 0, 1, 1), Window(0, 0, 1, 1), (1, 1)),
+            ),
+            patch(
+                "pytorch_segmentation_models_trainer.tools.evaluation.image_processing_worker.rasterio.open",
+                side_effect=RuntimeError("read failed"),
+            ),
+        ):
+            res = read_aligned_rasters_worker("pred.tif", "gt.tif", 2)
         self.assertEqual(res, (None, None))
 
     def test_get_spatial_overlap_error(self):

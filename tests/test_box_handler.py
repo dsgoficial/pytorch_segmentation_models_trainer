@@ -49,6 +49,13 @@ class Test_BoxHandler(BasicTestCase):
         result = bbox_handler.shift_bbox(bbox, *shift)
         self.assertEqual(result, expected_bbox)
 
+    def test_shift_bbox_accepts_numpy_and_rejects_unknown_type(self) -> None:
+        output = bbox_handler.shift_bbox(np.array([0, 1, 2, 3]), 10, 20)
+
+        np.testing.assert_array_equal(output, np.array([10, 21, 12, 23]))
+        with self.assertRaises(TypeError):
+            bbox_handler.shift_bbox((0, 1, 2, 3), 10, 20)
+
     def test_crop_bboxes(self) -> None:
         boxes = torch.tensor(
             [[-3, -3, 10, 10], [5, 5, 20, 20], [50, 50, 200, 200], [150, 150, 180, 180]]
@@ -181,3 +188,9 @@ class Test_BoxHandler(BasicTestCase):
         for expected, actual in zip(expected_output, merged_dict_list):
             for key, value in expected.items():
                 torch.testing.assert_close(value, actual[key])
+
+    def test_box_tile_merger_accumulate_single_is_not_implemented(self) -> None:
+        tile_merger = BboxTileMerger(image_shape=(16, 16))
+
+        with self.assertRaises(NotImplementedError):
+            tile_merger.accumulate_single(torch.zeros((1, 4)), np.array([0, 0, 1, 1]))

@@ -36,7 +36,9 @@ from geopandas.testing import geom_almost_equals, geom_equals
 from numpy.testing import assert_array_equal
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
+    AbstractDataWriter,
     BatchVectorFileDataWriter,
+    ObjectDetectionDataWriter,
     RasterDataWriter,
     VectorDatabaseDataWriter,
     VectorFileDataWriter,
@@ -87,6 +89,47 @@ class Test_DataWriter(BasicTestCase):
             output_data = raster_ds.read()
         assert_array_equal(reshape_as_raster(input_data), output_data)
 
+    def test_abstract_data_writer_cannot_be_instantiated(self) -> None:
+        with self.assertRaises(TypeError):
+            AbstractDataWriter()
+
+    def test_abstract_data_writer_method_body_is_noop(self) -> None:
+        class ConcreteWriter(AbstractDataWriter):
+            def write_data(self, input_data: np.array) -> None:
+                return super().write_data(input_data)
+
+        self.assertIsNone(ConcreteWriter().write_data(np.array([1])))
+
+    def test_raster_data_writer_uses_output_profile_and_jpeg_two_channel_padding(
+        self,
+    ) -> None:
+        input_data = np.ones([4, 4, 2], dtype=np.uint8)
+        profile = {
+            "driver": "JPEG",
+            "dtype": "uint8",
+            "width": 4,
+            "height": 4,
+            "count": 2,
+            "crs": None,
+            "transform": Affine.identity(),
+        }
+        output_file_path = os.path.join(self.output_dir, "nested", "output.jpg")
+        data_writer = RasterDataWriter(
+            output_file_path=output_file_path,
+            output_profile={
+                "driver": "JPEG",
+                "dtype": "uint8",
+                "width": 4,
+                "height": 4,
+                "count": 2,
+            },
+        )
+
+        data_writer.write_data(input_data=input_data, profile=profile)
+
+        with rasterio.open(output_file_path, "r") as raster_ds:
+            self.assertEqual(raster_ds.count, 3)
+
     def test_vector_file_data_writer(self) -> None:
         input_data = [Polygon([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]])]
         output_file_path = os.path.join(self.output_dir, "output.geojson")
@@ -97,6 +140,79 @@ class Test_DataWriter(BasicTestCase):
         assert os.path.isfile(output_file_path)
         output_data = geopandas.read_file(filename=output_file_path)
         assert input_data[0].equals(output_data["geometry"][0])
+
+    def test_vector_file_data_writer_missing_folder_raises(self) -> None:
+        data_writer = VectorFileDataWriter()
+
+        with self.assertRaises(ValueError):
+            data_writer.get_output_file_path(None)
+
+    def test_vector_file_data_writer_creates_extra_folder(self) -> None:
+        data_writer = VectorFileDataWriter(
+            output_file_folder=self.output_dir, output_file_name="output.geojson"
+        )
+
+        output_path = data_writer.get_output_file_path("nested")
+
+        self.assertTrue(os.path.isdir(os.path.join(self.output_dir, "nested")))
+        self.assertEqual(
+            output_path, os.path.join(self.output_dir, "nested", "output.geojson")
+        )
+
+    def test_vector_file_data_writer_empty_data_returns_without_file(self) -> None:
+        data_writer = VectorFileDataWriter(
+            output_file_folder=self.output_dir, output_file_name="empty.geojson"
+        )
+        empty_gdf = MagicMock()
+        empty_gdf.__len__.return_value = 0
+
+        with patch(
+            "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.GeoDataFrame.from_features",
+            return_value=empty_gdf,
+        ):
+            data_writer.write_data(input_data=[], profile={"crs": "EPSG:4326"})
+
+        self.assertFalse(os.path.exists(os.path.join(self.output_dir, "empty.geojson")))
+
+    def test_vector_file_data_writer_appends_existing_geojson(self) -> None:
+        input_data = [Polygon([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]])]
+        output_file_path = os.path.join(self.output_dir, "append.geojson")
+        data_writer = VectorFileDataWriter(
+            output_file_folder=self.output_dir, output_file_name="append.geojson"
+        )
+
+        data_writer.write_data(input_data=input_data, profile={"crs": "EPSG:4326"})
+        data_writer.write_data(input_data=input_data, profile={"crs": "EPSG:4326"})
+
+        output_data = geopandas.read_file(filename=output_file_path)
+        self.assertEqual(len(output_data), 2)
+
+    def test_vector_file_data_writer_appends_non_geojson_driver(self) -> None:
+        data_writer = VectorFileDataWriter(
+            output_file_folder=self.output_dir,
+            output_file_name="output.gpkg",
+            driver="GPKG",
+        )
+        gdf = MagicMock()
+        gdf.__len__.return_value = 1
+
+        with (
+            patch(
+                "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.GeoDataFrame.from_features",
+                return_value=gdf,
+            ),
+            patch(
+                "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.os.path.isfile",
+                return_value=True,
+            ),
+        ):
+            data_writer.write_data(
+                input_data=[Polygon([[0, 0], [1, 0], [1, 1], [0, 0]])],
+                profile={"crs": "EPSG:4326"},
+            )
+
+        gdf.to_file.assert_called_once()
+        self.assertEqual(gdf.to_file.call_args.kwargs["mode"], "a")
 
     def test_batch_vector_file_data_writer(self) -> None:
         input_data = [Polygon([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]])]
@@ -112,6 +228,66 @@ class Test_DataWriter(BasicTestCase):
             assert os.path.isfile(current_output_file_path)
             output_data = geopandas.read_file(filename=current_output_file_path)
             assert input_data[0].equals(output_data["geometry"][0])
+
+    def test_batch_vector_file_data_writer_empty_data_increments_index(self) -> None:
+        data_writer = BatchVectorFileDataWriter(
+            output_file_folder=self.output_dir, output_file_name="empty.geojson"
+        )
+        empty_gdf = MagicMock()
+        empty_gdf.__len__.return_value = 0
+
+        with patch(
+            "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.GeoDataFrame.from_features",
+            return_value=empty_gdf,
+        ):
+            data_writer.write_data(input_data=[], profile={"crs": "EPSG:4326"})
+
+        self.assertEqual(data_writer.current_index, 1)
+        self.assertFalse(
+            os.path.exists(os.path.join(self.output_dir, "empty_00000000.geojson"))
+        )
+
+    def test_batch_vector_file_data_writer_appends_existing_geojson(self) -> None:
+        input_data = [Polygon([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]])]
+        data_writer = BatchVectorFileDataWriter(
+            output_file_folder=self.output_dir, output_file_name="append.geojson"
+        )
+        data_writer.write_data(input_data=input_data, profile={"crs": "EPSG:4326"})
+        data_writer.current_index = 0
+
+        data_writer.write_data(input_data=input_data, profile={"crs": "EPSG:4326"})
+
+        output_data = geopandas.read_file(
+            filename=os.path.join(self.output_dir, "append_00000000.geojson")
+        )
+        self.assertEqual(len(output_data), 2)
+
+    def test_batch_vector_file_data_writer_appends_non_geojson_driver(self) -> None:
+        data_writer = BatchVectorFileDataWriter(
+            output_file_folder=self.output_dir,
+            output_file_name="output.gpkg",
+            driver="GPKG",
+        )
+        gdf = MagicMock()
+        gdf.__len__.return_value = 1
+
+        with (
+            patch(
+                "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.GeoDataFrame.from_features",
+                return_value=gdf,
+            ),
+            patch(
+                "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.os.path.isfile",
+                return_value=True,
+            ),
+        ):
+            data_writer.write_data(
+                input_data=[Polygon([[0, 0], [1, 0], [1, 1], [0, 0]])],
+                profile={"crs": "EPSG:4326"},
+            )
+
+        gdf.to_file.assert_called_once()
+        self.assertEqual(gdf.to_file.call_args.kwargs["mode"], "a")
 
     @patch(
         "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.create_engine"
@@ -139,3 +315,32 @@ class Test_DataWriter(BasicTestCase):
         self.assertEqual(args[0], "test")  # table_name
         self.assertEqual(args[1], mock_engine)  # engine
         self.assertEqual(kwargs["if_exists"], "replace")
+
+    @patch("geopandas.GeoDataFrame.to_postgis")
+    def test_vector_database_data_writer_empty_data_returns(
+        self, mock_to_postgis
+    ) -> None:
+        data_writer = VectorDatabaseDataWriter(
+            user="postgres",
+            password="postgres",
+            database="test_db",
+            table_name="test",
+        )
+        empty_gdf = MagicMock()
+        empty_gdf.__len__.return_value = 0
+
+        with patch(
+            "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.GeoDataFrame.from_features",
+            return_value=empty_gdf,
+        ):
+            data_writer.write_data(input_data=[], profile={"crs": "EPSG:4326"})
+
+        mock_to_postgis.assert_not_called()
+
+    def test_object_detection_data_writer_writes_json(self) -> None:
+        output_file_path = os.path.join(self.output_dir, "detections.json")
+        data_writer = ObjectDetectionDataWriter(output_file_path=output_file_path)
+
+        data_writer.write_data([{"bbox": [0, 1, 2, 3], "score": 0.9}])
+
+        self.assertTrue(os.path.exists(output_file_path))

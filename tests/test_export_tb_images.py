@@ -11,6 +11,7 @@ from tensorboardX import SummaryWriter
 
 from pytorch_segmentation_models_trainer.tools.cli import cli
 from pytorch_segmentation_models_trainer.tools.export_tb_images import (
+    _iter_raw_events,
     export_images,
     find_event_files,
     list_image_tags,
@@ -58,6 +59,13 @@ class TestFindEventFiles(unittest.TestCase):
     def test_empty_dir_returns_empty_list(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(find_event_files(Path(tmp)), [])
+
+    def test_iter_raw_events_stops_on_truncated_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            event_path = Path(tmp) / "events.out.tfevents.bad"
+            event_path.write_bytes((10).to_bytes(8, "little") + b"0000" + b"short")
+
+            self.assertEqual(list(_iter_raw_events(event_path)), [])
 
 
 class TestListImageTags(unittest.TestCase):

@@ -27,7 +27,10 @@ import torch
 from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor_tools import (
     Paths,
     Skeleton,
+    TensorSkeleton,
+    plot_skeleton,
     skeletons_to_tensorskeleton,
+    tensorskeleton_to_skeletons,
 )
 from tests.utils import BasicTestCase
 
@@ -159,3 +162,49 @@ class Test_Skeletonize(BasicTestCase):
         )
         self.assertEqual(tensorskeleton.batch_delim.shape, torch.Size([3]))
         assert torch.equal(tensorskeleton.batch_delim, torch.tensor([0, 12, 16]))
+
+    def test_tensorskeleton_properties_to_roundtrip_and_plot(self):
+        skeleton = Skeleton(
+            coordinates=np.array([[0, 0], [0, 1], [1, 1]], dtype=float),
+            paths=Paths(
+                indices=np.array([0, 1, 2], dtype=np.int64),
+                indptr=np.array([0, 3], dtype=np.int64),
+            ),
+            degrees=np.array([1, 2, 1], dtype=np.int64),
+        )
+        tensorskeleton = skeletons_to_tensorskeleton([skeleton], device="cpu")
+
+        self.assertEqual(tensorskeleton.num_nodes, 3)
+        self.assertEqual(tensorskeleton.num_paths, 1)
+        self.assertIsNone(tensorskeleton.to("cpu"))
+
+        output = tensorskeleton_to_skeletons(tensorskeleton)
+        self.assertEqual(len(output), 1)
+        self.assertEqual(output[0].coordinates.shape, (3, 2))
+
+        plot_skeleton(output[0])
+
+        empty_batch = TensorSkeleton(
+            pos=torch.zeros((0, 2)),
+            degrees=torch.zeros(0, dtype=torch.long),
+            path_index=torch.zeros(0, dtype=torch.long),
+            path_delim=torch.zeros(1, dtype=torch.long),
+            batch=torch.zeros(0, dtype=torch.long),
+            batch_delim=torch.tensor([0, 0], dtype=torch.long),
+            batch_size=1,
+        )
+        self.assertEqual(
+            tensorskeleton_to_skeletons(empty_batch)[0].coordinates.shape, (0, 2)
+        )
+
+    def test_tensorskeleton_asserts_pos_and_batch_lengths(self):
+        with self.assertRaises(AssertionError):
+            TensorSkeleton(
+                pos=torch.zeros((2, 2)),
+                degrees=torch.zeros(2),
+                path_index=torch.zeros(0),
+                path_delim=torch.zeros(0),
+                batch=torch.zeros(1),
+                batch_delim=torch.zeros(0),
+                batch_size=1,
+            )
