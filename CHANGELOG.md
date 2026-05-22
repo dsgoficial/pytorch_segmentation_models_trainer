@@ -5,6 +5,10 @@
 - Expanded the `tools` test suite to cover inference processors, evaluation utilities,
   polygonization helpers, DDOQ VAE distillation, raster/data handlers, plotting, and
   aggregation edge cases needed for 100% `tools` coverage.
+- Expanded coverage for `fine_tuning`, `custom_losses`, and smaller `dataset_loader`
+  modules with tests for fine-tuning strategies, fine-tuning config dataclasses,
+  EDL losses, loss-builder fallback paths, DDOQ distilled datasets, and
+  `EmbeddingDataset` file/geometry parsing branches.
 - Removed an unreachable duplicate `_evaluate_all_experiments_sequential` implementation
   from the evaluation pipeline so coverage reflects executable code only.
 

@@ -3,6 +3,8 @@
 Tests for fine_tuning_config dataclasses.
 """
 
+from dataclasses import asdict
+
 import pytest
 from omegaconf import OmegaConf
 from pytorch_segmentation_models_trainer.config_definitions.fine_tuning_config import (
@@ -24,3 +26,15 @@ class TestFineTuningConfig:
         assert cfg.lora_config is None
         assert "encoder" in cfg.frozen_modules
         assert "decoder" in cfg.trainable_modules
+
+    def test_dataclass_roundtrip_and_independent_defaults(self):
+        lora_cfg = LoraAdapterConfig(target_modules=["query"])
+        fine_cfg = FineTuningConfig(strategy="lora", lora_config=lora_cfg)
+
+        dumped = asdict(fine_cfg)
+        assert dumped["strategy"] == "lora"
+        assert dumped["lora_config"]["target_modules"] == ["query"]
+
+        other = FineTuningConfig()
+        other.frozen_modules.append("stem")
+        assert "stem" not in FineTuningConfig().frozen_modules

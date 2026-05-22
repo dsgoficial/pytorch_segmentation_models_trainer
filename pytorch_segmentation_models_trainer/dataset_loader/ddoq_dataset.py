@@ -58,7 +58,7 @@ class DDOQDistilledDataset(Dataset):
             mask = data[1] if len(data) > 1 else None
         elif isinstance(data, dict):
             image = data["image"]
-            mask = data.get("mask") or data.get("label")
+            mask = data["mask"] if "mask" in data else data.get("label")
         else:
             image = data
             mask = None

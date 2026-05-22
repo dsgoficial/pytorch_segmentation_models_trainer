@@ -4,8 +4,10 @@ import tempfile
 import json
 import shutil
 from pathlib import Path
+from unittest.mock import patch
 import pandas as pd
 import torch
+import pytest
 from shapely.geometry import Point
 from pytorch_segmentation_models_trainer.dataset_loader.embedding_dataset import (
     EmbeddingDataset,
@@ -85,6 +87,53 @@ class TestEmbeddingDataset(unittest.TestCase):
         item = ds[0]
         self.assertNotIn("geometry", item)
         self.assertEqual(item["id"], "id_0")
+
+    def test_get_files_filters_supported_extensions(self):
+        (self.test_dir / "keep.csv").write_text(
+            "id,embedding\n1,[]\n", encoding="utf-8"
+        )
+        (self.test_dir / "skip.txt").write_text("x", encoding="utf-8")
+
+        ds = EmbeddingDataset(self.test_dir)
+        self.assertEqual([f.suffix for f in ds.files], [".csv"])
+
+    def test_get_files_missing_directory_raises(self):
+        with self.assertRaises(FileNotFoundError):
+            EmbeddingDataset(self.test_dir / "missing")
+
+    def test_parse_geometry_variants(self):
+        csv_path = self.test_dir / "parse.csv"
+        df = pd.DataFrame(
+            {
+                "id": ["id_0"],
+                "embedding": [json.dumps([1.0, 2.0, 3.0])],
+                "geometry": [Point(0, 0).wkt],
+            }
+        )
+        df.to_csv(csv_path, index=False)
+
+        ds = EmbeddingDataset(csv_path)
+        self.assertIsInstance(ds._parse_geometry(Point(0, 0).wkt), Point)
+        self.assertEqual(ds._parse_geometry(None), None)
+        self.assertEqual(
+            ds._parse_geometry({"type": "Point", "coordinates": [1, 2]}).geom_type,
+            "Point",
+        )
+
+    def test_invalid_embedding_json_raises(self):
+        csv_path = self.test_dir / "bad.csv"
+        df = pd.DataFrame(
+            {
+                "id": ["id_0"],
+                "embedding": ["not-json"],
+                "geometry": [Point(0, 0).wkt],
+            }
+        )
+        df.to_csv(csv_path, index=False)
+
+        ds = EmbeddingDataset(csv_path)
+        with self.assertRaises(json.JSONDecodeError):
+            _ = ds[0]
 
 
 if __name__ == "__main__":
