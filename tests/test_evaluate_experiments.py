@@ -3,6 +3,7 @@ import logging
 import runpy
 import sys
 import types
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -90,9 +91,9 @@ def test_setup_logging_uses_default_output_dir_when_missing_output_config(
     ):
         evaluate_experiments.setup_logging(cfg)
 
-    expected_log_path = tmp_path / "evaluation_outputs" / "fallback.log"
+    expected_log_path = Path("evaluation_outputs/fallback.log")
     mock_file_handler.assert_called_once_with(expected_log_path, mode="w")
-    assert expected_log_path.parent.is_dir()
+    assert (tmp_path / expected_log_path.parent).is_dir()
 
 
 def test_evaluate_returns_pipeline_results():

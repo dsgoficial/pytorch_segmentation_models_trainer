@@ -285,12 +285,13 @@ class TestValidateEvaluationConfig(unittest.TestCase):
         )
 
     def test_validate_experiment_config_rejects_invalid_predict_config_type(self):
-        config = OmegaConf.merge(
-            self.base_exp_config,
+        config = OmegaConf.create(
             {
+                "name": "test_exp",
                 "predict_config": ["invalid"],
                 "checkpoint_path": "https://example.com/checkpoint.ckpt",
-            },
+                "output_folder": "/path/to/output",
+            }
         )
 
         errors, warnings = validate_experiment_config(config, 0)
