@@ -162,16 +162,18 @@ class TestLossBuilder(unittest.TestCase):
                 "losses": [
                     {
                         "loss": {"_target_": "fake", "name": "custom"},
-                        "weight": 2.5,
+                        "weight": [1.0, 2.0],
                     }
                 ],
             }
         )
 
         multi_loss = build_compound_loss_from_config(cfg)
-        self.assertEqual(multi_loss.weights, [2.5])
-        self.assertEqual(multi_loss.epoch_thresholds, [0, 1])
+        self.assertEqual(len(multi_loss.weights), 1)
+        self.assertTrue(callable(multi_loss.weights[0]))
         self.assertEqual(multi_loss.pre_processes, ["p1"])
+        self.assertEqual(float(multi_loss.weights[0](0.0)), 1.0)
+        self.assertEqual(float(multi_loss.weights[0](1.0)), 2.0)
 
     def test_build_compound_loss_requires_losses_field(self):
         with self.assertRaises(ValueError):
