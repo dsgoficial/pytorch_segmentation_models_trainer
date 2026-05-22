@@ -335,7 +335,7 @@ class TestLoraStrategy:
             apply_fine_tuning_strategy(model, cfg)
 
         kwargs = fake_lora_config.call_args.kwargs
-        assert kwargs["target_modules"] == ["query", "value"]
+        assert kwargs["target_modules"] == ["key", "query", "value"]
 
     def test_lora_auto_detection_failure_raises(self):
         fake_lora_config = MagicMock(return_value=object())
