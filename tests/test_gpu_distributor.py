@@ -247,6 +247,9 @@ class TestGPUDistributor(unittest.TestCase):
                 side_effect=[0, 1, 6],
             ),
             patch("time.sleep"),
+            patch(
+                "pytorch_segmentation_models_trainer.tools.evaluation.gpu_distributor.logger.error"
+            ),
         ):
             self.assertFalse(distributor.wait_for_gpu_memory(0, 1.0, timeout_seconds=5))
 
