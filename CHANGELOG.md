@@ -1,5 +1,12 @@
 # Unreleased
 
+## Documentation deployment
+
+- Fixed Docusaurus MDX parsing in the soft-label training guide by replacing
+  Kramdown-style heading anchors with Docusaurus-generated heading links.
+- Fixed a broken Classic ML documentation link to the Random Forest example
+  configuration.
+
 ## MBTiles QA Export
 
 - Added `export-mbtiles-mask-aligned` tooling to export imagery from MBTiles

@@ -241,7 +241,7 @@ orch2 = ClassicMLOrchestrator.load("model.pkl")
 
 ## Full YAML example
 
-See [`conf/examples/classic_ml_random_forest.yaml`](../../../conf/examples/classic_ml_random_forest.yaml)
+See [`pytorch_segmentation_models_trainer/conf/examples/classic_ml_random_forest.yaml`](https://github.com/dsgoficial/pytorch_segmentation_models_trainer/blob/main/pytorch_segmentation_models_trainer/conf/examples/classic_ml_random_forest.yaml)
 for a complete end-to-end configuration with Random Forest, multi-scale cucim
 features, and Dense CRF post-processing.
 

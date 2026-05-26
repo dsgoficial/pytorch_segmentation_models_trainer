@@ -248,7 +248,7 @@ pytorch-smt-tools build-soft-labels sources.csv \
 Output: `soft_label_patches.csv` with columns `tile_id`, `image_path`,
 `p_soft_path`, `w_conf_path`, `row_off`, `col_off`, `patch_size`.
 
-See [`conf/examples/soft_label_windowed_unet.yaml`](#windowed-dataset) for the
+See [`conf/examples/soft_label_windowed_unet.yaml`](#e5--windowed-dataset-large-tiles) for the
 corresponding training configuration.
 
 ---
@@ -339,7 +339,7 @@ loss:
   weight_key: w_conf
 ```
 
-### E4 — P_soft + W_conf + AEF GCS embeddings {#aef-gcs}
+### E4 — P_soft + W_conf + AEF GCS embeddings
 
 ```yaml title="conf/examples/soft_label_aef_gcs.yaml"
 _target_: pytorch_segmentation_models_trainer.model_loader.soft_label_model.SoftLabelModel
@@ -366,7 +366,7 @@ model:
   classes: 4
 ```
 
-### E5 — Windowed dataset (large tiles) {#windowed-dataset}
+### E5 — Windowed dataset (large tiles)
 
 ```yaml title="conf/examples/soft_label_windowed_unet.yaml"
 _target_: pytorch_segmentation_models_trainer.model_loader.soft_label_model.SoftLabelModel
