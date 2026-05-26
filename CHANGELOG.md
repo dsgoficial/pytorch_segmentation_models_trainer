@@ -1,5 +1,18 @@
 # Unreleased
 
+## MBTiles QA Export
+
+- Added `export-mbtiles-mask-aligned` tooling to export imagery from MBTiles
+  or any rasterio-readable source onto GeoTIFF mask grids, including paired
+  image/mask rasters, overlay PNG previews, and a manifest CSV for visual
+  alignment validation before training.
+- Added `MBTilesMaskWindowedDataset` for training segmentation models directly
+  from MBTiles imagery and GeoTIFF masks, using each mask window as the
+  reference grid for source-image reprojection.
+- Added optional CSV/Parquet window-index caching to
+  `MBTilesMaskWindowedDataset` so repeated training runs can skip mask scanning
+  and sliding-window index construction.
+
 ## Soft-Label: optional border-distance component in W_conf
 
 Made the border-distance mitigation contribution to W_conf optional, allowing

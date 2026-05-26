@@ -152,6 +152,138 @@ def export_tb_images_cmd(log_dir, list_tags, tags, steps, output):
     click.echo(f"Exported {count} image(s) to '{output}'.")
 
 
+@cli.command("export-mbtiles-mask-aligned")
+@click.option(
+    "--mbtiles-path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to MBTiles imagery, or any raster readable by rasterio.",
+)
+@click.option(
+    "--mask-dir",
+    default=None,
+    type=click.Path(exists=True, file_okay=False),
+    help="Directory scanned recursively for mask rasters.",
+)
+@click.option(
+    "--mask-path",
+    "mask_paths",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Explicit mask path. Can be repeated.",
+)
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Directory receiving images/, masks/, previews/, and manifest.csv.",
+)
+@click.option(
+    "--mask-extension",
+    default=".tif",
+    show_default=True,
+    help="Mask extension used with --mask-dir.",
+)
+@click.option(
+    "--patch-size",
+    default=None,
+    type=int,
+    help="Patch size in mask pixels. Omit when using --full-mask.",
+)
+@click.option(
+    "--stride",
+    default=None,
+    type=int,
+    help="Patch stride in mask pixels. Defaults to --patch-size.",
+)
+@click.option(
+    "--full-mask",
+    is_flag=True,
+    default=False,
+    help="Export one aligned image for each complete mask raster.",
+)
+@click.option(
+    "--selected-bands",
+    default=None,
+    help="Comma-separated 1-based source bands to export, e.g. '1,2,3'.",
+)
+@click.option(
+    "--image-dtype",
+    default="uint8",
+    show_default=True,
+    help="Output image dtype, or 'native'.",
+)
+@click.option(
+    "--image-resampling",
+    default="bilinear",
+    show_default=True,
+    type=click.Choice(["nearest", "bilinear", "cubic", "average"]),
+    help="Resampling method for source imagery.",
+)
+@click.option(
+    "--skip-empty-masks",
+    is_flag=True,
+    default=False,
+    help="Skip windows where the mask has no non-zero pixels.",
+)
+@click.option(
+    "--sidecar-png/--no-sidecar-png",
+    "write_sidecar_png",
+    default=True,
+    show_default=True,
+    help="Write RGB PNG previews with mask overlay.",
+)
+def export_mbtiles_mask_aligned_cmd(
+    mbtiles_path,
+    mask_dir,
+    mask_paths,
+    output_dir,
+    mask_extension,
+    patch_size,
+    stride,
+    full_mask,
+    selected_bands,
+    image_dtype,
+    image_resampling,
+    skip_empty_masks,
+    write_sidecar_png,
+):
+    """Export source imagery aligned to GeoTIFF mask grids for QA."""
+    from pathlib import Path
+
+    from pytorch_segmentation_models_trainer.tools.mbtiles.export_mask_aligned_images import (
+        export_mask_aligned_images,
+    )
+
+    bands = (
+        [int(part.strip()) for part in selected_bands.split(",")]
+        if selected_bands
+        else None
+    )
+    try:
+        result = export_mask_aligned_images(
+            mbtiles_path=Path(mbtiles_path),
+            mask_dir=Path(mask_dir) if mask_dir else None,
+            mask_paths=[Path(p) for p in mask_paths] if mask_paths else None,
+            output_dir=Path(output_dir),
+            mask_extension=mask_extension,
+            patch_size=patch_size,
+            stride=stride,
+            full_mask=full_mask,
+            selected_bands=bands,
+            image_dtype=image_dtype,
+            image_resampling=image_resampling,
+            skip_empty_masks=skip_empty_masks,
+            write_sidecar_png=write_sidecar_png,
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    suffix = "" if result.count == 1 else "s"
+    click.echo(f"Exported {result.count} mask-aligned image{suffix} to '{output_dir}'.")
+    click.echo(f"Manifest written to '{result.manifest_path}'.")
+
+
 @cli.command("ddoq-vae")
 @click.argument("yaml_path", type=click.Path(exists=True, dir_okay=False))
 @click.option("--k", default=None, type=int, help="Override number of clusters.")

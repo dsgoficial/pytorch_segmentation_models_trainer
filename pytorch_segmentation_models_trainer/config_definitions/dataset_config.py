@@ -233,6 +233,43 @@ class RasterPatchDatasetConfig:
 
 
 @dataclass
+class MBTilesMaskWindowedDatasetConfig:
+    """Configuração para MBTilesMaskWindowedDataset.
+
+    A máscara GeoTIFF define o grid de treinamento. A imagem MBTiles é
+    reprojetada/reamostrada para cada janela da máscara em tempo de leitura.
+
+    Exemplo de YAML::
+
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_mask_dataset.MBTilesMaskWindowedDataset
+          mbtiles_path: /data/source.mbtiles
+          mask_dir: /data/masks
+          patch_size: 512
+          stride: 512
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".mbtiles_mask_dataset.MBTilesMaskWindowedDataset"
+    )
+    mbtiles_path: str = MISSING
+    mask_paths: Optional[List[str]] = None
+    mask_dir: Optional[str] = None
+    mask_extension: str = ".tif"
+    patch_size: int = 512
+    stride: Optional[int] = None
+    selected_bands: Optional[List[int]] = None
+    image_dtype: str = "uint8"
+    image_resampling: str = "bilinear"
+    n_classes: int = 2
+    augmentation_list: List = field(default_factory=list)
+    data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+    return_metadata: bool = True
+    window_index_cache: Optional[str] = None
+
+
+@dataclass
 class CSVWindowedDatasetConfig(DatasetConfig):
     """Configuração para CSVWindowedSegmentationDataset.
 

@@ -19,6 +19,14 @@ from pytorch_segmentation_models_trainer.dataset_loader.dataset import <ClassNam
 from pytorch_segmentation_models_trainer.dataset_loader.raster_patch_dataset import RasterPatchDataset
 ```
 
+MBTiles/mask-aligned datasets live in:
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.mbtiles_mask_dataset import (
+    MBTilesMaskWindowedDataset,
+)
+```
+
 Image-only datasets live in:
 
 ```python
@@ -40,6 +48,7 @@ from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import (
 ```
 torch.utils.data.Dataset
 ├── RasterPatchDataset          ← sliding-window, folder-based (no CSV)
+├── MBTilesMaskWindowedDataset  ← MBTiles imagery aligned to mask windows
 └── AbstractDataset             ← CSV / DataFrame-based
     ├── ImageDataset
     │   ├── AutoencoderDataset
