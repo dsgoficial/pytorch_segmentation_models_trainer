@@ -1,5 +1,218 @@
 # Unreleased
 
+## Soft-Label: optional border-distance component in W_conf
+
+Made the border-distance mitigation contribution to W_conf optional, allowing
+the user to replicate the original paper formula or demonstrate their own
+contribution.
+
+- **`compute_w_conf`** gains a `use_border: bool = True` parameter:
+  - `use_border=True` (default): original behaviour —
+    `W_conf = alpha·w_entropy + (1-alpha-beta)·w_border + beta·w_embed`;
+    constraint `alpha + beta <= 1.0` is enforced.
+  - `use_border=False` (original paper): border component is skipped;
+    `W_conf = (alpha·w_entropy + beta·w_embed) / (alpha + beta_eff)`,
+    where `beta_eff = beta` when `w_embed` is provided. The `alpha + beta`
+    constraint is relaxed — only their sum must be positive.
+- **`process_tile`** and **`run`** thread `use_border` through to
+  `compute_w_conf`.
+- **`build-soft-labels` CLI command** and `scripts/build_soft_labels.py` shim
+  expose a `--no-border` flag for command-line use.
+- 8 new tests added (100% coverage maintained on `build_soft_labels.py`).
+
+## Soft-Label Preprocessing Tools — CLI integration
+
+Moved preprocessing scripts from `scripts/` (outside the package) into
+`pytorch_segmentation_models_trainer/tools/soft_labels/`, making them
+installable, importable, and testable as proper package modules.
+
+- **`tools/soft_labels/build_soft_labels.py`**: all P_soft/W_conf raster
+  building logic now lives here; `run()` is the orchestration entry point.
+- **`tools/soft_labels/download_aef_embeddings.py`**: AEF embedding download
+  (GCS and HuggingFace modes) moved here; `run()` handles routing.
+- **`tools/soft_labels/generate_training_csv.py`**: manifest → train/val/test
+  CSV split logic moved here; `split_dataframe()` is independently testable.
+- Three new Click subcommands registered in `tools/cli.py`:
+  `build-soft-labels`, `download-aef-embeddings`, `generate-training-csv`.
+- `scripts/*.py` reduced to thin backward-compatible shims that delegate to
+  the package modules.
+- Tests updated to import from the new package paths; 100% coverage on all
+  three new modules (124 tests).
+- `tests/test_generate_training_csv.py` added (was previously untested).
+
+## Curriculum-Guided Co-Teaching (Xiao et al. 2026, eq. 6-11)
+
+Full implementation of the noise-aware co-teaching framework from the paper,
+combining confidence-guided curriculum masking, class-balanced symmetric
+co-teaching, and optional neighbourhood feature regularization.
+
+- **`CurriculumScheduler`** (`custom_losses/co_teaching_loss.py`): stateless
+  helper that computes the per-epoch retention rate
+  `P_e = min(P_start + (e/E_warm)*(P_end-P_start), P_end)` and derives a
+  binary mask `M_curr = I(W_conf > τ)` where `τ = Percentile(W_conf, 1-P_e)`.
+  Also exposes `forget_rate(epoch)` that ramps linearly 0 → 0.3 over `E_warm`.
+
+- **`CoTeachingLoss`** (`custom_losses/co_teaching_loss.py`): dual-path loss
+  that transparently handles both training (dict pred with `logits_a`/`logits_b`)
+  and validation (single logits tensor, falls back to standard soft CE):
+  - **Training path** (eq. 8-11): applies curriculum mask, performs
+    class-balanced pixel selection per branch, and computes cross-update losses
+    `loss_A = Σ_{J_B} W_conf·CE^A` and `loss_B = Σ_{J_A} W_conf·CE^B`.
+  - **Neighbourhood regularization** (`compute_neighborhood_reg`): optional
+    `L_reg = Σ_i Σ_{j∈N(i)} max(0,S_ij)·KL(p_i||p_j)` where S_ij is cosine
+    similarity between input features in the 3×3 spatial neighbourhood;
+    controlled by `lambda_reg` (set to 0 to disable).
+  - `current_epoch` attribute synced from `CoTeachingModel.training_step` so
+    the curriculum state advances with training.
+
+- **`CoTeachingModel`** (`model_loader/co_teaching_model.py`): dual-branch
+  `SoftLightningModule` with manual optimization:
+  - Maintains `self.model` (fθA) and `self.model_b` (fθB) with independent
+    parameter initialization.
+  - `forward()` always routes through fθA for val/test compatibility.
+  - `training_step()` performs the full eq. 11 cross-update: forward both
+    branches, compute curriculum mask and class-balanced J_A/J_B selection,
+    then do independent `manual_backward` + `optimizer.step` calls so each
+    branch's gradient is isolated.
+  - `configure_optimizers()` returns two optimizers (one per branch, same
+    config from `cfg.optimizer`) with empty scheduler list.
+  - Inherits all `SoftLabelModel` / `Model` behaviour for val/test steps,
+    metrics, logging, and data loading.
+
+- **`conf/examples/co_teaching_unet.yaml`**: complete Hydra experiment config
+  for co-teaching UNet training.
+
+- **User documentation** added at `website/docs/user-guide/co-teaching.md`
+  covering theory, configuration, API reference, and hyperparameter guidance.
+
+## Soft-Label Training Pipeline
+
+Full implementation of probabilistic soft-label training following Xiao et al.
+(2026, JSTARS) — supports P_soft labels derived from multi-source LULC consensus
+plus optional per-pixel W_conf confidence weighting.
+
+- **`SoftLabelDataset`** (`dataset_loader/soft_label_dataset.py`): reads per-tile
+  P_soft and W_conf GeoTIFF rasters, applies geometric augmentations consistently
+  across image/P_soft/W_conf via `albumentations.Compose(additional_targets=...)`,
+  and returns `batch["mask"]` as a dict so both tensors reach the loss function.
+
+- **`SoftLabelWeightedCELoss`** (`custom_losses/soft_label_loss.py`): pixel-wise
+  soft cross-entropy `L(i) = W_conf(i) · [-Σ_c P(i,c) · log(pred(i,c))]`;
+  supports dict or plain-tensor ground-truth, and dict `pred_batch` (FrameField path).
+  W_conf=ones reduces exactly to standard soft cross-entropy; W_conf=zeros gives zero loss.
+
+- **`SoftLabelModel`** (`model_loader/soft_label_model.py`): subclass of `Model`
+  that unwraps the dict mask in `_shared_step` and re-wraps it in `_compute_loss`
+  so W_conf is forwarded to the loss without modifying `model.py`.
+
+- **`SoftLabelWeightedCELossConfig`** added to `config_definitions/loss_config_definition.py`.
+
+- **`SoftLabelDatasetConfig`** added to `config_definitions/dataset_config.py`.
+
+- **`conf/examples/soft_label_unet.yaml`**: complete Hydra experiment config for
+  soft-label UNet training with SoftLabelModel, SoftLabelDataset and SoftLabelWeightedCELoss.
+
+- **`scripts/build_soft_labels.py`**: preprocessing script that computes P_soft
+  (temporally-weighted voting) and W_conf (α·w_entropy + (1-α)·w_border) from M
+  source LULC rasters and writes GeoTIFF outputs with a manifest CSV.
+
+- **`scripts/generate_training_csv.py`**: train/val/test split generator that
+  maps the soft-label manifest to CSV files consumable by SoftLabelDataset.
+
+- **User documentation** added at `website/docs/user-guide/soft-label-training.md`
+  covering the full pipeline from data preparation to training configuration and
+  API reference.
+
+- **`SoftLabelWindowedDataset`** (`dataset_loader/soft_label_windowed_dataset.py`):
+  subclass of `SoftLabelDataset` that reads fixed-size patches from full-scene
+  rasters using `rasterio.windows.Window` (row_off, col_off, patch_size columns).
+  Enables training without pre-cutting tiles; P_soft and W_conf windows are read
+  on-the-fly and augmented consistently via the same `additional_targets` pipeline.
+
+- **`SoftLabelWindowedDatasetConfig`** added to `config_definitions/dataset_config.py`.
+
+- **`build_soft_labels.py` reprojection fix**: all LULC source rasters are now
+  reprojected to the image pixel grid before computing P_soft/W_conf, using
+  `rasterio.warp.reproject` with nearest-neighbour resampling. The `image_path`
+  column is now required in the sources CSV and is the spatial reference for all outputs.
+
+## AlphaEarth Foundation (AEF) Embedding Integration
+
+Extended W_conf computation with a third component `w_embed` derived from
+AlphaEarth Foundation dense embeddings. The extended formula is:
+
+```
+W_conf = alpha * w_entropy + beta * w_embed + (1 - alpha - beta) * w_border
+```
+
+- **`compute_w_embed`** (`scripts/build_soft_labels.py`): computes per-pixel
+  cosine similarity weight in two modes:
+  - **GCS per-pixel** (embedding shape `(H, W, D)`): within-tile class centroids
+    derived from P_soft argmax; per-pixel similarity mapped to [0, 1] via
+    `(cosine + 1) / 2`.
+  - **HF patch-level** (embedding shape `(D,)`): cross-tile class centroids
+    provided externally; scalar similarity broadcast to all pixels.
+
+- **`aggregate_aef_to_image_grid`** (`scripts/build_soft_labels.py`):
+  implements the official Google AEF aggregation pipeline:
+  1. Dequantise — ``sign(v) * (v / 127.5)^2`` per band
+  2. Element-wise vector sum to target grid via ``Resampling.sum``
+  3. L2 normalise per pixel
+  Standard spatial resampling (nearest-neighbour, bilinear, average) is invalid
+  for AEF embeddings because pixel-level interpolation produces off-manifold
+  synthetic vectors that corrupt cosine similarities (per the official AEF-on-GCS
+  documentation).  Only downscaling is supported; upscaling raises ``ValueError``.
+  ``process_tile`` catches that error and falls back to the entropy + border
+  W_conf formula.
+
+- **`load_aef_embedding`** (`scripts/build_soft_labels.py`): loads per-pixel
+  GeoTIFF (GCS) or patch `.npy` (HF); accepts optional `dst_*` parameters to
+  trigger automatic reprojection to the image grid.
+
+- **`_compute_hf_class_centroids`** (`scripts/build_soft_labels.py`): two-pass
+  helper that aggregates HF patch embeddings by dominant class and returns
+  `(C, D)` cross-tile centroids.
+
+- **`process_tile` extended**: accepts `aef_dir`, `aef_source`, `beta`, and
+  `class_centroids`; computes `w_embed` and blends it into W_conf when
+  `aef_dir` is set and `beta > 0`.
+
+- **`build_soft_labels.py` CLI extended** with `--aef-embeddings-dir`,
+  `--aef-source {gcs,hf}`, and `--beta` flags.
+
+- **`scripts/download_aef_embeddings.py`** (new): standalone script to download
+  AEF embeddings before the build step.
+  - `--source gcs`: downloads per-pixel GeoTIFFs from GCS via `gsutil cp`;
+    reads `gcs_paths_csv` with `tile_id`, `gcs_uri` columns; skips existing files.
+  - `--source hf`: queries `Major-TOM/Core-AlphaEarth-Embeddings` on HuggingFace
+    by geographic proximity of tile centre to grid cell centre; saves `{tile_id}.npy`;
+    requires `pip install datasets`.
+
+- **`patch_size` and `stride` flags** (`build_soft_labels.py`): `--patch-size`
+  and `--stride` expand the tile manifest into a patch-level CSV for
+  `SoftLabelWindowedDataset`, enabling large-tile training without pre-cutting.
+
+- **User documentation** updated (`website/docs/user-guide/soft-label-training.md`):
+  new sections for AEF download (GCS and HF modes), alignment explanation,
+  extended formula, CLI reference, `SoftLabelWindowedDataset` YAML examples,
+  and updated experiment variants table (E3–E5).
+
+- **Tests**: added `tests/test_download_aef_embeddings.py` (22 tests) and extended
+  `tests/test_build_soft_labels.py` with `TestReprojectAefToImageGrid` (3 tests),
+  `TestLoadAefEmbedding` (7 tests), `TestComputeWEmbed` (9 tests),
+  `TestComputeWConfWithEmbed` (5 tests), `TestComputeHfClassCentroids` (3 tests),
+  `TestProcessTileWithAEF` (2 tests), and `TestGeneratePatchRows` /
+  `TestExpandManifestToPatches` (15 tests).
+
+## Tests: 100 % coverage on all new components
+
+`tests/test_soft_label_loss.py` (19 tests),
+`tests/test_soft_label_dataset.py` (23 tests),
+`tests/test_soft_label_model.py` (9 tests),
+`tests/test_soft_label_windowed_dataset.py` (27 tests),
+`tests/test_build_soft_labels.py` (53 tests),
+`tests/test_download_aef_embeddings.py` (22 tests).
+
 ## Test coverage
 
 - Expanded the `tools` test suite to cover inference processors, evaluation utilities,

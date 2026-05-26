@@ -294,3 +294,85 @@ class CSVWindowedImageDatasetConfig(DatasetConfig):
     selected_bands: Optional[List[int]] = None
     use_rasterio: bool = True
     reset_augmentation_function: bool = False
+
+
+@dataclass
+class SoftLabelDatasetConfig:
+    """Configuration for ``SoftLabelDataset``.
+
+    Example YAML:
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_dataset.SoftLabelDataset
+          input_csv_path: /data/train.csv
+          image_key: image_path
+          p_soft_key: p_soft_path
+          w_conf_key: w_conf_path
+          augmentation_list:
+            - _target_: albumentations.HorizontalFlip
+              p: 0.5
+            - _target_: albumentations.VerticalFlip
+              p: 0.5
+            - _target_: albumentations.RandomRotate90
+              p: 0.5
+            - _target_: albumentations.Normalize
+              mean: [0.485, 0.456, 0.406]
+              std: [0.229, 0.224, 0.225]
+            - _target_: albumentations.pytorch.ToTensorV2
+          data_loader:
+            batch_size: 16
+            num_workers: 8
+            shuffle: true
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader.soft_label_dataset.SoftLabelDataset"
+    )
+    input_csv_path: Optional[str] = None
+    root_dir: Optional[str] = None
+    augmentation_list: List = field(default_factory=list)
+    data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+    image_key: str = "image_path"
+    p_soft_key: str = "p_soft_path"
+    w_conf_key: str = "w_conf_path"
+    n_first_rows_to_read: Optional[int] = None
+    seed: Optional[int] = None
+
+
+@dataclass
+class SoftLabelWindowedDatasetConfig:
+    """Configuration for ``SoftLabelWindowedDataset``.
+
+    Example YAML:
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_windowed_dataset.SoftLabelWindowedDataset
+          input_csv_path: /data/patches.csv
+          image_key: image_path
+          p_soft_key: p_soft_path
+          w_conf_key: w_conf_path
+          row_off_key: row_off
+          col_off_key: col_off
+          patch_size_key: patch_size
+          augmentation_list:
+            - _target_: albumentations.HorizontalFlip
+              p: 0.5
+            - _target_: albumentations.Normalize
+              mean: [0.485, 0.456, 0.406]
+              std: [0.229, 0.224, 0.225]
+            - _target_: albumentations.pytorch.ToTensorV2
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader.soft_label_windowed_dataset.SoftLabelWindowedDataset"
+    )
+    input_csv_path: Optional[str] = None
+    root_dir: Optional[str] = None
+    augmentation_list: List = field(default_factory=list)
+    data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+    image_key: str = "image_path"
+    p_soft_key: str = "p_soft_path"
+    w_conf_key: str = "w_conf_path"
+    row_off_key: str = "row_off"
+    col_off_key: str = "col_off"
+    patch_size_key: str = "patch_size"
+    n_first_rows_to_read: Optional[int] = None
+    seed: Optional[int] = None

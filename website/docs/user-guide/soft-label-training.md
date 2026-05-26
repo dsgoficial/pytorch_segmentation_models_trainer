@@ -1,0 +1,490 @@
+---
+sidebar_position: 21
+title: Soft-Label Training
+---
+
+# Soft-Label Training
+
+Soft-label training replaces hard, one-hot segmentation masks with
+**probabilistic labels** (P_soft) derived from multiple LULC source products.
+An optional **per-pixel confidence weight** (W_conf) down-weights uncertain
+pixels during loss computation.
+
+This approach follows the methodology of Xiao et al. (2026, JSTARS):
+*"Distilling 10-m Land Cover Maps from Multi-Source Consensus via AlphaEarth
+Embeddings and Noise-Aware Weak Supervision."*
+
+The framework extends the original paper with an additional **border-distance
+component** in W_conf that penalises class-boundary pixels where label
+ambiguity is highest.  See [W_conf formula](#w_conf-formula) for details.
+
+---
+
+## Components
+
+| Component | Class | Purpose |
+|-----------|-------|---------|
+| Dataset | `SoftLabelDataset` | Reads P_soft and W_conf GeoTIFFs, returns `batch["mask"]` as a dict |
+| Windowed Dataset | `SoftLabelWindowedDataset` | Reads patches on-the-fly from full-scene rasters via row/col offsets |
+| Loss | `SoftLabelWeightedCELoss` | Pixel-wise soft cross-entropy weighted by W_conf |
+| Model | `SoftLabelModel` | Subclass of `Model` that passes W_conf through the loss pipeline |
+| Preprocessing | `build_soft_labels.py` | Computes P_soft and W_conf from multiple LULC sources; optionally blends AEF embeddings |
+| AEF download | `download_aef_embeddings.py` | Downloads AEF embeddings from GCS or HuggingFace |
+
+---
+
+## Step 1 — Build P_soft and W_conf Rasters
+
+Use the CLI tool to compute P_soft (per-pixel class probability distributions)
+and W_conf (confidence weights) from multiple LULC source rasters.
+
+```bash
+pytorch-smt-tools build-soft-labels sources.csv \
+    --output-dir /data/soft_labels \
+    --num-classes 4 \
+    --alpha 0.6 \
+    --max-workers 8
+```
+
+> **Legacy scripts:** `python scripts/build_soft_labels.py` accepts the same
+> flags and is kept for backward compatibility.
+
+**sources.csv format:**
+
+```csv
+tile_id,image_path,source_name,lulc_path,weight
+tile_0,/data/images/tile_0.tif,mapbiomas,/data/mapbiomas/tile_0.tif,0.8
+tile_0,/data/images/tile_0.tif,esri_lulc,/data/esri/tile_0.tif,0.6
+tile_0,/data/images/tile_0.tif,dw,/data/dw/tile_0.tif,0.5
+tile_0,/data/images/tile_0.tif,carta25k,/data/carta/tile_0.tif,1.0
+```
+
+All LULC rasters are automatically reprojected to the image's CRS, resolution,
+and extent using nearest-neighbour resampling — the `image_path` column is the
+spatial reference.
+
+The script writes a manifest CSV with columns `tile_id`, `image_path`,
+`p_soft_path`, `w_conf_path`.
+
+---
+
+## W_conf Formula
+
+### With border-distance component (framework contribution)
+
+This is the **default** behaviour.  It extends the original paper by adding a
+border-distance penalty that reduces confidence near class boundaries — the
+region with the highest label ambiguity across multi-source products.
+
+```
+W_conf = alpha · w_entropy + (1 - alpha - beta) · w_border + beta · w_embed
+```
+
+| Term | Description |
+|------|-------------|
+| `w_entropy` | `1 - H(P_soft) / log(C)` — high when the class distribution is peaked |
+| `w_border` | Distance transform from class boundaries, normalised to [0, 1] — high far from borders |
+| `w_embed` | AEF cosine similarity to class centroid — high when the pixel matches its class in embedding space |
+
+`alpha + beta ≤ 1.0` is required; the remainder `(1 - alpha - beta)` goes to
+the border-distance term.
+
+### Without border-distance component (original paper formula)
+
+Use `--no-border` to reproduce the formula from the original paper exactly.
+The border computation is skipped and the weights are renormalised over the
+remaining terms:
+
+```
+W_conf = alpha · w_entropy                                        (no AEF)
+W_conf = (alpha · w_entropy + beta · w_embed) / (alpha + beta)   (with AEF)
+```
+
+When `--no-border` is set, the `alpha + beta ≤ 1.0` constraint is relaxed.
+
+:::tip Ablation study
+
+Run the same training with and without `--no-border` to quantify the impact of
+the border-distance contribution:
+
+```bash
+# Original paper formula
+pytorch-smt-tools build-soft-labels sources.csv \
+    --output-dir /data/soft_labels_no_border \
+    --num-classes 4 --alpha 0.6 --no-border
+
+# With border-distance contribution
+pytorch-smt-tools build-soft-labels sources.csv \
+    --output-dir /data/soft_labels_border \
+    --num-classes 4 --alpha 0.6
+```
+
+Then train with `conf/examples/soft_label_no_border.yaml` vs
+`conf/examples/soft_label_unet.yaml` and compare OA / mIoU.
+:::
+
+---
+
+## Step 1b — Download AEF Embeddings (Optional)
+
+### GCS mode — per-pixel dense embeddings
+
+Requires `gsutil` and GCS access to the AlphaEarth Foundation bucket.
+
+```bash
+pytorch-smt-tools download-aef-embeddings \
+    --source gcs \
+    --gcs-paths-csv gcs_paths.csv \
+    --output-dir /data/aef_embeddings
+```
+
+**gcs_paths.csv format:**
+
+```csv
+tile_id,gcs_uri
+tile_0,gs://alphaearth_foundations/embeddings/tile_0.tif
+tile_1,gs://alphaearth_foundations/embeddings/tile_1.tif
+```
+
+Each downloaded file is a multi-band GeoTIFF `{tile_id}.tif` with shape
+`(D, H, W)`.  The per-pixel cosine similarity to each pixel's within-tile class
+centroid is computed:
+
+```
+w_embed(i) = (cos_sim(emb(i), centroid(argmax_class(i))) + 1) / 2
+```
+
+### HuggingFace mode — patch-level embeddings
+
+Downloads patch-level 64-D embeddings from
+[`Major-TOM/Core-AlphaEarth-Embeddings`](https://huggingface.co/datasets/Major-TOM/Core-AlphaEarth-Embeddings)
+on HuggingFace.  Requires `pip install datasets`.
+
+```bash
+pytorch-smt-tools download-aef-embeddings \
+    --source hf \
+    --tiles-csv tiles.csv \
+    --output-dir /data/aef_hf_embeddings
+```
+
+**tiles.csv format:**
+
+```csv
+tile_id,image_path
+tile_0,/data/images/tile_0.tif
+tile_1,/data/images/tile_1.tif
+```
+
+For each tile, the script finds the nearest Major-TOM grid cell by geographic
+proximity and saves its embedding as `{tile_id}.npy`.
+
+When used with `--aef-source hf`, the scalar cosine similarity between the
+tile embedding and the dominant-class cross-tile centroid is broadcast
+uniformly to all pixels:
+
+```
+w_embed(i) = (cos_sim(emb_tile, centroid(dominant_class)) + 1) / 2
+```
+
+**Comparison of AEF modes:**
+
+| | GCS (per-pixel) | HF (patch-level) |
+|--|--|--|
+| Spatial granularity | Per pixel | Uniform per tile |
+| Embedding dimension | Varies (e.g. 256) | 64 |
+| Requires `gsutil` | Yes | No |
+| Requires `datasets` | No | Yes |
+| File per tile | `{tile_id}.tif` | `{tile_id}.npy` |
+
+Then build soft labels with AEF blending (see [conf/examples/soft_label_aef_gcs.yaml](https://github.com)):
+
+```bash
+pytorch-smt-tools build-soft-labels sources.csv \
+    --output-dir /data/soft_labels \
+    --num-classes 4 \
+    --alpha 0.5 \
+    --beta 0.2 \
+    --aef-embeddings-dir /data/aef_embeddings \
+    --aef-source gcs
+```
+
+:::info AEF aggregation uses the official Google algorithm
+
+Standard spatial resampling (nearest-neighbour, bilinear, average, …) is
+**invalid** for AEF embeddings.  The 64-D vectors live on a learned manifold;
+pixel-level interpolation produces off-manifold synthetic vectors that corrupt
+cosine similarities.
+
+`build_soft_labels.py` implements the official Google aggregation pipeline when
+the AEF file has a different resolution from the training image:
+
+1. **Dequantise** — `sign(v) × (v / 127.5)²` per band
+2. **Element-wise vector sum** — area-weighted sum of dequantised source pixels to each target pixel
+3. **L2 normalise** — divide each pixel vector by its Euclidean norm
+
+This is valid only for **downscaling** (target pixel coarser than or equal to
+source).  If the AEF file is at a finer resolution than the image (upscaling),
+the script logs an error and falls back to the entropy + border W_conf formula.
+
+See the [AEF-on-GCS documentation](https://developers.google.com/earth-engine/guides/aef_on_gcs_readme).
+:::
+
+---
+
+## Step 1c — Windowed Patch Manifest (Optional)
+
+For large tiles, use `--patch-size` to generate a patch-level manifest for
+`SoftLabelWindowedDataset` — no pre-cut patch files are written:
+
+```bash
+pytorch-smt-tools build-soft-labels sources.csv \
+    --output-dir /data/soft_labels \
+    --num-classes 4 \
+    --alpha 0.6 \
+    --patch-size 512 \
+    --stride 256        # 50% overlap; defaults to patch-size if omitted
+```
+
+Output: `soft_label_patches.csv` with columns `tile_id`, `image_path`,
+`p_soft_path`, `w_conf_path`, `row_off`, `col_off`, `patch_size`.
+
+See [`conf/examples/soft_label_windowed_unet.yaml`](#windowed-dataset) for the
+corresponding training configuration.
+
+---
+
+## Step 2 — Generate Train/Val/Test Splits
+
+```bash
+pytorch-smt-tools generate-training-csv \
+    /data/soft_labels/soft_label_manifest.csv \
+    --output-dir /data/splits \
+    --train-ratio 0.70 \
+    --val-ratio 0.15 \
+    --seed 42
+```
+
+This produces `train.csv`, `val.csv`, and `test.csv` with columns:
+`tile_id`, `image_path`, `p_soft_path`, `w_conf_path`.
+
+If `image_path` is absent from the manifest (e.g. you removed it), pass
+`--image-dir` to inject the column:
+
+```bash
+pytorch-smt-tools generate-training-csv manifest.csv \
+    --output-dir /data/splits \
+    --image-dir /data/images \
+    --image-extension .tif
+```
+
+---
+
+## Step 3 — Training Configuration
+
+### E1 — P_soft only, no confidence weighting
+
+```yaml title="conf/examples/soft_label_no_wconf.yaml"
+_target_: pytorch_segmentation_models_trainer.model_loader.soft_label_model.SoftLabelModel
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_dataset.SoftLabelDataset
+  input_csv_path: /data/splits/train.csv
+  image_key: image_path
+  p_soft_key: p_soft_path
+  # w_conf_key omitted → unweighted soft cross-entropy
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.soft_label_loss.SoftLabelWeightedCELoss
+  name: soft_label_ce
+  num_classes: 4
+```
+
+### E2 — P_soft + W_conf (with border contribution)
+
+```yaml title="conf/examples/soft_label_unet.yaml"
+_target_: pytorch_segmentation_models_trainer.model_loader.soft_label_model.SoftLabelModel
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_dataset.SoftLabelDataset
+  input_csv_path: /data/splits/train.csv
+  image_key: image_path
+  p_soft_key: p_soft_path
+  w_conf_key: w_conf_path      # W_conf includes border-distance component
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.soft_label_loss.SoftLabelWeightedCELoss
+  name: soft_label_ce
+  num_classes: 4
+  mask_key: mask
+  weight_key: w_conf
+```
+
+### E2-NB — P_soft + W_conf (original paper, no border)
+
+```yaml title="conf/examples/soft_label_no_border.yaml"
+_target_: pytorch_segmentation_models_trainer.model_loader.soft_label_model.SoftLabelModel
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_dataset.SoftLabelDataset
+  input_csv_path: /data/splits_no_border/train.csv   # built with --no-border
+  image_key: image_path
+  p_soft_key: p_soft_path
+  w_conf_key: w_conf_path      # W_conf = w_entropy only (original paper formula)
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.soft_label_loss.SoftLabelWeightedCELoss
+  name: soft_label_ce
+  num_classes: 4
+  mask_key: mask
+  weight_key: w_conf
+```
+
+### E4 — P_soft + W_conf + AEF GCS embeddings {#aef-gcs}
+
+```yaml title="conf/examples/soft_label_aef_gcs.yaml"
+_target_: pytorch_segmentation_models_trainer.model_loader.soft_label_model.SoftLabelModel
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_dataset.SoftLabelDataset
+  input_csv_path: /data/splits/train.csv
+  image_key: image_path
+  p_soft_key: p_soft_path
+  w_conf_key: w_conf_path      # W_conf includes entropy + AEF + border
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.soft_label_loss.SoftLabelWeightedCELoss
+  name: soft_label_ce
+  num_classes: 4
+  mask_key: mask
+  weight_key: w_conf
+
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet50
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: 4
+```
+
+### E5 — Windowed dataset (large tiles) {#windowed-dataset}
+
+```yaml title="conf/examples/soft_label_windowed_unet.yaml"
+_target_: pytorch_segmentation_models_trainer.model_loader.soft_label_model.SoftLabelModel
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_windowed_dataset.SoftLabelWindowedDataset
+  input_csv_path: /data/splits/train.csv  # patch manifest from --patch-size
+  image_key: image_path
+  p_soft_key: p_soft_path
+  w_conf_key: w_conf_path
+  row_off_key: row_off
+  col_off_key: col_off
+  patch_size_key: patch_size
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+```
+
+---
+
+## API Reference
+
+### `SoftLabelDataset`
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.soft_label_dataset import (
+    SoftLabelDataset,
+)
+
+ds = SoftLabelDataset(
+    input_csv_path="train.csv",
+    image_key="image_path",
+    p_soft_key="p_soft_path",
+    w_conf_key="w_conf_path",  # omit if CSV has no w_conf_path column
+)
+
+sample = ds[0]
+# sample["image"]          — (3, H, W) float32 in [0, 1]
+# sample["mask"]["mask"]   — (C, H, W) float32, sums to 1 per pixel
+# sample["mask"]["w_conf"] — (1, H, W) float32 in [0, 1]
+# sample["path"]           — image file path
+```
+
+### `SoftLabelWeightedCELoss`
+
+```python
+from pytorch_segmentation_models_trainer.custom_losses.soft_label_loss import (
+    SoftLabelWeightedCELoss,
+)
+
+loss_fn = SoftLabelWeightedCELoss(name="soft_ce", num_classes=4)
+loss = loss_fn.compute(
+    logits,                          # (B, C, H, W)
+    {"mask": p_soft, "w_conf": w},   # or just p_soft tensor
+)
+```
+
+The loss computes:
+
+```
+L(i) = W_conf(i) · [-Σ_c P_soft(i,c) · log(softmax(logits)(i,c))]
+```
+
+When `w_conf` is absent (or all ones), this reduces to standard soft cross-entropy.
+
+### `SoftLabelWindowedDataset`
+
+Reads patches on-the-fly from full-scene rasters using `rasterio.windows.Window`.
+Requires a patch manifest CSV (produced by `build_soft_labels --patch-size`):
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.soft_label_windowed_dataset import (
+    SoftLabelWindowedDataset,
+)
+
+ds = SoftLabelWindowedDataset(
+    input_csv_path="patches.csv",
+    image_key="image_path",
+    p_soft_key="p_soft_path",
+    w_conf_key="w_conf_path",   # optional
+    row_off_key="row_off",
+    col_off_key="col_off",
+    patch_size_key="patch_size",
+)
+sample = ds[0]
+# sample["image"]          — (3, patch_size, patch_size) float32
+# sample["mask"]["mask"]   — (C, patch_size, patch_size) float32
+# sample["mask"]["w_conf"] — (1, patch_size, patch_size) float32 (when present)
+```
+
+### `SoftLabelModel`
+
+Drop-in replacement for `Model`.  All other `Model` behaviour
+(metrics, logging, optimisers, LR schedulers, dual-head, OHEM, EDL, MoE)
+is inherited without modification.
+
+```yaml
+_target_: pytorch_segmentation_models_trainer.model_loader.soft_label_model.SoftLabelModel
+```
+
+---
+
+## Experiment variants
+
+| Experiment | W_conf formula | CLI flag | Config file |
+|------------|---------------|----------|-------------|
+| E0 | — (hard labels, CE) | — | — |
+| E1 | — (no weighting) | `--alpha 0.6` | `soft_label_no_wconf.yaml` |
+| E2-NB | `alpha·w_entropy` | `--alpha 0.6 --no-border` | `soft_label_no_border.yaml` |
+| E2 | `alpha·w_entropy + (1-alpha)·w_border` | `--alpha 0.6` | `soft_label_unet.yaml` |
+| E3 | `alpha·w_e + beta·w_embed + (1-a-b)·w_border` | `--alpha 0.5 --beta 0.2 --aef-source hf` | `soft_label_unet.yaml` |
+| E4 | `alpha·w_e + beta·w_embed + (1-a-b)·w_border` | `--alpha 0.5 --beta 0.2 --aef-source gcs` | `soft_label_aef_gcs.yaml` |
+| E5 | same as E4, patch manifest | `--patch-size 512` | `soft_label_windowed_unet.yaml` |
+
+> **E2-NB** ("no border") is the formula from the original paper.
+> **E2** adds the border-distance component — a framework contribution not in the paper.
+> The difference between E2-NB and E2 quantifies the impact of that contribution.

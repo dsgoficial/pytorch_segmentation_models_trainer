@@ -186,6 +186,28 @@ class WeightedJMLSCEGCBLLossConfig:
     gcbl_max_samples: int = 512
 
 
+@dataclass
+class SoftLabelWeightedCELossConfig:
+    """Configuration for ``SoftLabelWeightedCELoss``.
+
+    Example YAML:
+        loss:
+          _target_: pytorch_segmentation_models_trainer.custom_losses.soft_label_loss.SoftLabelWeightedCELoss
+          name: soft_label_ce
+          num_classes: 4
+          mask_key: mask
+          weight_key: w_conf
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_losses.soft_label_loss.SoftLabelWeightedCELoss"
+    )
+    name: str = "soft_label_ce"
+    num_classes: int = MISSING
+    mask_key: str = "mask"
+    weight_key: str = "w_conf"
+
+
 # ============================================================================
 # Individual Loss Configurations
 # ============================================================================
@@ -401,6 +423,9 @@ cs.store(group="loss", name="weighted_jml_sce_loss", node=WeightedJMLSCELossConf
 cs.store(group="loss", name="weighted_dice_sce_loss", node=WeightedDiceSCELossConfig)
 cs.store(
     group="loss", name="weighted_jml_sce_gcbl_loss", node=WeightedJMLSCEGCBLLossConfig
+)
+cs.store(
+    group="loss", name="soft_label_weighted_ce_loss", node=SoftLabelWeightedCELossConfig
 )
 
 

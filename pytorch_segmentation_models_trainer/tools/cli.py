@@ -200,6 +200,248 @@ def ddoq_vae_cmd(yaml_path, k, checkpoint_path, output_dir, distilled_image_form
     click.echo(f"Wrote {len(result.distilled_image_paths)} distilled image(s).")
 
 
+@cli.command("build-soft-labels")
+@click.argument("input_csv", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Root directory for output p_soft/ and w_conf/ sub-directories.",
+)
+@click.option(
+    "--num-classes",
+    default=4,
+    show_default=True,
+    type=int,
+    help="Number of land-cover classes (0-indexed).",
+)
+@click.option(
+    "--alpha",
+    default=0.6,
+    show_default=True,
+    type=float,
+    help="Entropy/border blend weight for W_conf (0=border-only, 1=entropy-only).",
+)
+@click.option(
+    "--max-workers",
+    default=4,
+    show_default=True,
+    type=int,
+    help="Number of parallel worker processes.",
+)
+@click.option(
+    "--patch-size",
+    default=None,
+    type=int,
+    help="When set, expand the manifest into patch rows for SoftLabelWindowedDataset.",
+)
+@click.option(
+    "--stride",
+    default=None,
+    type=int,
+    help="Sliding-window stride in pixels (default: same as --patch-size).",
+)
+@click.option(
+    "--aef-embeddings-dir",
+    default=None,
+    type=click.Path(file_okay=False),
+    help="Directory with pre-downloaded AEF embeddings.",
+)
+@click.option(
+    "--aef-source",
+    default="gcs",
+    show_default=True,
+    type=click.Choice(["gcs", "hf"], case_sensitive=False),
+    help="AEF embedding source.",
+)
+@click.option(
+    "--beta",
+    default=0.0,
+    show_default=True,
+    type=float,
+    help="AEF embedding blend weight (alpha + beta must be <= 1.0 unless --no-border).",
+)
+@click.option(
+    "--no-border",
+    "use_border",
+    is_flag=True,
+    default=True,
+    flag_value=False,
+    help="Omit the border-distance component (replicates original paper formula).",
+)
+def build_soft_labels_cmd(
+    input_csv,
+    output_dir,
+    num_classes,
+    alpha,
+    max_workers,
+    patch_size,
+    stride,
+    aef_embeddings_dir,
+    aef_source,
+    beta,
+    use_border,
+):
+    """Build P_soft and W_conf rasters from multiple LULC sources in INPUT_CSV.
+
+    INPUT_CSV must have columns: tile_id, image_path, source_name, lulc_path, weight.
+    """
+    from pathlib import Path
+    from pytorch_segmentation_models_trainer.tools.soft_labels import build_soft_labels
+
+    manifest_path = build_soft_labels.run(
+        input_csv=input_csv,
+        output_dir=Path(output_dir),
+        num_classes=num_classes,
+        alpha=alpha,
+        max_workers=max_workers,
+        patch_size=patch_size,
+        stride=stride,
+        aef_embeddings_dir=aef_embeddings_dir,
+        aef_source=aef_source,
+        beta=beta,
+        use_border=use_border,
+    )
+    click.echo(f"Manifest written to '{manifest_path}'.")
+
+
+@cli.command("download-aef-embeddings")
+@click.option(
+    "--source",
+    required=True,
+    type=click.Choice(["gcs", "hf"], case_sensitive=False),
+    help="Embedding source: 'gcs' for per-pixel GeoTIFFs, 'hf' for HuggingFace.",
+)
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Directory where downloaded embedding files will be written.",
+)
+@click.option(
+    "--gcs-paths-csv",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="CSV with tile_id and gcs_uri (required for --source gcs).",
+)
+@click.option(
+    "--tiles-csv",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="CSV with tile_id and image_path (required for --source hf).",
+)
+@click.option(
+    "--max-workers",
+    default=4,
+    show_default=True,
+    type=int,
+    help="Reserved for future parallel GCS downloads.",
+)
+def download_aef_embeddings_cmd(
+    source, output_dir, gcs_paths_csv, tiles_csv, max_workers
+):
+    """Download AlphaEarth Foundation embeddings for a set of tiles.
+
+    Use --source gcs for per-pixel GeoTIFFs from Google Cloud Storage, or
+    --source hf for patch-level vectors from HuggingFace.
+    """
+    from pathlib import Path
+    from pytorch_segmentation_models_trainer.tools.soft_labels import (
+        download_aef_embeddings,
+    )
+
+    try:
+        download_aef_embeddings.run(
+            source=source,
+            output_dir=Path(output_dir),
+            gcs_paths_csv=gcs_paths_csv,
+            tiles_csv=tiles_csv,
+            max_workers=max_workers,
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    click.echo("Download complete.")
+
+
+@cli.command("generate-training-csv")
+@click.argument("manifest_path", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Directory where train.csv, val.csv, test.csv are written.",
+)
+@click.option(
+    "--image-dir",
+    default=None,
+    type=click.Path(file_okay=False),
+    help="Directory containing <tile_id>.tif images. "
+    "Ignored when manifest already has image_path column.",
+)
+@click.option(
+    "--image-extension",
+    default=".tif",
+    show_default=True,
+    help="File extension for images in --image-dir.",
+)
+@click.option(
+    "--train-ratio",
+    default=0.70,
+    show_default=True,
+    type=float,
+    help="Fraction of rows for training.",
+)
+@click.option(
+    "--val-ratio",
+    default=0.15,
+    show_default=True,
+    type=float,
+    help="Fraction of rows for validation.",
+)
+@click.option(
+    "--seed",
+    default=42,
+    show_default=True,
+    type=int,
+    help="Random seed for reproducibility.",
+)
+def generate_training_csv_cmd(
+    manifest_path,
+    output_dir,
+    image_dir,
+    image_extension,
+    train_ratio,
+    val_ratio,
+    seed,
+):
+    """Generate train/val/test CSV splits from MANIFEST_PATH.
+
+    MANIFEST_PATH is the CSV produced by build-soft-labels (or any CSV with
+    tile_id, p_soft_path, and optionally w_conf_path).
+    """
+    from pathlib import Path
+    from pytorch_segmentation_models_trainer.tools.soft_labels import (
+        generate_training_csv,
+    )
+
+    try:
+        paths = generate_training_csv.run(
+            manifest_path=manifest_path,
+            output_dir=Path(output_dir),
+            image_dir=image_dir,
+            image_extension=image_extension,
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+            seed=seed,
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    for name, path in paths.items():
+        click.echo(f"  {name}: {path}")
+
+
 def entry():
     """Entry point registered in pyproject.toml."""
     cli()
