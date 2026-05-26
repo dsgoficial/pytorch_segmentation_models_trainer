@@ -18,7 +18,13 @@
 #       --alpha 0.5 \
 #       --beta 0.2 \
 #       --aef-embeddings-dir /data/aef_embeddings \
-#       --aef-source gcs
+#       --aef-source gcs \
+#       --aef-resampling auto
+#
+# AEF resampling modes:
+#   auto      - aggregate when image pixels are coarser than AEF; nearest when finer
+#   aggregate - dequantize -> vector sum -> L2 normalize (downsampling only)
+#   nearest   - nearest-neighbor assignment -> L2 normalize (upsampling-safe)
 #
 # Then generate splits:
 #   pytorch-smt-tools generate-training-csv \

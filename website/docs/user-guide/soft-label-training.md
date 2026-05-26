@@ -205,28 +205,34 @@ pytorch-smt-tools build-soft-labels sources.csv \
     --alpha 0.5 \
     --beta 0.2 \
     --aef-embeddings-dir /data/aef_embeddings \
-    --aef-source gcs
+    --aef-source gcs \
+    --aef-resampling auto
 ```
 
-:::info AEF aggregation uses the official Google algorithm
+:::info AEF resampling is local and vector-aware
 
-Standard spatial resampling (nearest-neighbour, bilinear, average, …) is
-**invalid** for AEF embeddings.  The 64-D vectors live on a learned manifold;
-pixel-level interpolation produces off-manifold synthetic vectors that corrupt
-cosine similarities.
+The preprocessing tool does not require `aef-loader` for local GeoTIFF files.
+It includes local AEF helpers for NoData handling, dequantization, vector
+aggregation, nearest-neighbor upsampling, and L2 normalization.
 
-`build_soft_labels.py` implements the official Google aggregation pipeline when
-the AEF file has a different resolution from the training image:
+Raw AEF `int8` rasters use `-128` as NoData.  This value is converted to `NaN`
+before any aggregation so invalid pixels do not become negative embedding
+components.
 
-1. **Dequantise** — `sign(v) × (v / 127.5)²` per band
-2. **Element-wise vector sum** — area-weighted sum of dequantised source pixels to each target pixel
-3. **L2 normalise** — divide each pixel vector by its Euclidean norm
+`--aef-resampling auto` chooses the spatial operation from the source and target
+pixel areas:
 
-This is valid only for **downscaling** (target pixel coarser than or equal to
-source).  If the AEF file is at a finer resolution than the image (upscaling),
-the script logs an error and falls back to the entropy + border W_conf formula.
+- **Downsampling** (training image is coarser): dequantize -> element-wise
+  vector sum -> L2 normalize.
+- **Upsampling** (training image is finer): nearest-neighbor assignment -> L2
+  normalize.
 
-See the [AEF-on-GCS documentation](https://developers.google.com/earth-engine/guides/aef_on_gcs_readme).
+Bilinear, cubic, and average interpolation are not exposed for AEF vectors
+because they create synthetic off-manifold embeddings and can corrupt cosine
+similarities.
+
+See [AlphaEarth Foundation Embeddings](./aef-embeddings.md) for resampling
+modes and examples.
 :::
 
 ---

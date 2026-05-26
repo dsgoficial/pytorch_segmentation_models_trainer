@@ -38,6 +38,12 @@ if __name__ == "__main__":
     parser.add_argument("--stride", type=int, default=None)
     parser.add_argument("--aef-embeddings-dir", default=None)
     parser.add_argument("--aef-source", choices=["gcs", "hf"], default="gcs")
+    parser.add_argument(
+        "--aef-resampling",
+        choices=["auto", "aggregate", "nearest", "none"],
+        default="auto",
+        help="AEF raster alignment strategy for GCS embeddings.",
+    )
     parser.add_argument("--beta", type=float, default=0.0)
     parser.add_argument(
         "--no-border",
@@ -57,6 +63,7 @@ if __name__ == "__main__":
         stride=args.stride,
         aef_embeddings_dir=args.aef_embeddings_dir,
         aef_source=args.aef_source,
+        aef_resampling=args.aef_resampling,
         beta=args.beta,
         use_border=not args.no_border,
     )

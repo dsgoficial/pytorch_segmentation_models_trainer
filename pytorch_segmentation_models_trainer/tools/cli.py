@@ -387,6 +387,16 @@ def ddoq_vae_cmd(yaml_path, k, checkpoint_path, output_dir, distilled_image_form
     help="AEF embedding source.",
 )
 @click.option(
+    "--aef-resampling",
+    default="auto",
+    show_default=True,
+    type=click.Choice(["auto", "aggregate", "nearest", "none"], case_sensitive=False),
+    help=(
+        "AEF raster alignment strategy for GCS embeddings. 'auto' aggregates "
+        "for downsampling and uses nearest-neighbor for upsampling."
+    ),
+)
+@click.option(
     "--beta",
     default=0.0,
     show_default=True,
@@ -411,6 +421,7 @@ def build_soft_labels_cmd(
     stride,
     aef_embeddings_dir,
     aef_source,
+    aef_resampling,
     beta,
     use_border,
 ):
@@ -431,6 +442,7 @@ def build_soft_labels_cmd(
         stride=stride,
         aef_embeddings_dir=aef_embeddings_dir,
         aef_source=aef_source,
+        aef_resampling=aef_resampling,
         beta=beta,
         use_border=use_border,
     )

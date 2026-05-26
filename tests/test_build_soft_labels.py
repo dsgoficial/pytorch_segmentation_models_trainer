@@ -1208,16 +1208,18 @@ class TestProcessTileWithAEF:
             data = src.read(1)
         assert data.shape == (h, w)
 
-    def test_process_tile_coarser_aef_aggregated(self, same_res_setup, tmp_path):
-        """process_tile aggregates a coarser AEF embedding to the image grid.
+    def test_process_tile_coarser_aef_upsampled_with_nearest(
+        self, same_res_setup, tmp_path
+    ):
+        """process_tile upsamples coarser AEF embeddings with nearest neighbor.
 
-        When the AEF file is at a coarser resolution (fewer pixels than the
-        image), the official Google algorithm is applied automatically.
+        When the AEF file has fewer pixels than the image, ``aef_resampling=auto``
+        avoids vector interpolation and assigns nearest source embeddings.
         """
         img_path, path_a, _, h, w = same_res_setup
         import pandas as pd
 
-        # AEF at 8x8, image at 32x32 (coarser → valid for aggregation)
+        # AEF at 8x8, image at 32x32 (coarser source → nearest upsample)
         aef_h, aef_w, d = 8, 8, 4
         aef_dir = tmp_path / "aef"
         aef_dir.mkdir()
@@ -1246,7 +1248,7 @@ class TestProcessTileWithAEF:
                 }
             ]
         )
-        # Should succeed: aggregation is valid for downscaling
+        # Should succeed: auto uses nearest for upsampling
         _, _, p_soft_path, w_conf_path = process_tile(
             "tile_0",
             rows,
@@ -1263,18 +1265,18 @@ class TestProcessTileWithAEF:
         assert result_w.min() >= 0.0 - 1e-5
         assert result_w.max() <= 1.0 + 1e-5
 
-    def test_process_tile_finer_aef_logs_error_and_falls_back(
+    def test_process_tile_finer_aef_aggregated_to_image_grid(
         self, same_res_setup, tmp_path
     ):
-        """process_tile logs an error and falls back when AEF is at a finer resolution.
+        """process_tile aggregates finer AEF embeddings to the image grid.
 
-        Upscaling AEF embeddings is not supported; process_tile falls back to
-        the entropy + border W_conf formula rather than raising.
+        When the AEF file has more pixels than the image, ``aef_resampling=auto``
+        uses vector-sum aggregation followed by L2 normalization.
         """
         img_path, path_a, _, h, w = same_res_setup
         import pandas as pd
 
-        # AEF at 64x64 (finer than image 32x32) → invalid upscaling
+        # AEF at 64x64 (finer than image 32x32) → aggregate downsample
         aef_h, aef_w, d = 64, 64, 4
         aef_dir = tmp_path / "aef"
         aef_dir.mkdir()
@@ -1303,7 +1305,7 @@ class TestProcessTileWithAEF:
                 }
             ]
         )
-        # Should not raise — logs error, falls back to entropy+border W_conf
+        # Should not raise — auto aggregates down to the image grid
         _, _, p_soft_path, w_conf_path = process_tile(
             "tile_0",
             rows,

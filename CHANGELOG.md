@@ -1,5 +1,23 @@
 # Unreleased
 
+## AlphaEarth Foundation (AEF) Embedding Resampling
+
+- Added local AEF embedding utilities for NoData masking, dequantization,
+  quantization, vector validity checks, L2 normalization, vector-sum
+  downsampling, and nearest-neighbor upsampling without adding `aef-loader` as
+  a core dependency.
+- Fixed AEF NoData handling in soft-label preprocessing: raw `int8` value `-128`
+  is now converted to `NaN` before aggregation so invalid pixels are not treated
+  as negative embedding components.
+- Added `--aef-resampling {auto,aggregate,nearest,none}` to `build-soft-labels`.
+  The default `auto` mode uses vector-sum aggregation when image pixels are
+  coarser than AEF and nearest-neighbor assignment when image pixels are finer.
+- Updated per-pixel `w_embed` centroid computation to ignore invalid or
+  zero-norm embedding vectors and return finite confidence maps.
+- Added user documentation for local AEF embedding conversion, downsampling,
+  upsampling, and CLI usage in `website/docs/user-guide/aef-embeddings.md`, and
+  linked it from the soft-label training guide.
+
 ## Documentation deployment
 
 - Fixed Docusaurus MDX parsing in the soft-label training guide by replacing

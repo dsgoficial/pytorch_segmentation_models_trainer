@@ -35,6 +35,15 @@ from rasterio.transform import Affine
 from rasterio.warp import reproject as warp_reproject
 from scipy.ndimage import distance_transform_edt
 
+from pytorch_segmentation_models_trainer.tools.soft_labels.aef_utils import (
+    AEFResamplingStrategy,
+    aggregate_aef_raster_to_grid,
+    normalize_aef_vectors,
+    read_aef_raster,
+    resample_aef_raster_to_grid,
+    valid_aef_vector_mask,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -231,44 +240,9 @@ def aggregate_aef_to_image_grid(
     Raises:
         ValueError: if the target pixel area is smaller than the source (upscaling).
     """
-    eps = 1e-8
-    with rasterio.open(aef_path) as src:
-        src_pixel_area = abs(src.transform.a * src.transform.e)
-        dst_pixel_area = abs(dst_transform.a * dst_transform.e)
-        if dst_pixel_area < src_pixel_area * 0.99:
-            raise ValueError(
-                f"AEF aggregation only supports downscaling (target pixel area must "
-                f"be >= source pixel area). Source: {src_pixel_area:.6g}, "
-                f"target: {dst_pixel_area:.6g}. For finer target resolutions, "
-                f"download AEF at the native resolution matching the training image."
-            )
-
-        # Step 1: read and dequantise all bands
-        raw = src.read().astype(np.float32)  # (D, H_src, W_src)
-        dequant = np.sign(raw) * (raw / 127.5) ** 2  # (D, H_src, W_src)
-
-        num_bands = src.count
-        dst_sum = np.zeros((num_bands, dst_height, dst_width), dtype=np.float32)
-
-        # Step 2: sum each dequantised band to the target grid
-        for band_idx in range(num_bands):
-            band_dst = np.zeros((dst_height, dst_width), dtype=np.float32)
-            warp_reproject(
-                source=dequant[band_idx],
-                destination=band_dst,
-                src_transform=src.transform,
-                src_crs=src.crs,
-                dst_transform=dst_transform,
-                dst_crs=dst_crs,
-                resampling=Resampling.sum,
-            )
-            dst_sum[band_idx] = band_dst
-
-    # Step 3: L2 normalise per pixel
-    norm = np.linalg.norm(dst_sum, axis=0, keepdims=True)  # (1, H, W)
-    normalised = dst_sum / (norm + eps)  # (D, H, W)
-
-    return np.transpose(normalised, (1, 2, 0)).astype(np.float32)  # (H, W, D)
+    return aggregate_aef_raster_to_grid(
+        aef_path, dst_height, dst_width, dst_transform, dst_crs
+    )
 
 
 def load_aef_embedding(
@@ -279,22 +253,21 @@ def load_aef_embedding(
     dst_width: Optional[int] = None,
     dst_transform: Optional[Affine] = None,
     dst_crs=None,
+    aef_resampling: AEFResamplingStrategy = "auto",
 ) -> np.ndarray:
     """Load a pre-downloaded AlphaEarth Foundation embedding for a tile.
 
     For GCS source, when ``dst_height``, ``dst_width``, ``dst_transform``, and
-    ``dst_crs`` are all provided, the official Google aggregation algorithm is
-    applied (dequantise → element-wise vector sum → L2 normalise).  This is
-    valid only for downscaling; attempting to produce a finer grid than the
-    source raises ``ValueError``.
+    ``dst_crs`` are all provided, ``aef_resampling`` controls spatial alignment.
+    ``"auto"`` uses vector-sum aggregation for downsampling and nearest-neighbor
+    assignment for upsampling.
 
     When the dst parameters are omitted, the raw array is returned at native
     resolution without any transformation.
 
-    **Standard spatial resampling (nearest-neighbour, bilinear, average) must
-    NOT be used on AEF embeddings.**  The 64-D vectors are learned manifold
-    representations; pixel-level interpolation produces off-manifold synthetic
-    vectors that corrupt cosine similarities.
+    **Bilinear/cubic interpolation must NOT be used on AEF embeddings.**  The
+    vectors are learned manifold representations; pixel-level interpolation
+    produces off-manifold synthetic vectors that corrupt cosine similarities.
 
     See: https://developers.google.com/earth-engine/guides/aef_on_gcs_readme
 
@@ -308,14 +281,15 @@ def load_aef_embedding(
         dst_width: Target grid width (GCS + aggregation only).
         dst_transform: Target affine transform (GCS + aggregation only).
         dst_crs: Target CRS (GCS + aggregation only).
+        aef_resampling: ``"auto"``, ``"aggregate"``, ``"nearest"``, or ``"none"``.
 
     Returns:
         ``(H, W, D)`` float32 for GCS source; ``(D,)`` float32 for HF source.
 
     Raises:
         FileNotFoundError: if the embedding file does not exist.
-        ValueError: if ``source`` is not ``"gcs"`` or ``"hf"``, or if
-                    upscaling is requested (target finer than source).
+        ValueError: if ``source`` is not ``"gcs"`` or ``"hf"``, or if an
+                    unsupported resampling strategy is requested.
     """
     aef_dir = Path(aef_dir)
     if source == "gcs":
@@ -323,11 +297,17 @@ def load_aef_embedding(
         if not path.exists():
             raise FileNotFoundError(f"GCS embedding not found: {path}")
         if all(p is not None for p in [dst_height, dst_width, dst_transform, dst_crs]):
-            return aggregate_aef_to_image_grid(
-                str(path), dst_height, dst_width, dst_transform, dst_crs
+            return resample_aef_raster_to_grid(
+                str(path),
+                dst_height,
+                dst_width,
+                dst_transform,
+                dst_crs,
+                strategy=aef_resampling,
             )
-        with rasterio.open(path) as src:
-            data = src.read()  # (D, H, W)
+        data, _, _ = read_aef_raster(str(path))
+        if np.issubdtype(data.dtype, np.floating) and np.isnan(data).any():
+            data = normalize_aef_vectors(data, axis=0)
         return np.transpose(data, (1, 2, 0)).astype(np.float32)  # (H, W, D)
     elif source == "hf":
         path = aef_dir / f"{tile_id}.npy"
@@ -378,18 +358,18 @@ def compute_w_embed(
         argmax_map = p_soft.argmax(axis=0)  # (H, W)
         D = embedding.shape[2]
         centroids = np.zeros((num_classes, D), dtype=np.float32)
+        valid_vectors = valid_aef_vector_mask(embedding, axis=2, eps=eps)
         for c in range(num_classes):
-            mask = argmax_map == c
+            mask = (argmax_map == c) & valid_vectors
             if mask.any():
                 centroids[c] = embedding[mask].mean(axis=0)
 
-        emb_norm = embedding / (np.linalg.norm(embedding, axis=2, keepdims=True) + eps)
+        emb_norm = normalize_aef_vectors(embedding, axis=2, eps=eps)
         centroid_for_pixel = centroids[argmax_map]  # (H, W, D)
-        cent_norm = centroid_for_pixel / (
-            np.linalg.norm(centroid_for_pixel, axis=2, keepdims=True) + eps
-        )
+        cent_norm = normalize_aef_vectors(centroid_for_pixel, axis=2, eps=eps)
         cos_sim = (emb_norm * cent_norm).sum(axis=2)  # (H, W)
         w_embed = (cos_sim + 1.0) / 2.0  # map [-1,1] → [0,1]
+        w_embed = np.where(valid_vectors, w_embed, 0.0)
 
     elif embedding.ndim == 1:
         # HF patch-level mode: (D,)
@@ -410,7 +390,7 @@ def compute_w_embed(
             "Expected (H, W, D) for GCS or (D,) for HF."
         )
 
-    return w_embed[np.newaxis].astype(np.float32)  # (1, H, W)
+    return np.nan_to_num(w_embed[np.newaxis], nan=0.0).astype(np.float32)
 
 
 def _compute_hf_class_centroids(
@@ -506,6 +486,7 @@ def process_tile(
     beta: float = 0.0,
     class_centroids: Optional[np.ndarray] = None,
     use_border: bool = True,
+    aef_resampling: AEFResamplingStrategy = "auto",
 ) -> Tuple[str, str, Path, Path]:
     """Build P_soft and W_conf rasters for one tile.
 
@@ -531,6 +512,9 @@ def process_tile(
         use_border: When True (default), include the border-distance component in
                     W_conf (user contribution). Set to False for the original
                     paper formula (entropy-only or entropy + embed).
+        aef_resampling: AEF raster alignment strategy for GCS mode. ``"auto"``
+                        aggregates when target pixels are coarser than AEF and
+                        uses nearest-neighbor when target pixels are finer.
 
     Returns:
         Tuple of (tile_id, image_path, p_soft_path, w_conf_path).
@@ -559,6 +543,7 @@ def process_tile(
                 dst_width=img_w,
                 dst_transform=img_transform,
                 dst_crs=img_crs,
+                aef_resampling=aef_resampling,
             )
             w_embed = compute_w_embed(
                 embedding, p_soft, class_centroids=class_centroids
@@ -679,6 +664,7 @@ def run(
     aef_source: str = "gcs",
     beta: float = 0.0,
     use_border: bool = True,
+    aef_resampling: AEFResamplingStrategy = "auto",
 ) -> Path:
     """Build P_soft and W_conf rasters for all tiles in *input_csv*.
 
@@ -697,6 +683,7 @@ def run(
               ``use_border=True``).
         use_border: When True (default), include the border-distance component in
                     W_conf. Set to False to replicate the original paper formula.
+        aef_resampling: AEF raster alignment strategy for GCS mode.
 
     Returns:
         Path to the written manifest CSV.
@@ -732,8 +719,9 @@ def run(
                 aef_dir,
                 aef_source,
                 beta,
-                class_centroids,
-                use_border,
+                class_centroids=class_centroids,
+                use_border=use_border,
+                aef_resampling=aef_resampling,
             ): tile_id
             for tile_id, grp in groups.items()
         }
