@@ -12,6 +12,10 @@
 - Added `--aef-resampling {auto,aggregate,nearest,none}` to `build-soft-labels`.
   The default `auto` mode uses vector-sum aggregation when image pixels are
   coarser than AEF and nearest-neighbor assignment when image pixels are finer.
+- Added optional aligned AEF export via `--save-aef-aligned` and
+  `--aef-aligned-dtype {int8,float32}`. Saved rasters are written to
+  `output_dir/aef_aligned/{tile_id}.tif`, and manifests include
+  `aligned_aef_path` when export is enabled.
 - Updated per-pixel `w_embed` centroid computation to ignore invalid or
   zero-norm embedding vectors and return finite confidence maps.
 - Added user documentation for local AEF embedding conversion, downsampling,

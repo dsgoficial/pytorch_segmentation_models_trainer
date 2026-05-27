@@ -206,7 +206,9 @@ pytorch-smt-tools build-soft-labels sources.csv \
     --beta 0.2 \
     --aef-embeddings-dir /data/aef_embeddings \
     --aef-source gcs \
-    --aef-resampling auto
+    --aef-resampling auto \
+    --save-aef-aligned \
+    --aef-aligned-dtype int8
 ```
 
 :::info AEF resampling is local and vector-aware
@@ -232,7 +234,7 @@ because they create synthetic off-manifold embeddings and can corrupt cosine
 similarities.
 
 See [AlphaEarth Foundation Embeddings](./aef-embeddings.md) for resampling
-modes and examples.
+modes, aligned embedding export, and examples.
 :::
 
 ---

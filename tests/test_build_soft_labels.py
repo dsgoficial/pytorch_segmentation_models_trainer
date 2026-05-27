@@ -588,6 +588,13 @@ class TestExpandManifestToPatches:
         manifest_no_wc = tile_manifest.drop(columns=["w_conf_path"])
         df = expand_manifest_to_patches(manifest_no_wc, patch_size=16, stride=16)
         assert "w_conf_path" not in df.columns
+
+    def test_aligned_aef_path_propagated(self, tile_manifest):
+        """Optional aligned_aef_path propagates to every patch row."""
+        tile_manifest["aligned_aef_path"] = "/tmp/aef_aligned/tile_0.tif"
+        df = expand_manifest_to_patches(tile_manifest, patch_size=16, stride=16)
+        assert "aligned_aef_path" in df.columns
+        assert (df["aligned_aef_path"] == "/tmp/aef_aligned/tile_0.tif").all()
         assert len(df) == 4
 
 
@@ -1357,6 +1364,115 @@ class TestProcessTileWithAEF:
             result_w = src.read(1)
         assert result_w.shape == (h, w)
 
+    def test_process_tile_saves_aligned_aef_int8(self, same_res_setup, tmp_path):
+        """process_tile writes aligned AEF embeddings as quantized int8."""
+        img_path, path_a, _, h, w = same_res_setup
+        import pandas as pd
+
+        aef_h, aef_w, d = 8, 8, 4
+        aef_dir = tmp_path / "aef"
+        aef_dir.mkdir()
+        transform = from_bounds(*BOUNDS, aef_w, aef_h)
+        data = (np.ones((d, aef_h, aef_w)) * 64).astype(np.int8)
+        with rasterio.open(
+            aef_dir / "tile_0.tif",
+            "w",
+            driver="GTiff",
+            height=aef_h,
+            width=aef_w,
+            count=d,
+            dtype="int8",
+            crs=EPSG4326,
+            transform=transform,
+        ) as dst:
+            dst.write(data)
+
+        rows = pd.DataFrame(
+            [
+                {
+                    "source_name": "a",
+                    "lulc_path": str(path_a),
+                    "weight": 1.0,
+                    "image_path": str(img_path),
+                }
+            ]
+        )
+        result = process_tile(
+            "tile_0",
+            rows,
+            tmp_path,
+            num_classes=3,
+            alpha=0.6,
+            aef_dir=aef_dir,
+            aef_source="gcs",
+            beta=0.0,
+            save_aligned_aef=True,
+            aligned_aef_dtype="int8",
+        )
+        *_, aligned_aef_path = result
+        assert aligned_aef_path.exists()
+        with rasterio.open(aligned_aef_path) as src:
+            assert src.height == h
+            assert src.width == w
+            assert src.count == d
+            assert src.dtypes[0] == "int8"
+            assert src.nodata == -128
+
+    def test_process_tile_saves_aligned_aef_float32(self, same_res_setup, tmp_path):
+        """process_tile writes aligned AEF embeddings as normalized float32."""
+        img_path, path_a, _, h, w = same_res_setup
+        import pandas as pd
+
+        aef_h, aef_w, d = 8, 8, 4
+        aef_dir = tmp_path / "aef"
+        aef_dir.mkdir()
+        transform = from_bounds(*BOUNDS, aef_w, aef_h)
+        data = (np.ones((d, aef_h, aef_w)) * 64).astype(np.int8)
+        with rasterio.open(
+            aef_dir / "tile_0.tif",
+            "w",
+            driver="GTiff",
+            height=aef_h,
+            width=aef_w,
+            count=d,
+            dtype="int8",
+            crs=EPSG4326,
+            transform=transform,
+        ) as dst:
+            dst.write(data)
+
+        rows = pd.DataFrame(
+            [
+                {
+                    "source_name": "a",
+                    "lulc_path": str(path_a),
+                    "weight": 1.0,
+                    "image_path": str(img_path),
+                }
+            ]
+        )
+        result = process_tile(
+            "tile_0",
+            rows,
+            tmp_path,
+            num_classes=3,
+            alpha=0.6,
+            aef_dir=aef_dir,
+            aef_source="gcs",
+            beta=0.0,
+            save_aligned_aef=True,
+            aligned_aef_dtype="float32",
+        )
+        *_, aligned_aef_path = result
+        with rasterio.open(aligned_aef_path) as src:
+            assert src.height == h
+            assert src.width == w
+            assert src.count == d
+            assert src.dtypes[0] == "float32"
+            data = src.read()
+        norms = np.linalg.norm(np.transpose(data, (1, 2, 0)), axis=2)
+        assert np.allclose(norms, 1.0, atol=1e-5)
+
 
 # ---------------------------------------------------------------------------
 # run() orchestration
@@ -1524,3 +1640,46 @@ class TestRun:
             "w_conf_path",
         }
         assert len(df) == 1
+
+    def test_run_save_aligned_aef_adds_manifest_column(self, same_res_setup, tmp_path):
+        """run() writes aligned AEF and includes aligned_aef_path in manifest."""
+        import pandas as pd
+        from pytorch_segmentation_models_trainer.tools.soft_labels.build_soft_labels import (
+            run,
+        )
+
+        img_path, path_a, path_b, _, _ = same_res_setup
+        csv_path = self._sources_csv(tmp_path, img_path, path_a, path_b)
+        aef_dir = tmp_path / "aef"
+        aef_dir.mkdir()
+
+        aef_h, aef_w, d = 8, 8, 4
+        transform = from_bounds(*BOUNDS, aef_w, aef_h)
+        data = (np.ones((d, aef_h, aef_w)) * 64).astype(np.int8)
+        with rasterio.open(
+            aef_dir / "tile_0.tif",
+            "w",
+            driver="GTiff",
+            height=aef_h,
+            width=aef_w,
+            count=d,
+            dtype="int8",
+            crs=EPSG4326,
+            transform=transform,
+        ) as dst:
+            dst.write(data)
+
+        out_dir = tmp_path / "output_save_aef"
+        manifest_path = run(
+            input_csv=str(csv_path),
+            output_dir=out_dir,
+            num_classes=3,
+            max_workers=1,
+            aef_embeddings_dir=str(aef_dir),
+            aef_source="gcs",
+            save_aligned_aef=True,
+            aligned_aef_dtype="int8",
+        )
+        df = pd.read_csv(manifest_path)
+        assert "aligned_aef_path" in df.columns
+        assert Path(df.iloc[0]["aligned_aef_path"]).exists()
