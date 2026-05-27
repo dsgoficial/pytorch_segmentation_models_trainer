@@ -453,8 +453,11 @@ def build_soft_labels_cmd(
 @click.option(
     "--source",
     required=True,
-    type=click.Choice(["gcs", "hf"], case_sensitive=False),
-    help="Embedding source: 'gcs' for per-pixel GeoTIFFs, 'hf' for HuggingFace.",
+    type=click.Choice(["gcs", "hf", "sourcecoop"], case_sensitive=False),
+    help=(
+        "Embedding source: 'gcs' for GeoTIFFs from GCS, 'hf' for HuggingFace, "
+        "or 'sourcecoop' for cropped COGs from Source Cooperative."
+    ),
 )
 @click.option(
     "--output-dir",
@@ -472,7 +475,24 @@ def build_soft_labels_cmd(
     "--tiles-csv",
     default=None,
     type=click.Path(exists=True, dir_okay=False),
-    help="CSV with tile_id and image_path (required for --source hf).",
+    help="CSV with tile_id and image_path (required for --source hf/sourcecoop).",
+)
+@click.option(
+    "--sourcecoop-index-path",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Optional local Source Cooperative STAC GeoParquet index.",
+)
+@click.option(
+    "--sourcecoop-index-url",
+    default=None,
+    help="Remote Source Cooperative STAC GeoParquet index URL override.",
+)
+@click.option(
+    "--year",
+    default=None,
+    type=int,
+    help="Annual AEF product year override for --source sourcecoop.",
 )
 @click.option(
     "--max-workers",
@@ -482,12 +502,20 @@ def build_soft_labels_cmd(
     help="Reserved for future parallel GCS downloads.",
 )
 def download_aef_embeddings_cmd(
-    source, output_dir, gcs_paths_csv, tiles_csv, max_workers
+    source,
+    output_dir,
+    gcs_paths_csv,
+    tiles_csv,
+    sourcecoop_index_path,
+    sourcecoop_index_url,
+    year,
+    max_workers,
 ):
     """Download AlphaEarth Foundation embeddings for a set of tiles.
 
-    Use --source gcs for per-pixel GeoTIFFs from Google Cloud Storage, or
-    --source hf for patch-level vectors from HuggingFace.
+    Use --source gcs for per-pixel GeoTIFFs from Google Cloud Storage,
+    --source hf for patch-level vectors from HuggingFace, or --source
+    sourcecoop for cropped per-pixel GeoTIFFs from Source Cooperative COGs.
     """
     from pathlib import Path
     from pytorch_segmentation_models_trainer.tools.soft_labels import (
@@ -500,6 +528,11 @@ def download_aef_embeddings_cmd(
             output_dir=Path(output_dir),
             gcs_paths_csv=gcs_paths_csv,
             tiles_csv=tiles_csv,
+            sourcecoop_index_path=sourcecoop_index_path,
+            sourcecoop_index_url=(
+                sourcecoop_index_url or download_aef_embeddings.SOURCECOOP_AEF_INDEX_URL
+            ),
+            year=year,
             max_workers=max_workers,
         )
     except ValueError as exc:

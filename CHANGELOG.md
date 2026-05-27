@@ -38,6 +38,17 @@
   `MBTilesMaskWindowedDataset` so repeated training runs can skip mask scanning
   and sliding-window index construction.
 
+## AlphaEarth Foundation Embedding Downloads
+
+- Added `--source sourcecoop` to `download-aef-embeddings`, using the public
+  Source Cooperative AEF STAC GeoParquet index to select intersecting annual
+  COGs and save cropped 64-band per-pixel GeoTIFF embeddings for each tile.
+- Added Source Cooperative year selection from `--year`, a per-row `year`
+  column, or the first year found in `image_path`, avoiding full HuggingFace
+  dataset downloads when only regional AEF crops are needed.
+- Documented the Source Cooperative download workflow in the AEF and soft-label
+  guides, and added `conf/examples/soft_label_aef_sourcecoop.yaml`.
+
 ## Soft-Label: optional border-distance component in W_conf
 
 Made the border-distance mitigation contribution to W_conf optional, allowing

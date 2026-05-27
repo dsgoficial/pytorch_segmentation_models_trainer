@@ -186,6 +186,44 @@ uniformly to all pixels:
 w_embed(i) = (cos_sim(emb_tile, centroid(dominant_class)) + 1) / 2
 ```
 
+### Source Cooperative mode — cropped per-pixel COG embeddings
+
+Downloads 64-band per-pixel AEF embedding crops from the public
+[Source Cooperative AEF annual COG collection](https://source.coop/tge-labs/aef/v1/annual).
+This mode reads the STAC GeoParquet index, selects the annual COG intersecting
+each tile footprint, and writes only the crop needed by the tile as
+`{tile_id}.tif`.
+
+```bash
+pytorch-smt-tools download-aef-embeddings \
+    --source sourcecoop \
+    --tiles-csv tiles.csv \
+    --output-dir /data/aef_sourcecoop_embeddings \
+    --year 2025
+```
+
+When `--year` is omitted, the downloader uses a `year` column in `tiles.csv` or
+the first 4-digit year found in `image_path`.
+
+```csv
+tile_id,image_path,year
+tile_0,/data/images/tile_20250625_20260106.tif,2025
+tile_1,/data/images/tile_20240101.tif,2024
+```
+
+The resulting files are per-pixel GeoTIFF embeddings, so use them in the build
+step with `--aef-source gcs`:
+
+```bash
+pytorch-smt-tools build-soft-labels sources.csv \
+    --output-dir /data/soft_labels \
+    --num-classes 4 \
+    --alpha 0.5 \
+    --beta 0.2 \
+    --aef-embeddings-dir /data/aef_sourcecoop_embeddings \
+    --aef-source gcs
+```
+
 **Comparison of AEF modes:**
 
 | | GCS (per-pixel) | HF (patch-level) |

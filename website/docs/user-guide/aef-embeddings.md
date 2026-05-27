@@ -28,6 +28,16 @@ HuggingFace mode expects one patch-level NumPy vector per tile:
 
 HF vectors are not spatially resampled because each file represents one tile.
 
+Source Cooperative mode writes cropped per-pixel GeoTIFF embeddings using the
+same local format as GCS mode:
+
+```text
+/data/aef_sourcecoop_embeddings/{tile_id}.tif
+```
+
+These crops are selected from the public annual AEF STAC GeoParquet index and
+read by `build-soft-labels` with `--aef-source gcs`.
+
 ## Local AEF conversion
 
 Raw AEF rasters store embeddings as `int8`.  The local converter handles the
@@ -95,6 +105,19 @@ pytorch-smt-tools download-aef-embeddings \
     --gcs-paths-csv gcs_paths.csv \
     --output-dir /data/aef_embeddings
 ```
+
+Or download per-tile crops from Source Cooperative COGs:
+
+```bash
+pytorch-smt-tools download-aef-embeddings \
+    --source sourcecoop \
+    --tiles-csv tiles.csv \
+    --output-dir /data/aef_sourcecoop_embeddings \
+    --year 2025
+```
+
+When `--year` is omitted, the downloader uses a `year` column in `tiles.csv` or
+the first 4-digit year found in `image_path`.
 
 Build soft labels with AEF blending:
 
