@@ -1,5 +1,64 @@
 # Unreleased
 
+## MBTiles tools
+
+- Added `scan-mask-colors` CLI command (`pytorch-smt-tools scan-mask-colors MASK_PATH`)
+  that scans a mask raster for every unique RGB triplet using parallel windowed reads
+  (`ThreadPoolExecutor` + rasterio, tqdm progress bar) and prints a ready-to-paste
+  `color_map` JSON for `MBTilesPolygonDataset`.  `(0,0,0)` is automatically assigned
+  class 0 (background); all other colours are assigned 1, 2, 3 … in sorted order.
+  Supports `--bands`, `--window-size`, `--workers`, `--output` options.
+- Added `tools/mbtiles/scan_unique_colors.py` with the underlying
+  `scan_unique_colors`, `build_color_map`, and `scan_and_report` functions.
+- Fixed OOM crashes on large MBTiles: `scan_unique_colors` now queries the
+  SQLite `tiles` table (via `_get_mbtiles_tile_windows`) to build 256×256
+  tile-aligned windows for **only the tiles that exist** in the database,
+  skipping empty/nodata areas of the raster bbox entirely.  Non-MBTiles
+  sources fall back to the previous grid scan.
+- Fixed unbounded memory growth in `scan_unique_colors`: task submission is
+  now **bounded** — at most `2 × workers` futures are in flight simultaneously
+  (chunked `islice` loop), preventing all windows from queuing at once
+  regardless of raster size.
+- Reduced peak memory per window in `_unique_colors_in_window` by ~40%:
+  the R/G/B-to-uint32 packing now uses in-place operations (`*=`, `+=`, `del`)
+  so at most two H×W uint32 arrays exist simultaneously instead of four.
+
+## MBTiles Polygon Dataset
+
+- Added `MBTilesPolygonDataset` for training segmentation models from paired
+  image and mask MBTiles rasters (read via rasterio at native/maximum
+  resolution) filtered by vector polygon regions.
+- Sliding-window patches are generated over the image raster and filtered so
+  that only patches **fully contained** within the input polygon union are
+  indexed — border-touching patches are excluded to eliminate partial-label
+  noise at annotation edges.
+- Mask rasters (RGB/RGBA color-coded) are warped onto each image-window grid
+  via WarpedVRT so that image and mask are always spatially aligned regardless
+  of original projections.
+- Added RGB/RGBA color-map decoding: the `color_map` parameter maps each
+  `[R, G, B]` triplet to an integer class index; unmatched pixels default to
+  class `0`.  When `color_map` is `None`, the first mask band is used directly
+  as integer class indices.
+- Replaced the global grid scan in `_build_window_index` with a
+  **polygon-first** approach: for each polygon only the stride-aligned
+  positions inside its pixel bounding box are visited, reducing index-build
+  time from O(raster area) to O(sum of polygon areas).
+- Added `index_build_workers` parameter to parallelize per-polygon index
+  building via `ThreadPoolExecutor`; defaults to `min(n_polygons, cpu_count)`.
+  Threading is safe because all threads complete inside `__init__` before any
+  DataLoader workers are spawned.  Containment checks against individual
+  polygon geometries (not the global union) — windows spanning multiple
+  polygons are excluded, which is the conservative correct behavior.
+  Results across polygons are deduplicated and sorted in row-major order for
+  deterministic output.
+- Added support for `MultiPolygon` geometries in region files.
+- Added optional CSV/Parquet `window_index_cache` to skip the polygon-
+  containment pass on repeated training runs.
+- Added `conf/examples/mbtiles_polygon_dataset.yaml` with a complete train/val
+  YAML example.
+- Added user documentation at
+  `website/docs/user-guide/mbtiles-polygon-dataset.md`.
+
 ## AlphaEarth Foundation (AEF) Embedding Resampling
 
 - Added local AEF embedding utilities for NoData masking, dequantization,

@@ -619,6 +619,102 @@ def generate_training_csv_cmd(
         click.echo(f"  {name}: {path}")
 
 
+@cli.command("scan-mask-colors")
+@click.argument("mask_path", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--bands",
+    default="1,2,3",
+    show_default=True,
+    help=(
+        "Comma-separated 1-based band indices to use as R, G, B.  "
+        "Repeat a band to duplicate it, e.g. '1,1,1' for single-band masks."
+    ),
+)
+@click.option(
+    "--window-size",
+    default=1024,
+    show_default=True,
+    type=int,
+    help="Tile height and width in pixels for each windowed read.",
+)
+@click.option(
+    "--workers",
+    default=None,
+    type=int,
+    help="Thread pool size.  Defaults to min(n_tiles, cpu_count).",
+)
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    default=False,
+    help="Suppress the tqdm progress bar.",
+)
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Optional path to write the JSON report.  Always printed to stdout as well.",
+)
+def scan_mask_colors_cmd(mask_path, bands, window_size, workers, no_progress, output):
+    """Scan MASK_PATH for unique RGB tuples and print a color_map JSON.
+
+    Reads the raster in parallel windows using a ThreadPoolExecutor and
+    reports every unique (R, G, B) colour together with auto-assigned class
+    indices ready to paste into the ``color_map`` field of
+    ``MBTilesPolygonDataset``.
+
+    (0, 0, 0) is treated as background and receives class 0; all other
+    colours are assigned 1, 2, 3 … in sorted order.  Edit the indices before
+    pasting into your training YAML.
+
+    \b
+    Examples:
+
+        # Scan a mask MBTiles
+        pytorch-smt-tools scan-mask-colors masks.mbtiles
+
+        # Single-band mask — duplicate the band for RGB encoding
+        pytorch-smt-tools scan-mask-colors mask.tif --bands 1,1,1
+
+        # Save JSON to a file as well
+        pytorch-smt-tools scan-mask-colors masks.mbtiles -o colors.json
+    """
+    import json as _json
+
+    from pytorch_segmentation_models_trainer.tools.mbtiles.scan_unique_colors import (
+        scan_and_report,
+    )
+
+    try:
+        parsed_bands = [int(b.strip()) for b in bands.split(",")]
+    except ValueError:
+        raise click.UsageError(
+            f"--bands must be comma-separated integers, got '{bands}'."
+        )
+
+    try:
+        report = scan_and_report(
+            raster_path=mask_path,
+            bands=parsed_bands,
+            window_size=window_size,
+            workers=workers,
+            progress=not no_progress,
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    json_str = _json.dumps(report, indent=2)
+    click.echo(json_str)
+
+    if output:
+        from pathlib import Path as _Path
+
+        _Path(output).parent.mkdir(parents=True, exist_ok=True)
+        _Path(output).write_text(json_str)
+        click.echo(f"Report written to '{output}'.", err=True)
+
+
 def entry():
     """Entry point registered in pyproject.toml."""
     cli()
