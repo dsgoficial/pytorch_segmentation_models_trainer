@@ -1,27 +1,40 @@
 # Unreleased
 
-## MBTiles Crops Dataset
+## Dataset Builder & Raster Tools
 
-- Added `MBTilesCropsGeoTifMaskDataset` for training segmentation models from
-  pre-selected crop windows paired with a spatially-aligned mask from any
-  rasterio-readable source (VRT mosaicking multiple GeoTIFFs, single GeoTIFF,
-  MBTile, …).
-- Windows are loaded from an existing source rather than generated via sliding
-  window: a **CSV/Parquet** file with `row_off`/`col_off` pixel-space offsets,
-  or a **vector file** (GeoPackage, Shapefile, GeoJSON, …) where each feature
-  defines one window via bbox-snap to a fixed `patch_size × patch_size` grid.
-- Mask resampling is always **nearest-neighbour** to preserve class-index
-  integrity; image resampling is configurable (default `bilinear`).
-- CRS and resolution differences between image and mask are resolved
-  automatically at read time via `WarpedVRT` — the output patch size is always
-  exactly `patch_size × patch_size` regardless of mask resolution or projection.
-- Multi-band masks require a `color_map` (`[[R, G, B, class_idx], …]`);
-  single-band masks use class indices directly (`n_classes=2` binarises).
-  Instantiation raises `ValueError` if a multi-band mask is supplied without
-  `color_map`.
-- Added `MBTilesCropsGeoTifMaskDatasetConfig` dataclass in
-  `config_definitions/dataset_config.py` for Hydra integration.
-- Window index can be cached to `.csv` or `.parquet` via `window_index_cache`.
+- Added `tools/raster/tiff_remap.py` with `remap_raster` (single-file pixel-value remapping)
+  and `remap_raster_folder` (recursive directory remapping via `ThreadPoolExecutor`).
+  Returns `(output_path, success, error_message)` and `(n_success, n_errors)` respectively.
+- Added `tools/raster/vrt2tif.py` with `convert_to_geotiff` (single VRT/raster to tiled
+  compressed GeoTIFF) and `convert_folder` (batch conversion matching a glob pattern).
+  Preserves band descriptions; supports LZW, DEFLATE, JPEG, NONE compression.
+- Added `tools/dataset_builder/band_combiner.py` with `find_file_groups` (intersects
+  filenames across N source directories, optionally with a named capture pattern),
+  `combine_sources_to_tiff` (concatenates selected bands from multiple sources), and
+  `combine_all` (parallel batch combiner using `ThreadPoolExecutor`).
+- Added `tools/dataset_builder/tile_dataset_builder.py` with `compute_tile_windows`
+  (fixed-size window generator with edge adjustment) and `build_tile_dataset`
+  (rasterizes GeoPackage/vector polygon masks onto each tile, parallelised per image,
+  saves `dataset.csv` and optionally a full-resolution `mask_full.tif`).
+- Added `tools/dataset_builder/sliding_window_builder.py` with `compute_sliding_windows`
+  and `build_sliding_window_dataset` (crops existing image/mask CSV pairs into
+  sliding-window patches; preserves geo-referencing; supports class remapping and
+  directory-segment blacklist).
+- Added `tools/visualization/segmentation_vis.py` with `colorize_mask`, `prepare_image_for_display`,
+  and `create_segmentation_grid` (multi-column GT vs. prediction comparison figure with
+  optional class legend, best/worst/random sample selection, and reprojection alignment).
+- Added 6 new CLI commands to `pytorch-smt-tools`:
+  - `combine-bands` — multi-directory band combiner
+  - `build-tile-dataset` — tile dataset from YAML config
+  - `build-sliding-window-dataset` — patch generator from image/mask CSV
+  - `remap-mask-classes` — pixel class remapper across directory tree
+  - `convert-to-tiff` — batch VRT→GeoTIFF converter
+  - `visualize-predictions` — segmentation comparison grid figure
+- Added YAML config examples: `conf/examples/build_tile_dataset.yaml`,
+  `conf/examples/build_sliding_window_dataset.yaml`, `conf/examples/remap_mask_classes.yaml`.
+- Added user documentation: `website/docs/user-guide/dataset-builder.md`,
+  `website/docs/user-guide/raster-tools.md`,
+  `website/docs/user-guide/segmentation-visualization.md`.
 
 ## MBTiles tools
 
