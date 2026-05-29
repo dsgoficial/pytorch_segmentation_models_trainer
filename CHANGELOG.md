@@ -1,5 +1,28 @@
 # Unreleased
 
+## MBTiles Crops Dataset
+
+- Added `MBTilesCropsGeoTifMaskDataset` for training segmentation models from
+  pre-selected crop windows paired with a spatially-aligned mask from any
+  rasterio-readable source (VRT mosaicking multiple GeoTIFFs, single GeoTIFF,
+  MBTile, …).
+- Windows are loaded from an existing source rather than generated via sliding
+  window: a **CSV/Parquet** file with `row_off`/`col_off` pixel-space offsets,
+  or a **vector file** (GeoPackage, Shapefile, GeoJSON, …) where each feature
+  defines one window via bbox-snap to a fixed `patch_size × patch_size` grid.
+- Mask resampling is always **nearest-neighbour** to preserve class-index
+  integrity; image resampling is configurable (default `bilinear`).
+- CRS and resolution differences between image and mask are resolved
+  automatically at read time via `WarpedVRT` — the output patch size is always
+  exactly `patch_size × patch_size` regardless of mask resolution or projection.
+- Multi-band masks require a `color_map` (`[[R, G, B, class_idx], …]`);
+  single-band masks use class indices directly (`n_classes=2` binarises).
+  Instantiation raises `ValueError` if a multi-band mask is supplied without
+  `color_map`.
+- Added `MBTilesCropsGeoTifMaskDatasetConfig` dataclass in
+  `config_definitions/dataset_config.py` for Hydra integration.
+- Window index can be cached to `.csv` or `.parquet` via `window_index_cache`.
+
 ## MBTiles tools
 
 - Added `scan-mask-colors` CLI command (`pytorch-smt-tools scan-mask-colors MASK_PATH`)

@@ -413,3 +413,64 @@ class SoftLabelWindowedDatasetConfig:
     patch_size_key: str = "patch_size"
     n_first_rows_to_read: Optional[int] = None
     seed: Optional[int] = None
+
+
+@dataclass
+class MBTilesCropsGeoTifMaskDatasetConfig:
+    """Configuration for ``MBTilesCropsGeoTifMaskDataset``.
+
+    Loads pre-selected crop windows (from a CSV/Parquet file or a vector file)
+    and pairs each window with a spatially-aligned mask patch read from any
+    rasterio-readable source (VRT, GeoTIFF, MBTile, …).  Mask resampling is
+    always nearest-neighbour to preserve class-index integrity.
+
+    Example YAML (CSV windows, VRT mask)::
+
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_crops_dataset.MBTilesCropsGeoTifMaskDataset
+          image_mbtiles_path: /data/imagery.mbtiles
+          mask_path: /data/masks/mask.vrt
+          crops_path: /data/crops.csv
+          patch_size: 256
+          color_map:
+            - [255, 0, 0, 1]
+            - [0, 255, 0, 2]
+          augmentation_list:
+            - _target_: albumentations.HorizontalFlip
+              p: 0.5
+            - _target_: albumentations.Normalize
+              mean: [0.485, 0.456, 0.406]
+              std: [0.229, 0.224, 0.225]
+            - _target_: albumentations.pytorch.ToTensorV2
+
+    Example YAML (vector windows, single-band GeoTIFF mask)::
+
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_crops_dataset.MBTilesCropsGeoTifMaskDataset
+          image_mbtiles_path: /data/imagery.mbtiles
+          mask_path: /data/masks/mask.tif
+          crops_path: /data/crops.gpkg
+          patch_size: 256
+          n_classes: 2
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".mbtiles_crops_dataset.MBTilesCropsGeoTifMaskDataset"
+    )
+    image_mbtiles_path: str = MISSING
+    mask_path: str = MISSING
+    crops_path: str = MISSING
+    patch_size: int = 256
+    color_map: Optional[List] = None
+    n_classes: int = 2
+    selected_bands: Optional[List[int]] = None
+    image_dtype: str = "uint8"
+    image_resampling: str = "bilinear"
+    crops_layer: Optional[str] = None
+    col_off_key: str = "col_off"
+    row_off_key: str = "row_off"
+    augmentation_list: List = field(default_factory=list)
+    data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+    return_metadata: bool = False
+    window_index_cache: Optional[str] = None
