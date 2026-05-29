@@ -1,5 +1,41 @@
 # Unreleased
 
+## Dataset Builder & Raster Tools
+
+- Added `tools/raster/tiff_remap.py` with `remap_raster` (single-file pixel-value remapping)
+  and `remap_raster_folder` (recursive directory remapping via `ThreadPoolExecutor`).
+  Returns `(output_path, success, error_message)` and `(n_success, n_errors)` respectively.
+- Added `tools/raster/vrt2tif.py` with `convert_to_geotiff` (single VRT/raster to tiled
+  compressed GeoTIFF) and `convert_folder` (batch conversion matching a glob pattern).
+  Preserves band descriptions; supports LZW, DEFLATE, JPEG, NONE compression.
+- Added `tools/dataset_builder/band_combiner.py` with `find_file_groups` (intersects
+  filenames across N source directories, optionally with a named capture pattern),
+  `combine_sources_to_tiff` (concatenates selected bands from multiple sources), and
+  `combine_all` (parallel batch combiner using `ThreadPoolExecutor`).
+- Added `tools/dataset_builder/tile_dataset_builder.py` with `compute_tile_windows`
+  (fixed-size window generator with edge adjustment) and `build_tile_dataset`
+  (rasterizes GeoPackage/vector polygon masks onto each tile, parallelised per image,
+  saves `dataset.csv` and optionally a full-resolution `mask_full.tif`).
+- Added `tools/dataset_builder/sliding_window_builder.py` with `compute_sliding_windows`
+  and `build_sliding_window_dataset` (crops existing image/mask CSV pairs into
+  sliding-window patches; preserves geo-referencing; supports class remapping and
+  directory-segment blacklist).
+- Added `tools/visualization/segmentation_vis.py` with `colorize_mask`, `prepare_image_for_display`,
+  and `create_segmentation_grid` (multi-column GT vs. prediction comparison figure with
+  optional class legend, best/worst/random sample selection, and reprojection alignment).
+- Added 6 new CLI commands to `pytorch-smt-tools`:
+  - `combine-bands` — multi-directory band combiner
+  - `build-tile-dataset` — tile dataset from YAML config
+  - `build-sliding-window-dataset` — patch generator from image/mask CSV
+  - `remap-mask-classes` — pixel class remapper across directory tree
+  - `convert-to-tiff` — batch VRT→GeoTIFF converter
+  - `visualize-predictions` — segmentation comparison grid figure
+- Added YAML config examples: `conf/examples/build_tile_dataset.yaml`,
+  `conf/examples/build_sliding_window_dataset.yaml`, `conf/examples/remap_mask_classes.yaml`.
+- Added user documentation: `website/docs/user-guide/dataset-builder.md`,
+  `website/docs/user-guide/raster-tools.md`,
+  `website/docs/user-guide/segmentation-visualization.md`.
+
 ## MBTiles tools
 
 - Added `scan-mask-colors` CLI command (`pytorch-smt-tools scan-mask-colors MASK_PATH`)

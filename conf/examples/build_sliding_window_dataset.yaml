@@ -1,0 +1,12 @@
+# Sliding-window crop of existing image/mask pairs
+input_csv: /path/to/dataset.csv
+output_dir: /path/to/output
+window_size: 256
+overlap: 0.0
+class_remap:
+  6: 4   # merge veg_cultivada into campo
+  7: 5   # merge brejo into floresta
+blacklist:
+  - masks_old
+  - backup
+n_workers: 8
