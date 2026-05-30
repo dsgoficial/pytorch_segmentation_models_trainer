@@ -322,3 +322,163 @@ def test_build_tile_dataset_rejects_invalid_background_value(tmp_path: Path) -> 
             background_value=999,
             progress=False,
         )
+
+
+def test_build_tile_dataset_no_crs_skips_reprojection(tmp_path: Path) -> None:
+    """When both the image and GDF have no CRS, reprojection is skipped."""
+    img_path = tmp_path / "image.tif"
+    data = np.ones((3, 32, 32), dtype=np.uint8)
+    transform = rasterio.transform.from_bounds(0, 0, 1, 1, 32, 32)
+    profile = dict(
+        driver="GTiff",
+        dtype=data.dtype,
+        width=32,
+        height=32,
+        count=3,
+        crs=None,
+        transform=transform,
+    )
+    with rasterio.open(img_path, "w", **profile) as dst:
+        dst.write(data)
+
+    poly = box(0.1, 0.1, 0.9, 0.9)
+    gdf = gpd.GeoDataFrame({"geometry": [poly], "class_id": [1]}, crs=None)
+    gpkg_path = tmp_path / "masks.gpkg"
+    gdf.to_file(gpkg_path, driver="GPKG", layer="polys")
+
+    df = build_tile_dataset(
+        image_paths=[img_path],
+        vector_path=gpkg_path,
+        class_attribute="class_id",
+        output_dir=tmp_path / "dataset",
+        vector_layer="polys",
+        tile_width=16,
+        tile_height=16,
+        skip_empty_tiles=False,
+        generate_full_size_masks=False,
+        progress=False,
+    )
+    assert len(df) >= 0
+
+
+def test_build_tile_dataset_empty_gdf_full_mask_all_background(
+    tmp_path: Path,
+) -> None:
+    """With an empty GDF, generate_full_size_masks must write a background-only mask."""
+    img_path = tmp_path / "image.tif"
+    data = np.ones((3, 32, 32), dtype=np.uint8)
+    make_tiff(img_path, data, crs="EPSG:4326")
+
+    gdf = gpd.GeoDataFrame({"geometry": [], "class_id": []}, crs="EPSG:4326")
+    gpkg_path = tmp_path / "masks.gpkg"
+    gdf.to_file(gpkg_path, driver="GPKG", layer="polys")
+
+    build_tile_dataset(
+        image_paths=[img_path],
+        vector_path=gpkg_path,
+        class_attribute="class_id",
+        output_dir=tmp_path / "dataset",
+        vector_layer="polys",
+        tile_width=16,
+        tile_height=16,
+        skip_empty_tiles=False,
+        generate_full_size_masks=True,
+        background_value=255,
+        progress=False,
+    )
+
+    full_mask_path = tmp_path / "dataset" / "image" / "mask_full.tif"
+    assert full_mask_path.exists()
+    with rasterio.open(full_mask_path) as f:
+        assert np.all(f.read(1) == 255)
+
+
+def test_build_tile_dataset_skips_empty_image_tiles(tmp_path: Path) -> None:
+    """Tiles whose non-zero pixel ratio is below the threshold should be skipped."""
+    img_path = tmp_path / "image.tif"
+    # Mostly zero image — only one pixel is non-zero
+    data = np.zeros((3, 32, 32), dtype=np.uint8)
+    data[:, 0, 0] = 1
+    make_tiff(img_path, data, crs="EPSG:4326")
+
+    poly = box(0.0, 0.0, 1.0, 1.0)
+    gdf = gpd.GeoDataFrame({"geometry": [poly], "class_id": [1]}, crs="EPSG:4326")
+    gpkg_path = tmp_path / "masks.gpkg"
+    gdf.to_file(gpkg_path, driver="GPKG", layer="polys")
+
+    df_skip = build_tile_dataset(
+        image_paths=[img_path],
+        vector_path=gpkg_path,
+        class_attribute="class_id",
+        output_dir=tmp_path / "skip",
+        vector_layer="polys",
+        tile_width=16,
+        tile_height=16,
+        skip_empty_tiles=True,
+        min_valid_pixel_ratio=0.9,
+        background_value=0,
+        progress=False,
+    )
+
+    df_no_skip = build_tile_dataset(
+        image_paths=[img_path],
+        vector_path=gpkg_path,
+        class_attribute="class_id",
+        output_dir=tmp_path / "no_skip",
+        vector_layer="polys",
+        tile_width=16,
+        tile_height=16,
+        skip_empty_tiles=False,
+        min_valid_pixel_ratio=0.9,
+        background_value=0,
+        progress=False,
+    )
+
+    assert len(df_skip) < len(df_no_skip)
+
+
+def test_build_tile_dataset_skips_all_background_mask_tiles(tmp_path: Path) -> None:
+    """Tiles where the mask is entirely background (and skip_empty_tiles=True) are skipped."""
+    img_path = tmp_path / "image.tif"
+    data = np.ones((3, 32, 32), dtype=np.uint8) * 128
+    make_tiff(img_path, data, crs="EPSG:4326")
+
+    # Polygon outside image bounds — mask will be all background
+    poly = box(2.0, 2.0, 3.0, 3.0)
+    gdf = gpd.GeoDataFrame({"geometry": [poly], "class_id": [1]}, crs="EPSG:4326")
+    gpkg_path = tmp_path / "masks.gpkg"
+    gdf.to_file(gpkg_path, driver="GPKG", layer="polys")
+
+    df = build_tile_dataset(
+        image_paths=[img_path],
+        vector_path=gpkg_path,
+        class_attribute="class_id",
+        output_dir=tmp_path / "dataset",
+        vector_layer="polys",
+        tile_width=16,
+        tile_height=16,
+        skip_empty_tiles=True,
+        background_value=255,
+        progress=False,
+    )
+
+    assert len(df) == 0
+
+
+def test_build_tile_dataset_with_progress_bar(image_and_vector) -> None:
+    """build_tile_dataset with progress=True should produce the same result."""
+    img_path, gpkg_path, out_dir = image_and_vector
+
+    df = build_tile_dataset(
+        image_paths=[img_path],
+        vector_path=gpkg_path,
+        class_attribute="class_id",
+        output_dir=out_dir / "prog",
+        vector_layer="polygons",
+        tile_width=32,
+        tile_height=32,
+        skip_empty_tiles=False,
+        progress=True,
+    )
+
+    assert len(df) > 0

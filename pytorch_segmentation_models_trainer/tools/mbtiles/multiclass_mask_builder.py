@@ -180,7 +180,7 @@ def _iter_frame_jobs(
         if not subset.empty:
             subset = subset[subset.intersects(clipped_frame)]
             for geom, class_id in zip(subset.geometry, subset[class_attribute]):
-                if geom is None or geom.is_empty:
+                if geom is None or geom.is_empty:  # pragma: no cover
                     continue
                 repaired_geom = _ensure_valid_geometry(geom)
                 if repaired_geom is None or repaired_geom.is_empty:

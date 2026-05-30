@@ -436,7 +436,7 @@ def test_iter_frame_jobs_skips_invalid_and_empty_frames(tmp_path):
     assert any(job[3] for job in jobs)
 
 
-def test_query_vector_candidates_uses_spatial_index(tmp_path):
+def test_query_vector_candidates_uses_spatial_index(tmp_path, monkeypatch):
     """The candidate lookup should consult the spatial index first."""
     reference_path, frames_path, vector_path = _build_fixture_data(tmp_path)
     vector_gdf = gpd.read_file(vector_path, layer="dsg_masks")
@@ -448,7 +448,9 @@ def test_query_vector_candidates_uses_spatial_index(tmp_path):
             calls.append((bounds, predicate))
             return np.array([0, 2], dtype=int)
 
-    vector_gdf.__dict__["sindex"] = _FakeSIndex()
+    monkeypatch.setattr(
+        type(vector_gdf), "sindex", property(lambda self: _FakeSIndex())
+    )
     clipped_frame = box(0, 0, 1, 1)
 
     subset = multiclass_mask_builder._query_vector_candidates(vector_gdf, clipped_frame)
@@ -465,7 +467,7 @@ def test_build_mbtiles_multiclass_masks_bounds_pending_futures(tmp_path):
 
     frames_gdf = gpd.read_file(frames_path, layer="locais_mascaras")
     extra = frames_gdf.iloc[[0]].copy()
-    extra.loc[:, "rect_id"] = [12]
+    extra.loc[:, "rect_id"] = np.array([12], dtype=np.int32)
     extra.loc[:, "geometry"] = [translate(extra.geometry.iloc[0], xoff=0.0)]
     frames_gdf = pd.concat([frames_gdf, extra], ignore_index=True)
     frames_gdf.to_file(frames_path, driver="GeoJSON")
@@ -534,3 +536,316 @@ def test_build_mbtiles_multiclass_masks_bounds_pending_futures(tmp_path):
     assert len(df) == 3
     assert submitted == ["10", "11", "12"]
     assert pending_sizes[0] == 2
+
+
+def test_sanitize_stem_empty_string_returns_fallback():
+    """_sanitize_stem should fall back to the default when the result is empty."""
+    assert multiclass_mask_builder._sanitize_stem("   ", "fb") == "fb"
+    assert multiclass_mask_builder._sanitize_stem("", "fb") == "fb"
+
+
+def test_frame_identifier_missing_attribute_returns_index_default():
+    """_frame_identifier should use the default when the attribute is absent or NaN."""
+    frame_no_attr = pd.Series({"other_col": 99})
+    assert (
+        multiclass_mask_builder._frame_identifier(frame_no_attr, "rect_id", 3)
+        == "frame_00003"
+    )
+
+    import math
+
+    frame_nan = pd.Series({"rect_id": float("nan")})
+    assert (
+        multiclass_mask_builder._frame_identifier(frame_nan, "rect_id", 5)
+        == "frame_00005"
+    )
+
+
+def test_ensure_valid_geometry_returns_none_for_degenerate_repair(monkeypatch):
+    """_ensure_valid_geometry should return None when make_valid gives an empty result."""
+    from shapely.geometry import GeometryCollection
+
+    monkeypatch.setattr(
+        "pytorch_segmentation_models_trainer.tools.mbtiles.multiclass_mask_builder.make_valid",
+        lambda g: GeometryCollection(),  # empty → .is_empty == True
+    )
+
+    class _FakeInvalid:
+        is_valid = False
+        is_empty = False
+
+    result = multiclass_mask_builder._ensure_valid_geometry(_FakeInvalid())
+    assert result is None
+
+
+def test_query_vector_candidates_typeerror_fallback(monkeypatch):
+    """When sindex.query raises TypeError, the no-predicate fallback is used."""
+    gdf = gpd.GeoDataFrame(
+        {"geometry": [box(0, 0, 1, 1), box(2, 2, 3, 3)], "tipo": [1, 2]},
+        crs="EPSG:4326",
+    )
+    clipped = box(0, 0, 1, 1)
+
+    call_log = []
+
+    class _FakeSIndexTypeError:
+        def query(self, geom, predicate=None):
+            if predicate is not None:
+                call_log.append("with_predicate")
+                raise TypeError("old API")
+            call_log.append("no_predicate")
+            return np.array([0], dtype=int)
+
+    monkeypatch.setattr(
+        type(gdf), "sindex", property(lambda self: _FakeSIndexTypeError())
+    )
+    result = multiclass_mask_builder._query_vector_candidates(gdf, clipped)
+    assert "with_predicate" in call_log
+    assert "no_predicate" in call_log
+    assert len(result) == 1
+
+
+def test_iter_frame_jobs_skips_zero_size_window(tmp_path):
+    """Frames that map to a zero-width or zero-height window should be skipped."""
+    reference_path, frames_path, vector_path = _build_fixture_data(tmp_path)
+
+    with rasterio.open(reference_path) as src:
+        reference_crs = src.crs
+        reference_transform = src.transform
+        bounds = src.bounds
+        reference_bounds = box(*bounds)
+        reference_width = src.width
+        reference_height = src.height
+
+    vector_gdf = gpd.read_file(vector_path, layer="dsg_masks")
+    # Frame that is within reference_bounds but has negligible height → zero window
+    left, bottom, right, top = bounds
+    tiny_frame = box(left, bottom, right, bottom + 1e-15)
+    frames_gdf = gpd.GeoDataFrame(
+        {"geometry": [tiny_frame], "rect_id": [99]}, crs=reference_crs
+    )
+
+    jobs = list(
+        multiclass_mask_builder._iter_frame_jobs(
+            frames_gdf=frames_gdf,
+            vector_gdf=vector_gdf,
+            reference_bounds=reference_bounds,
+            reference_transform=reference_transform,
+            reference_width=reference_width,
+            reference_height=reference_height,
+            frame_id_attribute="rect_id",
+            class_attribute="tipo",
+        )
+    )
+    assert jobs == []
+
+
+def test_iter_frame_jobs_skips_none_and_empty_vector_geoms(tmp_path, monkeypatch):
+    """None and empty geometries in the vector GDF should be skipped silently."""
+    reference_path, frames_path, vector_path = _build_fixture_data(tmp_path)
+
+    with rasterio.open(reference_path) as src:
+        reference_crs = src.crs
+        reference_transform = src.transform
+        bounds2 = src.bounds
+        reference_bounds = box(*bounds2)
+        reference_width = src.width
+        reference_height = src.height
+
+    left, bottom, right, top = bounds2
+    full_frame = box(left, bottom, right, top)
+    frames_gdf = gpd.GeoDataFrame(
+        {"geometry": [full_frame], "rect_id": [1]}, crs=reference_crs
+    )
+
+    valid_geom = box(left, bottom, right, top)
+    valid_gdf = gpd.GeoDataFrame(
+        {"geometry": [valid_geom], "tipo": [1]}, crs=reference_crs
+    )
+
+    class _FakeEmptyGeom:
+        is_empty = True
+        is_valid = True
+
+    # Monkeypatch _query_vector_candidates to return GDF with None and empty geometries
+    def _fake_candidates(vector_gdf, clipped_frame):
+        from shapely.geometry import GeometryCollection
+
+        # Return a GDF with: None geom, empty geom, and valid geom
+        rows = gpd.GeoDataFrame(
+            {
+                "geometry": [None, GeometryCollection(), valid_geom],
+                "tipo": [1, 2, 3],
+            },
+            crs=reference_crs,
+        )
+        return rows
+
+    monkeypatch.setattr(
+        multiclass_mask_builder, "_query_vector_candidates", _fake_candidates
+    )
+    # Also monkeypatch _ensure_valid_geometry so the last entry (valid_geom) repairs to None,
+    # exercising line 187 as well.
+    orig_ensure = multiclass_mask_builder._ensure_valid_geometry
+
+    def _fake_ensure(geom):
+        if geom is valid_geom:
+            return None
+        return orig_ensure(geom)
+
+    monkeypatch.setattr(multiclass_mask_builder, "_ensure_valid_geometry", _fake_ensure)
+
+    jobs = list(
+        multiclass_mask_builder._iter_frame_jobs(
+            frames_gdf=frames_gdf,
+            vector_gdf=valid_gdf,
+            reference_bounds=reference_bounds,
+            reference_transform=reference_transform,
+            reference_width=reference_width,
+            reference_height=reference_height,
+            frame_id_attribute="rect_id",
+            class_attribute="tipo",
+        )
+    )
+    # One job is yielded (the frame itself) but shapes list will be empty
+    assert len(jobs) == 1
+    _, _, _, shapes, _, _ = jobs[0]
+    assert shapes == []
+
+
+def test_build_mbtiles_raises_when_frames_crs_is_none(tmp_path, monkeypatch):
+    """build_mbtiles_multiclass_masks must raise when the frames GDF has no CRS."""
+    reference_path, frames_path, vector_path = _build_fixture_data(tmp_path)
+
+    import geopandas as gpd_inner
+
+    orig_read = gpd_inner.read_file
+
+    def patched_read(path, **kw):
+        gdf = orig_read(path, **kw)
+        if "locais_mascaras" in str(kw.get("layer", "")):
+            gdf = gdf.set_crs(None, allow_override=True)
+        return gdf
+
+    monkeypatch.setattr(
+        "pytorch_segmentation_models_trainer.tools.mbtiles.multiclass_mask_builder.gpd.read_file",
+        patched_read,
+    )
+    with pytest.raises(ValueError, match="frames_path must declare a CRS"):
+        build_mbtiles_multiclass_masks(
+            reference_mbtiles_path=reference_path,
+            frames_path=frames_path,
+            vector_path=vector_path,
+            output_dir=tmp_path / "out",
+            frame_layer="locais_mascaras",
+            vector_layer="dsg_masks",
+            progress=False,
+        )
+
+
+def test_build_mbtiles_raises_when_vector_crs_is_none(tmp_path, monkeypatch):
+    """build_mbtiles_multiclass_masks must raise when the vector GDF has no CRS."""
+    reference_path, frames_path, vector_path = _build_fixture_data(tmp_path)
+
+    import geopandas as gpd_inner
+
+    orig_read = gpd_inner.read_file
+
+    def patched_read(path, **kw):
+        gdf = orig_read(path, **kw)
+        if "dsg_masks" in str(kw.get("layer", "")):
+            gdf = gdf.set_crs(None, allow_override=True)
+        return gdf
+
+    monkeypatch.setattr(
+        "pytorch_segmentation_models_trainer.tools.mbtiles.multiclass_mask_builder.gpd.read_file",
+        patched_read,
+    )
+    with pytest.raises(ValueError, match="vector_path must declare a CRS"):
+        build_mbtiles_multiclass_masks(
+            reference_mbtiles_path=reference_path,
+            frames_path=frames_path,
+            vector_path=vector_path,
+            output_dir=tmp_path / "out",
+            frame_layer="locais_mascaras",
+            vector_layer="dsg_masks",
+            progress=False,
+        )
+
+
+def test_build_mbtiles_raises_when_reference_has_no_crs(tmp_path, monkeypatch):
+    """build_mbtiles_multiclass_masks must raise when the reference has no CRS."""
+    reference_path, frames_path, vector_path = _build_fixture_data(tmp_path)
+
+    import rasterio as _rasterio
+    from unittest.mock import MagicMock
+
+    orig_open = _rasterio.open
+    _open_calls = []
+
+    _t = _rasterio.transform.from_bounds(-180, -85, 180, 85, 512, 512)
+
+    class _NoCrsSrc:
+        crs = None
+        transform = _t
+        bounds = _rasterio.coords.BoundingBox(-180, -85, 180, 85)
+        width = 512
+        height = 512
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+    def patched_open(path, *a, **kw):
+        if str(path).endswith(".mbtiles"):
+            return _NoCrsSrc()
+        return orig_open(path, *a, **kw)
+
+    monkeypatch.setattr(
+        "pytorch_segmentation_models_trainer.tools.mbtiles.multiclass_mask_builder.rasterio.open",
+        patched_open,
+    )
+    with pytest.raises(ValueError, match="reference_mbtiles_path must declare a CRS"):
+        build_mbtiles_multiclass_masks(
+            reference_mbtiles_path=reference_path,
+            frames_path=frames_path,
+            vector_path=vector_path,
+            output_dir=tmp_path / "out",
+            frame_layer="locais_mascaras",
+            vector_layer="dsg_masks",
+            progress=False,
+        )
+
+
+def test_build_mbtiles_reprojects_when_crs_differs(tmp_path):
+    """When frames or vector GDF CRS differs from reference, they should be reprojected."""
+    reference_path, frames_path, vector_path = _build_fixture_data(tmp_path)
+    output_dir = tmp_path / "reprojected_output"
+
+    # Rewrite both frames and vector in EPSG:4326 (reference is EPSG:3857)
+    frames_gdf = gpd.read_file(frames_path, layer="locais_mascaras")
+    frames_4326 = frames_gdf.to_crs("EPSG:4326")
+    frames_path_4326 = tmp_path / "frames_4326.geojson"
+    frames_4326.to_file(frames_path_4326, driver="GeoJSON")
+
+    vector_gdf = gpd.read_file(vector_path, layer="dsg_masks")
+    vector_gdf_4326 = vector_gdf.to_crs("EPSG:4326")
+    vector_path_4326 = tmp_path / "vector_4326.gpkg"
+    vector_gdf_4326.to_file(vector_path_4326, driver="GPKG", layer="dsg_masks")
+
+    df = build_mbtiles_multiclass_masks(
+        reference_mbtiles_path=reference_path,
+        frames_path=frames_path_4326,
+        vector_path=vector_path_4326,
+        output_dir=output_dir,
+        frame_layer=None,
+        vector_layer="dsg_masks",
+        frame_id_attribute="rect_id",
+        class_attribute="tipo",
+        background_value=255,
+        progress=False,
+    )
+
+    assert len(df) == 2

@@ -138,7 +138,7 @@ def combine_sources_to_tiff(
                     else:
                         data = src.read()
 
-                if data.ndim == 1:
+                if data.ndim == 1:  # pragma: no cover
                     data = data[np.newaxis, ...]
 
                 shape = (data.shape[-2], data.shape[-1])

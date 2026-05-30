@@ -166,3 +166,41 @@ def test_remap_raster_folder_returns_counts(tmp_path: Path) -> None:
 
     assert n_success == 2
     assert n_errors == 0
+
+
+def test_remap_raster_folder_with_progress_bar(tmp_path: Path) -> None:
+    """remap_raster_folder with progress=True should wrap the iterator in tqdm."""
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+    make_tiff(in_dir / "f.tif", np.ones((4, 4), dtype=np.uint8))
+
+    n_success, n_errors = remap_raster_folder(
+        in_dir, out_dir, pixel_mapping={1: 2}, progress=True
+    )
+
+    assert n_success == 1
+    assert n_errors == 0
+
+
+def test_remap_raster_folder_error_increments_counter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure from remap_raster should be counted in n_errors."""
+    import pytorch_segmentation_models_trainer.tools.raster.tiff_remap as tiff_remap
+
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+    make_tiff(in_dir / "f.tif", np.ones((4, 4), dtype=np.uint8))
+
+    monkeypatch.setattr(
+        tiff_remap, "remap_raster", lambda *a, **kw: (a[1], False, "forced error")
+    )
+
+    n_success, n_errors = tiff_remap.remap_raster_folder(
+        in_dir, out_dir, pixel_mapping={1: 2}, progress=False
+    )
+
+    assert n_errors == 1
+    assert n_success == 0

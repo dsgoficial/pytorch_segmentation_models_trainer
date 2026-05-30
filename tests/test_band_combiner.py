@@ -303,3 +303,55 @@ def test_combine_all_skips_missing_groups(tmp_path: Path) -> None:
     names = [p.stem for p in results]
     assert names == ["common"]
     assert not (out_dir / "only_a.tif").exists()
+
+
+def test_find_file_groups_empty_source_list() -> None:
+    """An empty source_dirs list should return an empty list immediately."""
+    assert find_file_groups([]) == []
+
+
+def test_combine_sources_to_tiff_nonexistent_file_returns_error(
+    tmp_path: Path,
+) -> None:
+    """A non-existent source path should trigger the exception handler."""
+    _, success, err = combine_sources_to_tiff(
+        [tmp_path / "nonexistent.tif"], tmp_path / "out.tif", overwrite=True
+    )
+    assert success is False
+    assert err is not None
+
+
+def test_combine_all_returns_empty_when_no_matching_groups(tmp_path: Path) -> None:
+    """combine_all should return [] immediately when dirs share no common files."""
+    dir_a = tmp_path / "a"
+    dir_b = tmp_path / "b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    make_tiff(dir_a / "only_a.tif", np.zeros((4, 4), dtype=np.uint8))
+    make_tiff(dir_b / "only_b.tif", np.zeros((4, 4), dtype=np.uint8))
+
+    results = combine_all(
+        source_dirs=[dir_a, dir_b],
+        output_dir=tmp_path / "out",
+        glob_pattern="*.tif",
+        progress=False,
+    )
+    assert results == []
+
+
+def test_combine_all_with_progress_bar(tmp_path: Path) -> None:
+    """combine_all with progress=True should still produce correct output."""
+    dir_a = tmp_path / "a"
+    dir_b = tmp_path / "b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    make_tiff(dir_a / "tile.tif", np.ones((2, 4, 4), dtype=np.uint8))
+    make_tiff(dir_b / "tile.tif", np.ones((2, 4, 4), dtype=np.uint8))
+
+    results = combine_all(
+        source_dirs=[dir_a, dir_b],
+        output_dir=tmp_path / "out",
+        glob_pattern="*.tif",
+        progress=True,
+    )
+    assert len(results) == 1

@@ -109,8 +109,8 @@ class TestMBTilesMulticlassMaskBuilderConfig:
         from hydra.core.config_store import ConfigStore
 
         cs = ConfigStore.instance()
-        node = cs.load("mbtiles_multiclass_mask/default")
-        assert "build_mbtiles_multiclass_masks" in node._target_
+        node = cs.load("mbtiles_multiclass_mask/default.yaml")
+        assert "build_mbtiles_multiclass_masks" in node.node["_target_"]
 
 
 class TestExportStrategyConfigs:

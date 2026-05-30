@@ -275,3 +275,30 @@ def test_build_sliding_window_dataset_without_mi_column(tmp_path: Path) -> None:
     )
 
     assert "mi" not in df.columns
+
+
+def test_build_sliding_window_dataset_with_progress_bar(tmp_path: Path) -> None:
+    """build_sliding_window_dataset with progress=True should use the tqdm iterator."""
+    img_dir = tmp_path / "src" / "images"
+    msk_dir = tmp_path / "src" / "masks"
+    img_dir.mkdir(parents=True)
+    msk_dir.mkdir(parents=True)
+
+    img = img_dir / "tile.tif"
+    msk = msk_dir / "tile.tif"
+    make_tiff(img, np.random.randint(0, 255, (3, 32, 32), dtype=np.uint8))
+    make_tiff(msk, np.zeros((1, 32, 32), dtype=np.uint8))
+
+    csv_path = tmp_path / "pairs.csv"
+    pd.DataFrame({"image": [str(img)], "mask": [str(msk)]}).to_csv(
+        csv_path, index=False
+    )
+
+    df = build_sliding_window_dataset(
+        input_csv=csv_path,
+        output_dir=tmp_path / "out",
+        window_size=16,
+        progress=True,
+    )
+
+    assert len(df) > 0

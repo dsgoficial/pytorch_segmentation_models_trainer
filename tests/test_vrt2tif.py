@@ -138,3 +138,70 @@ def test_convert_folder_preserves_structure(tmp_path: Path) -> None:
 
     assert (out_dir / "top.tif").exists()
     assert (out_dir / "sub" / "nested.tif").exists()
+
+
+def test_convert_to_geotiff_preserves_band_descriptions(tmp_path: Path) -> None:
+    """Band descriptions set on the source should be written to output tags."""
+    data = np.ones((2, 4, 4), dtype=np.uint8)
+    src_path = tmp_path / "src.tif"
+    h, w = 4, 4
+    transform = rasterio.transform.from_bounds(0, 0, 1, 1, w, h)
+    profile = dict(
+        driver="GTiff",
+        dtype=data.dtype,
+        width=w,
+        height=h,
+        count=2,
+        crs="EPSG:4326",
+        transform=transform,
+    )
+    with rasterio.open(src_path, "w", **profile) as dst:
+        dst.write(data)
+        dst.set_band_description(1, "red")
+        dst.set_band_description(2, "nir")
+
+    dst_path = tmp_path / "dst.tif"
+    _, success, _ = convert_to_geotiff(src_path, dst_path)
+
+    assert success is True
+    with rasterio.open(dst_path) as f:
+        assert f.tags(1).get("name") == "red"
+        assert f.tags(2).get("name") == "nir"
+
+
+def test_convert_folder_with_progress_bar(tmp_path: Path) -> None:
+    """convert_folder with progress=True should wrap the iterator in tqdm."""
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+    make_tiff(in_dir / "f.tif", np.ones((4, 4), dtype=np.uint8))
+
+    n_success, n_errors = convert_folder(
+        in_dir, out_dir, glob_pattern="*.tif", progress=True
+    )
+
+    assert n_success == 1
+    assert n_errors == 0
+
+
+def test_convert_folder_error_increments_counter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure from convert_to_geotiff should be counted in n_errors."""
+    import pytorch_segmentation_models_trainer.tools.raster.vrt2tif as vrt2tif
+
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+    make_tiff(in_dir / "f.tif", np.ones((4, 4), dtype=np.uint8))
+
+    monkeypatch.setattr(
+        vrt2tif, "convert_to_geotiff", lambda *a, **kw: (a[1], False, "forced error")
+    )
+
+    n_success, n_errors = vrt2tif.convert_folder(
+        in_dir, out_dir, glob_pattern="*.tif", progress=False
+    )
+
+    assert n_errors == 1
+    assert n_success == 0

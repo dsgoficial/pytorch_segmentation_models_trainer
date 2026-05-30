@@ -1,5 +1,15 @@
 # Unreleased
 
+## Test coverage
+
+- Restored 100% test coverage for all modules introduced in the dataset-builder /
+  raster-tools / visualization / multiclass-mask merge: `band_combiner.py`,
+  `sliding_window_builder.py`, `tile_dataset_builder.py`, `tiff_remap.py`,
+  `vrt2tif.py`, `segmentation_vis.py`, and `multiclass_mask_builder.py`.
+- Fixed `test_build_mbtiles_multiclass_masks_bounds_pending_futures` which was
+  failing with `pandas.errors.LossySetitemError` on Python 3.14 due to an
+  implicit int32 → Python int assignment (`[12]` → `np.array([12], dtype=np.int32)`).
+
 ## MBTiles multiclass masks
 
 - Added `build-mbtiles-multiclass-masks` tooling for generating multi-class

@@ -264,3 +264,64 @@ def test_create_segmentation_grid_with_image_dir_and_worst_mode(grid_fixtures) -
 
     assert len(fig.axes) == 3
     plt.close(fig)
+
+
+def test_prepare_image_for_display_2d_input_padded_to_3_channels() -> None:
+    """A 2D (H, W) array should become (H, W, 3) after padding."""
+    img = np.full((8, 8), fill_value=200, dtype=np.uint8)
+    result = prepare_image_for_display(img)
+
+    assert result.shape == (8, 8, 3)
+    assert result.dtype == np.float32
+
+
+def test_create_segmentation_grid_missing_files_display_na(tmp_path: Path) -> None:
+    """When raster files do not exist, cells should render N/A text (no crash)."""
+    gt_dir = tmp_path / "gt"
+    pred_dir = tmp_path / "pred"
+    image_dir = tmp_path / "images"
+    gt_dir.mkdir()
+    pred_dir.mkdir()
+    image_dir.mkdir()
+
+    records = pd.DataFrame({"tile_id": ["missing"], "mi": ["mi_x"], "mean_iou": [0.0]})
+
+    fig = create_segmentation_grid(
+        records=records,
+        gt_dir=gt_dir,
+        pred_dirs=[pred_dir],
+        pred_labels=["model"],
+        color_map=COLOR_MAP,
+        image_dir=image_dir,
+        n_samples=1,
+        mode="best",
+    )
+
+    assert isinstance(fig, plt.Figure)
+    plt.close(fig)
+
+
+def test_create_segmentation_grid_pred_shape_mismatch_is_reprojected(
+    grid_fixtures,
+) -> None:
+    """When pred shape differs from gt shape, _reproject_to_gt should resize it."""
+    records, gt_dir, _, labels, tmp_path = grid_fixtures
+
+    pred_dir_small = tmp_path / "pred_small"
+    (pred_dir_small / "mi_001").mkdir(parents=True)
+    small_mask = np.zeros((16, 16), dtype=np.uint8)
+    small_mask[4:12, 4:12] = 1
+    make_tiff(pred_dir_small / "mi_001" / "tile_001.tif", small_mask)
+
+    fig = create_segmentation_grid(
+        records=records,
+        gt_dir=gt_dir,
+        pred_dirs=[pred_dir_small],
+        pred_labels=["small_model"],
+        color_map=COLOR_MAP,
+        n_samples=1,
+        mode="best",
+    )
+
+    assert isinstance(fig, plt.Figure)
+    plt.close(fig)
