@@ -52,6 +52,9 @@
 - Added `tools/visualization/segmentation_vis.py` with `colorize_mask`, `prepare_image_for_display`,
   and `create_segmentation_grid` (multi-column GT vs. prediction comparison figure with
   optional class legend, best/worst/random sample selection, and reprojection alignment).
+- Parallelized `create_segmentation_grid` raster loading with `ThreadPoolExecutor` so
+  image, GT, and prediction tiles for each sampled row are loaded concurrently before
+  rendering the comparison grid.
 - Added 6 new CLI commands to `pytorch-smt-tools`:
   - `combine-bands` — multi-directory band combiner
   - `build-tile-dataset` — tile dataset from YAML config

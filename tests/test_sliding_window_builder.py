@@ -90,6 +90,13 @@ def test_compute_sliding_windows_edge_adjustment() -> None:
         assert c1 <= 70
 
 
+@pytest.mark.parametrize("overlap", [-0.1, 1.0, 1.5])
+def test_compute_sliding_windows_invalid_overlap(overlap: float) -> None:
+    """Invalid overlap values should be rejected."""
+    with pytest.raises(ValueError, match="overlap must be in \\[0, 1\\)"):
+        compute_sliding_windows(64, 64, 32, overlap)
+
+
 # ---- build_sliding_window_dataset ----
 
 
@@ -240,3 +247,30 @@ def test_build_sliding_window_dataset_georeferences_patches(csv_pair) -> None:
     assert (
         different
     ), "All patches have the same transform as the source — georeferencing may be wrong"
+
+
+def test_build_sliding_window_dataset_without_mi_column(tmp_path: Path) -> None:
+    """When the input CSV lacks mi, the output should omit it too."""
+    img_dir = tmp_path / "src" / "images"
+    msk_dir = tmp_path / "src" / "masks"
+    img_dir.mkdir(parents=True)
+    msk_dir.mkdir(parents=True)
+
+    img = img_dir / "tile.tif"
+    msk = msk_dir / "tile.tif"
+    make_tiff(img, np.random.randint(0, 255, (3, 32, 32), dtype=np.uint8))
+    make_tiff(msk, np.zeros((1, 32, 32), dtype=np.uint8))
+
+    csv_path = tmp_path / "pairs.csv"
+    pd.DataFrame({"image": [str(img)], "mask": [str(msk)]}).to_csv(
+        csv_path, index=False
+    )
+
+    df = build_sliding_window_dataset(
+        input_csv=csv_path,
+        output_dir=tmp_path / "out",
+        window_size=16,
+        progress=False,
+    )
+
+    assert "mi" not in df.columns

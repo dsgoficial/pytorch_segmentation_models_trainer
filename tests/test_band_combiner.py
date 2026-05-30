@@ -196,6 +196,64 @@ def test_combine_sources_to_tiff_overwrite_replaces(tmp_path: Path) -> None:
     assert dst.read_bytes() != b"sentinel"
 
 
+def test_combine_sources_to_tiff_uses_explicit_band_selection(tmp_path: Path) -> None:
+    """Explicit band selections should be honored for each source."""
+    src1 = tmp_path / "src1.tif"
+    src2 = tmp_path / "src2.tif"
+    dst = tmp_path / "selected.tif"
+
+    make_tiff(
+        src1,
+        np.stack(
+            [np.full((4, 4), 1, dtype=np.uint8), np.full((4, 4), 2, dtype=np.uint8)]
+        ),
+    )
+    make_tiff(
+        src2,
+        np.stack(
+            [np.full((4, 4), 3, dtype=np.uint8), np.full((4, 4), 4, dtype=np.uint8)]
+        ),
+    )
+
+    _, success, err = combine_sources_to_tiff(
+        [src1, src2],
+        dst,
+        bands_per_source=[[2], [1]],
+        skip_alpha=False,
+    )
+
+    assert success is True
+    assert err is None
+    with rasterio.open(dst) as f:
+        assert f.count == 2
+        assert f.read(1).max() == 2
+        assert f.read(2).max() == 3
+
+
+def test_combine_all_respects_name_pattern_and_no_groups(tmp_path: Path) -> None:
+    """Name pattern filtering should only combine matching filenames."""
+    dir_a = tmp_path / "a"
+    dir_b = tmp_path / "b"
+    out_dir = tmp_path / "out"
+    dir_a.mkdir()
+    dir_b.mkdir()
+
+    make_tiff(dir_a / "MI_001.tif", np.ones((2, 4, 4), dtype=np.uint8))
+    make_tiff(dir_b / "MI_001.tif", np.ones((3, 4, 4), dtype=np.uint8))
+    make_tiff(dir_a / "skip.tif", np.ones((2, 4, 4), dtype=np.uint8))
+
+    results = combine_all(
+        source_dirs=[dir_a, dir_b],
+        output_dir=out_dir,
+        glob_pattern="*.tif",
+        name_pattern="MI_{name}.tif",
+        progress=False,
+    )
+
+    assert [p.stem for p in results] == ["001"]
+    assert (out_dir / "001.tif").exists()
+
+
 def test_combine_all_produces_correct_outputs(tmp_path: Path) -> None:
     """combine_all should write one output per matching group."""
     dir_a = tmp_path / "a"

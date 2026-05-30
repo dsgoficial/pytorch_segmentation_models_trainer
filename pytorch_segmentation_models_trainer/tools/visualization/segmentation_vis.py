@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor
 
 # Type alias exported for callers
 ColorMap = Dict[int, Tuple[int, int, int]]  # {class_id: (R, G, B)}
@@ -218,6 +219,23 @@ def create_segmentation_grid(
         zx = gt_arr.shape[1] / pred_arr.shape[1]
         return zoom(pred_arr, (zy, zx), order=0).astype(pred_arr.dtype)
 
+    def _load_record_payload(record: pd.Series) -> dict:
+        """Load all raster payloads needed to render a single row."""
+        tile_id = str(record["tile_id"])
+        mi = str(record["mi"])
+
+        image_data = _load_image(image_dir, mi, tile_id) if image_dir else None
+        gt_data = _load_mask(gt_dir, mi, tile_id)
+        pred_data = [_load_mask(pred_dir, mi, tile_id) for pred_dir in pred_dirs]
+
+        return {
+            "tile_id": tile_id,
+            "mi": mi,
+            "image_data": image_data,
+            "gt_data": gt_data,
+            "pred_data": pred_data,
+        }
+
     # Determine number of columns
     n_cols = 1  # GT
     if image_dir is not None:
@@ -246,17 +264,23 @@ def create_segmentation_grid(
     for col_idx, title in enumerate(col_titles):
         axes[0, col_idx].set_title(title, fontsize=9, pad=3)
 
-    for row_idx, record in df.iterrows():
-        tile_id = str(record["tile_id"])
-        mi = str(record["mi"])
+    with ThreadPoolExecutor(max_workers=min(len(df), 8) or 1) as executor:
+        payloads = list(
+            executor.map(_load_record_payload, [row for _, row in df.iterrows()])
+        )
+
+    for row_idx, payload in enumerate(payloads):
+        tile_id = payload["tile_id"]
+        mi = payload["mi"]
+        gt_data = payload["gt_data"]
+        pred_payloads = payload["pred_data"]
 
         col = 0
 
         if image_dir is not None:
-            img_data = _load_image(image_dir, mi, tile_id)
             ax = axes[row_idx, col]
-            if img_data is not None:
-                ax.imshow(prepare_image_for_display(img_data))
+            if payload["image_data"] is not None:
+                ax.imshow(prepare_image_for_display(payload["image_data"]))
             else:
                 ax.text(
                     0.5, 0.5, "N/A", ha="center", va="center", transform=ax.transAxes
@@ -264,7 +288,6 @@ def create_segmentation_grid(
             ax.axis("off")
             col += 1
 
-        gt_data = _load_mask(gt_dir, mi, tile_id)
         ax = axes[row_idx, col]
         if gt_data is not None:
             ax.imshow(colorize_mask(gt_data, color_map, nodata_value=nodata))
@@ -273,8 +296,7 @@ def create_segmentation_grid(
         ax.axis("off")
         col += 1
 
-        for pred_dir in pred_dirs:
-            pred_data = _load_mask(pred_dir, mi, tile_id)
+        for pred_data in pred_payloads:
             ax = axes[row_idx, col]
             if pred_data is not None:
                 if gt_data is not None:

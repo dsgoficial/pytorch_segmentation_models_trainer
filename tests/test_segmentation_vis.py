@@ -216,3 +216,50 @@ def test_create_segmentation_grid_saves_file(grid_fixtures) -> None:
     assert out_path.exists()
     assert out_path.stat().st_size > 0
     plt.close(fig)
+
+
+def test_create_segmentation_grid_random_mode_uses_sample_and_legend(
+    grid_fixtures,
+) -> None:
+    """Random mode should sample rows and render the optional legend."""
+    records, gt_dir, pred_dirs, labels, tmp_path = grid_fixtures
+    class_labels = {0: "background", 1: "foreground"}
+
+    fig = create_segmentation_grid(
+        records=pd.concat([records, records.assign(mean_iou=0.9)]),
+        gt_dir=gt_dir,
+        pred_dirs=pred_dirs,
+        pred_labels=labels,
+        color_map=COLOR_MAP,
+        class_labels=class_labels,
+        n_samples=1,
+        mode="random",
+    )
+
+    assert len(fig.axes) == 2
+    assert fig.legends, "Expected a legend when class_labels is provided"
+    plt.close(fig)
+
+
+def test_create_segmentation_grid_with_image_dir_and_worst_mode(grid_fixtures) -> None:
+    """The image column and worst-mode path should both be exercised."""
+    records, gt_dir, pred_dirs, labels, tmp_path = grid_fixtures
+    image_dir = tmp_path / "images"
+    (image_dir / "mi_001").mkdir(parents=True)
+    make_tiff(
+        image_dir / "mi_001" / "tile_001.tif", np.ones((3, 32, 32), dtype=np.uint8)
+    )
+
+    fig = create_segmentation_grid(
+        records=records.assign(mean_iou=[0.1]),
+        gt_dir=gt_dir,
+        pred_dirs=pred_dirs,
+        pred_labels=labels,
+        color_map=COLOR_MAP,
+        image_dir=image_dir,
+        n_samples=1,
+        mode="worst",
+    )
+
+    assert len(fig.axes) == 3
+    plt.close(fig)
