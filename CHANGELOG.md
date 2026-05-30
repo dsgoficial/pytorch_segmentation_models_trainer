@@ -1,5 +1,34 @@
 # Unreleased
 
+## MBTiles multiclass masks
+
+- Added `build-mbtiles-multiclass-masks` tooling for generating multi-class
+  GeoTIFF masks from a GeoJSON frame set, a GeoPackage of labeled polygons, and
+  an MBTiles reference grid at the source's maximum available zoom.
+- Parallelized `build-mbtiles-multiclass-masks` per frame with
+  `ThreadPoolExecutor` and added a `tqdm` progress bar so large mask-build jobs
+  report progress without changing output structure.
+- Switched `build-mbtiles-multiclass-masks` to a streaming job generator with a
+  bounded futures window, preventing linear memory growth from prebuilding all
+  frame jobs and keeping only a small number of tasks in flight.
+- Reduced per-frame allocations inside the multiclass mask worker by writing
+  raster outputs in-place and avoiding an extra `np.where` copy for the final
+  mask image.
+- Removed the `gpd.clip` dependency from the multiclass mask builder and now
+  rasterize all intersecting features after repairing invalid geometries with
+  `shapely.validation.make_valid`, preventing `TopologyException` crashes on
+  self-intersecting or otherwise invalid polygons.
+- Added `conf/examples/mbtiles_multiclass_mask_builder.yaml` plus
+  `website/docs/user-guide/mbtiles-multiclass-mask-builder.md` so the new
+  workflow is documented and runnable through the CLI.
+
+## Dataset Builder
+
+- Added `background_value` to `build_tile_dataset` and the `build-tile-dataset`
+  YAML workflow so multi-class masks can use a configurable nodata/background
+  index instead of hardcoding `0`. Default is `255`, and `skip_empty_tiles`
+  now treats tiles filled with the selected background value as empty.
+
 ## Dataset Builder & Raster Tools
 
 - Added `tools/raster/tiff_remap.py` with `remap_raster` (single-file pixel-value remapping)

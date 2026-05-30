@@ -427,7 +427,9 @@ class TestRasterPatchDataset(BasicTestCase):
         """uint16 images without transform are normalized to [0, 1]."""
         img_dir16 = self.tmp / "images16"
         mask_dir16 = self.tmp / "masks16"
-        _write_tif(img_dir16 / "img.tif", width=200, height=200, bands=3, dtype="uint16")
+        _write_tif(
+            img_dir16 / "img.tif", width=200, height=200, bands=3, dtype="uint16"
+        )
         _write_mask(mask_dir16 / "img.tif", width=200, height=200)
 
         ds = RasterPatchDataset(
@@ -472,15 +474,22 @@ class TestRasterPatchDataset(BasicTestCase):
         multi_mask_path.parent.mkdir(parents=True, exist_ok=True)
         import rasterio
         from rasterio.transform import from_bounds
+
         data = np.array([[[0, 1, 2, 128, 255] * 40] * 200], dtype=np.uint8)
         # Pad/crop to exact 200×200
         mask_data = np.zeros((1, 200, 200), dtype=np.uint8)
         mask_data[0, :, :5] = [0, 1, 2, 128, 255]
         transform = from_bounds(0, 0, 1, 1, 200, 200)
         with rasterio.open(
-            multi_mask_path, "w", driver="GTiff",
-            height=200, width=200, count=1, dtype="uint8",
-            crs="EPSG:4326", transform=transform,
+            multi_mask_path,
+            "w",
+            driver="GTiff",
+            height=200,
+            width=200,
+            count=1,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=transform,
         ) as dst:
             dst.write(mask_data)
 
@@ -506,12 +515,19 @@ class TestRasterPatchDataset(BasicTestCase):
         mc_mask_path.parent.mkdir(parents=True, exist_ok=True)
         import rasterio
         from rasterio.transform import from_bounds
+
         mask_data = np.full((1, 200, 200), fill_value=3, dtype=np.uint8)
         transform = from_bounds(0, 0, 1, 1, 200, 200)
         with rasterio.open(
-            mc_mask_path, "w", driver="GTiff",
-            height=200, width=200, count=1, dtype="uint8",
-            crs="EPSG:4326", transform=transform,
+            mc_mask_path,
+            "w",
+            driver="GTiff",
+            height=200,
+            width=200,
+            count=1,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=transform,
         ) as dst:
             dst.write(mask_data)
 

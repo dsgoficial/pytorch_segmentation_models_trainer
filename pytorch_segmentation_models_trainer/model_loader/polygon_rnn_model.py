@@ -20,6 +20,7 @@
  *   https://github.com/AlexMa011/pytorch-polygon-rnn                      *
  ****
 """
+
 import os
 
 import torch

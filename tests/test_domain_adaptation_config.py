@@ -2,6 +2,7 @@
 """
 Tests for domain_adaptation_config dataclasses.
 """
+
 import pytest
 from omegaconf import OmegaConf, MissingMandatoryValue
 

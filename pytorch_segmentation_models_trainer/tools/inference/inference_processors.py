@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 from collections import defaultdict
 from concurrent.futures.thread import ThreadPoolExecutor
 import logging
@@ -146,9 +147,11 @@ class AbstractInferenceProcessor(ABC):
                 polygonizer,
                 inference,
                 profile,
-                image_name=Path(image_path).stem
-                if self.group_output_by_image_basename
-                else None,
+                image_name=(
+                    Path(image_path).stem
+                    if self.group_output_by_image_basename
+                    else None
+                ),
             )
         if save_inference_output:
             self.save_inference(image_path, threshold, profile, inference, output_dict)
@@ -543,9 +546,7 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         transforms = self._get_tta_transforms()
         n_tta = len(transforms)
         compute_unc = (
-            self.export_uncertainty_map
-            and "uncertainty" in merger_dict
-            and n_tta > 1
+            self.export_uncertainty_map and "uncertainty" in merger_dict and n_tta > 1
         )
 
         with torch.no_grad():
@@ -783,9 +784,11 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
                 polygonizer,
                 inference,
                 profile,
-                image_name=Path(image_path).stem
-                if self.group_output_by_image_basename
-                else None,
+                image_name=(
+                    Path(image_path).stem
+                    if self.group_output_by_image_basename
+                    else None
+                ),
             )
         if save_inference_output:
             self.save_inference(image_path, threshold, profile, inference, output_dict)
@@ -1127,7 +1130,9 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
 
         if self.export_strategy is not None:
             output_dict["inference"].append(
-                self.export_strategy.save_inference({"seg": inference.get("seg", inference)}, profile)
+                self.export_strategy.save_inference(
+                    {"seg": inference.get("seg", inference)}, profile
+                )
             )
 
 
@@ -1364,9 +1369,9 @@ class PolygonRNNInferenceProcessor(AbstractInferenceProcessor):
         self, image: np.ndarray, bboxes: List[np.ndarray], **kwargs: Optional[Any]
     ) -> Dict[str, np.ndarray]:
         img = Image.fromarray(image)
-        image_tensor_list_dict: List[
-            Dict[str, torch.Tensor]
-        ] = self.crop_and_resize_image_to_bboxes(img, bboxes)
+        image_tensor_list_dict: List[Dict[str, torch.Tensor]] = (
+            self.crop_and_resize_image_to_bboxes(img, bboxes)
+        )
         output_list = []
         self.model.eval()
         with torch.no_grad():

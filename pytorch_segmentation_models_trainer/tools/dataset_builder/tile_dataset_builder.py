@@ -74,6 +74,7 @@ def _process_image(
     min_valid_pixel_ratio: float,
     skip_empty_tiles: bool,
     generate_full_size_masks: bool,
+    background_value: int,
 ) -> List[dict]:
     """Process a single image: tile it and rasterize polygon masks.
 
@@ -85,6 +86,11 @@ def _process_image(
     from rasterio.transform import from_bounds
     from rasterio.warp import transform_geom
     from shapely.geometry import box, mapping
+
+    if not 0 <= background_value <= 255:
+        raise ValueError("background_value must be in the uint8 range [0, 255]")
+
+    background_value = int(background_value)
 
     rows = []
 
@@ -120,11 +126,13 @@ def _process_image(
                 shapes,
                 out_shape=(image_height, image_width),
                 transform=image_transform,
-                fill=0,
+                fill=background_value,
                 dtype=np.uint8,
             )
         else:
-            full_mask = np.zeros((image_height, image_width), dtype=np.uint8)
+            full_mask = np.full(
+                (image_height, image_width), background_value, dtype=np.uint8
+            )
 
         mask_profile = dict(
             driver="GTiff",
@@ -176,13 +184,15 @@ def _process_image(
                     shapes,
                     out_shape=(tile_height, tile_width),
                     transform=tile_transform,
-                    fill=0,
+                    fill=background_value,
                     dtype=np.uint8,
                 )
             else:
-                tile_mask = np.zeros((tile_height, tile_width), dtype=np.uint8)
+                tile_mask = np.full(
+                    (tile_height, tile_width), background_value, dtype=np.uint8
+                )
 
-            if skip_empty_tiles and tile_mask.max() == 0:
+            if skip_empty_tiles and np.all(tile_mask == background_value):
                 continue
 
             tile_name = f"{tile_id:06d}.tif"
@@ -240,6 +250,7 @@ def build_tile_dataset(
     generate_full_size_masks: bool = False,
     max_workers: int = 8,
     progress: bool = True,
+    background_value: int = 255,
 ) -> pd.DataFrame:
     """Build a tile dataset from raster images and vector polygon masks.
 
@@ -272,6 +283,8 @@ def build_tile_dataset(
             for each image.
         max_workers: Number of parallel worker threads.
         progress: Whether to show a tqdm progress bar.
+        background_value: Pixel value used for nodata/background in the mask.
+            Defaults to 255 so background is distinct from class index 0.
 
     Returns:
         DataFrame with columns ``image_path``, ``label_path``, ``rows``,
@@ -312,6 +325,7 @@ def build_tile_dataset(
                 min_valid_pixel_ratio,
                 skip_empty_tiles,
                 generate_full_size_masks,
+                background_value,
             ): img_path
             for img_path in iterator
         }

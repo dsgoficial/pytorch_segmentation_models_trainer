@@ -2,6 +2,7 @@
 """
 Tests for BaseDomainAdaptationMethod and DomainAdaptationLossOutput.
 """
+
 import pytest
 import torch
 
@@ -9,7 +10,6 @@ from pytorch_segmentation_models_trainer.domain_adaptation.base_method import (
     BaseDomainAdaptationMethod,
     DomainAdaptationLossOutput,
 )
-
 
 # ---------------------------------------------------------------------------
 # Minimal concrete subclass for testing the base contract
@@ -27,7 +27,7 @@ class _ConcreteMethod(BaseDomainAdaptationMethod):
         target_output,
         source_features,
         target_features,
-        **kwargs
+        **kwargs,
     ):
         loss = torch.tensor(0.0)
         return DomainAdaptationLossOutput(loss=loss, log_dict={"test_loss": 0.0})
@@ -52,7 +52,7 @@ class _MethodWithExtras(BaseDomainAdaptationMethod):
         target_output,
         source_features,
         target_features,
-        **kwargs
+        **kwargs,
     ):
         loss = torch.tensor(0.5)
         return DomainAdaptationLossOutput(loss=loss, log_dict={"disc_loss": 0.5})

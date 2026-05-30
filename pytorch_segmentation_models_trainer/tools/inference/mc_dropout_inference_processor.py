@@ -295,17 +295,23 @@ class MCDropoutInferenceProcessor(MultiClassInferenceProcessor):
                 _polygonizer,
                 inference,
                 profile,
-                image_name=Path(image_path).stem
-                if self.group_output_by_image_basename
-                else None,
+                image_name=(
+                    Path(image_path).stem
+                    if self.group_output_by_image_basename
+                    else None
+                ),
             )
         if save_inference_output:
-            self._save_mc_inference(image_path, threshold, profile, inference, output_dict)
+            self._save_mc_inference(
+                image_path, threshold, profile, inference, output_dict
+            )
         if kwargs.get("output_inferences"):
             output_dict["inference_output"].append(inference)
         return output_dict
 
-    def _save_mc_inference(self, image_path, threshold, profile, inference, output_dict):
+    def _save_mc_inference(
+        self, image_path, threshold, profile, inference, output_dict
+    ):
         """Like save_inference but uses '_mc_uncertainty' suffix for the uncertainty raster."""
         if self.export_uncertainty_map and "uncertainty" in inference:
             self._save_uncertainty_raster(

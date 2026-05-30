@@ -16,6 +16,7 @@
  *                                                                         *
  ***************************************************************************/
 """
+
 from dataclasses import dataclass, field
 from typing import Any, Optional, List
 from omegaconf import MISSING

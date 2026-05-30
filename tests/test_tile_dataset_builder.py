@@ -223,3 +223,102 @@ def test_build_tile_dataset_full_size_mask(image_and_vector) -> None:
     with rasterio.open(full_mask_path) as f:
         assert f.width == 100
         assert f.height == 100
+
+
+def test_build_tile_dataset_uses_default_background_value_255(tmp_path: Path) -> None:
+    """Default masks should use 255 as background instead of 0."""
+    img_path = tmp_path / "image.tif"
+    data = np.ones((3, 64, 64), dtype=np.uint8)
+    make_tiff(img_path, data, crs="EPSG:4326")
+
+    poly = box(0.00, 0.50, 0.50, 1.00)
+    gdf = gpd.GeoDataFrame({"geometry": [poly], "class_id": [3]}, crs="EPSG:4326")
+    gpkg_path = tmp_path / "masks.gpkg"
+    gdf.to_file(gpkg_path, driver="GPKG", layer="polygons")
+
+    out_dir = tmp_path / "dataset"
+    df = build_tile_dataset(
+        image_paths=[img_path],
+        vector_path=gpkg_path,
+        class_attribute="class_id",
+        output_dir=out_dir,
+        vector_layer="polygons",
+        tile_width=32,
+        tile_height=32,
+        skip_empty_tiles=False,
+        progress=False,
+    )
+
+    assert len(df) > 0
+    empty_tile_found = False
+    for _, row in df.iterrows():
+        with rasterio.open(row["label_path"]) as f:
+            mask = f.read(1)
+        if np.all(mask == 255):
+            empty_tile_found = True
+            break
+
+    assert empty_tile_found, "Expected at least one tile with 255 background"
+
+
+def test_build_tile_dataset_allows_custom_background_value(tmp_path: Path) -> None:
+    """background_value should be configurable for multi-class masks."""
+    img_path = tmp_path / "image.tif"
+    data = np.ones((3, 64, 64), dtype=np.uint8)
+    make_tiff(img_path, data, crs="EPSG:4326")
+
+    poly = box(0.00, 0.50, 0.50, 1.00)
+    gdf = gpd.GeoDataFrame({"geometry": [poly], "class_id": [3]}, crs="EPSG:4326")
+    gpkg_path = tmp_path / "masks.gpkg"
+    gdf.to_file(gpkg_path, driver="GPKG", layer="polygons")
+
+    out_dir = tmp_path / "dataset_custom_bg"
+    df = build_tile_dataset(
+        image_paths=[img_path],
+        vector_path=gpkg_path,
+        class_attribute="class_id",
+        output_dir=out_dir,
+        vector_layer="polygons",
+        tile_width=32,
+        tile_height=32,
+        skip_empty_tiles=False,
+        progress=False,
+        background_value=17,
+    )
+
+    assert len(df) > 0
+    found_custom_background = False
+    for _, row in df.iterrows():
+        with rasterio.open(row["label_path"]) as f:
+            mask = f.read(1)
+        assert mask.dtype == np.uint8
+        if 17 in np.unique(mask):
+            found_custom_background = True
+            break
+
+    assert found_custom_background, "Expected at least one tile with background 17"
+
+
+def test_build_tile_dataset_rejects_invalid_background_value(tmp_path: Path) -> None:
+    """background_value must stay within the uint8 range."""
+    img_path = tmp_path / "image.tif"
+    data = np.ones((3, 16, 16), dtype=np.uint8)
+    make_tiff(img_path, data, crs="EPSG:4326")
+
+    gdf = gpd.GeoDataFrame(
+        {"geometry": [box(0.0, 0.0, 1.0, 1.0)], "class_id": [1]},
+        crs="EPSG:4326",
+    )
+    gpkg_path = tmp_path / "masks.gpkg"
+    gdf.to_file(gpkg_path, driver="GPKG", layer="polygons")
+
+    with pytest.raises(ValueError, match="uint8 range"):
+        build_tile_dataset(
+            image_paths=[img_path],
+            vector_path=gpkg_path,
+            class_attribute="class_id",
+            output_dir=tmp_path / "dataset_invalid",
+            vector_layer="polygons",
+            background_value=999,
+            progress=False,
+        )

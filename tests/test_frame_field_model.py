@@ -5,6 +5,7 @@ Tests for FrameFieldModel / FrameFieldSegmentationPLModel.
 - Inference tests use dummy tensors (fast, no I/O).
 - Training tests mock Trainer.fit() to avoid running the full pipeline.
 """
+
 import os
 import unittest
 from importlib import import_module
@@ -229,8 +230,12 @@ class Test_FrameFieldModel(CustomTestCase):
         return {
             "image": torch.randn(B, 3, H, W),
             "gt_polygons_image": torch.zeros(B, C, H, W),
-            "class_freq": torch.ones(B, C),       # [B, C] required by compute_seg_loss_weights
-            "gt_crossfield_angle": torch.zeros(B, 1, H, W),  # required by compute_gt_field
+            "class_freq": torch.ones(
+                B, C
+            ),  # [B, C] required by compute_seg_loss_weights
+            "gt_crossfield_angle": torch.zeros(
+                B, 1, H, W
+            ),  # required by compute_gt_field
         }
 
     def test_frame_field_validation_step_returns_loss(self) -> None:
@@ -246,6 +251,7 @@ class Test_FrameFieldModel(CustomTestCase):
                 ],
             )
             from importlib import import_module
+
             module_path, class_name = cfg.pl_model._target_.rsplit(".", 1)
             module = import_module(module_path)
             ff_model = getattr(module, class_name)(cfg)
@@ -269,6 +275,7 @@ class Test_FrameFieldModel(CustomTestCase):
                 ],
             )
             from importlib import import_module
+
             module_path, class_name = cfg.pl_model._target_.rsplit(".", 1)
             module = import_module(module_path)
             ff_model = getattr(module, class_name)(cfg)
@@ -292,6 +299,7 @@ class Test_FrameFieldModel(CustomTestCase):
                 ],
             )
             from importlib import import_module
+
             module_path, class_name = cfg.pl_model._target_.rsplit(".", 1)
             module = import_module(module_path)
             ff_model = getattr(module, class_name)(cfg)

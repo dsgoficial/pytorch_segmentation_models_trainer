@@ -14,6 +14,7 @@ The dataset builder tools help you prepare segmentation datasets from raw raster
 | Band Combiner | `combine-bands` | Merge bands from N matching rasters into a single multi-band GeoTIFF |
 | Tile Dataset Builder | `build-tile-dataset` | Tile rasters and rasterize vector polygons as masks |
 | Sliding Window Builder | `build-sliding-window-dataset` | Crop existing image/mask pairs into fixed-size patches |
+| MBTiles Multiclass Mask Builder | `build-mbtiles-multiclass-masks` | Rasterize class polygons onto frame extents using an MBTiles reference grid |
 
 ---
 
@@ -99,7 +100,12 @@ min_valid_pixel_ratio: 0.1
 skip_empty_tiles: true
 generate_full_size_masks: false
 max_workers: 8
+background_value: 255
 ```
+
+Use a `background_value` that does not collide with any valid class ID. The
+default `255` is a good fit for masks stored as `uint8` when classes start at
+`0` or `1`.
 
 ### Output structure
 
@@ -127,6 +133,7 @@ df = build_tile_dataset(
     output_dir=Path("dataset/"),
     tile_width=256,
     tile_height=256,
+    background_value=255,
 )
 print(f"{len(df)} tiles saved")
 ```

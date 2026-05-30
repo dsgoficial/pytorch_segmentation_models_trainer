@@ -17,6 +17,7 @@
  *                                                                         *
  ****
 """
+
 """
 Fine-tuning strategies for segmentation models
 ===============================================
@@ -116,6 +117,7 @@ def _log_param_summary(model: nn.Module, strategy: str) -> None:
 # Strategy implementations
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def _apply_full(model: nn.Module, cfg: Any) -> nn.Module:
     for param in model.parameters():
         param.requires_grad = True
@@ -147,7 +149,8 @@ def _apply_linear_probe(model: nn.Module, cfg: Any) -> nn.Module:
         param.requires_grad = False
 
     trainable_keywords = tuple(
-        getattr(cfg, "trainable_modules", None) or ("head", "segmentation_head", "classifier")
+        getattr(cfg, "trainable_modules", None)
+        or ("head", "segmentation_head", "classifier")
     )
     unfrozen_any = False
     for name, param in model.named_parameters():
@@ -216,7 +219,16 @@ def _auto_detect_attention_linears(model: nn.Module) -> List[str]:
     appear to belong to attention blocks (name contains common attention
     keywords).
     """
-    attention_keywords = ("query", "key", "value", "q_proj", "k_proj", "v_proj", "qkv", "attn")
+    attention_keywords = (
+        "query",
+        "key",
+        "value",
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "qkv",
+        "attn",
+    )
     found = set()
     for name, module in model.named_modules():
         if isinstance(module, nn.Linear):

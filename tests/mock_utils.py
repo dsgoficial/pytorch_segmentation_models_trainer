@@ -1,6 +1,7 @@
 import torch
 import os
 
+
 def create_dummy_checkpoint(path):
     """Creates a dummy PyTorch Lightning checkpoint file."""
     checkpoint = {

@@ -125,6 +125,7 @@ class TestEvidentialWrapperInvariants:
 
     def test_max_uncertainty_from_very_negative_logits(self):
         """When logits are very negative, evidence ≈ 0, alpha ≈ 1, u → 1."""
+
         # Use a model that directly returns a fixed very-negative tensor
         class NegativeLogitModel(nn.Module):
             def __init__(self, k):

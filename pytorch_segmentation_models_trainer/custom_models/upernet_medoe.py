@@ -151,9 +151,7 @@ class UPerNetMEDOE(nn.Module):
                 from omegaconf import DictConfig, OmegaConf
 
                 if isinstance(class_groups, DictConfig):
-                    class_groups = OmegaConf.to_container(
-                        class_groups, resolve=True
-                    )
+                    class_groups = OmegaConf.to_container(class_groups, resolve=True)
             except ImportError:
                 pass
         else:
@@ -168,7 +166,9 @@ class UPerNetMEDOE(nn.Module):
         self.num_experts = len(self.group_names)
 
         # For tail_residual mode, gate has one fewer expert (TAIL is not gated)
-        self._num_gated_experts = self.num_experts - 1 if tail_residual else self.num_experts
+        self._num_gated_experts = (
+            self.num_experts - 1 if tail_residual else self.num_experts
+        )
         # TAIL expert index and its class channels
         self._tail_idx = self.num_experts - 1
         self._tail_classes = class_groups[self.group_names[self._tail_idx]]
@@ -256,9 +256,7 @@ class UPerNetMEDOE(nn.Module):
         nn.init.zeros_(self.gate.bias)
         nn.init.xavier_uniform_(self.gate.weight)
 
-    def _make_masked_target(
-        self, target: torch.Tensor, group_idx: int
-    ) -> torch.Tensor:
+    def _make_masked_target(self, target: torch.Tensor, group_idx: int) -> torch.Tensor:
         """Create masked target for an expert group."""
         group_mask = getattr(self, f"_group_mask_{group_idx}")
         valid = target != self.ignore_index
@@ -281,7 +279,9 @@ class UPerNetMEDOE(nn.Module):
         """Entropy regularization on gate weights to prevent collapse."""
         n_experts = gate_weights.shape[1]
         entropy = -(gate_weights * torch.log(gate_weights.clamp(min=1e-8))).sum(dim=1)
-        max_entropy = torch.log(torch.tensor(float(n_experts), device=gate_weights.device))
+        max_entropy = torch.log(
+            torch.tensor(float(n_experts), device=gate_weights.device)
+        )
         return max_entropy - entropy.mean()
 
     def compute_ohem_loss(
@@ -307,8 +307,10 @@ class UPerNetMEDOE(nn.Module):
             else:
                 hard_target = target
             pixel_loss = F.cross_entropy(
-                predictions, hard_target,
-                ignore_index=self.ignore_index, reduction="none",
+                predictions,
+                hard_target,
+                ignore_index=self.ignore_index,
+                reduction="none",
             )  # (B, H, W)
             valid_mask = hard_target != self.ignore_index
             # Set ignored pixels to -inf so they're never selected
@@ -354,19 +356,24 @@ class UPerNetMEDOE(nn.Module):
             if (masked_target != self.ignore_index).any():
                 ce_losses.append(self.expert_criterion(expert_out, masked_target))
                 ce_weights.append(self.expert_weights[i])
-            suppression_losses.append(
-                self._compute_suppression_loss(expert_out, i)
-            )
+            suppression_losses.append(self._compute_suppression_loss(expert_out, i))
 
         if not ce_losses:
-            ce_term = torch.zeros(1, device=target.device, dtype=torch.float32).squeeze()
+            ce_term = torch.zeros(
+                1, device=target.device, dtype=torch.float32
+            ).squeeze()
         else:
-            weights_t = torch.tensor(ce_weights, device=target.device, dtype=torch.float32)
+            weights_t = torch.tensor(
+                ce_weights, device=target.device, dtype=torch.float32
+            )
             ce_term = (torch.stack(ce_losses) * weights_t).sum() / weights_t.sum()
 
         suppression_term = torch.stack(suppression_losses).mean()
 
-        total = self.expert_loss_weight * ce_term + self.aux_suppression_weight * suppression_term
+        total = (
+            self.expert_loss_weight * ce_term
+            + self.aux_suppression_weight * suppression_term
+        )
 
         # Gate entropy regularization
         if self.gate_entropy_weight > 0 and self._gate_weights_with_grad is not None:
@@ -409,7 +416,9 @@ class UPerNetMEDOE(nn.Module):
                 ensemble = ensemble + gate_weights[:, i : i + 1] * expert_out
 
         self.last_expert_outputs = expert_outputs
-        self._gate_weights_with_grad = gate_weights if self.gate_entropy_weight > 0 else None
+        self._gate_weights_with_grad = (
+            gate_weights if self.gate_entropy_weight > 0 else None
+        )
         self.last_gate_weights = gate_weights.detach()
         self.last_aux_loss = aux_loss
 
@@ -438,9 +447,7 @@ class UPerNetMEDOE(nn.Module):
             diagnostics["medoe/tail_scale"] = self.tail_scale.detach()
 
         if hard_masks is not None and self.last_expert_outputs is not None:
-            for i, (name, class_indices) in enumerate(
-                self.class_groups.items()
-            ):
+            for i, (name, class_indices) in enumerate(self.class_groups.items()):
                 expert_pred = self.last_expert_outputs[i].detach().argmax(dim=1)
                 for c in class_indices:
                     pred_c = expert_pred == c

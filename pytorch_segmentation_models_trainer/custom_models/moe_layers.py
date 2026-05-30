@@ -33,7 +33,6 @@ from typing import Any, Dict, Tuple, Union
 
 from segmentation_models_pytorch.base.modules import Conv2dReLU
 
-
 # ----------------------------------------------------------------------
 # Routers
 # ----------------------------------------------------------------------
@@ -73,9 +72,7 @@ class NoisyTopKRouter(nn.Module):
         nn.init.xavier_uniform_(self.gate.weight)
         nn.init.xavier_uniform_(self.w_noise.weight)
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             x: Input features (B, C, H, W)
@@ -94,16 +91,10 @@ class NoisyTopKRouter(nn.Module):
 
         if self.training and self.noise_std > 0:
             noise_logits = self.w_noise(x_flat)
-            noise = (
-                torch.randn_like(logits)
-                * F.softplus(noise_logits)
-                * self.noise_std
-            )
+            noise = torch.randn_like(logits) * F.softplus(noise_logits) * self.noise_std
             logits = logits + noise
 
-        top_k_logits, top_k_indices = torch.topk(
-            logits, self.top_k, dim=-1
-        )
+        top_k_logits, top_k_indices = torch.topk(logits, self.top_k, dim=-1)
 
         dispatch_weights = F.softmax(top_k_logits, dim=-1)
 
@@ -122,8 +113,7 @@ class NoisyTopKRouter(nn.Module):
         full_weights.scatter_(1, top_k_indices, dispatch_weights)
 
         expert_weight_maps = (
-            full_weights
-            .view(B, N, self.num_experts)
+            full_weights.view(B, N, self.num_experts)
             .permute(0, 2, 1)
             .view(B, self.num_experts, H, W)
         )
@@ -184,9 +174,7 @@ class ExpertChoiceRouter(nn.Module):
 
         # Expert Choice: softmax over spatial positions per image
         # S[b, e, n] = probability that expert e assigns to position n
-        S = F.softmax(
-            logits.permute(0, 2, 1), dim=2
-        )  # (B, num_experts, N)
+        S = F.softmax(logits.permute(0, 2, 1), dim=2)  # (B, num_experts, N)
 
         capacity = max(1, int(self.capacity_factor * N / self.num_experts))
         capacity = min(capacity, N)
@@ -198,13 +186,9 @@ class ExpertChoiceRouter(nn.Module):
         weight_maps = torch.zeros_like(S_flat)
         weight_maps.scatter_(1, top_idx, top_vals)
 
-        expert_weight_maps = weight_maps.view(
-            B, self.num_experts, H, W
-        )
+        expert_weight_maps = weight_maps.view(B, self.num_experts, H, W)
 
-        aux_loss = torch.tensor(
-            0.0, device=x.device, dtype=x.dtype
-        )
+        aux_loss = torch.tensor(0.0, device=x.device, dtype=x.dtype)
 
         return expert_weight_maps, aux_loss
 
@@ -312,9 +296,7 @@ class MoEConv2dReLU(nn.Module):
             ]
         )
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             x: Input tensor (B, C_in, H, W)
@@ -330,8 +312,12 @@ class MoEConv2dReLU(nn.Module):
             output = self.shared_expert(x)
         else:
             output = torch.zeros(
-                B, self.out_channels, H, W,
-                device=x.device, dtype=x.dtype,
+                B,
+                self.out_channels,
+                H,
+                W,
+                device=x.device,
+                dtype=x.dtype,
             )
 
         # 2. Route
@@ -343,12 +329,10 @@ class MoEConv2dReLU(nn.Module):
 
         # 3. Sparse experts with gradient checkpointing
         for e, expert in enumerate(self.experts):
-            w_map = expert_weight_maps[:, e: e + 1, :, :]  # (B, 1, H, W)
+            w_map = expert_weight_maps[:, e : e + 1, :, :]  # (B, 1, H, W)
 
             if self.training:
-                expert_out = grad_checkpoint(
-                    expert, x, use_reentrant=False
-                )
+                expert_out = grad_checkpoint(expert, x, use_reentrant=False)
             else:
                 expert_out = expert(x)
 

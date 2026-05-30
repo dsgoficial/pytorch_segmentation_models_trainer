@@ -6,17 +6,20 @@ Uses a real tiny timm model (resnet18) to validate the full forward pass
 on CPU with small tensors.  No pretrained weights are downloaded
 (pretrained=False).
 """
+
 import pytest
 import torch
 
 try:
     import timm  # noqa: F401
+
     TIMM_AVAILABLE = True
 except ImportError:
     TIMM_AVAILABLE = False
 
 try:
     import segmentation_models_pytorch  # noqa: F401
+
     SMP_AVAILABLE = True
 except ImportError:
     SMP_AVAILABLE = False
@@ -106,6 +109,7 @@ class TestTimmEncoderWithSMPDecoder:
 
     def test_import_error_when_timm_missing(self):
         from unittest.mock import patch
+
         with patch.dict("sys.modules", {"timm": None}):
             with pytest.raises(ImportError, match="timm"):
                 TimmEncoderWithSMPDecoder(
@@ -120,6 +124,7 @@ class TestSMPTuPrefix:
 
     def test_smp_unet_with_tu_resnet18(self):
         import segmentation_models_pytorch as smp
+
         model = smp.Unet(
             encoder_name="tu-resnet18",
             encoder_weights=None,

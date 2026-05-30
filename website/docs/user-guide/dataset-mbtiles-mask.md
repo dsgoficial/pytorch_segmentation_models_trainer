@@ -12,6 +12,8 @@ that grid before returning a training sample.
 
 Use this dataset after validating alignment with
 [`export-mbtiles-mask-aligned`](./export-mbtiles-mask-aligned-images.md).
+If you still need to generate the masks themselves from vector data, use
+[`MBTiles Multiclass Mask Builder`](./mbtiles-multiclass-mask-builder.md) first.
 
 ## When to Use
 

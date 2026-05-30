@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 import torch
 from torch import nn
 from torch.nn.modules.loss import _Loss
@@ -64,9 +65,11 @@ class FinalConvBlock(torch.nn.Module):
             ),
             torch.nn.ReLU(),
             torch.nn.BatchNorm2d(out_channels),
-            torch.nn.Identity()
-            if upsample_factor == 1.0
-            else torch.nn.Upsample(scale_factor=upsample_factor, mode="bilinear"),
+            (
+                torch.nn.Identity()
+                if upsample_factor == 1.0
+                else torch.nn.Upsample(scale_factor=upsample_factor, mode="bilinear")
+            ),
         )
 
     def init_weights(self):

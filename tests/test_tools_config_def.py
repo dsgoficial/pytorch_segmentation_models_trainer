@@ -17,6 +17,7 @@ from pytorch_segmentation_models_trainer.config_definitions.tools_config_def imp
     VectorFileDataWriterConfig,
     RasterDataWriterConfig,
     VectorDatabaseDataWriterConfig,
+    MBTilesMulticlassMaskBuilderConfig,
     RasterExportInferenceStrategyConfig,
     MultipleRasterExportInferenceStrategyConfig,
     VectorFileExportInferenceStrategyConfig,
@@ -95,6 +96,21 @@ class TestWriterConfigs:
         with pytest.raises(MissingMandatoryValue):
             _ = cfg.user
         assert cfg.port == 5432
+
+
+class TestMBTilesMulticlassMaskBuilderConfig:
+    def test_defaults_and_hydra_registration(self):
+        cfg = OmegaConf.structured(MBTilesMulticlassMaskBuilderConfig)
+        assert cfg.frame_id_attribute == "rect_id"
+        assert cfg.class_attribute == "tipo"
+        assert cfg.output_subdir == "masks"
+        assert cfg.background_value == 255
+
+        from hydra.core.config_store import ConfigStore
+
+        cs = ConfigStore.instance()
+        node = cs.load("mbtiles_multiclass_mask/default")
+        assert "build_mbtiles_multiclass_masks" in node._target_
 
 
 class TestExportStrategyConfigs:

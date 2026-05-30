@@ -72,6 +72,7 @@ non-trivial.  TTA is therefore applied only to the ``seg`` output for
 frame-field processors; ``crossfield`` is taken from the identity (``rot0``)
 pass.  If ``rot0`` is not in the augmentation list the first pass is used.
 """
+
 from __future__ import annotations
 
 from typing import Callable, Dict, FrozenSet, List, Union
@@ -161,8 +162,7 @@ def _augment(x: torch.Tensor, aug: str) -> torch.Tensor:
         # vertical flip, then 90° CCW
         return torch.rot90(torch.flip(x, dims=[-2]), 1, dims=(-2, -1))
     raise ValueError(
-        f"Unknown TTA augmentation: '{aug}'. "
-        f"Valid options: {sorted(_VALID)}"
+        f"Unknown TTA augmentation: '{aug}'. " f"Valid options: {sorted(_VALID)}"
     )
 
 
@@ -209,8 +209,7 @@ def _deaugment(x: torch.Tensor, aug: str) -> torch.Tensor:
         # forward: flip_v → rot90  ⟹  inverse: rot270 → flip_v
         return torch.flip(torch.rot90(x, -1, dims=(-2, -1)), dims=[-2])
     raise ValueError(
-        f"Unknown TTA augmentation: '{aug}'. "
-        f"Valid options: {sorted(_VALID)}"
+        f"Unknown TTA augmentation: '{aug}'. " f"Valid options: {sorted(_VALID)}"
     )
 
 

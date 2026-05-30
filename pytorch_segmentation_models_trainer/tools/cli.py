@@ -807,7 +807,8 @@ def build_tile_dataset_cmd(yaml_path):
     ``image_paths``, ``vector_path``, ``class_attribute``, ``output_dir``,
     and optionally ``vector_layer``, ``tile_width``, ``tile_height``,
     ``overlap_x_percent``, ``overlap_y_percent``, ``min_valid_pixel_ratio``,
-    ``skip_empty_tiles``, ``generate_full_size_masks``, ``max_workers``.
+    ``skip_empty_tiles``, ``generate_full_size_masks``, ``max_workers``,
+    ``background_value``.
     """
     from pathlib import Path
 
@@ -907,6 +908,36 @@ def build_sliding_window_dataset_cmd(
         n_workers=workers,
     )
     click.echo(f"Generated {len(df)} patch pair(s) in '{output_dir}'.")
+
+
+@cli.command("build-mbtiles-multiclass-masks")
+@click.argument("yaml_path", type=click.Path(exists=True, dir_okay=False))
+def build_mbtiles_multiclass_masks_cmd(yaml_path):
+    """Build multiclass masks from an MBTiles reference grid and vector labels.
+
+    YAML_PATH must contain keys matching
+    ``build_mbtiles_multiclass_masks()`` parameters:
+    ``reference_mbtiles_path``, ``frames_path``, ``vector_path``,
+    ``output_dir``, and optionally ``frame_layer``, ``vector_layer``,
+    ``frame_id_attribute``, ``class_attribute``, ``output_subdir``,
+    ``output_extension``, and ``background_value``.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    from pytorch_segmentation_models_trainer.tools.mbtiles.multiclass_mask_builder import (
+        build_mbtiles_multiclass_masks,
+    )
+
+    with open(yaml_path) as fh:
+        cfg = yaml.safe_load(fh)
+
+    for key in ("reference_mbtiles_path", "frames_path", "vector_path", "output_dir"):
+        cfg[key] = Path(cfg[key])
+
+    df = build_mbtiles_multiclass_masks(**cfg)
+    click.echo(f"Built {len(df)} multiclass masks into '{cfg['output_dir']}/'.")
 
 
 @cli.command("remap-mask-classes")
