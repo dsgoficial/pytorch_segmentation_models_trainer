@@ -14,6 +14,8 @@
 - Reduced per-frame allocations inside the multiclass mask worker by writing
   raster outputs in-place and avoiding an extra `np.where` copy for the final
   mask image.
+- Declared the multiclass mask GeoTIFF `nodata` tag as `255` so the on-disk
+  metadata matches the background value written into empty pixels.
 - Removed the `gpd.clip` dependency from the multiclass mask builder and now
   rasterize all intersecting features after repairing invalid geometries with
   `shapely.validation.make_valid`, preventing `TopologyException` crashes on

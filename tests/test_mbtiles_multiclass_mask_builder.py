@@ -133,6 +133,7 @@ def test_build_mbtiles_multiclass_masks_writes_masks_and_dataset_csv(tmp_path):
             mask = src.read(1)
             assert mask.dtype == np.uint8
             assert src.crs.to_string() == "EPSG:3857"
+            assert src.nodata == 255
             assert mask.shape == (512, 256)
             assert 255 in np.unique(mask)
 
@@ -175,6 +176,7 @@ def test_write_mask_creates_uint8_geotiff(tmp_path):
         assert src.count == 1
         assert src.dtypes[0] == "uint8"
         assert src.crs.to_string() == "EPSG:3857"
+        assert src.nodata == 255
         assert src.read(1).dtype == np.uint8
         np.testing.assert_array_equal(src.read(1), mask)
 

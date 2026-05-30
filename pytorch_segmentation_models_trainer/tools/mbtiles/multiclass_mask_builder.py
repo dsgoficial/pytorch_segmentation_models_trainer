@@ -62,6 +62,7 @@ def _write_mask(
     mask: np.ndarray,
     crs,
     transform,
+    nodata: int = 255,
 ) -> None:
     """Write a single-band ``uint8`` mask to disk."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,7 +74,7 @@ def _write_mask(
         "dtype": "uint8",
         "crs": crs,
         "transform": transform,
-        "nodata": None,
+        "nodata": int(nodata),
     }
     with rasterio.open(output_path, "w", **profile) as dst:
         dst.write(mask, 1)
