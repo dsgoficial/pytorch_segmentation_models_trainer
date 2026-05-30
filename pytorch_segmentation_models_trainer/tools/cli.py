@@ -1207,6 +1207,251 @@ def visualize_predictions_cmd(
     click.echo(f"Figure saved to '{output}'.")
 
 
+@cli.command("download-gee-lulc")
+@click.option(
+    "--source",
+    required=True,
+    type=click.Choice(
+        ["mapbiomas", "dynamic-world", "esri-lulc"], case_sensitive=False
+    ),
+    help="LULC product to download.",
+)
+@click.option(
+    "--year",
+    required=True,
+    type=int,
+    help="Target year for the LULC product.",
+)
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Directory where output GeoTIFFs will be written.",
+)
+@click.option(
+    "--bbox",
+    nargs=4,
+    type=float,
+    default=None,
+    metavar="XMIN YMIN XMAX YMAX",
+    help="Bounding box in WGS84 (xmin ymin xmax ymax). Mutually exclusive with --vector-path.",
+)
+@click.option(
+    "--vector-path",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="GeoPackage or GeoJSON file. Each polygon is downloaded separately.",
+)
+@click.option(
+    "--name-attribute",
+    default=None,
+    help="Vector attribute whose value is used to name each output file.",
+)
+@click.option(
+    "--download-mode",
+    default="direct",
+    show_default=True,
+    type=click.Choice(["direct", "export-drive"], case_sensitive=False),
+    help=(
+        "'direct' uses getDownloadURL (regions up to ~1° × 1°). "
+        "'export-drive' exports to Google Drive for large regions."
+    ),
+)
+@click.option(
+    "--max-workers",
+    default=4,
+    show_default=True,
+    type=int,
+    help="Number of parallel download threads.",
+)
+@click.option(
+    "--scale",
+    default=None,
+    type=int,
+    help="Pixel resolution in metres. Defaults to the product native resolution.",
+)
+@click.option(
+    "--crs",
+    default="EPSG:4326",
+    show_default=True,
+    help="Output coordinate reference system.",
+)
+@click.option(
+    "--drive-folder",
+    default="GEE_Downloads",
+    show_default=True,
+    help="Google Drive folder name (export-drive mode only).",
+)
+@click.option(
+    "--mapbiomas-collection",
+    default="brazil",
+    show_default=True,
+    help=(
+        "MapBiomas region key (e.g. brazil, amazon, atlantic_forest). "
+        "Ignored for other sources."
+    ),
+)
+@click.option(
+    "--mapbiomas-collection-id",
+    default=None,
+    help="Full GEE asset ID override for MapBiomas. Takes precedence over --mapbiomas-collection.",
+)
+@click.option(
+    "--project",
+    default=None,
+    help="GEE Cloud project ID.",
+)
+@click.option(
+    "--service-account-email",
+    default=None,
+    envvar="GEE_SERVICE_ACCOUNT_EMAIL",
+    help=(
+        "Service account email for non-interactive authentication "
+        "(e.g. mybot@my-project.iam.gserviceaccount.com). "
+        "Can also be set via the GEE_SERVICE_ACCOUNT_EMAIL environment variable. "
+        "Recommended for server/CI use."
+    ),
+)
+@click.option(
+    "--service-account-key-file",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    envvar="GEE_SERVICE_ACCOUNT_KEY_FILE",
+    help=(
+        "Path to the service account private key JSON file. "
+        "Can also be set via the GEE_SERVICE_ACCOUNT_KEY_FILE environment variable. "
+        "Recommended for server/CI use."
+    ),
+)
+@click.option(
+    "--proxy-url",
+    default=None,
+    envvar="HTTPS_PROXY",
+    help=(
+        "HTTP proxy URL (e.g. http://user:pass@proxy.corp:8080). "
+        "Applied to both the GEE SDK transport and direct downloads. "
+        "Falls back to the HTTPS_PROXY environment variable."
+    ),
+)
+@click.option(
+    "--ca-bundle",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    envvar="REQUESTS_CA_BUNDLE",
+    help=(
+        "Path to a CA certificate bundle (.crt/.pem) for SSL verification. "
+        "Required when the proxy uses a self-signed certificate. "
+        "Falls back to the REQUESTS_CA_BUNDLE environment variable."
+    ),
+)
+def download_gee_lulc_cmd(
+    source,
+    year,
+    output_dir,
+    bbox,
+    vector_path,
+    name_attribute,
+    download_mode,
+    max_workers,
+    scale,
+    crs,
+    drive_folder,
+    mapbiomas_collection,
+    mapbiomas_collection_id,
+    project,
+    service_account_email,
+    service_account_key_file,
+    proxy_url,
+    ca_bundle,
+):
+    """Download LULC rasters from Google Earth Engine.
+
+    Requires the 'earthengine-api' package: pip install earthengine-api
+
+    Authentication (server/CI — recommended):
+    \b
+        pytorch-smt-tools download-gee-lulc \\
+            --source mapbiomas --year 2022 \\
+            --bbox -48.5 -23.5 -47.5 -22.5 \\
+            --output-dir /data/mapbiomas \\
+            --service-account-email bot@proj.iam.gserviceaccount.com \\
+            --service-account-key-file /secrets/gee_key.json \\
+            --project my-gee-project
+
+    Authentication (interactive OAuth — requires browser access):
+    \b
+        pytorch-smt-tools download-gee-lulc \\
+            --source mapbiomas --year 2022 \\
+            --bbox -48.5 -23.5 -47.5 -22.5 \\
+            --output-dir /data/mapbiomas \\
+            --project my-gee-project
+
+    Per-polygon download from a vector file:
+    \b
+        pytorch-smt-tools download-gee-lulc \\
+            --source dynamic-world --year 2022 \\
+            --vector-path municipalities.gpkg \\
+            --name-attribute cod_ibge \\
+            --output-dir /data/dw \\
+            --service-account-email bot@proj.iam.gserviceaccount.com \\
+            --service-account-key-file /secrets/gee_key.json
+    """
+    from pathlib import Path
+
+    from pytorch_segmentation_models_trainer.tools.gee.gee_downloader import (
+        download_regions,
+        initialize_gee,
+        load_regions,
+    )
+
+    if bbox is None and vector_path is None:
+        raise click.UsageError("Either --bbox or --vector-path must be provided.")
+    if bbox is not None and vector_path is not None:
+        raise click.UsageError("--bbox and --vector-path are mutually exclusive.")
+
+    try:
+        initialize_gee(
+            project=project,
+            service_account_email=service_account_email,
+            service_account_key_file=service_account_key_file,
+            proxy_url=proxy_url,
+            ca_bundle=ca_bundle,
+        )
+    except ImportError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    try:
+        regions = load_regions(
+            bbox=tuple(bbox) if bbox else None,
+            vector_path=vector_path,
+            name_attribute=name_attribute,
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    click.echo(f"Downloading {source} for {len(regions)} region(s) (year={year})…")
+
+    results = download_regions(
+        regions=regions,
+        output_dir=Path(output_dir),
+        source=source,
+        year=year,
+        download_mode=download_mode,
+        max_workers=max_workers,
+        scale=scale,
+        crs=crs,
+        drive_folder=drive_folder,
+        mapbiomas_collection=mapbiomas_collection,
+        mapbiomas_collection_id=mapbiomas_collection_id,
+        proxy_url=proxy_url,
+        ca_bundle=ca_bundle,
+    )
+
+    n_ok = sum(1 for v in results.values() if v)
+    n_fail = len(results) - n_ok
+    click.echo(f"Done: {n_ok} succeeded, {n_fail} failed.")
+
+
 def entry():
     """Entry point registered in pyproject.toml."""
     cli()

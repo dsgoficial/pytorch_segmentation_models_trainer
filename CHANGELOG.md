@@ -1,5 +1,27 @@
 # Unreleased
 
+## GEE LULC Downloader
+
+- Added `pytorch_segmentation_models_trainer/tools/gee/gee_downloader.py` with
+  support for downloading MapBiomas, Dynamic World, and ESRI LULC rasters from
+  Google Earth Engine for any set of regions.
+- Input accepts either a bounding box (`xmin ymin xmax ymax`) or a vector file
+  (GeoPackage/GeoJSON); each polygon is downloaded and saved individually, named
+  by a configurable attribute.
+- Two download modes: `direct` (via `getDownloadURL`, suitable for regions up to
+  ~1° × 1°) and `export-drive` (via `Export.image.toDrive` for large areas).
+- Downloads run in parallel via `ThreadPoolExecutor` with configurable
+  `max_workers`.
+- MapBiomas supports 14 regional collections (Brazil default) plus a full asset
+  ID override for custom collections.
+- Authentication via service account JSON key (recommended for server/CI use,
+  readable from `GEE_SERVICE_ACCOUNT_EMAIL` / `GEE_SERVICE_ACCOUNT_KEY_FILE`
+  environment variables) or OAuth2 interactive flow as fallback.
+- Exposed as `pytorch-smt-tools download-gee-lulc` CLI command.
+- 100% test coverage with mocked GEE API calls (no network access required).
+- Added `conf/examples/download_gee_lulc.yaml` with usage examples.
+- Added `website/docs/user-guide/gee-downloader.md` documentation.
+
 ## Test coverage
 
 - Restored 100% test coverage for all modules introduced in the dataset-builder /
