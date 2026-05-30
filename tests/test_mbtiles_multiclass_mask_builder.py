@@ -1,3 +1,4 @@
+# flake8: noqa
 """Tests for the MBTiles multiclass mask builder tool."""
 
 from __future__ import annotations

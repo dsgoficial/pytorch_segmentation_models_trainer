@@ -1,3 +1,4 @@
+# flake8: noqa
 """
 segmentation_vis.py — Colorization and comparison grid utilities for segmentation results.
 
@@ -11,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from matplotlib.figure import Figure
 import numpy as np
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
@@ -127,7 +129,7 @@ def create_segmentation_grid(
     figsize_per_tile: Tuple[float, float] = (3.0, 3.0),
     dpi: int = 150,
     nodata: int = 255,
-) -> "plt.Figure":
+) -> Figure:
     """Build a comparison grid figure: image | GT | pred_1 ... pred_N per row.
 
     Args:

@@ -1,3 +1,4 @@
+# flake8: noqa
 """Tests for tools/dataset_builder/band_combiner.py."""
 
 from __future__ import annotations

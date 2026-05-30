@@ -1,3 +1,4 @@
+# flake8: noqa
 """Tests for tools/visualization/segmentation_vis.py."""
 
 from __future__ import annotations

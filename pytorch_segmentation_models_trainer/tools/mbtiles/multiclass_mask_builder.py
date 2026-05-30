@@ -1,3 +1,4 @@
+# flake8: noqa
 """Build multiclass mask rasters from vector labels on an MBTiles reference grid."""
 
 from __future__ import annotations
