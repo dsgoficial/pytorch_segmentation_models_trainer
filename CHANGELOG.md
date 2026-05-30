@@ -1,5 +1,47 @@
 # Unreleased
 
+## JSON Raster Remapper + VRT Builder
+
+- Added `build_vrt(raster_paths, output_path, nodata_value)` to
+  `tools/raster/tiff_remap.py`: builds a GDAL VRT mosaic from any list of
+  co-registered rasters using only `xml.etree.ElementTree` + rasterio (no
+  `osgeo.gdal` dependency).  Validates that all inputs share the same CRS,
+  pixel resolution, and band count; raises `ValueError` with a descriptive
+  message on mismatch.  Source paths inside the VRT are written as relative
+  paths when possible, falling back to absolute otherwise.
+- Extended `remap_raster_folder_from_json` with `create_vrt=False` and
+  `vrt_path=None` keyword arguments.  When `create_vrt=True`, a mosaic VRT
+  is built from all successfully remapped rasters after the thread pool
+  finishes, using the `nodata_value` from the JSON file.
+- Extended `pytorch-smt-tools remap-raster-from-json` CLI with `--build-vrt`
+  flag and `--vrt-path` option (folder mode only).
+
+## JSON Raster Remapper
+
+- Added `load_remap_json` to `tools/raster/tiff_remap.py`: loads and validates
+  a DsgTools-compatible JSON mapping file (`description`, `nodata_value`,
+  `mapping` fields).  Non-integer entries are skipped with a `UserWarning`;
+  `nodata_value` defaults to 255 when absent.
+- Added `infer_output_dtype`: selects the smallest numpy dtype (uint8 → uint16
+  → int16 → int32 → float32) that represents all target values and the nodata
+  value.
+- Added `remap_raster_windowed`: single-file remap with concurrent windowed I/O.
+  Reads are parallelised (one rasterio handle per thread via
+  `ThreadPoolExecutor`); writes are serialised with a `threading.Lock`.
+  Unmapped pixels become `nodata_value` (DsgTools semantics, unlike the
+  existing `remap_raster` which keeps unmapped values unchanged).  Input nodata
+  pixels are also forced to `nodata_value` after the mapping loop.
+- Added `remap_raster_folder_from_json`: batch version — loads the JSON once
+  and processes all matching rasters in a directory tree with file-level thread
+  parallelism.
+- Exposed as `pytorch-smt-tools remap-raster-from-json` CLI command supporting
+  single-file (`--input`/`--output`) and folder (`--input-dir`/`--output-dir`)
+  modes in a single command with mutual-exclusivity validation.
+- Added `conf/examples/remap_raster_from_json.yaml` with folder-mode example.
+- Updated `website/docs/user-guide/raster-tools.md` with full documentation,
+  JSON format reference, CLI usage, and Python API examples.
+- 100% test coverage (35 tests in `tests/test_tiff_remap.py`).
+
 ## GEE LULC Downloader
 
 - Added `pytorch_segmentation_models_trainer/tools/gee/gee_downloader.py` with

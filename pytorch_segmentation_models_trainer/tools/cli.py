@@ -1452,6 +1452,205 @@ def download_gee_lulc_cmd(
     click.echo(f"Done: {n_ok} succeeded, {n_fail} failed.")
 
 
+@cli.command("remap-raster-from-json")
+@click.option(
+    "--input",
+    "input_path",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="[Single-file mode] Input raster path.",
+)
+@click.option(
+    "--output",
+    "output_path",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="[Single-file mode] Output raster path.",
+)
+@click.option(
+    "--input-dir",
+    default=None,
+    type=click.Path(file_okay=False),
+    help="[Folder mode] Root directory of input rasters.",
+)
+@click.option(
+    "--output-dir",
+    default=None,
+    type=click.Path(file_okay=False),
+    help="[Folder mode] Root directory for remapped output rasters.",
+)
+@click.option(
+    "--mapping-json",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the DsgTools-compatible JSON mapping file.",
+)
+@click.option(
+    "--n-workers",
+    default=4,
+    show_default=True,
+    type=int,
+    help="Number of parallel threads.",
+)
+@click.option(
+    "--compress",
+    default="lzw",
+    show_default=True,
+    type=click.Choice(["lzw", "deflate", "zstd", "none"], case_sensitive=False),
+    help="GeoTIFF compression codec.",
+)
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    default=False,
+    help="[Folder mode] Suppress the tqdm progress bar.",
+)
+@click.option(
+    "--build-vrt",
+    "create_vrt",
+    is_flag=True,
+    default=False,
+    help=(
+        "[Folder mode] After remapping, build a GDAL VRT mosaic of all "
+        "successfully remapped rasters.  The nodata value from the JSON is "
+        "embedded in the VRT.  See --vrt-path to override the output location."
+    ),
+)
+@click.option(
+    "--vrt-path",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help=(
+        "[Folder mode] Path for the VRT file created by --build-vrt. "
+        "Defaults to <output-dir>/mosaic.vrt."
+    ),
+)
+def remap_raster_from_json_cmd(
+    input_path,
+    output_path,
+    input_dir,
+    output_dir,
+    mapping_json,
+    n_workers,
+    compress,
+    no_progress,
+    create_vrt,
+    vrt_path,
+):
+    """Remap raster pixel values using a DsgTools-compatible JSON mapping file.
+
+    \b
+    Unmapped values and source nodata pixels become the nodata_value defined
+    in the JSON (default 255).  Output dtype is inferred automatically from
+    the range of target values.
+
+    \b
+    SINGLE-FILE MODE
+        Remap one raster.  Requires --input and --output.
+
+            pytorch-smt-tools remap-raster-from-json \\
+                --input  /data/mapbiomas.tif \\
+                --output /data/edgv.tif \\
+                --mapping-json /data/mapbiomas_to_edgv.json
+
+    \b
+    FOLDER MODE
+        Remap every .tif/.tiff found recursively under --input-dir,
+        mirroring the directory tree under --output-dir.
+        Requires --input-dir and --output-dir.
+
+            pytorch-smt-tools remap-raster-from-json \\
+                --input-dir  /data/masks \\
+                --output-dir /data/masks_remapped \\
+                --mapping-json /data/mapbiomas_to_edgv.json \\
+                --n-workers 8
+
+    \b
+    FOLDER MODE + VRT
+        Add --build-vrt to create a mosaic.vrt of all remapped rasters.
+        Use --vrt-path to specify a custom VRT location.
+
+            pytorch-smt-tools remap-raster-from-json \\
+                --input-dir  /data/masks \\
+                --output-dir /data/masks_remapped \\
+                --mapping-json /data/mapbiomas_to_edgv.json \\
+                --build-vrt \\
+                --vrt-path /data/masks_remapped/mosaic.vrt
+
+    \b
+    JSON FORMAT
+        {
+          "description": "MapBiomas -> EDGV",
+          "nodata_value": 255,
+          "mapping": { "3": 1, "15": 2, "33": 0 }
+        }
+    """
+    from pathlib import Path
+
+    from pytorch_segmentation_models_trainer.tools.raster.tiff_remap import (
+        load_remap_json,
+        remap_raster_folder_from_json,
+        remap_raster_windowed,
+    )
+
+    single_mode = input_path is not None or output_path is not None
+    folder_mode = input_dir is not None or output_dir is not None
+
+    if single_mode and folder_mode:
+        raise click.UsageError(
+            "Use either --input/--output (single-file) or "
+            "--input-dir/--output-dir (folder), not both."
+        )
+    if not single_mode and not folder_mode:
+        raise click.UsageError(
+            "Provide --input/--output for single-file mode or "
+            "--input-dir/--output-dir for folder mode."
+        )
+
+    if single_mode:
+        if input_path is None or output_path is None:
+            raise click.UsageError(
+                "Single-file mode requires both --input and --output."
+            )
+        try:
+            mapping, nodata_value, _ = load_remap_json(Path(mapping_json))
+        except (FileNotFoundError, ValueError) as exc:
+            raise click.UsageError(str(exc)) from exc
+        _, success, err = remap_raster_windowed(
+            Path(input_path),
+            Path(output_path),
+            mapping,
+            nodata_value=nodata_value,
+            n_workers=n_workers,
+            compress=compress,
+        )
+        if not success:
+            raise click.ClickException(f"Remap failed: {err}")
+        click.echo(f"Remapped raster written to '{output_path}'.")
+    else:
+        if input_dir is None or output_dir is None:
+            raise click.UsageError(
+                "Folder mode requires both --input-dir and --output-dir."
+            )
+        try:
+            n_success, n_errors = remap_raster_folder_from_json(
+                Path(input_dir),
+                Path(output_dir),
+                Path(mapping_json),
+                n_workers=n_workers,
+                progress=not no_progress,
+                create_vrt=create_vrt,
+                vrt_path=Path(vrt_path) if vrt_path else None,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            raise click.UsageError(str(exc)) from exc
+        suffix = "" if n_success == 1 else "s"
+        click.echo(f"Done: {n_success} raster{suffix} remapped, {n_errors} error(s).")
+        if create_vrt:
+            out_vrt = vrt_path or str(Path(output_dir) / "mosaic.vrt")
+            click.echo(f"VRT written to '{out_vrt}'.")
+
+
 def entry():
     """Entry point registered in pyproject.toml."""
     cli()

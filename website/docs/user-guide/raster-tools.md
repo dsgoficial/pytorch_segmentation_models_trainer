@@ -11,8 +11,139 @@ Utility tools for preprocessing raster files.  Accessible via the `pytorch-smt-t
 
 | Tool | CLI command | Description |
 |------|-------------|-------------|
-| Mask Class Remapper | `remap-mask-classes` | Remap pixel class values across all TIFFs in a directory tree |
+| JSON Raster Remapper | `remap-raster-from-json` | Remap pixel values using a DsgTools-compatible JSON file (single file or folder) |
+| Mask Class Remapper | `remap-mask-classes` | Remap pixel class values across all TIFFs in a directory tree (inline dict) |
 | VRT to GeoTIFF converter | `convert-to-tiff` | Convert VRT (or any rasterio-readable file) to compressed GeoTIFF |
+
+---
+
+## JSON Raster Remapper (`remap-raster-from-json`)
+
+Remaps pixel values using a **DsgTools-compatible JSON mapping file**.  Key
+behaviours:
+
+* **Unmapped values become nodata** — only pixels explicitly listed in
+  `mapping` survive; everything else becomes `nodata_value`.
+* **Concurrent windowed I/O** — reads are parallelised across rasterio windows
+  (one file handle per thread); writes are serialised with a thread lock.
+* **Automatic dtype inference** — the smallest integer dtype that can represent
+  all target values and `nodata_value` is chosen for the output.
+* Supports both single-file and full folder (recursive) processing.
+
+### JSON format
+
+```json
+{
+  "description": "MapBiomas collection 9 -> EDGV 3.0",
+  "nodata_value": 255,
+  "mapping": {
+    "3":  1,
+    "15": 2,
+    "33": 3
+  }
+}
+```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `mapping` | yes | — | `"source": target` integer pairs |
+| `nodata_value` | no | `255` | Value for unmapped / nodata pixels |
+| `description` | no | `""` | Free-text annotation |
+
+### CLI usage — single file
+
+```bash
+pytorch-smt-tools remap-raster-from-json \
+  --input  /data/mapbiomas.tif \
+  --output /data/edgv.tif \
+  --mapping-json /data/mapbiomas_to_edgv.json
+```
+
+### CLI usage — folder
+
+```bash
+pytorch-smt-tools remap-raster-from-json \
+  --input-dir  /data/masks \
+  --output-dir /data/masks_remapped \
+  --mapping-json /data/mapbiomas_to_edgv.json \
+  --n-workers 8
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--input` | — | [Single-file] Source raster path |
+| `--output` | — | [Single-file] Output raster path |
+| `--input-dir` | — | [Folder] Root directory of input rasters |
+| `--output-dir` | — | [Folder] Output root directory (mirrors input tree) |
+| `--mapping-json` | (required) | Path to the JSON mapping file |
+| `--n-workers` | `4` | Number of parallel threads |
+| `--compress` | `lzw` | GeoTIFF compression: `lzw`, `deflate`, `zstd`, `none` |
+| `--no-progress` | flag | Suppress tqdm progress bar (folder mode) |
+| `--build-vrt` | flag | [Folder] Build a GDAL VRT mosaic after remapping |
+| `--vrt-path` | `<output-dir>/mosaic.vrt` | [Folder] Custom VRT output path |
+
+### Config YAML example
+
+```yaml
+# conf/examples/remap_raster_from_json.yaml
+input_dir: /path/to/masks
+output_dir: /path/to/masks_remapped
+json_path: /path/to/mapbiomas_to_edgv.json
+n_workers: 8
+create_vrt: true          # optional: build mosaic.vrt in output_dir
+# vrt_path: /custom/mosaic.vrt  # optional: override VRT location
+```
+
+### Python API
+
+```python
+from pathlib import Path
+from pytorch_segmentation_models_trainer.tools.raster.tiff_remap import (
+    build_vrt,
+    load_remap_json,
+    remap_raster_windowed,
+    remap_raster_folder_from_json,
+)
+
+# Load and validate the JSON mapping
+mapping, nodata_value, description = load_remap_json(Path("mapbiomas_to_edgv.json"))
+
+# Single file
+out_path, success, err = remap_raster_windowed(
+    input_path=Path("mapbiomas.tif"),
+    output_path=Path("edgv.tif"),
+    mapping=mapping,
+    nodata_value=nodata_value,
+    n_workers=4,
+)
+
+# Entire directory tree
+n_success, n_errors = remap_raster_folder_from_json(
+    input_dir=Path("masks/"),
+    output_dir=Path("masks_remapped/"),
+    json_path=Path("mapbiomas_to_edgv.json"),
+    n_workers=8,
+)
+
+# Directory tree + VRT mosaic
+n_success, n_errors = remap_raster_folder_from_json(
+    input_dir=Path("masks/"),
+    output_dir=Path("masks_remapped/"),
+    json_path=Path("mapbiomas_to_edgv.json"),
+    n_workers=8,
+    create_vrt=True,                              # builds masks_remapped/mosaic.vrt
+    vrt_path=Path("masks_remapped/mosaic.vrt"),   # optional override
+)
+
+# Standalone VRT builder (any list of co-registered rasters)
+build_vrt(
+    raster_paths=list(Path("masks_remapped").rglob("*.tif")),
+    output_path=Path("masks_remapped/mosaic.vrt"),
+    nodata_value=255,
+)
+```
 
 ---
 
