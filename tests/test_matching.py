@@ -92,3 +92,92 @@ class Test_Matching(unittest.TestCase):
             for d in output_dict_list
         ]
         self.assertEqual(expected_json_str, json.dumps(output_transformed_dict_list))
+
+    def test_match_polygon_lists_by_criteria_validates_empty_target_and_criteria(self):
+        reference = [Polygon([(0, 0), (1, 0), (1, 1), (0, 0)])]
+
+        with self.assertRaises(AssertionError):
+            matching.match_polygon_lists_by_criteria(
+                reference,
+                reference,
+                lambda _target, _ref: 1.0,
+                match_criteria="bad",
+            )
+        with self.assertRaises(ValueError):
+            matching.match_polygon_lists_by_criteria(
+                reference,
+                [Polygon()],
+                lambda _target, _ref: 1.0,
+            )
+
+    def test_match_polygon_lists_by_criteria_thresholds_and_replacement(self):
+        reference = [Polygon([(0, 0), (10, 0), (10, 10), (0, 0)])]
+        target_low = Polygon([(0, 0), (1, 0), (1, 1), (0, 0)])
+        target_high = Polygon([(0, 0), (9, 0), (9, 9), (0, 0)])
+        target_far = Polygon([(20, 20), (21, 20), (21, 21), (20, 20)])
+
+        matched, unmatched_refs, unmatched_targets = (
+            matching.match_polygon_lists_by_criteria(
+                reference,
+                [target_far],
+                lambda _target, _ref: 1.0,
+                match_criteria="max",
+                match_threshold=0.5,
+            )
+        )
+        self.assertEqual(matched, [])
+        self.assertEqual(len(unmatched_refs), 1)
+        self.assertEqual(len(unmatched_targets), 1)
+
+        matched, unmatched_refs, unmatched_targets = (
+            matching.match_polygon_lists_by_criteria(
+                reference,
+                [target_low],
+                lambda _target, _ref: 0.1,
+                match_criteria="max",
+                match_threshold=0.5,
+            )
+        )
+        self.assertEqual(matched, [])
+        self.assertEqual(len(unmatched_refs), 1)
+        self.assertEqual(len(unmatched_targets), 1)
+
+        matched, _, _ = matching.match_polygon_lists_by_criteria(
+            reference,
+            [target_low, target_high],
+            lambda target, _ref: target.area,
+            match_criteria="max",
+            match_threshold=-1,
+        )
+        self.assertTrue(matched[0]["target"].equals(target_high))
+
+    def test_match_polygon_lists_by_min_criteria_replacement(self):
+        reference = [Polygon([(0, 0), (10, 0), (10, 10), (0, 0)])]
+        target_far = Polygon([(0, 0), (9, 0), (9, 9), (0, 0)])
+        target_near = Polygon([(0, 0), (1, 0), (1, 1), (0, 0)])
+
+        matched, unmatched_refs, unmatched_targets = (
+            matching.match_polygon_lists_by_criteria(
+                reference,
+                [target_near],
+                lambda _target, _ref: 0.1,
+                match_criteria="min",
+                match_threshold=0.5,
+            )
+        )
+        self.assertEqual(matched, [])
+        self.assertEqual(len(unmatched_refs), 1)
+        self.assertEqual(len(unmatched_targets), 1)
+
+        def asymmetric_metric(first, _second):
+            return -1.0 if first.equals(reference[0]) else first.area
+
+        matched, _, _ = matching.match_polygon_lists_by_criteria(
+            reference,
+            [target_far, target_near],
+            asymmetric_metric,
+            match_criteria="min",
+            match_threshold=-1,
+        )
+
+        self.assertTrue(matched[0]["target"].equals(target_near))

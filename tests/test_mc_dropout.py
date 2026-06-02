@@ -220,9 +220,9 @@ class TestMcDropoutStochasticity:
             out1 = model(x)
             out2 = model(x)
 
-        assert not torch.allclose(out1, out2), (
-            "Two MC Dropout samples should differ (dropout is stochastic)"
-        )
+        assert not torch.allclose(
+            out1, out2
+        ), "Two MC Dropout samples should differ (dropout is stochastic)"
 
     def test_samples_identical_without_dropout(self):
         model = TinySegModelNoDropout()
@@ -233,9 +233,9 @@ class TestMcDropoutStochasticity:
             out1 = model(x)
             out2 = model(x)
 
-        assert torch.allclose(out1, out2), (
-            "Deterministic model should produce identical outputs"
-        )
+        assert torch.allclose(
+            out1, out2
+        ), "Deterministic model should produce identical outputs"
 
     def test_n_samples_1_gives_single_pass(self):
         """n_samples=1 is valid and simply runs one stochastic forward pass."""
@@ -320,6 +320,26 @@ class TestMcDropoutInferenceProcessorInit:
             # Pass tta_mode through kwargs — should be stripped with a warning
         # No error raised — processor instantiates fine
 
+    def test_tta_mode_kwarg_is_removed_with_warning(self, caplog):
+        from pytorch_segmentation_models_trainer.tools.inference.mc_dropout_inference_processor import (
+            MCDropoutInferenceProcessor,
+        )
+
+        with caplog.at_level("WARNING"):
+            MCDropoutInferenceProcessor(
+                model=_make_mock_model(),
+                device="cpu",
+                batch_size=1,
+                export_strategy=None,
+                n_samples=2,
+                num_classes=C,
+                model_input_shape=(32, 32),
+                step_shape=(16, 16),
+                tta_mode="d4",
+            )
+
+        assert "tta_mode='d4' is ignored" in caplog.text
+
     def test_invalid_uncertainty_mode_raises(self):
         from pytorch_segmentation_models_trainer.tools.inference.mc_dropout_inference_processor import (
             MCDropoutInferenceProcessor,
@@ -398,6 +418,69 @@ class TestMcDropoutInferenceProcessorMakeInference:
 
 
 class TestMcDropoutInferenceProcessorProcess:
+    def test_process_large_image_warning_and_output_inferences(self, tmp_path, caplog):
+        proc = _make_processor(n_samples=1, export_uncertainty_map=False)
+        proc.striped_threshold_pixels = 1
+
+        import rasterio
+        from rasterio.transform import from_bounds
+
+        image_path = str(tmp_path / "large.tif")
+        transform = from_bounds(0, 0, 1, 1, 16, 16)
+        with rasterio.open(
+            image_path,
+            "w",
+            driver="GTiff",
+            height=16,
+            width=16,
+            count=3,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=transform,
+        ) as dst:
+            dst.write(np.random.randint(0, 255, (3, 16, 16), dtype=np.uint8))
+
+        with caplog.at_level("WARNING"):
+            output = proc.process(
+                image_path,
+                save_inference_output=False,
+                output_inferences=True,
+            )
+
+        assert "large image detected" in caplog.text
+        assert "inference_output" in output
+
+    def test_process_runs_polygonizer_argument(self, tmp_path):
+        proc = _make_processor(n_samples=1, export_uncertainty_map=False)
+        proc.process_polygonizer = MagicMock(return_value=["poly"])
+
+        import rasterio
+        from rasterio.transform import from_bounds
+
+        image_path = str(tmp_path / "image.tif")
+        transform = from_bounds(0, 0, 1, 1, 16, 16)
+        with rasterio.open(
+            image_path,
+            "w",
+            driver="GTiff",
+            height=16,
+            width=16,
+            count=3,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=transform,
+        ) as dst:
+            dst.write(np.random.randint(0, 255, (3, 16, 16), dtype=np.uint8))
+
+        output = proc.process(
+            image_path,
+            save_inference_output=False,
+            polygonizer=MagicMock(),
+        )
+
+        assert output["polygons"] == ["poly"]
+        proc.process_polygonizer.assert_called_once()
+
     def test_process_saves_uncertainty_raster(self, tmp_path):
         proc = _make_processor(
             n_samples=2,
@@ -462,6 +545,20 @@ class TestMcDropoutInferenceProcessorProcess:
 
         unc_dir = Path(proc.output_uncertainty_dir)
         assert not unc_dir.exists() or len(list(unc_dir.glob("*.tif"))) == 0
+
+    def test_save_mc_inference_skips_export_strategy_when_absent(self):
+        proc = _make_processor(n_samples=1, export_uncertainty_map=False)
+        output = {}
+
+        proc._save_mc_inference(
+            "image.tif",
+            0.5,
+            {"count": 3, "dtype": "uint8"},
+            {"seg": np.zeros((4, 4), dtype=np.uint8)},
+            output,
+        )
+
+        assert output == {}
 
 
 # ---------------------------------------------------------------------------

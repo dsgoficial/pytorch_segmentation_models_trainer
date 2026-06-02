@@ -1,0 +1,57 @@
+# Soft-label training with AEF crops downloaded from Source Cooperative COGs.
+#
+# Prerequisites — crop AEF embeddings for the image tiles first:
+#   pytorch-smt-tools download-aef-embeddings \
+#       --source sourcecoop \
+#       --tiles-csv tiles.csv \
+#       --output-dir /data/aef_sourcecoop_embeddings \
+#       --year 2025
+#
+# The Source Cooperative downloader writes per-pixel GeoTIFFs, so the build
+# step consumes them through the existing gcs-style AEF loader:
+#   pytorch-smt-tools build-soft-labels sources.csv \
+#       --output-dir /data/soft_labels \
+#       --num-classes 4 \
+#       --alpha 0.5 \
+#       --beta 0.2 \
+#       --aef-embeddings-dir /data/aef_sourcecoop_embeddings \
+#       --aef-source gcs
+#
+# Example tiles.csv:
+#   tile_id,image_path,year
+#   tile_0,/data/images/tile_20250625_20260106.tif,2025
+
+_target_: pytorch_segmentation_models_trainer.model_loader.soft_label_model.SoftLabelModel
+
+hyperparameters:
+  num_epochs: 50
+  batch_size: 16
+  learning_rate: 1.0e-4
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_dataset.SoftLabelDataset
+  input_csv_path: /data/splits/train.csv
+  image_key: image_path
+  p_soft_key: p_soft_path
+  w_conf_key: w_conf_path
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_dataset.SoftLabelDataset
+  input_csv_path: /data/splits/val.csv
+  image_key: image_path
+  p_soft_key: p_soft_path
+  w_conf_key: w_conf_path
+
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet34
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: 4
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.soft_label_loss.SoftLabelWeightedCELoss
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1.0e-4

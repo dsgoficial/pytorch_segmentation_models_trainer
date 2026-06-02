@@ -1,0 +1,27 @@
+# Example: export MBTiles imagery aligned to GeoTIFF mask grids for QA.
+#
+# The mask raster defines the output CRS, transform, resolution, and shape.
+# The MBTiles imagery is reprojected/resampled into that grid so the exported
+# image/mask pairs can be inspected before training.
+
+mbtiles_export:
+  _target_: pytorch_segmentation_models_trainer.tools.mbtiles.export_mask_aligned_images.export_mask_aligned_images
+  mbtiles_path: /data/source_imagery.mbtiles
+  mask_dir: /data/masks
+  output_dir: /data/qa_mbtiles_tiles
+
+  # Export patch previews. Use full_mask: true instead to export one raster per
+  # full mask.
+  patch_size: 512
+  stride: 512
+  full_mask: false
+
+  mask_extension: .tif
+  selected_bands: [1, 2, 3]
+  image_dtype: uint8
+  output_format: tif
+  image_resampling: bilinear
+  write_sidecar_png: true
+  overlay_alpha: 0.35
+  skip_empty_masks: false
+  n_classes: 2

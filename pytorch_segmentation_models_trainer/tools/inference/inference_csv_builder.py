@@ -126,7 +126,7 @@ class InferenceCSVBuilder:
 
         # Estratégia 3: Buscar por padrão
         # Procurar qualquer arquivo que comece com o stem da imagem
-        candidates = list(
+        candidates = sorted(
             self.masks_folder.glob(f"{image_path.stem}*{image_path.suffix}")
         )
 

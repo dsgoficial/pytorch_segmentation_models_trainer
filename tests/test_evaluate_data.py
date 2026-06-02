@@ -48,6 +48,36 @@ class TestEvaluateData(unittest.TestCase):
             self.assertIsInstance(results[0]["point"], str)
             self.assertIn("POINT", results[0]["point"])
 
+    def test_compute_metrics_non_iou_tuple_uses_metric_name(self):
+        def hausdorff_pair(ref, target):
+            return (1.0, 2.0)
+
+        match_list = [
+            {
+                "reference": Polygon([(0, 0), (1, 0), (1, 1)]),
+                "target": Polygon([(0, 0), (1, 0), (1, 1)]),
+            }
+        ]
+
+        results = compute_metrics_on_match_list_dict(match_list, [hausdorff_pair])
+
+        self.assertEqual(results[0]["hausdorff_pair"], (1.0, 2.0))
+
+    def test_compute_vertex_errors_can_keep_point_objects(self):
+        match_list = [{"reference": Polygon(), "target": Polygon()}]
+
+        with patch(
+            "pytorch_segmentation_models_trainer.tools.evaluation.evaluate_data.per_vertex_error_list"
+        ) as mock_error:
+            mock_error.return_value = [{"point": Point(0, 0), "error": 0.1}]
+
+            results = compute_vertex_errors_on_match_list_dict(
+                match_list, convert_output_to_wkt=False
+            )
+
+        self.assertIsInstance(results[0]["point"], Point)
+        self.assertEqual(results[0]["id"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

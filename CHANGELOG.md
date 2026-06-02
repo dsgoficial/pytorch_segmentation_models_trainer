@@ -1,5 +1,619 @@
 # Unreleased
 
+## JSON Raster Remapper + VRT Builder
+
+- Added `build_vrt(raster_paths, output_path, nodata_value)` to
+  `tools/raster/tiff_remap.py`: builds a GDAL VRT mosaic from any list of
+  co-registered rasters using only `xml.etree.ElementTree` + rasterio (no
+  `osgeo.gdal` dependency).  Validates that all inputs share the same CRS,
+  pixel resolution, and band count; raises `ValueError` with a descriptive
+  message on mismatch.  Source paths inside the VRT are written as relative
+  paths when possible, falling back to absolute otherwise.
+- Extended `remap_raster_folder_from_json` with `create_vrt=False` and
+  `vrt_path=None` keyword arguments.  When `create_vrt=True`, a mosaic VRT
+  is built from all successfully remapped rasters after the thread pool
+  finishes, using the `nodata_value` from the JSON file.
+- Extended `pytorch-smt-tools remap-raster-from-json` CLI with `--build-vrt`
+  flag and `--vrt-path` option (folder mode only).
+
+## JSON Raster Remapper
+
+- Added `load_remap_json` to `tools/raster/tiff_remap.py`: loads and validates
+  a DsgTools-compatible JSON mapping file (`description`, `nodata_value`,
+  `mapping` fields).  Non-integer entries are skipped with a `UserWarning`;
+  `nodata_value` defaults to 255 when absent.
+- Added `infer_output_dtype`: selects the smallest numpy dtype (uint8 → uint16
+  → int16 → int32 → float32) that represents all target values and the nodata
+  value.
+- Added `remap_raster_windowed`: single-file remap with concurrent windowed I/O.
+  Reads are parallelised (one rasterio handle per thread via
+  `ThreadPoolExecutor`); writes are serialised with a `threading.Lock`.
+  Unmapped pixels become `nodata_value` (DsgTools semantics, unlike the
+  existing `remap_raster` which keeps unmapped values unchanged).  Input nodata
+  pixels are also forced to `nodata_value` after the mapping loop.
+- Added `remap_raster_folder_from_json`: batch version — loads the JSON once
+  and processes all matching rasters in a directory tree with file-level thread
+  parallelism.
+- Exposed as `pytorch-smt-tools remap-raster-from-json` CLI command supporting
+  single-file (`--input`/`--output`) and folder (`--input-dir`/`--output-dir`)
+  modes in a single command with mutual-exclusivity validation.
+- Added `conf/examples/remap_raster_from_json.yaml` with folder-mode example.
+- Updated `website/docs/user-guide/raster-tools.md` with full documentation,
+  JSON format reference, CLI usage, and Python API examples.
+- 100% test coverage (35 tests in `tests/test_tiff_remap.py`).
+
+## GEE LULC Downloader
+
+- Added `pytorch_segmentation_models_trainer/tools/gee/gee_downloader.py` with
+  support for downloading MapBiomas, Dynamic World, and ESRI LULC rasters from
+  Google Earth Engine for any set of regions.
+- Input accepts either a bounding box (`xmin ymin xmax ymax`) or a vector file
+  (GeoPackage/GeoJSON); each polygon is downloaded and saved individually, named
+  by a configurable attribute.
+- Two download modes: `direct` (via `getDownloadURL`, suitable for regions up to
+  ~1° × 1°) and `export-drive` (via `Export.image.toDrive` for large areas).
+- Downloads run in parallel via `ThreadPoolExecutor` with configurable
+  `max_workers`.
+- MapBiomas supports 14 regional collections (Brazil default) plus a full asset
+  ID override for custom collections.
+- Authentication via service account JSON key (recommended for server/CI use,
+  readable from `GEE_SERVICE_ACCOUNT_EMAIL` / `GEE_SERVICE_ACCOUNT_KEY_FILE`
+  environment variables) or OAuth2 interactive flow as fallback.
+- Exposed as `pytorch-smt-tools download-gee-lulc` CLI command.
+- 100% test coverage with mocked GEE API calls (no network access required).
+- Added `conf/examples/download_gee_lulc.yaml` with usage examples.
+- Added `website/docs/user-guide/gee-downloader.md` documentation.
+
+## Test coverage
+
+- Restored 100% test coverage for all modules introduced in the dataset-builder /
+  raster-tools / visualization / multiclass-mask merge: `band_combiner.py`,
+  `sliding_window_builder.py`, `tile_dataset_builder.py`, `tiff_remap.py`,
+  `vrt2tif.py`, `segmentation_vis.py`, and `multiclass_mask_builder.py`.
+- Fixed `test_build_mbtiles_multiclass_masks_bounds_pending_futures` which was
+  failing with `pandas.errors.LossySetitemError` on Python 3.14 due to an
+  implicit int32 → Python int assignment (`[12]` → `np.array([12], dtype=np.int32)`).
+
+## MBTiles multiclass masks
+
+- Added `build-mbtiles-multiclass-masks` tooling for generating multi-class
+  GeoTIFF masks from a GeoJSON frame set, a GeoPackage of labeled polygons, and
+  an MBTiles reference grid at the source's maximum available zoom.
+- Parallelized `build-mbtiles-multiclass-masks` per frame with
+  `ThreadPoolExecutor` and added a `tqdm` progress bar so large mask-build jobs
+  report progress without changing output structure.
+- Switched `build-mbtiles-multiclass-masks` to a streaming job generator with a
+  bounded futures window, preventing linear memory growth from prebuilding all
+  frame jobs and keeping only a small number of tasks in flight.
+- Reduced per-frame allocations inside the multiclass mask worker by writing
+  raster outputs in-place and avoiding an extra `np.where` copy for the final
+  mask image.
+- Declared the multiclass mask GeoTIFF `nodata` tag as `255` so the on-disk
+  metadata matches the background value written into empty pixels.
+- Removed the `gpd.clip` dependency from the multiclass mask builder and now
+  rasterize all intersecting features after repairing invalid geometries with
+  `shapely.validation.make_valid`, preventing `TopologyException` crashes on
+  self-intersecting or otherwise invalid polygons.
+- Added `conf/examples/mbtiles_multiclass_mask_builder.yaml` plus
+  `website/docs/user-guide/mbtiles-multiclass-mask-builder.md` so the new
+  workflow is documented and runnable through the CLI.
+
+## Dataset Builder
+
+- Added `background_value` to `build_tile_dataset` and the `build-tile-dataset`
+  YAML workflow so multi-class masks can use a configurable nodata/background
+  index instead of hardcoding `0`. Default is `255`, and `skip_empty_tiles`
+  now treats tiles filled with the selected background value as empty.
+
+## Dataset Builder & Raster Tools
+
+- Added `tools/raster/tiff_remap.py` with `remap_raster` (single-file pixel-value remapping)
+  and `remap_raster_folder` (recursive directory remapping via `ThreadPoolExecutor`).
+  Returns `(output_path, success, error_message)` and `(n_success, n_errors)` respectively.
+- Added `tools/raster/vrt2tif.py` with `convert_to_geotiff` (single VRT/raster to tiled
+  compressed GeoTIFF) and `convert_folder` (batch conversion matching a glob pattern).
+  Preserves band descriptions; supports LZW, DEFLATE, JPEG, NONE compression.
+- Added `tools/dataset_builder/band_combiner.py` with `find_file_groups` (intersects
+  filenames across N source directories, optionally with a named capture pattern),
+  `combine_sources_to_tiff` (concatenates selected bands from multiple sources), and
+  `combine_all` (parallel batch combiner using `ThreadPoolExecutor`).
+- Added `tools/dataset_builder/tile_dataset_builder.py` with `compute_tile_windows`
+  (fixed-size window generator with edge adjustment) and `build_tile_dataset`
+  (rasterizes GeoPackage/vector polygon masks onto each tile, parallelised per image,
+  saves `dataset.csv` and optionally a full-resolution `mask_full.tif`).
+- Added `tools/dataset_builder/sliding_window_builder.py` with `compute_sliding_windows`
+  and `build_sliding_window_dataset` (crops existing image/mask CSV pairs into
+  sliding-window patches; preserves geo-referencing; supports class remapping and
+  directory-segment blacklist).
+- Added `tools/visualization/segmentation_vis.py` with `colorize_mask`, `prepare_image_for_display`,
+  and `create_segmentation_grid` (multi-column GT vs. prediction comparison figure with
+  optional class legend, best/worst/random sample selection, and reprojection alignment).
+- Parallelized `create_segmentation_grid` raster loading with `ThreadPoolExecutor` so
+  image, GT, and prediction tiles for each sampled row are loaded concurrently before
+  rendering the comparison grid.
+- Added 6 new CLI commands to `pytorch-smt-tools`:
+  - `combine-bands` — multi-directory band combiner
+  - `build-tile-dataset` — tile dataset from YAML config
+  - `build-sliding-window-dataset` — patch generator from image/mask CSV
+  - `remap-mask-classes` — pixel class remapper across directory tree
+  - `convert-to-tiff` — batch VRT→GeoTIFF converter
+  - `visualize-predictions` — segmentation comparison grid figure
+- Added YAML config examples: `conf/examples/build_tile_dataset.yaml`,
+  `conf/examples/build_sliding_window_dataset.yaml`, `conf/examples/remap_mask_classes.yaml`.
+- Added user documentation: `website/docs/user-guide/dataset-builder.md`,
+  `website/docs/user-guide/raster-tools.md`,
+  `website/docs/user-guide/segmentation-visualization.md`.
+
+## MBTiles tools
+
+- Added `scan-mask-colors` CLI command (`pytorch-smt-tools scan-mask-colors MASK_PATH`)
+  that scans a mask raster for every unique RGB triplet using parallel windowed reads
+  (`ThreadPoolExecutor` + rasterio, tqdm progress bar) and prints a ready-to-paste
+  `color_map` JSON for `MBTilesPolygonDataset`.  `(0,0,0)` is automatically assigned
+  class 0 (background); all other colours are assigned 1, 2, 3 … in sorted order.
+  Supports `--bands`, `--window-size`, `--workers`, `--output` options.
+- Added `tools/mbtiles/scan_unique_colors.py` with the underlying
+  `scan_unique_colors`, `build_color_map`, and `scan_and_report` functions.
+- Fixed OOM crashes on large MBTiles: `scan_unique_colors` now queries the
+  SQLite `tiles` table (via `_get_mbtiles_tile_windows`) to build 256×256
+  tile-aligned windows for **only the tiles that exist** in the database,
+  skipping empty/nodata areas of the raster bbox entirely.  Non-MBTiles
+  sources fall back to the previous grid scan.
+- Fixed unbounded memory growth in `scan_unique_colors`: task submission is
+  now **bounded** — at most `2 × workers` futures are in flight simultaneously
+  (chunked `islice` loop), preventing all windows from queuing at once
+  regardless of raster size.
+- Reduced peak memory per window in `_unique_colors_in_window` by ~40%:
+  the R/G/B-to-uint32 packing now uses in-place operations (`*=`, `+=`, `del`)
+  so at most two H×W uint32 arrays exist simultaneously instead of four.
+
+## MBTiles Polygon Dataset
+
+- Added `MBTilesPolygonDataset` for training segmentation models from paired
+  image and mask MBTiles rasters (read via rasterio at native/maximum
+  resolution) filtered by vector polygon regions.
+- Sliding-window patches are generated over the image raster and filtered so
+  that only patches **fully contained** within the input polygon union are
+  indexed — border-touching patches are excluded to eliminate partial-label
+  noise at annotation edges.
+- Mask rasters (RGB/RGBA color-coded) are warped onto each image-window grid
+  via WarpedVRT so that image and mask are always spatially aligned regardless
+  of original projections.
+- Added RGB/RGBA color-map decoding: the `color_map` parameter maps each
+  `[R, G, B]` triplet to an integer class index; unmatched pixels default to
+  class `0`.  When `color_map` is `None`, the first mask band is used directly
+  as integer class indices.
+- Replaced the global grid scan in `_build_window_index` with a
+  **polygon-first** approach: for each polygon only the stride-aligned
+  positions inside its pixel bounding box are visited, reducing index-build
+  time from O(raster area) to O(sum of polygon areas).
+- Added `index_build_workers` parameter to parallelize per-polygon index
+  building via `ThreadPoolExecutor`; defaults to `min(n_polygons, cpu_count)`.
+  Threading is safe because all threads complete inside `__init__` before any
+  DataLoader workers are spawned.  Containment checks against individual
+  polygon geometries (not the global union) — windows spanning multiple
+  polygons are excluded, which is the conservative correct behavior.
+  Results across polygons are deduplicated and sorted in row-major order for
+  deterministic output.
+- Added support for `MultiPolygon` geometries in region files.
+- Added optional CSV/Parquet `window_index_cache` to skip the polygon-
+  containment pass on repeated training runs.
+- Added `conf/examples/mbtiles_polygon_dataset.yaml` with a complete train/val
+  YAML example.
+- Added user documentation at
+  `website/docs/user-guide/mbtiles-polygon-dataset.md`.
+
+## AlphaEarth Foundation (AEF) Embedding Resampling
+
+- Added local AEF embedding utilities for NoData masking, dequantization,
+  quantization, vector validity checks, L2 normalization, vector-sum
+  downsampling, and nearest-neighbor upsampling without adding `aef-loader` as
+  a core dependency.
+- Fixed AEF NoData handling in soft-label preprocessing: raw `int8` value `-128`
+  is now converted to `NaN` before aggregation so invalid pixels are not treated
+  as negative embedding components.
+- Added `--aef-resampling {auto,aggregate,nearest,none}` to `build-soft-labels`.
+  The default `auto` mode uses vector-sum aggregation when image pixels are
+  coarser than AEF and nearest-neighbor assignment when image pixels are finer.
+- Updated per-pixel `w_embed` centroid computation to ignore invalid or
+  zero-norm embedding vectors and return finite confidence maps.
+- Added user documentation for local AEF embedding conversion, downsampling,
+  upsampling, and CLI usage in `website/docs/user-guide/aef-embeddings.md`, and
+  linked it from the soft-label training guide.
+
+## Documentation deployment
+
+- Fixed Docusaurus MDX parsing in the soft-label training guide by replacing
+  Kramdown-style heading anchors with Docusaurus-generated heading links.
+- Fixed a broken Classic ML documentation link to the Random Forest example
+  configuration.
+
+## MBTiles QA Export
+
+- Added `export-mbtiles-mask-aligned` tooling to export imagery from MBTiles
+  or any rasterio-readable source onto GeoTIFF mask grids, including paired
+  image/mask rasters, overlay PNG previews, and a manifest CSV for visual
+  alignment validation before training.
+- Added `MBTilesMaskWindowedDataset` for training segmentation models directly
+  from MBTiles imagery and GeoTIFF masks, using each mask window as the
+  reference grid for source-image reprojection.
+- Added optional CSV/Parquet window-index caching to
+  `MBTilesMaskWindowedDataset` so repeated training runs can skip mask scanning
+  and sliding-window index construction.
+
+## AlphaEarth Foundation Embedding Downloads
+
+- Added `--source sourcecoop` to `download-aef-embeddings`, using the public
+  Source Cooperative AEF STAC GeoParquet index to select intersecting annual
+  COGs and save cropped 64-band per-pixel GeoTIFF embeddings for each tile.
+- Added Source Cooperative year selection from `--year`, a per-row `year`
+  column, or the first year found in `image_path`, avoiding full HuggingFace
+  dataset downloads when only regional AEF crops are needed.
+- Documented the Source Cooperative download workflow in the AEF and soft-label
+  guides, and added `conf/examples/soft_label_aef_sourcecoop.yaml`.
+
+## Soft-Label: optional border-distance component in W_conf
+
+Made the border-distance mitigation contribution to W_conf optional, allowing
+the user to replicate the original paper formula or demonstrate their own
+contribution.
+
+- **`compute_w_conf`** gains a `use_border: bool = True` parameter:
+  - `use_border=True` (default): original behaviour —
+    `W_conf = alpha·w_entropy + (1-alpha-beta)·w_border + beta·w_embed`;
+    constraint `alpha + beta <= 1.0` is enforced.
+  - `use_border=False` (original paper): border component is skipped;
+    `W_conf = (alpha·w_entropy + beta·w_embed) / (alpha + beta_eff)`,
+    where `beta_eff = beta` when `w_embed` is provided. The `alpha + beta`
+    constraint is relaxed — only their sum must be positive.
+- **`process_tile`** and **`run`** thread `use_border` through to
+  `compute_w_conf`.
+- **`build-soft-labels` CLI command** and `scripts/build_soft_labels.py` shim
+  expose a `--no-border` flag for command-line use.
+- 8 new tests added (100% coverage maintained on `build_soft_labels.py`).
+
+## Soft-Label Preprocessing Tools — CLI integration
+
+Moved preprocessing scripts from `scripts/` (outside the package) into
+`pytorch_segmentation_models_trainer/tools/soft_labels/`, making them
+installable, importable, and testable as proper package modules.
+
+- **`tools/soft_labels/build_soft_labels.py`**: all P_soft/W_conf raster
+  building logic now lives here; `run()` is the orchestration entry point.
+- **`tools/soft_labels/download_aef_embeddings.py`**: AEF embedding download
+  (GCS and HuggingFace modes) moved here; `run()` handles routing.
+- **`tools/soft_labels/generate_training_csv.py`**: manifest → train/val/test
+  CSV split logic moved here; `split_dataframe()` is independently testable.
+- Three new Click subcommands registered in `tools/cli.py`:
+  `build-soft-labels`, `download-aef-embeddings`, `generate-training-csv`.
+- `scripts/*.py` reduced to thin backward-compatible shims that delegate to
+  the package modules.
+- Tests updated to import from the new package paths; 100% coverage on all
+  three new modules (124 tests).
+- `tests/test_generate_training_csv.py` added (was previously untested).
+
+## Curriculum-Guided Co-Teaching (Xiao et al. 2026, eq. 6-11)
+
+Full implementation of the noise-aware co-teaching framework from the paper,
+combining confidence-guided curriculum masking, class-balanced symmetric
+co-teaching, and optional neighbourhood feature regularization.
+
+- **`CurriculumScheduler`** (`custom_losses/co_teaching_loss.py`): stateless
+  helper that computes the per-epoch retention rate
+  `P_e = min(P_start + (e/E_warm)*(P_end-P_start), P_end)` and derives a
+  binary mask `M_curr = I(W_conf > τ)` where `τ = Percentile(W_conf, 1-P_e)`.
+  Also exposes `forget_rate(epoch)` that ramps linearly 0 → 0.3 over `E_warm`.
+
+- **`CoTeachingLoss`** (`custom_losses/co_teaching_loss.py`): dual-path loss
+  that transparently handles both training (dict pred with `logits_a`/`logits_b`)
+  and validation (single logits tensor, falls back to standard soft CE):
+  - **Training path** (eq. 8-11): applies curriculum mask, performs
+    class-balanced pixel selection per branch, and computes cross-update losses
+    `loss_A = Σ_{J_B} W_conf·CE^A` and `loss_B = Σ_{J_A} W_conf·CE^B`.
+  - **Neighbourhood regularization** (`compute_neighborhood_reg`): optional
+    `L_reg = Σ_i Σ_{j∈N(i)} max(0,S_ij)·KL(p_i||p_j)` where S_ij is cosine
+    similarity between input features in the 3×3 spatial neighbourhood;
+    controlled by `lambda_reg` (set to 0 to disable).
+  - `current_epoch` attribute synced from `CoTeachingModel.training_step` so
+    the curriculum state advances with training.
+
+- **`CoTeachingModel`** (`model_loader/co_teaching_model.py`): dual-branch
+  `SoftLightningModule` with manual optimization:
+  - Maintains `self.model` (fθA) and `self.model_b` (fθB) with independent
+    parameter initialization.
+  - `forward()` always routes through fθA for val/test compatibility.
+  - `training_step()` performs the full eq. 11 cross-update: forward both
+    branches, compute curriculum mask and class-balanced J_A/J_B selection,
+    then do independent `manual_backward` + `optimizer.step` calls so each
+    branch's gradient is isolated.
+  - `configure_optimizers()` returns two optimizers (one per branch, same
+    config from `cfg.optimizer`) with empty scheduler list.
+  - Inherits all `SoftLabelModel` / `Model` behaviour for val/test steps,
+    metrics, logging, and data loading.
+
+- **`conf/examples/co_teaching_unet.yaml`**: complete Hydra experiment config
+  for co-teaching UNet training.
+
+- **User documentation** added at `website/docs/user-guide/co-teaching.md`
+  covering theory, configuration, API reference, and hyperparameter guidance.
+
+## Soft-Label Training Pipeline
+
+Full implementation of probabilistic soft-label training following Xiao et al.
+(2026, JSTARS) — supports P_soft labels derived from multi-source LULC consensus
+plus optional per-pixel W_conf confidence weighting.
+
+- **`SoftLabelDataset`** (`dataset_loader/soft_label_dataset.py`): reads per-tile
+  P_soft and W_conf GeoTIFF rasters, applies geometric augmentations consistently
+  across image/P_soft/W_conf via `albumentations.Compose(additional_targets=...)`,
+  and returns `batch["mask"]` as a dict so both tensors reach the loss function.
+
+- **`SoftLabelWeightedCELoss`** (`custom_losses/soft_label_loss.py`): pixel-wise
+  soft cross-entropy `L(i) = W_conf(i) · [-Σ_c P(i,c) · log(pred(i,c))]`;
+  supports dict or plain-tensor ground-truth, and dict `pred_batch` (FrameField path).
+  W_conf=ones reduces exactly to standard soft cross-entropy; W_conf=zeros gives zero loss.
+
+- **`SoftLabelModel`** (`model_loader/soft_label_model.py`): subclass of `Model`
+  that unwraps the dict mask in `_shared_step` and re-wraps it in `_compute_loss`
+  so W_conf is forwarded to the loss without modifying `model.py`.
+
+- **`SoftLabelWeightedCELossConfig`** added to `config_definitions/loss_config_definition.py`.
+
+- **`SoftLabelDatasetConfig`** added to `config_definitions/dataset_config.py`.
+
+- **`conf/examples/soft_label_unet.yaml`**: complete Hydra experiment config for
+  soft-label UNet training with SoftLabelModel, SoftLabelDataset and SoftLabelWeightedCELoss.
+
+- **`scripts/build_soft_labels.py`**: preprocessing script that computes P_soft
+  (temporally-weighted voting) and W_conf (α·w_entropy + (1-α)·w_border) from M
+  source LULC rasters and writes GeoTIFF outputs with a manifest CSV.
+
+- **`scripts/generate_training_csv.py`**: train/val/test split generator that
+  maps the soft-label manifest to CSV files consumable by SoftLabelDataset.
+
+- **User documentation** added at `website/docs/user-guide/soft-label-training.md`
+  covering the full pipeline from data preparation to training configuration and
+  API reference.
+
+- **`SoftLabelWindowedDataset`** (`dataset_loader/soft_label_windowed_dataset.py`):
+  subclass of `SoftLabelDataset` that reads fixed-size patches from full-scene
+  rasters using `rasterio.windows.Window` (row_off, col_off, patch_size columns).
+  Enables training without pre-cutting tiles; P_soft and W_conf windows are read
+  on-the-fly and augmented consistently via the same `additional_targets` pipeline.
+
+- **`SoftLabelWindowedDatasetConfig`** added to `config_definitions/dataset_config.py`.
+
+- **`build_soft_labels.py` reprojection fix**: all LULC source rasters are now
+  reprojected to the image pixel grid before computing P_soft/W_conf, using
+  `rasterio.warp.reproject` with nearest-neighbour resampling. The `image_path`
+  column is now required in the sources CSV and is the spatial reference for all outputs.
+
+## AlphaEarth Foundation (AEF) Embedding Integration
+
+Extended W_conf computation with a third component `w_embed` derived from
+AlphaEarth Foundation dense embeddings. The extended formula is:
+
+```
+W_conf = alpha * w_entropy + beta * w_embed + (1 - alpha - beta) * w_border
+```
+
+- **`compute_w_embed`** (`scripts/build_soft_labels.py`): computes per-pixel
+  cosine similarity weight in two modes:
+  - **GCS per-pixel** (embedding shape `(H, W, D)`): within-tile class centroids
+    derived from P_soft argmax; per-pixel similarity mapped to [0, 1] via
+    `(cosine + 1) / 2`.
+  - **HF patch-level** (embedding shape `(D,)`): cross-tile class centroids
+    provided externally; scalar similarity broadcast to all pixels.
+
+- **`aggregate_aef_to_image_grid`** (`scripts/build_soft_labels.py`):
+  implements the official Google AEF aggregation pipeline:
+  1. Dequantise — ``sign(v) * (v / 127.5)^2`` per band
+  2. Element-wise vector sum to target grid via ``Resampling.sum``
+  3. L2 normalise per pixel
+  Standard spatial resampling (nearest-neighbour, bilinear, average) is invalid
+  for AEF embeddings because pixel-level interpolation produces off-manifold
+  synthetic vectors that corrupt cosine similarities (per the official AEF-on-GCS
+  documentation).  Only downscaling is supported; upscaling raises ``ValueError``.
+  ``process_tile`` catches that error and falls back to the entropy + border
+  W_conf formula.
+
+- **`load_aef_embedding`** (`scripts/build_soft_labels.py`): loads per-pixel
+  GeoTIFF (GCS) or patch `.npy` (HF); accepts optional `dst_*` parameters to
+  trigger automatic reprojection to the image grid.
+
+- **`_compute_hf_class_centroids`** (`scripts/build_soft_labels.py`): two-pass
+  helper that aggregates HF patch embeddings by dominant class and returns
+  `(C, D)` cross-tile centroids.
+
+- **`process_tile` extended**: accepts `aef_dir`, `aef_source`, `beta`, and
+  `class_centroids`; computes `w_embed` and blends it into W_conf when
+  `aef_dir` is set and `beta > 0`.
+
+- **`build_soft_labels.py` CLI extended** with `--aef-embeddings-dir`,
+  `--aef-source {gcs,hf}`, and `--beta` flags.
+
+- **`scripts/download_aef_embeddings.py`** (new): standalone script to download
+  AEF embeddings before the build step.
+  - `--source gcs`: downloads per-pixel GeoTIFFs from GCS via `gsutil cp`;
+    reads `gcs_paths_csv` with `tile_id`, `gcs_uri` columns; skips existing files.
+  - `--source hf`: queries `Major-TOM/Core-AlphaEarth-Embeddings` on HuggingFace
+    by geographic proximity of tile centre to grid cell centre; saves `{tile_id}.npy`;
+    requires `pip install datasets`.
+
+- **`patch_size` and `stride` flags** (`build_soft_labels.py`): `--patch-size`
+  and `--stride` expand the tile manifest into a patch-level CSV for
+  `SoftLabelWindowedDataset`, enabling large-tile training without pre-cutting.
+
+- **User documentation** updated (`website/docs/user-guide/soft-label-training.md`):
+  new sections for AEF download (GCS and HF modes), alignment explanation,
+  extended formula, CLI reference, `SoftLabelWindowedDataset` YAML examples,
+  and updated experiment variants table (E3–E5).
+
+- **Tests**: added `tests/test_download_aef_embeddings.py` (22 tests) and extended
+  `tests/test_build_soft_labels.py` with `TestReprojectAefToImageGrid` (3 tests),
+  `TestLoadAefEmbedding` (7 tests), `TestComputeWEmbed` (9 tests),
+  `TestComputeWConfWithEmbed` (5 tests), `TestComputeHfClassCentroids` (3 tests),
+  `TestProcessTileWithAEF` (2 tests), and `TestGeneratePatchRows` /
+  `TestExpandManifestToPatches` (15 tests).
+
+## Tests: 100 % coverage on all new components
+
+`tests/test_soft_label_loss.py` (19 tests),
+`tests/test_soft_label_dataset.py` (23 tests),
+`tests/test_soft_label_model.py` (9 tests),
+`tests/test_soft_label_windowed_dataset.py` (27 tests),
+`tests/test_build_soft_labels.py` (53 tests),
+`tests/test_download_aef_embeddings.py` (22 tests).
+
+## Test coverage
+
+- Expanded the `tools` test suite to cover inference processors, evaluation utilities,
+  polygonization helpers, DDOQ VAE distillation, raster/data handlers, plotting, and
+  aggregation edge cases needed for 100% `tools` coverage.
+- Expanded coverage for `fine_tuning`, `custom_losses`, and smaller `dataset_loader`
+  modules with tests for fine-tuning strategies, fine-tuning config dataclasses,
+  EDL losses, loss-builder fallback paths, DDOQ distilled datasets, and
+  `EmbeddingDataset` file/geometry parsing branches.
+- Removed an unreachable duplicate `_evaluate_all_experiments_sequential` implementation
+  from the evaluation pipeline so coverage reflects executable code only.
+
+## Config examples
+
+- Moved `classic_ml_random_forest.yaml`, `kfold_segmentation.yaml`,
+  `iterable_windowed_image_autoencoder.yaml`, and `windowed_image_autoencoder.yaml`
+  from the project root `conf/examples/` to `pytorch_segmentation_models_trainer/conf/examples/`
+  where all Hydra example configs should live.
+
+## CI
+
+- Restored `[gpu-ml]` optional extras in `pyproject.toml` (`cupy-cuda12x`, `cucim-cu12`,
+  `cuml-cu12`, `pydensecrf`, `pygco`) so users can install GPU packages via
+  `pip install pkg[gpu-ml]`; all packages are fully mocked in the test suite.
+- Added `constraint-dependencies` pinning gpu-ml packages to versions with pre-built wheels
+  (`cuml-cu12==26.4.0`, `cupy-cuda12x==14.0.1`) or stub metadata
+  (`cucim-cu12==26.4.0`, `pydensecrf==1.0rc3`, `pygco==0.0.1`) so `uv lock` can resolve them
+  without CUDA hardware.
+- Added `[[tool.uv.dependency-metadata]]` stubs for `cucim-cu12`, `pydensecrf`, and `pygco`
+  (source-only packages that cannot be compiled in CI) so uv treats them as already-resolved.
+- Added `--frozen` flag to all `uv sync` calls in CI (`build`, `test-transformers`, `test-gpu-ml`
+  jobs) so the existing `uv.lock` is used as-is without re-resolution.
+
+## Web Config Builder — Experiments Runner & New Losses
+
+- Added `ExperimentsRunnerSection` component (`web/src/components/ExperimentsRunnerSection.jsx`)
+  for configuring `experiments_runner` YAML blocks: output directory, explicit seeds list or
+  random `n_runs`, `save_summary`, and `resume` flags.
+- Added `ExperimentsRunnerPage` (`web/src/pages/ExperimentsRunnerPage.jsx`) — a full
+  `mode: run-experiments` config page reusing all training sections plus `ExperimentsRunnerSection`.
+- Wired the new page into `App.jsx` as a third "Experiments Runner" navigation tab.
+- Extended `LossSection` with five new segmentation losses:
+  `WeightedDiceSCELoss`, `WeightedLovaszSCELoss`, `WeightedJMLSCELoss`,
+  `WeightedJMLSCEGCBLLoss`, and the existing ones now include full parameter panels.
+- Fixed label accessibility (`htmlFor`/`id`) throughout `LossSection` and
+  `ExperimentsRunnerSection` for screen-reader and test correctness.
+
+## Web Config Builder — Test Infrastructure
+
+- Set up Vitest 3 + React Testing Library (`@testing-library/react`, `@testing-library/user-event`,
+  `@testing-library/jest-dom`, `jsdom`) as the test framework for `web/`.
+- Added test scripts (`npm test`, `npm run test:coverage`) to `web/package.json`.
+- Added Vitest config block to `web/vite.config.js` (jsdom environment, coverage via v8).
+- Wrote 56 frontend tests across four suites:
+  - `LossSection.test.jsx` — LOSS_DEFAULTS exports, per-loss-type rendering, and user interactions.
+  - `ExperimentsRunnerSection.test.jsx` — seeds/n_runs toggle, text parsing, checkbox state.
+  - `ExperimentsRunnerPage.test.jsx` — mode badge, section headings, YAML preview contents.
+  - `App.test.jsx` — tab navigation including the new Experiments Runner tab.
+- Added `test-web` CI job to `.github/workflows/python-app.yml` that installs Node 20,
+  runs `npm ci`, and executes `npm test` on every push/PR.
+
+## Loss Config Definitions
+
+- Added five new Hydra dataclass configs to `config_definitions/loss_config_definition.py`:
+  `WeightedDiceCrossEntropyLossConfig`, `WeightedDiceSCELossConfig`,
+  `WeightedLovaszSCELossConfig`, `WeightedJMLSCELossConfig`, `WeightedJMLSCEGCBLLossConfig`.
+  All registered in Hydra ConfigStore under the `loss` group.
+- Added 17 new tests in `tests/test_loss_config_definition.py` covering defaults, MISSING
+  `num_classes` validation, field overrides, and YAML roundtrip for all five new configs.
+
+## Classic ML GPU Pipeline
+
+- Added `pytorch_segmentation_models_trainer/classic_ml/` subpackage providing a
+  complete GPU-accelerated classic ML segmentation pipeline that falls back
+  transparently to CPU when NVIDIA hardware is unavailable.
+- **Feature Engineering** (`classic_ml/feature_engineering.py`):
+  - `GaborFilterExtractor` — Gabor filter bank at configurable frequencies and
+    orientations; uses `cucim.skimage.filters.gabor` on GPU arrays and
+    `skimage.filters.gabor` on CPU.
+  - `GradientExtractor` — horizontal/vertical Sobel gradients and magnitude via
+    `cucim` or `skimage`.
+  - `MultiscaleExtractor` — Gaussian pyramid at configurable sigmas.
+  - `FeatureEngineeringPipeline` — composes extractors, returns ``(H*W, n_features)``
+    feature matrices.  All extractors accept ``numpy`` or ``cupy`` arrays and always
+    return ``numpy`` arrays.  GPU dispatch uses `cupy.get_array_module()`.
+- **Estimators** (`classic_ml/estimators.py`):
+  - `GPUAcceleratedRandomForest`, `GPUAcceleratedSVM`, `GPUAcceleratedKMeans` —
+    thin wrappers around `sklearn` estimators exposing `.fit()`, `.predict()`,
+    `.predict_proba()`.  `KMeans.predict_proba()` returns inverse-distance soft
+    assignments.
+  - `enable_gpu_acceleration()` — explicit opt-in function that calls
+    `cuml.accel.install()` to patch sklearn globally with RAPIDS cuml backends.
+    Not called at import time to avoid unexpected side-effects on existing sklearn
+    code (k-fold splitter, clustering metrics, etc.).
+- **Post-processing** (`classic_ml/postprocessing.py`):
+  - `DenseCRFPostprocessor` — fully-connected Dense CRF via `pydensecrf` with
+    bilateral appearance and Gaussian smoothness pairwise terms.  Raises
+    `ImportError` at instantiation if `pydensecrf` is absent.
+  - `GraphCutsPostprocessor` — Min-Cut/Max-Flow energy minimisation via `pygco`
+    with image-gradient edge weights.  Raises `ImportError` at instantiation if
+    `pygco` is absent.
+  - `PostprocessingPipeline` — chains postprocessors; each receives the original
+    probability map; returns the last postprocessor's output.
+- **Orchestrator** (`classic_ml/orchestrator.py`):
+  - `ClassicMLOrchestrator` — plain Python class (not `pl.LightningModule`) that
+    glues feature pipeline + classifier + optional postprocessor.  Exposes
+    `.fit(images, masks)`, `.predict(image, return_probabilities)`, `.save()`, and
+    `.load()` (pickle-based).
+- **Tensor utilities** (`utils/tensor_conversion.py`):
+  - `tensor_to_numpy`, `numpy_to_tensor`, `tensor_to_cupy` (zero-copy),
+    `cupy_to_tensor` (zero-copy), `ensure_numpy` — work across numpy / PyTorch /
+    CuPy array types.
+- **Hydra configs** (`config_definitions/classic_ml_config.py`): dataclasses for
+  all new classes registered in the Hydra ConfigStore under the
+  `classic_ml/` group hierarchy.
+- **Example YAML** (`conf/examples/classic_ml_random_forest.yaml`): end-to-end
+  Random Forest pipeline with Gabor + gradient + multi-scale features and Dense
+  CRF post-processing.
+- **Optional extras** (`pyproject.toml`): new `[gpu-ml]` extras group listing
+  `cupy-cuda12x`, `cucim-cu12`, `cuml-cu12`, `pydensecrf`, and `pygco`.
+
+## K-Fold Cross-Validation
+
+- Added `SpatialKFoldSplitter` in `utils/spatial_kfold.py` with two strategies:
+  - `"by_image"`: Group K-Fold via `sklearn.model_selection.GroupKFold` grouping all patches
+    by their source image (`group_col`). Completely eliminates data leakage from overlapping
+    patches across folds when `stride < patch_size`.
+  - `"by_spatial_region"`: Divides image height into `n_splits` horizontal bands with an
+    optional `buffer_px` exclusion zone around each boundary. Patches whose footprint
+    intersects the buffer are dropped from both train and val, reducing spatial
+    autocorrelation at fold boundaries. Recommended `buffer_px >= patch_size` for zero
+    pixel overlap, `>= 2 × patch_size` for further autocorrelation reduction.
+- Added `KFoldConfig` dataclass in `config_definitions/kfold_config.py`, registered in the
+  Hydra ConfigStore under `group="kfold"`. Added `kfold: Optional[Any] = None` field to
+  `ExperimentsRunnerConfig`.
+- `ExperimentsRunner` extended with k-fold mode: when `experiments_runner.kfold` is present,
+  the runner iterates `seed × fold` (e.g., 5 folds × 3 seeds = 15 runs). Fold CSVs are
+  generated once via `SpatialKFoldSplitter.generate_and_save_folds` and reused across seeds.
+  `train_dataset.input_csv_path` and `val_dataset.input_csv_path` are overridden
+  automatically per fold. Output directories use `fold_XX_seedYYY` naming. `summary.csv`
+  gains a `fold_idx` column. Resume (`resume: true`) skips completed fold-seed combinations
+  using the existing `runner_state.json` mechanism.
+- Added `RunResult.fold_idx: Optional[int] = None` field (backward-compatible with existing
+  state files that do not contain this key).
+- Added `conf/examples/kfold_segmentation.yaml` with an annotated end-to-end 5-fold example.
+- Added user documentation at `website/docs/user-guide/kfold.md` covering motivation, both
+  split strategies, buffer zone configuration, multi-seed usage, output structure, and a
+  full parameter reference.
+
 ## [1.3.0] - 2026-05-18
 
 ## Dataset Distillation

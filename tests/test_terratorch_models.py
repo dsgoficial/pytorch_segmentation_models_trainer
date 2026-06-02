@@ -5,13 +5,13 @@ Tests for TerraTorchSegmentationWrapper (Phase 4).
 TerraTorch is mocked so these tests run without installing terratorch.
 The _prepare_input helper and head wiring are tested with a fake backbone.
 """
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
 import torch.nn as nn
-
 
 # ─── Helpers ───────────────────────────────────────────────────────��─────────
 
@@ -23,6 +23,7 @@ NUM_TOKENS = (H // PATCH_SIZE) * (W // PATCH_SIZE)  # 16
 
 def _make_fake_terratorch_module():
     """A tiny nn.Module that mimics a TerraTorch backbone returning patch tokens."""
+
     class _FakeBackbone(nn.Module):
         embed_dim = EMBED_DIM
         patch_size = PATCH_SIZE
@@ -46,20 +47,25 @@ def _make_fake_factory(backbone):
 
 # ─── Import under mock ──────────────────��─────────────────────────────────────
 
+
 def _build_wrapper(backbone, num_classes=2, head_type="linear"):
     """Build TerraTorchSegmentationWrapper with a mocked factory."""
     fake_factory = _make_fake_factory(backbone)
-    with patch.dict("sys.modules", {
-        "terratorch": MagicMock(),
-        "terratorch.models": MagicMock(),
-        "terratorch.models.backbones": MagicMock(),
-        "terratorch.models.backbones.prithvi_model_factory": MagicMock(
-            PrithviModelFactory=MagicMock(return_value=fake_factory)
-        ),
-    }):
+    with patch.dict(
+        "sys.modules",
+        {
+            "terratorch": MagicMock(),
+            "terratorch.models": MagicMock(),
+            "terratorch.models.backbones": MagicMock(),
+            "terratorch.models.backbones.prithvi_model_factory": MagicMock(
+                PrithviModelFactory=MagicMock(return_value=fake_factory)
+            ),
+        },
+    ):
         from pytorch_segmentation_models_trainer.custom_models.terratorch_models import (
             TerraTorchSegmentationWrapper,
         )
+
         wrapper = TerraTorchSegmentationWrapper(
             backbone_name="prithvi_100M",
             num_classes=num_classes,
@@ -76,6 +82,7 @@ def _build_wrapper(backbone, num_classes=2, head_type="linear"):
 
 # ─── Tests ─────────────────────────────────────────────────────────────��─────
 
+
 class TestTerraTorchWrapper:
     def test_import_error_when_terratorch_missing(self):
         with patch.dict("sys.modules", {"terratorch": None}):
@@ -83,6 +90,7 @@ class TestTerraTorchWrapper:
                 from pytorch_segmentation_models_trainer.custom_models.terratorch_models import (
                     TerraTorchSegmentationWrapper,
                 )
+
                 TerraTorchSegmentationWrapper(
                     backbone_name="prithvi_100M",
                     num_classes=2,

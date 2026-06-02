@@ -1,0 +1,7 @@
+# Remap pixel class values in all TIFFs under input_dir
+input_dir: /path/to/masks
+output_dir: /path/to/masks_remapped
+pixel_mapping:
+  8: 5   # remap class 8 -> 5
+  6: 4   # remap class 6 -> 4
+n_workers: 8

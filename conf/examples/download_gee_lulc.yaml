@@ -1,0 +1,63 @@
+# Download LULC rasters from Google Earth Engine
+# Run: pytorch-smt-tools download-gee-lulc <options>
+# Requires: pip install earthengine-api
+
+# ── Authentication (service account — recommended for servers/CI) ──────────
+# Set via env vars to avoid hardcoding credentials:
+#   export GEE_SERVICE_ACCOUNT_EMAIL=bot@my-project.iam.gserviceaccount.com
+#   export GEE_SERVICE_ACCOUNT_KEY_FILE=/secrets/gee_key.json
+#
+# Or pass directly via CLI:
+#   --service-account-email  --service-account-key-file  --project
+
+# ── Example 1: MapBiomas Brazil — bounding box ────────────────────────────
+# pytorch-smt-tools download-gee-lulc \
+#   --source mapbiomas \
+#   --year 2022 \
+#   --bbox -48.5 -23.5 -47.5 -22.5 \
+#   --output-dir /data/mapbiomas \
+#   --project my-gee-project \
+#   --service-account-email $GEE_SERVICE_ACCOUNT_EMAIL \
+#   --service-account-key-file $GEE_SERVICE_ACCOUNT_KEY_FILE
+
+# ── Example 2: MapBiomas Amazon — per-polygon from GeoPackage ─────────────
+# pytorch-smt-tools download-gee-lulc \
+#   --source mapbiomas \
+#   --year 2022 \
+#   --mapbiomas-collection amazon \
+#   --vector-path /data/municipalities.gpkg \
+#   --name-attribute cod_ibge \
+#   --output-dir /data/mapbiomas_amazon \
+#   --max-workers 8 \
+#   --project my-gee-project \
+#   --service-account-email $GEE_SERVICE_ACCOUNT_EMAIL \
+#   --service-account-key-file $GEE_SERVICE_ACCOUNT_KEY_FILE
+
+# ── Example 3: Dynamic World — export to Drive for large regions ──────────
+# pytorch-smt-tools download-gee-lulc \
+#   --source dynamic-world \
+#   --year 2022 \
+#   --bbox -55.0 -15.0 -44.0 -5.0 \
+#   --download-mode export-drive \
+#   --drive-folder GEE_DynamicWorld \
+#   --output-dir /data/dynamic_world \
+#   --project my-gee-project \
+#   --service-account-email $GEE_SERVICE_ACCOUNT_EMAIL \
+#   --service-account-key-file $GEE_SERVICE_ACCOUNT_KEY_FILE
+
+# ── Example 4: ESRI LULC — custom resolution ─────────────────────────────
+# pytorch-smt-tools download-gee-lulc \
+#   --source esri-lulc \
+#   --year 2022 \
+#   --vector-path /data/study_areas.geojson \
+#   --name-attribute area_name \
+#   --scale 30 \
+#   --crs EPSG:32723 \
+#   --output-dir /data/esri_lulc \
+#   --project my-gee-project \
+#   --service-account-email $GEE_SERVICE_ACCOUNT_EMAIL \
+#   --service-account-key-file $GEE_SERVICE_ACCOUNT_KEY_FILE
+
+# ── Available MapBiomas collections ──────────────────────────────────────
+# brazil, amazon, chaco, atlantic_forest, pampa, peru, bolivia,
+# colombia, venezuela, ecuador, paraguay, argentina, uruguay, indonesia

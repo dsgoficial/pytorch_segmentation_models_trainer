@@ -1,0 +1,64 @@
+# MBTiles Polygon Dataset — segmentation training from paired MBTiles rasters
+#
+# Both image and mask are rasterio-readable sources (MBTiles opened via the
+# GDAL MBTILES driver). Reading always occurs at the maximum available zoom
+# (native resolution). A sliding-window grid is generated over the image raster
+# and only patches FULLY CONTAINED within the input polygon regions are indexed.
+#
+# Mask rasters must be RGB/RGBA color-coded PNGs; color_map maps [R,G,B] → class.
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_dataset.MBTilesPolygonDataset
+  image_mbtiles_path: /data/imagery.mbtiles
+  mask_mbtiles_path: /data/masks.mbtiles
+  regions_path: /data/regions.gpkg        # Shapefile / GeoJSON / GPKG / …
+  patch_size: 512                         # window size in image pixels
+  stride: 512                             # non-overlapping grid (< patch_size for overlap)
+  color_map:
+    - [255, 0, 0, 1]                      # red   → class 1
+    - [0, 255, 0, 2]                      # green → class 2
+    - [0, 0, 255, 3]                      # blue  → class 3
+  selected_bands: [1, 2, 3]              # optional 1-based band selection
+  image_dtype: uint8
+  mask_resampling: nearest               # nearest is recommended for class masks
+  return_metadata: false
+  window_index_cache: /data/cache/train_window_index.csv   # skip polygon pass on re-run
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.VerticalFlip
+      p: 0.5
+    - _target_: albumentations.RandomRotate90
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: 16
+    num_workers: 4
+    shuffle: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_dataset.MBTilesPolygonDataset
+  image_mbtiles_path: /data/imagery.mbtiles
+  mask_mbtiles_path: /data/masks.mbtiles
+  regions_path: /data/val_regions.gpkg
+  patch_size: 512
+  stride: 512
+  color_map:
+    - [255, 0, 0, 1]
+    - [0, 255, 0, 2]
+    - [0, 0, 255, 3]
+  image_dtype: uint8
+  mask_resampling: nearest
+  window_index_cache: /data/cache/val_window_index.csv
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: 16
+    num_workers: 4
+    shuffle: false

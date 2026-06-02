@@ -1,0 +1,86 @@
+# Example: train segmentation from MBTiles imagery and GeoTIFF masks.
+#
+# The mask GeoTIFF defines the training grid. Each image patch is read from the
+# MBTiles source and warped/resampled onto the mask window before entering the
+# model.
+
+defaults:
+  - _self_
+
+hyperparameters:
+  model_name: unet_resnet34_mbtiles_mask
+  batch_size: 8
+  epochs: 50
+  max_lr: 1e-4
+  classes: 2
+
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet34
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: ${hyperparameters.classes}
+
+loss:
+  _target_: torch.nn.CrossEntropyLoss
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1e-4
+
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_mask_dataset.MBTilesMaskWindowedDataset
+  mbtiles_path: /data/source_imagery.mbtiles
+  mask_dir: /data/train_masks
+  patch_size: 512
+  stride: 512
+  selected_bands: [1, 2, 3]
+  image_dtype: uint8
+  image_resampling: bilinear
+  n_classes: ${hyperparameters.classes}
+  window_index_cache: /data/cache/train_mbtiles_mask_windows.parquet
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    shuffle: true
+    num_workers: 4
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_mask_dataset.MBTilesMaskWindowedDataset
+  mbtiles_path: /data/source_imagery.mbtiles
+  mask_dir: /data/val_masks
+  patch_size: 512
+  stride: 512
+  selected_bands: [1, 2, 3]
+  image_dtype: uint8
+  image_resampling: bilinear
+  n_classes: ${hyperparameters.classes}
+  window_index_cache: /data/cache/val_mbtiles_mask_windows.parquet
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    shuffle: false
+    num_workers: 4
+    pin_memory: true
+    drop_last: false
+
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${hyperparameters.classes}

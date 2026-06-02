@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 from abc import ABC, abstractmethod
 import csv
 import dataclasses
@@ -122,9 +123,11 @@ def build_output_raster_list(input_raster_path: str, cfg: DictConfig) -> List[st
 def build_csv_file_from_concurrent_futures_output(cfg, result_list):
     output_file = os.path.join(
         cfg.output_csv_path,
-        "temp.csv"
-        if "merge_existing" in cfg and cfg.merge_existing
-        else f"{cfg.dataset_name}.csv",
+        (
+            "temp.csv"
+            if "merge_existing" in cfg and cfg.merge_existing
+            else f"{cfg.dataset_name}.csv"
+        ),
     )
     with open(output_file, "w") as data_file:
         csv_writer = csv.writer(data_file)
@@ -165,13 +168,17 @@ class VectorReaderConfig:
 
 @dataclass
 class FileGeoDFConfig:
-    _target_: str = "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.FileGeoDF"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.FileGeoDF"
+    )
     file_name: str = "../tests/testing_data/data/vectors/test_polygons.geojson"
 
 
 @dataclass
 class PostgisConfig(VectorReaderConfig):
-    _target_: str = "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.PostgisGeoDF"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.PostgisGeoDF"
+    )
     database: str = "dataset_mestrado"
     sql: str = "select id, geom from buildings"
     user: str = "postgres"
@@ -182,14 +189,18 @@ class PostgisConfig(VectorReaderConfig):
 
 @dataclass
 class BatchFileGeoDFConfig(VectorReaderConfig):
-    _target_: str = "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.BatchFileGeoDF"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.BatchFileGeoDF"
+    )
     root_dir: str = "../tests/testing_data/data/vectors"
     file_extension: str = "geojson"
 
 
 @dataclass
 class COCOGeoDFConfig(VectorReaderConfig):
-    _target_: str = "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.COCOGeoDF"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.COCOGeoDF"
+    )
     file_name: str = MISSING
 
 
@@ -247,10 +258,8 @@ class TemplateMaskBuilder(ABC):
         mask_type_list: list,
         built_mask_dict: dict,
     ) -> DatasetEntry:
-        lambda_func = (
-            lambda x: make_path_relative(x[0], x[1])
-            if self.dataset_has_relative_path
-            else x[0]
+        lambda_func = lambda x: (
+            make_path_relative(x[0], x[1]) if self.dataset_has_relative_path else x[0]
         )
         args_dict = dict()
         for mask_key, file_path in built_mask_dict.items():
@@ -270,12 +279,14 @@ class TemplateMaskBuilder(ABC):
             )
         args_dict.update(raster_df.get_image_stats())
         return DatasetEntry(
-            image=make_path_relative(
-                input_raster_path,
-                os.path.basename(os.path.normpath(self.image_root_dir)),
-            )
-            if self.dataset_has_relative_path
-            else input_raster_path,
+            image=(
+                make_path_relative(
+                    input_raster_path,
+                    os.path.basename(os.path.normpath(self.image_root_dir)),
+                )
+                if self.dataset_has_relative_path
+                else input_raster_path
+            ),
             **args_dict,
         )
 

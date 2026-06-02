@@ -14,6 +14,7 @@ from rasterio.windows import Window
 from omegaconf import OmegaConf, DictConfig
 import json
 import os
+from pathlib import Path
 
 from pytorch_segmentation_models_trainer.tools.evaluation.metrics_calculator import (
     MetricsCalculator,
@@ -130,6 +131,13 @@ class TestSpatialOverlap(unittest.TestCase):
                     "Window size mismatch after spatial alignment:", cm.output[0]
                 )
 
+    @patch(
+        "pytorch_segmentation_models_trainer.tools.evaluation.metrics_calculator.rasterio.open"
+    )
+    def test_spatial_overlap_open_error(self, mock_open):
+        mock_open.side_effect = RuntimeError("open failed")
+        self.assertIsNone(_get_spatial_overlap("pred.tif", "gt.tif"))
+
 
 class TestMetricsCalculator(unittest.TestCase):
     def setUp(self):
@@ -244,6 +252,242 @@ class TestMetricsCalculator(unittest.TestCase):
         calculator = MetricsCalculator(self.config)
         with self.assertRaises(ValueError):
             calculator.calculate_metrics()
+
+    def test_metric_instantiation_error_is_ignored(self):
+        cfg = OmegaConf.create(
+            {
+                "metrics": {"bad": {"_target_": "missing.module.Metric"}},
+                "pixel_metrics": {},
+                "num_classes": 2,
+                "output_folder": self.tmp_dir,
+            }
+        )
+        calculator = MetricsCalculator(cfg)
+        self.assertEqual(calculator.metrics_to_compute, {})
+
+    def test_find_prediction_files_tasks_and_matching_variants(self):
+        calculator = MetricsCalculator(self.config)
+        found = calculator._find_prediction_files(self.tmp_dir)
+        self.assertIn("pred_mask_0", found)
+
+        self.assertEqual(
+            calculator._find_matching_prediction(
+                "pred_mask_0", {"pred_mask_0": "direct.tif"}
+            ),
+            "direct.tif",
+        )
+        self.assertEqual(
+            calculator._find_matching_prediction("mask_tile", {"tile": "pred.tif"}),
+            "pred.tif",
+        )
+        self.assertEqual(
+            calculator._find_matching_prediction("abc_tile_xyz", {"tile": "pred.tif"}),
+            "pred.tif",
+        )
+        self.assertIsNone(calculator._find_matching_prediction("missing", {}))
+
+        rows = pd.DataFrame(
+            [
+                {"image": "", "mask": "", "prediction": ""},
+                {"mask": "gt_mask_0.tif", "prediction": "pred_mask_0.tif"},
+            ]
+        )
+        tasks = calculator._create_tasks(rows, {})
+        self.assertEqual(len(tasks), 1)
+        self.assertTrue(tasks[0]["gt_path"].endswith("gt_mask_0.tif"))
+
+    def test_compute_metrics_for_single_pair_no_overlap_threshold_and_metric_error(
+        self,
+    ):
+        calculator = MetricsCalculator(self.config)
+        self.assertEqual(
+            calculator._compute_metrics_for_single_pair(
+                self.pred_mask_path,
+                os.path.join(self.tmp_dir, "missing_gt.tif"),
+            ),
+            {},
+        )
+
+        good_metric = MagicMock(return_value=torch.tensor(1.0))
+        bad_metric = MagicMock(side_effect=RuntimeError("metric failed"))
+        calculator.pixel_metrics = {"good": good_metric}
+        calculator.metrics_to_compute = {"bad": bad_metric}
+        result = calculator._compute_metrics_for_single_pair(
+            self.pred_mask_path,
+            self.gt_mask_path,
+            threshold=0.5,
+        )
+
+        self.assertEqual(result["good"], 1.0)
+        self.assertNotIn("bad", result)
+
+    def test_calculate_metrics_fallbacks_prediction_folder_and_parallel(self):
+        fallback_cfg = OmegaConf.create(dict(self.config))
+        fallback_cfg.ground_truth_csv_path = os.path.join(
+            self.tmp_dir, "missing_gt.csv"
+        )
+        calculator = MetricsCalculator(fallback_cfg)
+        with (
+            patch.object(
+                calculator,
+                "_create_tasks",
+                return_value=[
+                    {
+                        "image_name": "a",
+                        "pred_path": self.pred_mask_path,
+                        "gt_path": self.gt_mask_path,
+                    },
+                    {
+                        "image_name": "b",
+                        "pred_path": self.pred_mask_path,
+                        "gt_path": self.gt_mask_path,
+                    },
+                ],
+            ),
+            patch.object(
+                calculator,
+                "_process_images_parallel",
+                return_value=[{"image_name": "a", "iou": 1.0}],
+            ) as process_parallel,
+            patch.object(
+                calculator,
+                "_compute_metrics_from_results",
+                return_value={"ok": True},
+            ),
+        ):
+            output = calculator.calculate_metrics(
+                predictions_folder=self.tmp_dir,
+                ground_truth_csv=None,
+                experiment_name="parallel_exp",
+                parallel=True,
+                num_workers=None,
+            )
+
+        self.assertEqual(output, {"ok": True})
+        process_parallel.assert_called_once()
+
+        no_csv_cfg = OmegaConf.create(dict(self.config))
+        no_csv_cfg.ground_truth_csv_path = os.path.join(self.tmp_dir, "missing_gt.csv")
+        no_csv_cfg.prediction_csv_path = os.path.join(self.tmp_dir, "missing_pred.csv")
+        with self.assertRaises(ValueError):
+            MetricsCalculator(no_csv_cfg).calculate_metrics()
+
+        with patch.object(calculator, "_create_tasks", return_value=[]):
+            with self.assertRaises(ValueError):
+                calculator.calculate_metrics(
+                    ground_truth_csv=self.config.prediction_csv_path
+                )
+
+    def test_processing_helpers_and_metric_aggregation_paths(self):
+        calculator = MetricsCalculator(self.config)
+        tasks = [
+            {
+                "image_name": "im",
+                "pred_path": self.pred_mask_path,
+                "gt_path": self.gt_mask_path,
+            }
+        ]
+
+        with patch(
+            "pytorch_segmentation_models_trainer.tools.evaluation.metrics_calculator.process_single_image_worker",
+            return_value=None,
+        ):
+            self.assertEqual(calculator._process_images_sequential(tasks), [])
+
+        with patch(
+            "pytorch_segmentation_models_trainer.tools.evaluation.metrics_calculator.process_single_image_worker",
+            return_value={"image_name": "im", "iou": 0.5, "accuracy": 0.75},
+        ):
+            parallel_results = calculator._process_images_parallel(
+                tasks * 2, num_workers=1
+            )
+        self.assertEqual(len(parallel_results), 2)
+
+        with (
+            patch.object(calculator, "_save_results"),
+            patch.object(
+                calculator,
+                "_prepare_output_directory",
+                return_value=Path(self.tmp_dir),
+            ),
+        ):
+            averaged = calculator._compute_metrics_from_results(
+                [
+                    {"image_name": "a", "iou": 0.5, "accuracy": 0.75},
+                    {"image_name": "b", "iou": 1.0, "accuracy": 0.25},
+                ],
+                "avg_exp",
+            )
+            empty = calculator._compute_metrics_from_results([], "empty")
+
+        self.assertEqual(averaged["overall"]["iou"], 0.75)
+        self.assertEqual(empty, {})
+
+        with (
+            patch.object(calculator, "_save_results"),
+            patch.object(
+                calculator,
+                "_prepare_output_directory",
+                return_value=Path(self.tmp_dir),
+            ),
+        ):
+            matrix_based = calculator._compute_metrics_from_results(
+                [
+                    {
+                        "image_name": "cm",
+                        "pred_flat": np.array([0, 1, 1, 0]),
+                        "gt_flat": np.array([0, 1, 0, 0]),
+                    }
+                ],
+                "cm_exp",
+            )
+        self.assertIn("Accuracy", matrix_based["overall"])
+
+        cm = calculator._compute_confusion_matrix_fast(
+            torch.tensor([0, 1, 1]),
+            torch.tensor([0, 1, 0]),
+        )
+        self.assertEqual(cm.shape, (2, 2))
+        self.assertIn(
+            "JaccardIndex", calculator._metrics_from_confusion_matrix_aggregated(cm)
+        )
+
+    def test_process_images_parallel_future_exception(self):
+        calculator = MetricsCalculator(self.config)
+
+        class BadFuture:
+            def result(self):
+                raise RuntimeError("future failed")
+
+        class DummyExecutor:
+            def __init__(self, max_workers):
+                self.max_workers = max_workers
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def submit(self, *args, **kwargs):
+                return BadFuture()
+
+        with (
+            patch(
+                "pytorch_segmentation_models_trainer.tools.evaluation.metrics_calculator.ThreadPoolExecutor",
+                DummyExecutor,
+            ),
+            patch(
+                "pytorch_segmentation_models_trainer.tools.evaluation.metrics_calculator.as_completed",
+                lambda futures: list(futures),
+            ),
+        ):
+            output = calculator._process_images_parallel(
+                [{"image_name": "im"}],
+                num_workers=None,
+            )
+
+        self.assertEqual(output, [])
 
     def test_process_single_image_worker_integration(self):
         # We need to ensure paths are absolute or correct for the worker

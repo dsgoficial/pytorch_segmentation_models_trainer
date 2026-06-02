@@ -1,0 +1,72 @@
+# Example: 5-fold spatial cross-validation with CSVWindowedSegmentationDataset
+#
+# The ExperimentsRunner generates fold CSVs once and runs seed × fold combinations.
+# With seeds=[42] and kfold.n_splits=5, this produces 5 training runs.
+# With seeds=[42, 101] it would produce 10 runs (2 seeds × 5 folds).
+#
+# train_dataset.input_csv_path and val_dataset.input_csv_path are overridden
+# automatically per fold — set them to the master CSV (same as kfold.input_csv_path).
+
+mode: run-experiments
+
+experiments_runner:
+  seeds: [42]
+  output_base_dir: outputs/kfold_study
+  save_summary: true
+  resume: true
+  summary_metrics:
+    - val/loss
+    - val/F1Score
+  kfold:
+    n_splits: 5
+    seed: 42
+    split_strategy: by_image   # "by_image" | "by_spatial_region"
+    group_col: image            # column that identifies the source image
+    buffer_px: 0               # set to patch_size to eliminate boundary overlap
+    row_col: row_off
+    col_col: col_off
+    input_csv_path: /data/all_patches.csv
+    save_fold_csvs_dir: fold_splits
+
+seed: 42
+
+hyperparameters:
+  batch_size: 8
+  epochs: 50
+  max_lr: 1.0e-3
+
+pl_trainer:
+  max_epochs: 50
+  accelerator: gpu
+  devices: 1
+  default_root_dir: outputs/kfold_study  # overridden per fold by the runner
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedSegmentationDataset
+  input_csv_path: /data/all_patches.csv  # overridden per fold by the runner
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.RandomBrightnessContrast
+      p: 0.3
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedSegmentationDataset
+  input_csv_path: /data/all_patches.csv  # overridden per fold by the runner
+
+model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.model.Model
+  architecture: Unet
+  encoder_name: resnet34
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: 1
+
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.model.SegmentationModel
+
+logger:
+  _target_: pytorch_lightning.loggers.TensorBoardLogger
+  save_dir: outputs/kfold_study/logs
+  name: kfold_segmentation
+  version: 0   # overridden per run by the runner (run_00_seed42, etc.)

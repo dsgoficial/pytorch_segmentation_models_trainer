@@ -16,11 +16,11 @@
  *                                                                         *
  ***************************************************************************/
 """
+
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 from omegaconf import MISSING
 from hydra.core.config_store import ConfigStore
-
 
 # ============================================================================
 # INFERENCE PROCESSORS
@@ -37,7 +37,9 @@ class SingleImageInfereceProcessorConfig:
     - model, device, batch_size, export_strategy, polygonizer
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.inference.inference_processors.SingleImageInfereceProcessor"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.inference.inference_processors.SingleImageInfereceProcessor"
+    )
     model_input_shape: Optional[List[int]] = None  # Ex: [448, 448]
     step_shape: Optional[List[int]] = None  # Ex: [224, 224]
     mask_bands: int = 1
@@ -52,7 +54,9 @@ class SingleImageFromFrameFieldProcessorConfig:
     Específico para Frame Field models (seg + crossfield).
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.inference.inference_processors.SingleImageFromFrameFieldProcessor"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.inference.inference_processors.SingleImageFromFrameFieldProcessor"
+    )
     model_input_shape: Optional[List[int]] = None
     step_shape: Optional[List[int]] = None
     mask_bands: int = 1
@@ -67,7 +71,9 @@ class MultiClassInferenceProcessorConfig:
     Para segmentação multi-classe com argmax.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.inference.inference_processors.MultiClassInferenceProcessor"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.inference.inference_processors.MultiClassInferenceProcessor"
+    )
     model_input_shape: Optional[List[int]] = None
     step_shape: Optional[List[int]] = None
     num_classes: int = MISSING
@@ -81,7 +87,9 @@ class ObjectDetectionInferenceProcessorConfig:
     Configuração para ObjectDetectionInferenceProcessor.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.inference.inference_processors.ObjectDetectionInferenceProcessor"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.inference.inference_processors.ObjectDetectionInferenceProcessor"
+    )
     model_input_shape: Optional[List[int]] = None
     config: Optional[Any] = None
 
@@ -92,7 +100,9 @@ class PolygonRNNInferenceProcessorConfig:
     Configuração para PolygonRNNInferenceProcessor.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.inference.inference_processors.PolygonRNNInferenceProcessor"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.inference.inference_processors.PolygonRNNInferenceProcessor"
+    )
     sequence_length: int = 60
     config: Optional[Any] = None
     group_output_by_image_basename: bool = False
@@ -109,7 +119,9 @@ class SingleImageReaderProcessorConfig:
     Configuração para leitura de uma única imagem.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader.SingleImageReaderProcessor"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader.SingleImageReaderProcessor"
+    )
     file_name: str = MISSING
 
 
@@ -119,7 +131,9 @@ class FolderImageReaderProcessorConfig:
     Configuração para leitura de pasta de imagens.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader.FolderImageReaderProcessor"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader.FolderImageReaderProcessor"
+    )
     folder_name: str = MISSING
     recursive: bool = True
     image_extension: str = "tif"
@@ -131,11 +145,98 @@ class CSVImageReaderProcessorConfig:
     Configuração para leitura de imagens via CSV.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader.CSVImageReaderProcessor"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader.CSVImageReaderProcessor"
+    )
     input_csv_path: str = MISSING
     key: str = "image"
     root_dir: Optional[str] = None
     n_first_rows_to_read: Optional[int] = None
+
+
+# ============================================================================
+# MBTILES QA / EXPORT TOOLS
+# ============================================================================
+
+
+@dataclass
+class MBTilesMaskAlignedExportConfig:
+    """Configuração para exportar imagens MBTiles alinhadas às máscaras GeoTIFF.
+
+    A máscara define o grid de destino (CRS, transform, resolução e shape). A
+    imagem do MBTiles é reprojetada/reamostrada para esse grid antes de ser
+    escrita, permitindo validar visualmente o alinhamento antes do treinamento.
+
+    Example YAML::
+
+        mbtiles_export:
+          _target_: pytorch_segmentation_models_trainer.tools.mbtiles.export_mask_aligned_images.export_mask_aligned_images
+          mbtiles_path: /data/source.mbtiles
+          mask_dir: /data/masks
+          output_dir: /data/qa_tiles
+          patch_size: 512
+          stride: 512
+          write_sidecar_png: true
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.mbtiles"
+        ".export_mask_aligned_images.export_mask_aligned_images"
+    )
+    mbtiles_path: str = MISSING
+    output_dir: str = MISSING
+    mask_dir: Optional[str] = None
+    mask_paths: Optional[List[str]] = None
+    mask_extension: str = ".tif"
+    patch_size: Optional[int] = None
+    stride: Optional[int] = None
+    full_mask: bool = False
+    selected_bands: Optional[List[int]] = None
+    image_dtype: str = "uint8"
+    output_format: str = "tif"
+    image_resampling: str = "bilinear"
+    write_sidecar_png: bool = True
+    overlay_alpha: float = 0.35
+    skip_empty_masks: bool = False
+    n_classes: int = 2
+
+
+@dataclass
+class MBTilesMulticlassMaskBuilderConfig:
+    """Configuration for building multiclass masks from an MBTiles reference grid.
+
+    Example YAML::
+
+        mbtiles_multiclass_mask:
+          _target_: pytorch_segmentation_models_trainer.tools.mbtiles.multiclass_mask_builder.build_mbtiles_multiclass_masks
+          reference_mbtiles_path: /data/tiles.mbtiles
+          frames_path: /data/locais_mascaras.geojson
+          vector_path: /data/dsg_masks.gpkg
+          output_dir: /data/output
+          frame_layer: locais_mascaras
+          vector_layer: dsg_masks
+          frame_id_attribute: rect_id
+          class_attribute: tipo
+          background_value: 255
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.mbtiles"
+        ".multiclass_mask_builder.build_mbtiles_multiclass_masks"
+    )
+    reference_mbtiles_path: str = MISSING
+    frames_path: str = MISSING
+    vector_path: str = MISSING
+    output_dir: str = MISSING
+    frame_layer: Optional[str] = None
+    vector_layer: Optional[str] = None
+    frame_id_attribute: str = "rect_id"
+    class_attribute: str = "tipo"
+    output_subdir: str = "masks"
+    output_extension: str = "tif"
+    background_value: int = 255
+    n_workers: int = 8
+    progress: bool = True
 
 
 # ============================================================================
@@ -149,7 +250,9 @@ class VectorFileDataWriterConfig:
     Configuração para escrita de vetores em arquivo.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.VectorFileDataWriter"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.VectorFileDataWriter"
+    )
     output_file_folder: str = MISSING
     output_file_name: str = "output.geojson"
     driver: str = "GeoJSON"
@@ -162,7 +265,9 @@ class RasterDataWriterConfig:
     Configuração para escrita de raster.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.RasterDataWriter"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.RasterDataWriter"
+    )
     output_file_path: str = MISSING
     output_profile: Optional[Any] = None
 
@@ -173,7 +278,9 @@ class VectorDatabaseDataWriterConfig:
     Configuração para escrita de vetores em banco de dados.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.VectorDatabaseDataWriter"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.data_handlers.data_writer.VectorDatabaseDataWriter"
+    )
     user: str = MISSING
     password: str = MISSING
     database: str = MISSING
@@ -195,7 +302,9 @@ class RasterExportInferenceStrategyConfig:
     Configuração para exportação de inferência como raster único.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.inference.export_inference.RasterExportInferenceStrategy"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.inference.export_inference.RasterExportInferenceStrategy"
+    )
     output_file_path: str = MISSING
     output_profile: Optional[Any] = None
 
@@ -206,7 +315,9 @@ class MultipleRasterExportInferenceStrategyConfig:
     Configuração para exportação de múltiplos rasters (ex: seg, crossfield).
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.inference.export_inference.MultipleRasterExportInferenceStrategy"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.inference.export_inference.MultipleRasterExportInferenceStrategy"
+    )
     output_folder: str = MISSING
     output_basename: str = "inference.tif"
     output_profile: Optional[Any] = None
@@ -218,7 +329,9 @@ class VectorFileExportInferenceStrategyConfig:
     Configuração para exportação de inferência como vetor.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.inference.export_inference.VectorFileExportInferenceStrategy"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.inference.export_inference.VectorFileExportInferenceStrategy"
+    )
     output_file_path: str = MISSING
     driver: str = "GeoJSON"
 
@@ -229,7 +342,9 @@ class VectorDatabaseExportInferenceStrategyConfig:
     Configuração para exportação de inferência para banco de dados.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.inference.export_inference.VectorDatabaseExportInferenceStrategy"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.inference.export_inference.VectorDatabaseExportInferenceStrategy"
+    )
     user: str = MISSING
     password: str = MISSING
     database: str = MISSING
@@ -246,7 +361,9 @@ class ObjectDetectionExportInferenceStrategyConfig:
     Configuração para exportação de detecção de objetos.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.inference.export_inference.ObjectDetectionExportInferenceStrategy"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.inference.export_inference.ObjectDetectionExportInferenceStrategy"
+    )
     output_file_path: str = MISSING
 
 
@@ -288,7 +405,9 @@ class SimplePolygonizerProcessorConfig:
     Configuração para SimplePolygonizerProcessor.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.polygonization.polygonizer.SimplePolygonizerProcessor"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.polygonization.polygonizer.SimplePolygonizerProcessor"
+    )
     config: SimplePolConfigConfig = field(default_factory=SimplePolConfigConfig)
     data_writer: Optional[Any] = None
 
@@ -323,7 +442,9 @@ class ACMPolygonizerProcessorConfig:
     Configuração para ACMPolygonizerProcessor.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.polygonization.polygonizer.ACMPolygonizerProcessor"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.polygonization.polygonizer.ACMPolygonizerProcessor"
+    )
     config: ACMConfigConfig = field(default_factory=ACMConfigConfig)
     data_writer: Optional[Any] = None
 
@@ -383,7 +504,9 @@ class ASMPolygonizerProcessorConfig:
     Configuração para ASMPolygonizerProcessor.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.polygonization.polygonizer.ASMPolygonizerProcessor"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.polygonization.polygonizer.ASMPolygonizerProcessor"
+    )
     config: ASMConfigConfig = field(default_factory=ASMConfigConfig)
     data_writer: Optional[Any] = None
 
@@ -405,7 +528,9 @@ class PolygonRNNPolygonizerProcessorConfig:
     Configuração para PolygonRNNPolygonizerProcessor.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.tools.polygonization.polygonizer.PolygonRNNPolygonizerProcessor"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.polygonization.polygonizer.PolygonRNNPolygonizerProcessor"
+    )
     config: PolygonRNNConfigConfig = field(default_factory=PolygonRNNConfigConfig)
     data_writer: Optional[Any] = None
 
@@ -447,6 +572,16 @@ cs.store(
 cs.store(group="image_reader", name="single", node=SingleImageReaderProcessorConfig)
 cs.store(group="image_reader", name="folder", node=FolderImageReaderProcessorConfig)
 cs.store(group="image_reader", name="csv", node=CSVImageReaderProcessorConfig)
+cs.store(
+    group="mbtiles_export",
+    name="mask_aligned",
+    node=MBTilesMaskAlignedExportConfig,
+)
+cs.store(
+    group="mbtiles_multiclass_mask",
+    name="default",
+    node=MBTilesMulticlassMaskBuilderConfig,
+)
 
 # Data Writers
 cs.store(group="data_writer", name="vector_file", node=VectorFileDataWriterConfig)

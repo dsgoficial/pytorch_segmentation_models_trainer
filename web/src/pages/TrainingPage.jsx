@@ -123,6 +123,18 @@ function serializeLoss(loss) {
   if (t.includes('WeightedDiceCrossEntropyLoss')) {
     return { _target_: t, num_classes: '${model.classes}', dice_weight: p.diceWeight, ce_weight: p.ceWeight, smooth_factor: p.smoothFactor }
   }
+  if (t.endsWith('WeightedDiceSCELoss')) {
+    return { _target_: t, num_classes: '${model.classes}', dice_weight: p.diceWeight, sce_weight: p.sceWeight, smooth_factor: p.smoothFactor, sce_alpha: p.sceAlpha, sce_beta: p.sceBeta }
+  }
+  if (t.endsWith('WeightedLovaszSCELoss')) {
+    return { _target_: t, num_classes: '${model.classes}', lovasz_weight: p.lovaszWeight, sce_weight: p.sceWeight, sce_alpha: p.sceAlpha, sce_beta: p.sceBeta, per_image: p.perImage, lovasz_classes: p.lovaszClasses }
+  }
+  if (t.endsWith('WeightedJMLSCEGCBLLoss')) {
+    return { _target_: t, num_classes: '${model.classes}', jml_weight: p.jmlWeight, sce_weight: p.sceWeight, sce_alpha: p.sceAlpha, sce_beta: p.sceBeta, smooth: p.smooth, jml_classes: p.jmlClasses, label_smoothing: p.labelSmoothing, gcbl_weight: p.gcblWeight, gcbl_embed_dim: p.gcblEmbedDim, gcbl_temperature: p.gcblTemperature, gcbl_max_samples: p.gcblMaxSamples }
+  }
+  if (t.endsWith('WeightedJMLSCELoss')) {
+    return { _target_: t, num_classes: '${model.classes}', jml_weight: p.jmlWeight, sce_weight: p.sceWeight, sce_alpha: p.sceAlpha, sce_beta: p.sceBeta, smooth: p.smooth, jml_classes: p.jmlClasses, label_smoothing: p.labelSmoothing }
+  }
   if (t.includes('SegLoss')) {
     return { _target_: t, bce_coef: p.bceCoef, dice_coef: p.diceCoef, tversky_focal_coef: p.tverskFocalCoef }
   }
@@ -259,6 +271,14 @@ function applyImport(data, setters) {
     let params = {}
     if (t.includes('WeightedDiceCrossEntropyLoss'))
       params = { diceWeight: data.loss.dice_weight, ceWeight: data.loss.ce_weight, smoothFactor: data.loss.smooth_factor }
+    else if (t.endsWith('WeightedDiceSCELoss'))
+      params = { diceWeight: data.loss.dice_weight ?? 0.25, sceWeight: data.loss.sce_weight ?? 0.75, smoothFactor: data.loss.smooth_factor ?? 0.0, sceAlpha: data.loss.sce_alpha ?? 1.0, sceBeta: data.loss.sce_beta ?? 0.5 }
+    else if (t.endsWith('WeightedLovaszSCELoss'))
+      params = { lovaszWeight: data.loss.lovasz_weight ?? 0.25, sceWeight: data.loss.sce_weight ?? 0.75, sceAlpha: data.loss.sce_alpha ?? 1.0, sceBeta: data.loss.sce_beta ?? 0.5, perImage: data.loss.per_image ?? false, lovaszClasses: data.loss.lovasz_classes ?? 'present' }
+    else if (t.endsWith('WeightedJMLSCEGCBLLoss'))
+      params = { jmlWeight: data.loss.jml_weight ?? 0.25, sceWeight: data.loss.sce_weight ?? 0.75, sceAlpha: data.loss.sce_alpha ?? 1.0, sceBeta: data.loss.sce_beta ?? 0.5, smooth: data.loss.smooth ?? 0.001, jmlClasses: data.loss.jml_classes ?? 'present', labelSmoothing: data.loss.label_smoothing ?? 0.0, gcblWeight: data.loss.gcbl_weight ?? 0.1, gcblEmbedDim: data.loss.gcbl_embed_dim ?? 32, gcblTemperature: data.loss.gcbl_temperature ?? 0.07, gcblMaxSamples: data.loss.gcbl_max_samples ?? 512 }
+    else if (t.endsWith('WeightedJMLSCELoss'))
+      params = { jmlWeight: data.loss.jml_weight ?? 0.25, sceWeight: data.loss.sce_weight ?? 0.75, sceAlpha: data.loss.sce_alpha ?? 1.0, sceBeta: data.loss.sce_beta ?? 0.5, smooth: data.loss.smooth ?? 0.001, jmlClasses: data.loss.jml_classes ?? 'present', labelSmoothing: data.loss.label_smoothing ?? 0.0 }
     else if (t.includes('SegLoss'))
       params = { bceCoef: data.loss.bce_coef, diceCoef: data.loss.dice_coef, tverskFocalCoef: data.loss.tversky_focal_coef }
     else

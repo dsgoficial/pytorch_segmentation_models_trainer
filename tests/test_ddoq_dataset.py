@@ -53,3 +53,56 @@ def test_ddoq_dataset_soft_labels():
     assert torch.allclose(img, images[5])
     assert torch.allclose(mask, soft_labels[0])
     assert weight == pytest.approx(0.4)
+
+
+def test_ddoq_dataset_dict_and_missing_validation():
+    images = torch.randn(4, 3, 16, 16)
+    labels = torch.randint(0, 2, (4, 16, 16))
+    original_dataset = [
+        {"image": images[0], "mask": labels[0]},
+        {"image": images[1], "label": labels[1]},
+        {"image": images[2]},
+        images[3],
+    ]
+
+    medoid_indices = [0, 1, 2, 3]
+    ddoq_weights = torch.ones(4)
+    dataset = DDOQDistilledDataset(
+        original_dataset=original_dataset,
+        medoid_indices=medoid_indices,
+        ddoq_weights=ddoq_weights,
+    )
+
+    img, mask, weight = dataset[0]
+    assert torch.allclose(img, images[0])
+    assert torch.allclose(mask, labels[0])
+    assert weight == pytest.approx(1.0)
+
+    img, mask, _ = dataset[1]
+    assert torch.allclose(mask, labels[1])
+
+    img, mask, _ = dataset[2]
+    assert mask is None
+
+    img, mask, _ = dataset[3]
+    assert mask is None
+
+
+def test_ddoq_dataset_validation_errors():
+    images = torch.randn(2, 3, 16, 16)
+    original_dataset = TensorDataset(images)
+
+    with pytest.raises(ValueError, match="medoid indices"):
+        DDOQDistilledDataset(
+            original_dataset=original_dataset,
+            medoid_indices=[0, 1],
+            ddoq_weights=torch.tensor([1.0]),
+        )
+
+    with pytest.raises(ValueError, match="soft-labels"):
+        DDOQDistilledDataset(
+            original_dataset=original_dataset,
+            medoid_indices=[0],
+            ddoq_weights=torch.tensor([1.0]),
+            soft_labels=[torch.ones(2, 16, 16), torch.ones(2, 16, 16)],
+        )

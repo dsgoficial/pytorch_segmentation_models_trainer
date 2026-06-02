@@ -38,40 +38,58 @@ class ObjectDetectionPLModel(Model):
             batch_size=self.cfg.hyperparameters.batch_size,
             shuffle=self.cfg.train_dataset.data_loader.shuffle,
             num_workers=self.cfg.train_dataset.data_loader.num_workers,
-            pin_memory=self.cfg.train_dataset.data_loader.pin_memory
-            if "pin_memory" in self.cfg.train_dataset.data_loader
-            else True,
-            drop_last=self.cfg.train_dataset.data_loader.drop_last
-            if "drop_last" in self.cfg.train_dataset.data_loader
-            else True,
-            prefetch_factor=self.cfg.train_dataset.data_loader.prefetch_factor
-            if "prefetch_factor" in self.cfg.train_dataset.data_loader
-            else 2,
-            collate_fn=self.train_ds.collate_fn
-            if hasattr(self.train_ds, "collate_fn")
-            else self.train_ds.train_dataset.collate_fn,
+            pin_memory=(
+                self.cfg.train_dataset.data_loader.pin_memory
+                if "pin_memory" in self.cfg.train_dataset.data_loader
+                else True
+            ),
+            drop_last=(
+                self.cfg.train_dataset.data_loader.drop_last
+                if "drop_last" in self.cfg.train_dataset.data_loader
+                else True
+            ),
+            prefetch_factor=(
+                self.cfg.train_dataset.data_loader.prefetch_factor
+                if "prefetch_factor" in self.cfg.train_dataset.data_loader
+                else 2
+            ),
+            collate_fn=(
+                self.train_ds.collate_fn
+                if hasattr(self.train_ds, "collate_fn")
+                else self.train_ds.train_dataset.collate_fn
+            ),
         )
 
     def val_dataloader(self):
         return DataLoader(
             self.val_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
-            shuffle=self.cfg.val_dataset.data_loader.shuffle
-            if "shuffle" in self.cfg.val_dataset.data_loader
-            else False,
+            shuffle=(
+                self.cfg.val_dataset.data_loader.shuffle
+                if "shuffle" in self.cfg.val_dataset.data_loader
+                else False
+            ),
             num_workers=self.cfg.val_dataset.data_loader.num_workers,
-            pin_memory=self.cfg.val_dataset.data_loader.pin_memory
-            if "pin_memory" in self.cfg.val_dataset.data_loader
-            else True,
-            drop_last=self.cfg.val_dataset.data_loader.drop_last
-            if "drop_last" in self.cfg.val_dataset.data_loader
-            else True,
-            prefetch_factor=self.cfg.val_dataset.data_loader.prefetch_factor
-            if "prefetch_factor" in self.cfg.val_dataset.data_loader
-            else 2,
-            collate_fn=self.val_ds.collate_fn
-            if hasattr(self.val_ds, "collate_fn")
-            else self.val_ds.val_dataset.collate_fn,
+            pin_memory=(
+                self.cfg.val_dataset.data_loader.pin_memory
+                if "pin_memory" in self.cfg.val_dataset.data_loader
+                else True
+            ),
+            drop_last=(
+                self.cfg.val_dataset.data_loader.drop_last
+                if "drop_last" in self.cfg.val_dataset.data_loader
+                else True
+            ),
+            prefetch_factor=(
+                self.cfg.val_dataset.data_loader.prefetch_factor
+                if "prefetch_factor" in self.cfg.val_dataset.data_loader
+                else 2
+            ),
+            collate_fn=(
+                self.val_ds.collate_fn
+                if hasattr(self.val_ds, "collate_fn")
+                else self.val_ds.val_dataset.collate_fn
+            ),
         )
 
     def training_step(self, batch, batch_idx):

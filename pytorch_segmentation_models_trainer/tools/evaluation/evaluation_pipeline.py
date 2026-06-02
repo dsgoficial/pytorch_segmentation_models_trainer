@@ -198,9 +198,11 @@ class EvaluationPipeline:
             # Criar CSV diretamente das pastas
             prepare_evaluation_csv_from_folders(
                 ground_truth_folder=config.ground_truth_folder,
-                predictions_folder=config.predictions_folder
-                if hasattr(config, "predictions_folder")
-                else None,
+                predictions_folder=(
+                    config.predictions_folder
+                    if hasattr(config, "predictions_folder")
+                    else None
+                ),
                 output_csv_path=csv_path,
                 gt_pattern=config.get("gt_pattern", "*.tif"),
                 pred_pattern=config.get("pred_pattern", "*.tif"),
@@ -679,81 +681,6 @@ class EvaluationPipeline:
             )
 
         logger.info(f"Prediction completed successfully for {experiment.name}")
-
-    def _evaluate_all_experiments_sequential(
-        self, predictions: Dict, dataset_csv: str
-    ) -> Dict:
-        """
-        Calcula métricas sequencialmente (um experimento por vez).
-        Mas cada experimento processa imagens em paralelo.
-        """
-        logger.info("Evaluating experiments SEQUENTIALLY (images in parallel)")
-
-        all_results = {}
-
-        # Obter configuração de paralelização por imagem
-        parallel_config = self.config.pipeline_options.get(
-            "parallel_image_processing", {}
-        )
-        use_parallel = parallel_config.get("enabled", True)
-        num_workers = parallel_config.get("num_workers", None)
-
-        for exp_name, pred_info in predictions.items():
-            logger.info(f"\n{'='*60}")
-            logger.info(f"Evaluating experiment: {exp_name}")
-            logger.info(f"{'='*60}")
-
-            # Verificar se houve erro na predição/carregamento
-            if "error" in pred_info:
-                logger.error(
-                    f"Skipping evaluation (prediction/loading failed): "
-                    f"{pred_info['error']}"
-                )
-                continue
-
-            # Log se predições foram carregadas
-            if pred_info.get("loaded", False):
-                logger.info(
-                    f"Using precomputed predictions "
-                    f"({pred_info['num_predictions']} files)"
-                )
-
-            # Verificar se deve skip avaliação
-            if self._should_skip_evaluation(exp_name):
-                logger.info(f"Skipping evaluation (already exists)")
-                continue
-
-            # Encontrar config do experimento
-            exp_config = next(
-                (exp for exp in self.experiments if exp.name == exp_name), None
-            )
-
-            if exp_config is None:
-                logger.error(f"Config not found for experiment: {exp_name}")
-                continue
-
-            try:
-                # Criar MetricsCalculator
-                metrics_calculator = MetricsCalculator(self.config, exp_config)
-
-                # Calcular métricas (com paralelização por imagem)
-                results = metrics_calculator.calculate_metrics(
-                    predictions_folder=pred_info["output_folder"],
-                    ground_truth_csv=dataset_csv,
-                    experiment_name=exp_name,
-                    parallel=use_parallel,
-                    num_workers=num_workers,
-                )
-
-                all_results[exp_name] = results
-
-            except Exception as e:
-                logger.error(
-                    f"Failed to calculate metrics for {exp_name}: {e}", exc_info=True
-                )
-                continue
-
-        return all_results
 
     def _evaluate_all_experiments(self, predictions: Dict, dataset_csv: str) -> Dict:
         """

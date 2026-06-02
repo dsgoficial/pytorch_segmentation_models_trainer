@@ -1,0 +1,129 @@
+# Soft-label training with AEF per-pixel GCS embeddings — Experiment E4.
+# W_conf blends entropy, border distance, AND per-pixel AEF cosine similarity:
+#
+#   W_conf = alpha * w_entropy + beta * w_embed + (1 - alpha - beta) * w_border
+#
+# alpha + beta must be <= 1.0 (the remainder goes to w_border).
+#
+# Prerequisites — download AEF embeddings first:
+#   pytorch-smt-tools download-aef-embeddings \
+#       --source gcs \
+#       --gcs-paths-csv gcs_paths.csv \
+#       --output-dir /data/aef_embeddings
+#
+# Then build soft labels with AEF blending:
+#   pytorch-smt-tools build-soft-labels sources.csv \
+#       --output-dir /data/soft_labels \
+#       --num-classes 4 \
+#       --alpha 0.5 \
+#       --beta 0.2 \
+#       --aef-embeddings-dir /data/aef_embeddings \
+#       --aef-source gcs \
+#       --aef-resampling auto
+#
+# AEF resampling modes:
+#   auto      - aggregate when image pixels are coarser than AEF; nearest when finer
+#   aggregate - dequantize -> vector sum -> L2 normalize (downsampling only)
+#   nearest   - nearest-neighbor assignment -> L2 normalize (upsampling-safe)
+#
+# Then generate splits:
+#   pytorch-smt-tools generate-training-csv \
+#       /data/soft_labels/soft_label_manifest.csv \
+#       --output-dir /data/splits
+#
+# CSV columns required:
+#   image_path  - path to RGB GeoTIFF (3 bands, uint8)
+#   p_soft_path - path to P_soft GeoTIFF (C bands, float32)
+#   w_conf_path - path to W_conf GeoTIFF (1 band, float32) with AEF blend
+
+_target_: pytorch_segmentation_models_trainer.model_loader.soft_label_model.SoftLabelModel
+
+hyperparameters:
+  num_epochs: 50
+  batch_size: 16
+  learning_rate: 1.0e-4
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_dataset.SoftLabelDataset
+  input_csv_path: /data/splits/train.csv
+  image_key: image_path
+  p_soft_key: p_soft_path
+  w_conf_key: w_conf_path
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.VerticalFlip
+      p: 0.5
+    - _target_: albumentations.RandomRotate90
+      p: 0.5
+    - _target_: albumentations.ColorJitter
+      brightness: 0.2
+      contrast: 0.2
+      saturation: 0.1
+      p: 0.3
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_dataset.SoftLabelDataset
+  input_csv_path: /data/splits/val.csv
+  image_key: image_path
+  p_soft_key: p_soft_path
+  w_conf_key: w_conf_path
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 4
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.soft_label_loss.SoftLabelWeightedCELoss
+  name: soft_label_ce
+  num_classes: 4
+  mask_key: mask
+  weight_key: w_conf
+
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet50
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: 4
+
+class_definitions:
+  names: [background, building, road, vegetation]
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.learning_rate}
+  weight_decay: 1.0e-4
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.OneCycleLR
+  max_lr: ${hyperparameters.learning_rate}
+  epochs: ${hyperparameters.num_epochs}
+  steps_per_epoch: 100  # update to match len(train_loader)
+
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: 4
+    average: macro
+  - _target_: torchmetrics.F1Score
+    task: multiclass
+    num_classes: 4
+    average: macro

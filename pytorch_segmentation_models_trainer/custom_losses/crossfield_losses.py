@@ -20,6 +20,7 @@
  *   https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning/     *
  ****
 """
+
 import numpy as np
 import scipy.interpolate
 import torch
@@ -28,10 +29,10 @@ from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor
 )
 from pytorch_segmentation_models_trainer.utils import frame_field_utils, math_utils
 
-
 # ---------------------------------------------------------------------------
 # Pure-PyTorch replacements for torch_scatter CSR operations
 # ---------------------------------------------------------------------------
+
 
 def _gather_csr(src: torch.Tensor, indptr: torch.Tensor) -> torch.Tensor:
     """Expand each segment value to fill every position in that segment.
@@ -51,9 +52,7 @@ def _segment_max_csr(src: torch.Tensor, indptr: torch.Tensor):
     """
     n_segs = indptr.shape[0] - 1
     counts = indptr[1:] - indptr[:-1]
-    seg_ids = torch.repeat_interleave(
-        torch.arange(n_segs, device=src.device), counts
-    )
+    seg_ids = torch.repeat_interleave(torch.arange(n_segs, device=src.device), counts)
     out = src.new_full((n_segs,), float("-inf"))
     out.scatter_reduce_(0, seg_ids, src, reduce="amax", include_self=True)
     return out, None
@@ -66,9 +65,7 @@ def _segment_sum_csr(src: torch.Tensor, indptr: torch.Tensor) -> torch.Tensor:
     """
     n_segs = indptr.shape[0] - 1
     counts = indptr[1:] - indptr[:-1]
-    seg_ids = torch.repeat_interleave(
-        torch.arange(n_segs, device=src.device), counts
-    )
+    seg_ids = torch.repeat_interleave(torch.arange(n_segs, device=src.device), counts)
     out = torch.zeros(n_segs, device=src.device, dtype=src.dtype)
     out.scatter_add_(0, seg_ids, src)
     return out
@@ -205,9 +202,9 @@ class AlignLoss:
 
     def _compute_edge_mask(self, tangents, path_pos):
         edge_mask = torch.ones((tangents.shape[0]), device=tangents.device)
-        edge_mask[
-            self.tensorskeleton.path_delim[1:-1] - 1
-        ] = 0  # Zero out edges between paths
+        edge_mask[self.tensorskeleton.path_delim[1:-1] - 1] = (
+            0  # Zero out edges between paths
+        )
 
         midpoints = (path_pos[1:] + path_pos[:-1]) / 2
         midpoints_batch = self.tensorskeleton.batch[
@@ -241,18 +238,18 @@ class AlignLoss:
     def _compute_total_length_loss(self, prev_norm, next_norm):
         prev_length_loss = torch.pow(prev_norm, 2)
         next_length_loss = torch.pow(next_norm, 2)
-        prev_length_loss[
-            self.tensorskeleton.path_delim[1:-1] - 1
-        ] = 0  # Zero out invalid norms between paths
-        prev_length_loss[
-            self.tensorskeleton.path_delim[1:-1] - 2
-        ] = 0  # Zero out unwanted contribution to loss
-        next_length_loss[
-            self.tensorskeleton.path_delim[1:-1] - 1
-        ] = 0  # Zero out unwanted contribution to loss
-        next_length_loss[
-            self.tensorskeleton.path_delim[1:-1] - 2
-        ] = 0  # Zero out invalid norms between paths
+        prev_length_loss[self.tensorskeleton.path_delim[1:-1] - 1] = (
+            0  # Zero out invalid norms between paths
+        )
+        prev_length_loss[self.tensorskeleton.path_delim[1:-1] - 2] = (
+            0  # Zero out unwanted contribution to loss
+        )
+        next_length_loss[self.tensorskeleton.path_delim[1:-1] - 1] = (
+            0  # Zero out unwanted contribution to loss
+        )
+        next_length_loss[self.tensorskeleton.path_delim[1:-1] - 2] = (
+            0  # Zero out invalid norms between paths
+        )
         length_loss = prev_length_loss + next_length_loss
         return torch.sum(length_loss)
 
@@ -287,12 +284,12 @@ class AlignLoss:
                 next_tangent, middle_uv
             )
             is_corner = prev_tangent_closest_in_uv != next_tangent_closest_in_uv
-            is_corner[
-                self.tensorskeleton.path_delim[1:-1] - 2
-            ] = 0  # Zero out invalid corners between sub-paths
-            is_corner[
-                self.tensorskeleton.path_delim[1:-1] - 1
-            ] = 0  # Zero out invalid corners between sub-paths
+            is_corner[self.tensorskeleton.path_delim[1:-1] - 2] = (
+                0  # Zero out invalid corners between sub-paths
+            )
+            is_corner[self.tensorskeleton.path_delim[1:-1] - 1] = (
+                0  # Zero out invalid corners between sub-paths
+            )
             is_corner_index = (
                 torch.nonzero(is_corner)[:, 0] + 1
             )  # Shift due to first vertex not being represented in is_corner
@@ -350,9 +347,7 @@ class AlignLoss:
             expanded_sub_path_start_pos = _gather_csr(
                 sub_path_start_pos, sub_path_delim
             )
-            expanded_sub_path_normal = _gather_csr(
-                sub_path_normal, sub_path_delim
-            )
+            expanded_sub_path_normal = _gather_csr(sub_path_normal, sub_path_delim)
             relative_path_pos = path_pos - expanded_sub_path_start_pos
             relative_path_pos_projected_lengh = torch.sum(
                 relative_path_pos * expanded_sub_path_normal, dim=1
@@ -363,9 +358,9 @@ class AlignLoss:
             path_pos_distance = torch.norm(
                 relative_path_pos - relative_path_pos_projected, dim=1
             )
-            sub_path_max_distance = _segment_max_csr(
-                path_pos_distance, sub_path_delim
-            )[0]
+            sub_path_max_distance = _segment_max_csr(path_pos_distance, sub_path_delim)[
+                0
+            ]
             sub_path_small_dissimilarity_mask = (
                 sub_path_max_distance < self.curvature_dissimilarity_threshold
             )
@@ -397,12 +392,12 @@ class AlignLoss:
         sub_path_small_dissimilarity_mask,
     ):
         # Compute the mean vertex angle for each sub-path separately:
-        vertex_angles[
-            sub_path_delim[1:-1] - 1
-        ] = 0  # Zero out invalid angles between paths as well as corner angles
-        vertex_angles[
-            self.tensorskeleton.path_delim[1:-1] - 2
-        ] = 0  # Zero out invalid angles between paths (caused by the junction points being in all paths of the junction)
+        vertex_angles[sub_path_delim[1:-1] - 1] = (
+            0  # Zero out invalid angles between paths as well as corner angles
+        )
+        vertex_angles[self.tensorskeleton.path_delim[1:-1] - 2] = (
+            0  # Zero out invalid angles between paths (caused by the junction points being in all paths of the junction)
+        )
         sub_path_vertex_angle_delim = sub_path_delim.clone()
         sub_path_vertex_angle_delim[-1] -= 2
         sub_path_sum_vertex_angle = _segment_sum_csr(
@@ -417,21 +412,21 @@ class AlignLoss:
         sub_path_mean_vertex_angles = (
             sub_path_sum_vertex_angle / sub_path_valid_angle_count
         )
-        sub_path_mean_vertex_angles[
-            sub_path_small_dissimilarity_mask
-        ] = 0  # Optimize sub-path with a small dissimilarity to have straight edges
+        sub_path_mean_vertex_angles[sub_path_small_dissimilarity_mask] = (
+            0  # Optimize sub-path with a small dissimilarity to have straight edges
+        )
         expanded_sub_path_mean_vertex_angles = _gather_csr(
             sub_path_mean_vertex_angles, sub_path_vertex_angle_delim
         )
         curvature_loss = torch.pow(
             vertex_angles - expanded_sub_path_mean_vertex_angles, 2
         )
-        curvature_loss[
-            sub_path_delim[1:-1] - 1
-        ] = 0  # Zero out loss for start vertex of inner sub-paths
-        curvature_loss[
-            self.tensorskeleton.path_delim[1:-1] - 2
-        ] = 0  # Zero out loss for end vertex of inner paths (caused by the junction points being in all paths of the junction)
+        curvature_loss[sub_path_delim[1:-1] - 1] = (
+            0  # Zero out loss for start vertex of inner sub-paths
+        )
+        curvature_loss[self.tensorskeleton.path_delim[1:-1] - 2] = (
+            0  # Zero out loss for end vertex of inner paths (caused by the junction points being in all paths of the junction)
+        )
         return torch.sum(curvature_loss)
 
     def _compute_corner_loss(self, corner_angles):

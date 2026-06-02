@@ -8,6 +8,7 @@ without downloading any weights.
 Skipped automatically when 'transformers' is not installed.  Install it
 with:  pip install pytorch_segmentation_models_trainer[transformers]
 """
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -25,7 +26,6 @@ pytest.importorskip(
 from pytorch_segmentation_models_trainer.custom_models.huggingface_models import (
     HuggingFaceSegmentationWrapper,
 )
-
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -54,6 +54,7 @@ def _patch_auto_model(fake_model):
 
 
 # ─── Tests ───────────────────────────────────────────────────────────────────
+
 
 class TestHuggingFaceSegmentationWrapper:
     def test_instantiation(self):

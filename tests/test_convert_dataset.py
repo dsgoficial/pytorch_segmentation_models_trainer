@@ -21,17 +21,20 @@
 """
 
 import os
+import json
 import unittest
 import warnings
 from hydra import compose, initialize
 import hydra
 
 import pandas as pd
+from PIL import Image
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     InstanceSegmentationDataset,
 )
 from pytorch_segmentation_models_trainer.tools.dataset_handlers.convert_dataset import (
+    AbstractConversionStrategy,
     ConversionProcessor,
     PolygonRNNDatasetConversionStrategy,
 )
@@ -90,3 +93,44 @@ class Test_ConvertDataset(BasicTestCase):
         pd.testing.assert_frame_equal(
             expected_df.reset_index(drop=True), output_df.reset_index(drop=True)
         )
+
+    def test_abstract_conversion_strategy_method_body_is_noop(self):
+        class ConcreteStrategy(AbstractConversionStrategy):
+            def convert(self, input_dataset):
+                return super().convert(input_dataset)
+
+        self.assertIsNone(ConcreteStrategy().convert(object()))
+
+    def test_polygonrnn_convert_rejects_non_instance_dataset(self):
+        strategy = PolygonRNNDatasetConversionStrategy(
+            output_dir=self.output_dir,
+            output_file_name="out",
+            write_output_files=False,
+        )
+
+        with self.assertRaises(TypeError):
+            strategy.convert(object())
+
+    def test_polygonrnn_convert_single_skips_degenerate_polygon(self):
+        images_dir = create_folder(os.path.join(self.output_dir, "images"))
+        image_path = os.path.join(images_dir, "sample.png")
+        json_path = os.path.join(self.output_dir, "sample.json")
+        Image.new("RGB", (8, 8), color="white").save(image_path)
+        with open(json_path, "w") as f:
+            json.dump(
+                {
+                    "imgHeight": 8,
+                    "imgWidth": 8,
+                    "objects": [{"polygon": [[1, 1], [1, 1], [1, 1]]}],
+                },
+                f,
+            )
+        strategy = PolygonRNNDatasetConversionStrategy(
+            output_dir=self.output_dir,
+            output_file_name="out",
+            write_output_files=False,
+        )
+
+        output = strategy._convert_single(image_path, json_path)
+
+        self.assertEqual(output, [])

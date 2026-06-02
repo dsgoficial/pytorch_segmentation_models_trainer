@@ -76,8 +76,7 @@ def warn_if_no_dropout(model: nn.Module) -> bool:
         ``True`` if at least one Dropout layer was found, ``False`` otherwise.
     """
     has_dropout = any(
-        isinstance(m, (nn.Dropout, nn.Dropout2d, nn.Dropout3d))
-        for m in model.modules()
+        isinstance(m, (nn.Dropout, nn.Dropout2d, nn.Dropout3d)) for m in model.modules()
     )
     if not has_dropout:
         warnings.warn(
@@ -149,7 +148,9 @@ def compute_uncertainty(
     p_mean = samples.mean(dim=0)  # [B, C, H, W]
 
     # Predictive entropy H[p̄(y|x)]
-    entropy_mean = -(p_mean * (p_mean + eps).log()).sum(dim=1, keepdim=True)  # [B, 1, H, W]
+    entropy_mean = -(p_mean * (p_mean + eps).log()).sum(
+        dim=1, keepdim=True
+    )  # [B, 1, H, W]
 
     if mode == "entropy":
         return entropy_mean

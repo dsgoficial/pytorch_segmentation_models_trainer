@@ -1,0 +1,22 @@
+# Remap raster pixel values using a DsgTools-compatible JSON mapping file.
+#
+# Folder mode (process all .tif/.tiff files under input_dir).
+# For single-file usage, see the CLI help:
+#   pytorch-smt-tools remap-raster-from-json --help
+#
+# JSON mapping format:
+#   {
+#     "description": "MapBiomas collection 9 -> EDGV 3.0",
+#     "nodata_value": 255,
+#     "mapping": {
+#       "3":  1,
+#       "15": 2,
+#       "33": 3
+#     }
+#   }
+input_dir: /path/to/masks
+output_dir: /path/to/masks_remapped
+json_path: /path/to/mapbiomas_to_edgv.json
+n_workers: 8
+create_vrt: true          # optional: build mosaic.vrt in output_dir
+# vrt_path: /custom/path/mosaic.vrt  # optional: override VRT location

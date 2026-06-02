@@ -39,7 +39,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        uv sync --all-extras --dev
+        uv sync --frozen --extra all --dev
         uv pip install opencv-python-headless
 
     - name: Lint with flake8
@@ -84,6 +84,7 @@ jobs:
           --ignore=tests/test_optimizers.py \
           --ignore=tests/test_custom_models.py \
           --ignore=tests/test_frame_field_model.py \
+          --ignore=tests/test_gee_downloader.py \
           --timeout=120 \
           -v \
           -p no:warnings
@@ -140,7 +141,7 @@ jobs:
       run: |
         uv venv
         uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-        uv sync --all-extras --dev
+        uv sync --frozen --extra all --dev
         uv pip install opencv-python-headless
 
     - name: Lint new files with flake8
@@ -193,4 +194,148 @@ jobs:
         file: coverage.xml
         flags: transformers
         name: transformers-coverage
+        fail_ci_if_error: false
+
+  # ── GEE LULC downloader test suite ────────────────────────────────────────
+  # Covers tools/gee/gee_downloader.py (MapBiomas, Dynamic World, ESRI LULC).
+  # All GEE API calls are mocked — no GEE account or network access required.
+  #
+  # Install the optional extra with:
+  #   pip install pytorch_segmentation_models_trainer[gee]
+  # ──────────────────────────────────────────────────────────────────────────
+  test-gee:
+    runs-on: ubuntu-latest
+    env:
+      HYDRA_FULL_ERROR: 1
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+        cache-dependency-glob: "pyproject.toml"
+
+    - name: Set up Python 3.12
+      run: uv python install 3.12
+
+    - name: Install dependencies
+      run: |
+        uv venv
+        uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+        uv sync --frozen --extra tests --extra gee --dev
+
+    - name: Lint GEE files with flake8
+      run: |
+        uv run flake8 \
+          pytorch_segmentation_models_trainer/tools/gee/ \
+          tests/test_gee_downloader.py \
+          --count --select=E9,F63,F7,F82 --show-source --statistics
+        uv run flake8 \
+          pytorch_segmentation_models_trainer/tools/gee/ \
+          tests/test_gee_downloader.py \
+          --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Run GEE test suite
+      run: |
+        uv run pytest \
+          tests/test_gee_downloader.py \
+          --cov=pytorch_segmentation_models_trainer \
+          --cov-report=xml \
+          --timeout=60 \
+          -v \
+          -p no:warnings
+
+    - name: Coverage report
+      if: success()
+      run: |
+        uv run coverage report
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      if: success()
+      continue-on-error: true
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: coverage.xml
+        flags: gee
+        name: gee-coverage
+        fail_ci_if_error: false
+
+  # ── GPU-accelerated classic ML test suite ─────────────────────────────────
+  # Runs the 5 test files that cover tensor_conversion, feature_engineering,
+  # estimators, postprocessing, and orchestrator from the classic_ml module.
+  #
+  # All GPU dependencies (cupy, cucim, cuml, pydensecrf, pygco) are mocked via
+  # patch.dict(sys.modules, ...) so the job runs on a CPU-only runner without
+  # any CUDA packages installed.
+  # ──────────────────────────────────────────────────────────────────────────
+  test-gpu-ml:
+    runs-on: ubuntu-latest
+    env:
+      HYDRA_FULL_ERROR: 1
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+        cache-dependency-glob: "pyproject.toml"
+
+    - name: Set up Python 3.12
+      run: uv python install 3.12
+
+    # CPU-only PyTorch keeps the image small; gpu-ml extras (cupy, cuml, cucim)
+    # are intentionally excluded because they require CUDA and are fully mocked
+    # in the test suite.
+    - name: Install dependencies (CPU, no gpu-ml extras)
+      run: |
+        uv venv
+        uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+        uv sync --frozen --extra tests --dev
+        uv pip install opencv-python-headless
+
+    - name: Lint new files with flake8
+      run: |
+        uv run flake8 \
+          pytorch_segmentation_models_trainer/classic_ml/ \
+          pytorch_segmentation_models_trainer/utils/tensor_conversion.py \
+          pytorch_segmentation_models_trainer/config_definitions/classic_ml_config.py \
+          --count --select=E9,F63,F7,F82 --show-source --statistics
+        uv run flake8 \
+          pytorch_segmentation_models_trainer/classic_ml/ \
+          pytorch_segmentation_models_trainer/utils/tensor_conversion.py \
+          pytorch_segmentation_models_trainer/config_definitions/classic_ml_config.py \
+          --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Run gpu-ml test suite
+      run: |
+        uv run pytest \
+          -n auto --dist loadfile \
+          --cov=pytorch_segmentation_models_trainer \
+          --cov-report=xml \
+          tests/test_tensor_conversion.py \
+          tests/test_classic_ml_feature_engineering.py \
+          tests/test_classic_ml_estimators.py \
+          tests/test_classic_ml_postprocessing.py \
+          tests/test_classic_ml_orchestrator.py \
+          --timeout=120 \
+          -v \
+          -p no:warnings
+
+    - name: Coverage report
+      if: success()
+      run: |
+        uv run coverage report
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      if: success()
+      continue-on-error: true
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: coverage.xml
+        flags: gpu-ml
+        name: gpu-ml-coverage
         fail_ci_if_error: false

@@ -43,7 +43,6 @@ from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     RandomCropSegmentationDataset,
 )
 
-
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
@@ -61,8 +60,14 @@ def _create_geotiff(path, data, count=None, dtype="uint8"):
         bands = count
     transform = from_bounds(0, 0, w, h, w, h)
     with rasterio.open(
-        path, "w", driver="GTiff", height=h, width=w,
-        count=bands, dtype=dtype, transform=transform,
+        path,
+        "w",
+        driver="GTiff",
+        height=h,
+        width=w,
+        count=bands,
+        dtype=dtype,
+        transform=transform,
     ) as dst:
         for b in range(bands):
             dst.write(data[b], b + 1)
@@ -97,10 +102,12 @@ class _StageModel(nn.Module):
         class _InnerModel(nn.Module):
             def __init__(self, n_stages, channels):
                 super().__init__()
-                self.stages = nn.ModuleList([
-                    nn.Conv2d(channels, channels, 3, padding=1)
-                    for _ in range(n_stages)
-                ])
+                self.stages = nn.ModuleList(
+                    [
+                        nn.Conv2d(channels, channels, 3, padding=1)
+                        for _ in range(n_stages)
+                    ]
+                )
 
             def forward(self, x):
                 for stage in self.stages:
@@ -243,7 +250,7 @@ class TestEMAGlobalStepTracking(unittest.TestCase):
         for name in shadow_before:
             self.assertFalse(
                 torch.equal(ema._shadow[name], shadow_before[name]),
-                f"Shadow for {name} should update on first batch"
+                f"Shadow for {name} should update on first batch",
             )
 
         # Second call at same global_step=0 (micro-batch) — should NOT update
@@ -256,7 +263,7 @@ class TestEMAGlobalStepTracking(unittest.TestCase):
         for name in shadow_after_first:
             self.assertTrue(
                 torch.equal(ema._shadow[name], shadow_after_first[name]),
-                f"Shadow for {name} should NOT update on micro-batch (same global_step)"
+                f"Shadow for {name} should NOT update on micro-batch (same global_step)",
             )
 
     def test_updates_when_global_step_increments(self):
@@ -280,7 +287,7 @@ class TestEMAGlobalStepTracking(unittest.TestCase):
         for name in shadow_before:
             self.assertFalse(
                 torch.equal(ema._shadow[name], shadow_before[name]),
-                f"Shadow for {name} should update when global_step increments"
+                f"Shadow for {name} should update when global_step increments",
             )
 
     def test_simulates_accumulate_grad_batches_2(self):
@@ -303,15 +310,15 @@ class TestEMAGlobalStepTracking(unittest.TestCase):
             ema.on_train_batch_end(self.trainer, self.model, None, None, batch_idx)
 
             changed = any(
-                not torch.equal(ema._shadow[n], shadow_before[n])
-                for n in shadow_before
+                not torch.equal(ema._shadow[n], shadow_before[n]) for n in shadow_before
             )
             if changed:
                 update_count += 1
 
         # Should have exactly 2 updates (one per optimizer step)
-        self.assertEqual(update_count, 2,
-                         "EMA should update exactly once per optimizer step")
+        self.assertEqual(
+            update_count, 2, "EMA should update exactly once per optimizer step"
+        )
 
     def test_last_global_step_initialized_to_minus_one(self):
         """After on_fit_start, _last_global_step should be -1."""
@@ -354,7 +361,7 @@ class TestEMAOnSaveCheckpoint(unittest.TestCase):
             if name in checkpoint["state_dict"]:
                 self.assertTrue(
                     torch.allclose(checkpoint["state_dict"][name], torch.tensor(42.0)),
-                    f"Checkpoint {name} should contain EMA weights"
+                    f"Checkpoint {name} should contain EMA weights",
                 )
 
     def test_on_save_checkpoint_does_not_modify_model(self):
@@ -362,9 +369,7 @@ class TestEMAOnSaveCheckpoint(unittest.TestCase):
         ema = EMACallback(decay=0.999)
         ema.on_fit_start(self.trainer, self.model)
 
-        original_params = {
-            n: p.data.clone() for n, p in self.model.named_parameters()
-        }
+        original_params = {n: p.data.clone() for n, p in self.model.named_parameters()}
 
         for name in ema._shadow:
             ema._shadow[name].fill_(99.0)
@@ -383,7 +388,7 @@ class TestEMAOnSaveCheckpoint(unittest.TestCase):
             if name in original_params:
                 self.assertTrue(
                     torch.equal(param.data, original_params[name]),
-                    f"Model param {name} should not be modified by on_save_checkpoint"
+                    f"Model param {name} should not be modified by on_save_checkpoint",
                 )
 
     def test_checkpoint_ema_consistent_with_validation(self):
@@ -417,7 +422,7 @@ class TestEMAOnSaveCheckpoint(unittest.TestCase):
             if name in checkpoint["state_dict"]:
                 self.assertTrue(
                     torch.allclose(checkpoint["state_dict"][name], torch.tensor(77.0)),
-                    f"Checkpoint {name} should match EMA weights used during validation"
+                    f"Checkpoint {name} should match EMA weights used during validation",
                 )
 
 
@@ -491,8 +496,9 @@ class TestMixStyleCallback(unittest.TestCase):
         self.assertEqual(output.shape, x.shape)
         # With p=1.0, output should differ from input (very high probability)
         # We can't guarantee it 100% due to random permutation, but it's very likely
-        self.assertFalse(torch.equal(output, x),
-                         "MixStyle hook should modify output during training")
+        self.assertFalse(
+            torch.equal(output, x), "MixStyle hook should modify output during training"
+        )
 
     def test_mixstyle_hook_noop_during_eval(self):
         """During eval (training=False), the hook should be identity."""
@@ -502,8 +508,9 @@ class TestMixStyleCallback(unittest.TestCase):
         x = torch.randn(4, 8, 16, 16)
         output = cb._mixstyle_hook(None, None, x)
 
-        self.assertTrue(torch.equal(output, x),
-                        "MixStyle hook should be identity during eval")
+        self.assertTrue(
+            torch.equal(output, x), "MixStyle hook should be identity during eval"
+        )
 
     def test_mixstyle_hook_noop_single_sample(self):
         """With batch size 1, MixStyle should be identity (can't mix)."""
@@ -513,8 +520,9 @@ class TestMixStyleCallback(unittest.TestCase):
         x = torch.randn(1, 8, 16, 16)
         output = cb._mixstyle_hook(None, None, x)
 
-        self.assertTrue(torch.equal(output, x),
-                        "MixStyle should be identity with batch_size=1")
+        self.assertTrue(
+            torch.equal(output, x), "MixStyle should be identity with batch_size=1"
+        )
 
     def test_mixstyle_hook_preserves_shape(self):
         """Output shape must match input shape."""
@@ -626,8 +634,7 @@ class TestApplyClassMix(unittest.TestCase):
                     self.assertTrue(np.all(out_img[out_mask == 2] == 200))
                 break
 
-        self.assertTrue(found_class_copy,
-                        "ClassMix should copy class-shaped regions")
+        self.assertTrue(found_class_copy, "ClassMix should copy class-shaped regions")
 
     def test_does_not_modify_inputs(self):
         np.random.seed(42)
@@ -884,9 +891,7 @@ class TestGCBLLoss(unittest.TestCase):
 
     def test_max_boundary_samples_limits_computation(self):
         """max_boundary_samples should cap the number of sampled pixels."""
-        loss_fn = GCBLLoss(
-            num_classes=4, max_boundary_samples=16
-        )
+        loss_fn = GCBLLoss(num_classes=4, max_boundary_samples=16)
         pred = torch.randn(2, 4, 32, 32, requires_grad=True)
         target = torch.zeros(2, 32, 32, dtype=torch.long)
         target[:, :16, :] = 0
@@ -967,7 +972,9 @@ class TestWeightedJMLSCEGCBLLoss(unittest.TestCase):
         loss_combined = self._make_loss(gcbl_weight=0.0)
         loss_jmlsce = WeightedJMLSCELoss(
             num_classes=self.num_classes,
-            jml_weight=0.25, sce_weight=0.75, ignore_index=255,
+            jml_weight=0.25,
+            sce_weight=0.75,
+            ignore_index=255,
         )
 
         val_combined = loss_combined(pred, target)
@@ -979,8 +986,11 @@ class TestWeightedJMLSCEGCBLLoss(unittest.TestCase):
         loss_fn = self._make_loss()
         param_names = [n for n, _ in loss_fn.named_parameters()]
         gcbl_params = [n for n in param_names if "gcbl" in n]
-        self.assertGreater(len(gcbl_params), 0,
-                           "GCBL projector parameters should be part of the module")
+        self.assertGreater(
+            len(gcbl_params),
+            0,
+            "GCBL projector parameters should be part of the module",
+        )
 
     def test_ignore_index_all_ignored(self):
         loss_fn = self._make_loss()
@@ -1026,10 +1036,13 @@ class TestPerClassIoU(unittest.TestCase):
     def test_per_class_iou_metric_computation(self):
         """JaccardIndex with average='none' should return per-class IoU."""
         import torchmetrics
+
         n_classes = 7
         metric = torchmetrics.JaccardIndex(
-            task="multiclass", num_classes=n_classes,
-            average="none", ignore_index=255,
+            task="multiclass",
+            num_classes=n_classes,
+            average="none",
+            ignore_index=255,
         )
 
         pred = torch.zeros(100, dtype=torch.long)
@@ -1050,9 +1063,12 @@ class TestPerClassIoU(unittest.TestCase):
     def test_per_class_iou_ignores_255(self):
         """Pixels with label 255 should be ignored."""
         import torchmetrics
+
         metric = torchmetrics.JaccardIndex(
-            task="multiclass", num_classes=4,
-            average="none", ignore_index=255,
+            task="multiclass",
+            num_classes=4,
+            average="none",
+            ignore_index=255,
         )
 
         pred = torch.tensor([0, 0, 1, 1])
@@ -1067,13 +1083,21 @@ class TestPerClassIoU(unittest.TestCase):
     def test_per_class_iou_per_class_names_match(self):
         """Class names should align with metric output indices."""
         class_names = [
-            "background", "massa_dagua", "area_edificada",
-            "terreno_exposto", "vegetacao_baixa", "floresta", "veg_cultivada",
+            "background",
+            "massa_dagua",
+            "area_edificada",
+            "terreno_exposto",
+            "vegetacao_baixa",
+            "floresta",
+            "veg_cultivada",
         ]
         import torchmetrics
+
         metric = torchmetrics.JaccardIndex(
-            task="multiclass", num_classes=len(class_names),
-            average="none", ignore_index=255,
+            task="multiclass",
+            num_classes=len(class_names),
+            average="none",
+            ignore_index=255,
         )
 
         # Perfect prediction for class 3 only
@@ -1088,9 +1112,12 @@ class TestPerClassIoU(unittest.TestCase):
     def test_per_class_iou_handles_missing_classes(self):
         """Classes not present in batch should have IoU=0."""
         import torchmetrics
+
         metric = torchmetrics.JaccardIndex(
-            task="multiclass", num_classes=7,
-            average="none", ignore_index=255,
+            task="multiclass",
+            num_classes=7,
+            average="none",
+            ignore_index=255,
         )
 
         # Only classes 0 and 1 present
@@ -1146,7 +1173,7 @@ class TestClassMixSoftLabelsIntegration(unittest.TestCase, SyntheticDatasetMixin
         mask = result["mask"]
         self.assertTrue(
             self.N_CLASSES in mask.shape,
-            f"Soft label mask should have {self.N_CLASSES} as one dimension, got {mask.shape}"
+            f"Soft label mask should have {self.N_CLASSES} as one dimension, got {mask.shape}",
         )
 
 
@@ -1207,8 +1234,7 @@ class TestJMLSCEGCBLSoftLabelsEndToEnd(unittest.TestCase):
         # Projector params should also get gradients
         for p in loss_fn.gcbl.projector.parameters():
             if p.requires_grad:
-                self.assertIsNotNone(p.grad,
-                                     "GCBL projector should receive gradients")
+                self.assertIsNotNone(p.grad, "GCBL projector should receive gradients")
 
     def test_optimizer_includes_gcbl_params(self):
         """When loss_fn is an attribute of nn.Module, its params should be in optimizer."""
@@ -1227,8 +1253,9 @@ class TestJMLSCEGCBLSoftLabelsEndToEnd(unittest.TestCase):
         # GCBL params should be a subset of all_params
         for gp in gcbl_params:
             found = any(p.data_ptr() == gp.data_ptr() for p in all_params)
-            self.assertTrue(found,
-                            "GCBL projector param should be in parent module's parameters()")
+            self.assertTrue(
+                found, "GCBL projector param should be in parent module's parameters()"
+            )
 
 
 # ======================================================================
@@ -1255,7 +1282,7 @@ class TestIntegralImageIndex(unittest.TestCase):
         naive = {c: set() for c in range(n_classes)}
         for row in rows:
             for col in cols:
-                crop = mask[row:row + crop_h, col:col + crop_w]
+                crop = mask[row : row + crop_h, col : col + crop_w]
                 for c in np.unique(crop):
                     if 0 <= c < n_classes:
                         naive[c].add((col, row))
@@ -1278,8 +1305,11 @@ class TestIntegralImageIndex(unittest.TestCase):
                 integral_pos[c].add((cols[pos[1]], rows[pos[0]]))
 
         for c in range(n_classes):
-            self.assertEqual(naive[c], integral_pos[c],
-                             f"Class {c}: integral positions differ from naive")
+            self.assertEqual(
+                naive[c],
+                integral_pos[c],
+                f"Class {c}: integral positions differ from naive",
+            )
 
     def test_integral_excludes_class_255(self):
         """Integral image correctly ignores class 255 (not in range 0..n_classes)."""
@@ -1305,11 +1335,11 @@ class TestIntegralImageIndex(unittest.TestCase):
             )
             present = np.argwhere(sums > 0)
             if c == 0:
-                self.assertGreater(len(present), 0,
-                                   "Class 0 should have positions")
+                self.assertGreater(len(present), 0, "Class 0 should have positions")
             else:
-                self.assertEqual(len(present), 0,
-                                 f"Class {c} should have 0 positions (all 255)")
+                self.assertEqual(
+                    len(present), 0, f"Class {c} should have 0 positions (all 255)"
+                )
 
     def test_integral_single_class_per_crop(self):
         """When each crop contains exactly one class, results match."""
@@ -1339,8 +1369,7 @@ class TestIntegralImageIndex(unittest.TestCase):
             )
             present = np.argwhere(sums > 0)
             # Each class should appear in exactly 1 crop position
-            self.assertEqual(len(present), 1,
-                             f"Class {c} should be in exactly 1 crop")
+            self.assertEqual(len(present), 1, f"Class {c} should be in exactly 1 crop")
 
 
 class TestIntegralImageInDataset(unittest.TestCase, SyntheticDatasetMixin):
@@ -1362,13 +1391,12 @@ class TestIntegralImageInDataset(unittest.TestCase, SyntheticDatasetMixin):
             class_balanced_sampling=True,
             class_sampling_stride=16,
         )
-        self.assertGreater(len(ds._class_positions), 0,
-                           "No classes indexed")
+        self.assertGreater(len(ds._class_positions), 0, "No classes indexed")
         for c in range(self.N_CLASSES):
-            self.assertIn(c, ds._class_positions,
-                          f"Class {c} missing from index")
-            self.assertGreater(len(ds._class_positions[c]), 0,
-                               f"Class {c} has no positions")
+            self.assertIn(c, ds._class_positions, f"Class {c} missing from index")
+            self.assertGreater(
+                len(ds._class_positions[c]), 0, f"Class {c} has no positions"
+            )
 
     def test_class_position_index_with_soft_labels(self):
         """Index built correctly even with soft labels (argmax fallback)."""
@@ -1397,12 +1425,14 @@ class TestHardMaskCSV(unittest.TestCase):
     def test_parameter_in_init_signature(self):
         """hard_mask_csv parameter exists in __init__ signature."""
         import inspect
+
         sig = inspect.signature(RandomCropSegmentationDataset.__init__)
         self.assertIn("hard_mask_csv", sig.parameters)
 
     def test_default_is_none(self):
         """hard_mask_csv defaults to None."""
         import inspect
+
         sig = inspect.signature(RandomCropSegmentationDataset.__init__)
         self.assertIsNone(sig.parameters["hard_mask_csv"].default)
 
@@ -1479,8 +1509,11 @@ class TestHardMaskCSVIntegration(unittest.TestCase, SyntheticDatasetMixin):
         for c in range(self.N_CLASSES):
             soft_count = len(ds_soft._class_positions.get(c, []))
             hard_count = len(ds_hard._class_positions.get(c, []))
-            self.assertEqual(soft_count, hard_count,
-                             f"Class {c}: soft={soft_count} vs hard={hard_count}")
+            self.assertEqual(
+                soft_count,
+                hard_count,
+                f"Class {c}: soft={soft_count} vs hard={hard_count}",
+            )
 
 
 # ======================================================================
@@ -1508,8 +1541,11 @@ class TestGTIFFSRSSourceSuppression(unittest.TestCase, SyntheticDatasetMixin):
                 n_classes=self.N_CLASSES,
             )
             # After init, GTIFF_SRS_SOURCE should be removed (was not set)
-            self.assertNotIn("GTIFF_SRS_SOURCE", os.environ,
-                             "GTIFF_SRS_SOURCE should be removed after init")
+            self.assertNotIn(
+                "GTIFF_SRS_SOURCE",
+                os.environ,
+                "GTIFF_SRS_SOURCE should be removed after init",
+            )
         finally:
             if original is not None:
                 os.environ["GTIFF_SRS_SOURCE"] = original
@@ -1524,8 +1560,11 @@ class TestGTIFFSRSSourceSuppression(unittest.TestCase, SyntheticDatasetMixin):
                 samples_per_epoch=50,
                 n_classes=self.N_CLASSES,
             )
-            self.assertEqual(os.environ.get("GTIFF_SRS_SOURCE"), "EPSG",
-                             "GTIFF_SRS_SOURCE should be restored to 'EPSG'")
+            self.assertEqual(
+                os.environ.get("GTIFF_SRS_SOURCE"),
+                "EPSG",
+                "GTIFF_SRS_SOURCE should be restored to 'EPSG'",
+            )
         finally:
             os.environ.pop("GTIFF_SRS_SOURCE", None)
 

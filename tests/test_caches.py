@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for grid_cache and class_presence_cache auto-save/load."""
+
 import csv
 import json
 import os
@@ -31,8 +32,15 @@ def _create_geotiff(path, data, count=None, dtype="uint8"):
         bands = count
     transform = from_bounds(0, 0, w, h, w, h)
     with rasterio.open(
-        path, "w", driver="GTiff", height=h, width=w,
-        count=bands, dtype=dtype, transform=transform, crs="EPSG:3857",
+        path,
+        "w",
+        driver="GTiff",
+        height=h,
+        width=w,
+        count=bands,
+        dtype=dtype,
+        transform=transform,
+        crs="EPSG:3857",
     ) as dst:
         for b in range(bands):
             dst.write(data[b], b + 1)
@@ -55,8 +63,8 @@ class TestGridCache(unittest.TestCase):
         for i in range(3):
             img = np.full((3, h, w), 100 + i * 30, dtype=np.uint8)
             mask = np.zeros((h, w), dtype=np.uint8)
-            mask[h // 2:, :w // 2] = 1
-            mask[h // 2:, w // 2:] = 2
+            mask[h // 2 :, : w // 2] = 1
+            mask[h // 2 :, w // 2 :] = 2
             img_path = os.path.join(img_dir, f"img_{i}.tif")
             msk_path = os.path.join(msk_dir, f"msk_{i}.tif")
             _create_geotiff(img_path, img)
@@ -81,8 +89,11 @@ class TestGridCache(unittest.TestCase):
         self.assertFalse(os.path.exists(self.cache_path))
         ds = RandomCropSegmentationDataset(
             input_csv_path=self.csv_path,
-            crop_size=[32, 32], n_classes=3,
-            grid_mode=True, overlap_x=0.0, overlap_y=0.0,
+            crop_size=[32, 32],
+            n_classes=3,
+            grid_mode=True,
+            overlap_x=0.0,
+            overlap_y=0.0,
             min_valid_ratio=0.0,
             grid_cache=self.cache_path,
         )
@@ -93,8 +104,11 @@ class TestGridCache(unittest.TestCase):
         """Second init should load from cache without reading masks."""
         ds1 = RandomCropSegmentationDataset(
             input_csv_path=self.csv_path,
-            crop_size=[32, 32], n_classes=3,
-            grid_mode=True, overlap_x=0.0, overlap_y=0.0,
+            crop_size=[32, 32],
+            n_classes=3,
+            grid_mode=True,
+            overlap_x=0.0,
+            overlap_y=0.0,
             min_valid_ratio=0.0,
             grid_cache=self.cache_path,
         )
@@ -103,8 +117,11 @@ class TestGridCache(unittest.TestCase):
 
         ds2 = RandomCropSegmentationDataset(
             input_csv_path=self.csv_path,
-            crop_size=[32, 32], n_classes=3,
-            grid_mode=True, overlap_x=0.0, overlap_y=0.0,
+            crop_size=[32, 32],
+            n_classes=3,
+            grid_mode=True,
+            overlap_x=0.0,
+            overlap_y=0.0,
             min_valid_ratio=0.0,
             grid_cache=self.cache_path,
         )
@@ -116,8 +133,11 @@ class TestGridCache(unittest.TestCase):
         """If crop_size changes, cache should be rebuilt."""
         ds1 = RandomCropSegmentationDataset(
             input_csv_path=self.csv_path,
-            crop_size=[32, 32], n_classes=3,
-            grid_mode=True, overlap_x=0.0, overlap_y=0.0,
+            crop_size=[32, 32],
+            n_classes=3,
+            grid_mode=True,
+            overlap_x=0.0,
+            overlap_y=0.0,
             min_valid_ratio=0.0,
             grid_cache=self.cache_path,
         )
@@ -126,8 +146,11 @@ class TestGridCache(unittest.TestCase):
         # Change crop_size — should rebuild
         ds2 = RandomCropSegmentationDataset(
             input_csv_path=self.csv_path,
-            crop_size=[16, 16], n_classes=3,
-            grid_mode=True, overlap_x=0.0, overlap_y=0.0,
+            crop_size=[16, 16],
+            n_classes=3,
+            grid_mode=True,
+            overlap_x=0.0,
+            overlap_y=0.0,
             min_valid_ratio=0.0,
             grid_cache=self.cache_path,
         )
@@ -138,8 +161,11 @@ class TestGridCache(unittest.TestCase):
         """Verify the JSON has expected keys."""
         RandomCropSegmentationDataset(
             input_csv_path=self.csv_path,
-            crop_size=[32, 32], n_classes=3,
-            grid_mode=True, overlap_x=0.0, overlap_y=0.0,
+            crop_size=[32, 32],
+            n_classes=3,
+            grid_mode=True,
+            overlap_x=0.0,
+            overlap_y=0.0,
             min_valid_ratio=0.0,
             grid_cache=self.cache_path,
         )
@@ -156,8 +182,11 @@ class TestGridCache(unittest.TestCase):
         """Cache should include class_positions when class_balanced_sampling=True."""
         ds = RandomCropSegmentationDataset(
             input_csv_path=self.csv_path,
-            crop_size=[32, 32], n_classes=3,
-            grid_mode=True, overlap_x=0.0, overlap_y=0.0,
+            crop_size=[32, 32],
+            n_classes=3,
+            grid_mode=True,
+            overlap_x=0.0,
+            overlap_y=0.0,
             min_valid_ratio=0.0,
             grid_cache=self.cache_path,
             class_balanced_sampling=True,
@@ -171,8 +200,11 @@ class TestGridCache(unittest.TestCase):
 
         ds2 = RandomCropSegmentationDataset(
             input_csv_path=self.csv_path,
-            crop_size=[32, 32], n_classes=3,
-            grid_mode=True, overlap_x=0.0, overlap_y=0.0,
+            crop_size=[32, 32],
+            n_classes=3,
+            grid_mode=True,
+            overlap_x=0.0,
+            overlap_y=0.0,
             min_valid_ratio=0.0,
             grid_cache=self.cache_path,
             class_balanced_sampling=True,
@@ -222,7 +254,8 @@ class TestClassPresenceCacheAutoSave(unittest.TestCase):
         self.assertFalse(os.path.exists(self.cache_path))
         ds = RandomCropSegmentationDataset(
             input_csv_path=self.csv_path,
-            crop_size=[32, 32], n_classes=3,
+            crop_size=[32, 32],
+            n_classes=3,
             samples_per_epoch=10,
             min_valid_ratio=0.0,
             class_presence_cache=self.cache_path,
@@ -234,7 +267,8 @@ class TestClassPresenceCacheAutoSave(unittest.TestCase):
         """Auto-saved JSON should map filenames to class lists (plus optional _config key)."""
         ds = RandomCropSegmentationDataset(
             input_csv_path=self.csv_path,
-            crop_size=[32, 32], n_classes=3,
+            crop_size=[32, 32],
+            n_classes=3,
             samples_per_epoch=10,
             min_valid_ratio=0.0,
             class_presence_cache=self.cache_path,
@@ -253,7 +287,8 @@ class TestClassPresenceCacheAutoSave(unittest.TestCase):
         """Loading from cache should produce same class_to_images as building."""
         ds1 = RandomCropSegmentationDataset(
             input_csv_path=self.csv_path,
-            crop_size=[32, 32], n_classes=3,
+            crop_size=[32, 32],
+            n_classes=3,
             samples_per_epoch=10,
             min_valid_ratio=0.0,
             class_presence_cache=self.cache_path,
@@ -263,7 +298,8 @@ class TestClassPresenceCacheAutoSave(unittest.TestCase):
 
         ds2 = RandomCropSegmentationDataset(
             input_csv_path=self.csv_path,
-            crop_size=[32, 32], n_classes=3,
+            crop_size=[32, 32],
+            n_classes=3,
             samples_per_epoch=10,
             min_valid_ratio=0.0,
             class_presence_cache=self.cache_path,

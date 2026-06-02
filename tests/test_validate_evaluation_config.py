@@ -6,13 +6,18 @@ Unit tests for validate_evaluation_config.py
 import unittest
 from unittest.mock import MagicMock, patch
 from omegaconf import DictConfig, OmegaConf
+import runpy
+import sys
+import types
 
 from pytorch_segmentation_models_trainer.validate_evaluation_config import (
+    main,
     validate_experiment_config,
     validate_dataset_config,
     validate_metrics_config,
     validate_output_config,
 )
+from pytorch_segmentation_models_trainer import validate_evaluation_config
 
 
 class TestValidateEvaluationConfig(unittest.TestCase):
@@ -204,6 +209,115 @@ class TestValidateEvaluationConfig(unittest.TestCase):
             errors,
         )
 
+    @patch(
+        "pytorch_segmentation_models_trainer.validate_evaluation_config.os.path.exists"
+    )
+    def test_validate_experiment_config_missing_local_model_and_checkpoint(
+        self, mock_exists
+    ):
+        mock_exists.return_value = False
+        config = OmegaConf.merge(
+            self.base_exp_config,
+            {
+                "predict_config": {"model_path": "/missing/model.ckpt"},
+                "checkpoint_path": "/missing/checkpoint.ckpt",
+            },
+        )
+
+        errors, warnings = validate_experiment_config(config, 2)
+
+        self.assertEqual(warnings, [])
+        self.assertIn(
+            "Experiment 2 (test_exp): model_path not found: /missing/model.ckpt",
+            errors,
+        )
+        self.assertIn(
+            "Experiment 2 (test_exp): checkpoint not found: /missing/checkpoint.ckpt",
+            errors,
+        )
+
+    @patch(
+        "pytorch_segmentation_models_trainer.validate_evaluation_config.os.path.exists"
+    )
+    def test_validate_experiment_config_accepts_remote_paths(self, mock_exists):
+        mock_exists.return_value = False
+        config = OmegaConf.merge(
+            self.base_exp_config,
+            {
+                "predict_config": {"model_path": "s3://bucket/model.ckpt"},
+                "checkpoint_path": "mlflow://models/checkpoint",
+            },
+        )
+
+        errors, warnings = validate_experiment_config(config, 1)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(warnings, [])
+
+    @patch(
+        "pytorch_segmentation_models_trainer.validate_evaluation_config.os.path.exists"
+    )
+    def test_validate_experiment_config_string_predict_config_variants(
+        self, mock_exists
+    ):
+        mock_exists.return_value = False
+        class_path_config = OmegaConf.merge(
+            self.base_exp_config,
+            {
+                "predict_config": "package.module.Config",
+                "checkpoint_path": "https://example.com/checkpoint.ckpt",
+            },
+        )
+        errors, _ = validate_experiment_config(class_path_config, 0)
+        self.assertEqual(errors, [])
+
+        missing_file_config = OmegaConf.merge(
+            self.base_exp_config,
+            {
+                "predict_config": "missing_config",
+                "checkpoint_path": "https://example.com/checkpoint.ckpt",
+            },
+        )
+        errors, _ = validate_experiment_config(missing_file_config, 0)
+        self.assertIn(
+            "Experiment 0 (test_exp): predict_config not found: missing_config",
+            errors,
+        )
+
+    def test_validate_experiment_config_rejects_invalid_predict_config_type(self):
+        config = OmegaConf.create(
+            {
+                "name": "test_exp",
+                "predict_config": ["invalid"],
+                "checkpoint_path": "https://example.com/checkpoint.ckpt",
+                "output_folder": "/path/to/output",
+            }
+        )
+
+        errors, warnings = validate_experiment_config(config, 0)
+
+        self.assertEqual(warnings, [])
+        self.assertIn(
+            "Experiment 0: 'predict_config' must be a string or a dictionary.",
+            errors,
+        )
+
+    @patch(
+        "pytorch_segmentation_models_trainer.validate_evaluation_config.os.path.exists",
+        return_value=True,
+    )
+    @patch("pytorch_segmentation_models_trainer.validate_evaluation_config.Path.glob")
+    def test_validate_experiment_config_warns_when_output_has_predictions(
+        self, mock_glob, mock_exists
+    ):
+        mock_glob.side_effect = [[MagicMock()], [MagicMock()]]
+
+        errors, warnings = validate_experiment_config(self.base_exp_config, 0)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("output_folder already contains 2 predictions", warnings[0])
+
 
 class TestValidateConfigs(unittest.TestCase):
     def test_validate_dataset_config_csv_valid(self):
@@ -257,6 +371,96 @@ class TestValidateConfigs(unittest.TestCase):
                 self.assertTrue(is_valid)
                 self.assertEqual(len(errors), 0)
 
+    def test_validate_dataset_config_folders_missing_and_empty(self):
+        config = OmegaConf.create(
+            {
+                "build_csv_from_folders": {
+                    "enabled": True,
+                    "images_folder": "images",
+                    "masks_folder": "masks",
+                    "image_pattern": "*.tif",
+                }
+            }
+        )
+
+        with patch("os.path.exists", side_effect=[False, False, True]):
+            with patch(
+                "pytorch_segmentation_models_trainer."
+                "validate_evaluation_config.Path.glob",
+                return_value=[],
+            ):
+                is_valid, errors, warnings = validate_dataset_config(config)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(warnings, [])
+        self.assertIn("Images folder not found: images", errors)
+        self.assertIn("Masks folder not found: masks", errors)
+        self.assertIn("No images found in images_folder with pattern *.tif", errors)
+
+    def test_validate_dataset_config_csv_missing_columns(self):
+        config = OmegaConf.create(
+            {
+                "build_csv_from_folders": {"enabled": False},
+                "input_csv_path": "dataset.csv",
+            }
+        )
+        mock_df = MagicMock()
+        mock_df.columns = ["image"]
+
+        with (
+            patch("os.path.exists", return_value=True),
+            patch("pandas.read_csv", return_value=mock_df),
+        ):
+            is_valid, errors, warnings = validate_dataset_config(config)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(warnings, [])
+        self.assertIn("Dataset CSV missing columns: ['mask']", errors)
+
+    def test_validate_dataset_config_csv_warns_for_missing_sample_files(self):
+        config = OmegaConf.create(
+            {
+                "build_csv_from_folders": {"enabled": False},
+                "input_csv_path": "dataset.csv",
+            }
+        )
+        mock_df = MagicMock()
+        mock_df.columns = ["image", "mask"]
+        mock_df.__len__.return_value = 2
+        mock_df.head.return_value.iterrows.return_value = [
+            (0, {"image": "missing-image.png", "mask": "missing-mask.png"}),
+            (1, {"image": "ok-image.png", "mask": "ok-mask.png"}),
+        ]
+
+        with (
+            patch("os.path.exists", side_effect=[True, False, False, True, True]),
+            patch("pandas.read_csv", return_value=mock_df),
+        ):
+            is_valid, errors, warnings = validate_dataset_config(config)
+
+        self.assertTrue(is_valid)
+        self.assertEqual(errors, [])
+        self.assertIn("1/2 sampled images not found", warnings)
+        self.assertIn("1/2 sampled masks not found", warnings)
+
+    def test_validate_dataset_config_reports_csv_read_errors(self):
+        config = OmegaConf.create(
+            {
+                "build_csv_from_folders": {"enabled": False},
+                "input_csv_path": "dataset.csv",
+            }
+        )
+
+        with (
+            patch("os.path.exists", return_value=True),
+            patch("pandas.read_csv", side_effect=ValueError("bad csv")),
+        ):
+            is_valid, errors, warnings = validate_dataset_config(config)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(warnings, [])
+        self.assertIn("Error reading CSV: bad csv", errors)
+
     def test_validate_metrics_config(self):
         # Valid
         config = OmegaConf.create(
@@ -270,6 +474,15 @@ class TestValidateConfigs(unittest.TestCase):
         is_valid, errors, warnings = validate_metrics_config(invalid_config)
         self.assertFalse(is_valid)
         self.assertIn("Metric 0: Missing '_target_' field", errors)
+
+        empty_config = OmegaConf.create({"segmentation_metrics": []})
+        is_valid, errors, warnings = validate_metrics_config(empty_config)
+        self.assertTrue(is_valid)
+        self.assertEqual(errors, [])
+        self.assertIn(
+            "No metrics configured. Only confusion matrix will be computed.",
+            warnings,
+        )
 
     def test_validate_output_config(self):
         config = OmegaConf.create({"base_dir": "output"})
@@ -295,6 +508,171 @@ class TestValidateConfigs(unittest.TestCase):
                 ):
                     is_valid, errors, warnings = validate_output_config(config)
                     self.assertTrue(is_valid)
+
+    def test_validate_output_config_reports_unwritable_existing_dir(self):
+        config = OmegaConf.create({"base_dir": "output"})
+
+        with (
+            patch(
+                "pytorch_segmentation_models_trainer.validate_evaluation_config."
+                "Path.exists",
+                return_value=True,
+            ),
+            patch("os.access", return_value=False),
+        ):
+            is_valid, errors, warnings = validate_output_config(config)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(warnings, [])
+        self.assertIn("Output base_dir is not writable: output", errors)
+
+    def test_validate_output_config_reports_create_errors(self):
+        config = OmegaConf.create({"base_dir": "output"})
+
+        with (
+            patch(
+                "pytorch_segmentation_models_trainer.validate_evaluation_config."
+                "Path.exists",
+                return_value=False,
+            ),
+            patch(
+                "pytorch_segmentation_models_trainer.validate_evaluation_config."
+                "Path.mkdir",
+                side_effect=PermissionError("denied"),
+            ),
+        ):
+            is_valid, errors, warnings = validate_output_config(config)
+
+        self.assertFalse(is_valid)
+        self.assertEqual(warnings, [])
+        self.assertIn("Cannot create output base_dir: denied", errors)
+
+
+class TestValidateEvaluationMain(unittest.TestCase):
+    def _valid_cfg(self):
+        return OmegaConf.create(
+            {
+                "experiments": [
+                    {
+                        "name": "exp",
+                        "predict_config": {"model_path": "s3://bucket/model.ckpt"},
+                        "checkpoint_path": "s3://bucket/checkpoint.ckpt",
+                        "output_folder": "/tmp/out",
+                    }
+                ],
+                "evaluation_dataset": {
+                    "build_csv_from_folders": {"enabled": False},
+                    "input_csv_path": "dataset.csv",
+                },
+                "metrics": {"segmentation_metrics": [{"_target_": "pkg.Metric"}]},
+                "output": {"base_dir": "results"},
+            }
+        )
+
+    @patch(
+        "pytorch_segmentation_models_trainer.validate_evaluation_config."
+        "validate_output_config",
+        return_value=(True, [], []),
+    )
+    @patch(
+        "pytorch_segmentation_models_trainer.validate_evaluation_config."
+        "validate_metrics_config",
+        return_value=(True, [], ["metrics warning"]),
+    )
+    @patch(
+        "pytorch_segmentation_models_trainer.validate_evaluation_config."
+        "validate_dataset_config",
+        return_value=(True, [], []),
+    )
+    @patch(
+        "pytorch_segmentation_models_trainer.validate_evaluation_config."
+        "validate_experiment_config",
+        return_value=([], []),
+    )
+    def test_main_returns_zero_for_valid_config_with_warnings(
+        self, mock_exp, mock_dataset, mock_metrics, mock_output
+    ):
+        result = main(self._valid_cfg())
+
+        self.assertEqual(result, 0)
+        mock_exp.assert_called_once()
+        mock_dataset.assert_called_once()
+        mock_metrics.assert_called_once()
+        mock_output.assert_called_once()
+
+    @patch(
+        "pytorch_segmentation_models_trainer.validate_evaluation_config."
+        "validate_output_config",
+        return_value=(False, ["output error"], ["output warning"]),
+    )
+    @patch(
+        "pytorch_segmentation_models_trainer.validate_evaluation_config."
+        "validate_metrics_config",
+        return_value=(False, ["metric error"], []),
+    )
+    @patch(
+        "pytorch_segmentation_models_trainer.validate_evaluation_config."
+        "validate_dataset_config",
+        return_value=(False, ["dataset error"], []),
+    )
+    @patch(
+        "pytorch_segmentation_models_trainer.validate_evaluation_config."
+        "validate_experiment_config",
+        return_value=(["experiment error"], ["experiment warning"]),
+    )
+    def test_main_returns_one_for_invalid_config(
+        self, mock_exp, mock_dataset, mock_metrics, mock_output
+    ):
+        result = main(self._valid_cfg())
+
+        self.assertEqual(result, 1)
+
+    def test_module_main_guard_exits_with_main_result(self):
+        calls = []
+
+        def fake_hydra_main(**_kwargs):
+            def decorator(func):
+                def wrapper():
+                    calls.append("main")
+                    return 0
+
+                return wrapper
+
+            return decorator
+
+        fake_hydra = types.SimpleNamespace(main=fake_hydra_main)
+
+        with (
+            patch.dict(sys.modules, {"hydra": fake_hydra}),
+            patch.object(
+                validate_evaluation_config,
+                "validate_experiment_config",
+                return_value=([], []),
+            ),
+            patch.object(
+                validate_evaluation_config,
+                "validate_dataset_config",
+                return_value=(True, [], []),
+            ),
+            patch.object(
+                validate_evaluation_config,
+                "validate_metrics_config",
+                return_value=(True, [], []),
+            ),
+            patch.object(
+                validate_evaluation_config,
+                "validate_output_config",
+                return_value=(True, [], []),
+            ),
+        ):
+            with self.assertRaises(SystemExit) as exc_info:
+                runpy.run_module(
+                    "pytorch_segmentation_models_trainer." "validate_evaluation_config",
+                    run_name="__main__",
+                )
+
+        self.assertEqual(exc_info.exception.code, 0)
+        self.assertEqual(calls, ["main"])
 
 
 if __name__ == "__main__":

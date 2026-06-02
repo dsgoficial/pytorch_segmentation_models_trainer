@@ -17,6 +17,7 @@
  *                                                                         *
  ****
 """
+
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -103,9 +104,7 @@ class FineTuningConfig:
 
     strategy: str = "full"
     lora_config: Optional[LoraAdapterConfig] = None
-    frozen_modules: List[str] = field(
-        default_factory=lambda: ["encoder", "backbone"]
-    )
+    frozen_modules: List[str] = field(default_factory=lambda: ["encoder", "backbone"])
     trainable_modules: List[str] = field(
         default_factory=lambda: ["decoder", "head", "segmentation_head", "neck"]
     )

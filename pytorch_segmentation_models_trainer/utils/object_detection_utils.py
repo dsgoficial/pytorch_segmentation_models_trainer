@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 from typing import Dict, List
 import torch
 from torchvision.ops import box_iou

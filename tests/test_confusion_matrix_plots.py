@@ -50,6 +50,29 @@ class TestConfusionMatrixPlotter(unittest.TestCase):
         )
         self.assertTrue(os.path.exists(out_path))
 
+    def test_init_uses_visualization_config_fallback_and_defaults(self):
+        config = OmegaConf.create(
+            {
+                "metrics": {},
+                "visualization": {"confusion_matrix": {"normalize": None}},
+            }
+        )
+
+        plotter = ConfusionMatrixPlotter(config)
+
+        self.assertEqual(plotter.figsize, (10, 8))
+        self.assertEqual(plotter.save_format, "png")
+        self.assertIs(plotter.metrics_config, plotter.viz_config)
+
+    def test_plot_single_experiment_normalization_modes(self):
+        plotter = ConfusionMatrixPlotter(self.config)
+
+        for mode in ["pred", "all", "none"]:
+            out_path = plotter.plot_single_experiment(
+                self.cm, self.class_names, f"exp_{mode}", self.tmp_dir, normalize=mode
+            )
+            self.assertTrue(os.path.exists(out_path))
+
     def test_plot_comparison_grid(self):
         plotter = ConfusionMatrixPlotter(self.config)
         exp_data = {
@@ -61,6 +84,24 @@ class TestConfusionMatrixPlotter(unittest.TestCase):
         }
         out_path = plotter.plot_comparison_grid(exp_data, self.tmp_dir)
         self.assertTrue(os.path.exists(out_path))
+
+    def test_plot_comparison_grid_layouts_and_normalization_modes(self):
+        plotter = ConfusionMatrixPlotter(self.config)
+        exp_data = {
+            f"exp{i}": {"confusion_matrix": self.cm, "class_names": self.class_names}
+            for i in range(10)
+        }
+
+        for mode in ["pred", "all", "none"]:
+            out_path = plotter.plot_comparison_grid(
+                exp_data, self.tmp_dir, normalize=mode
+            )
+            self.assertTrue(os.path.exists(out_path))
+
+        for count in [3, 5, 8]:
+            subset = dict(list(exp_data.items())[:count])
+            out_path = plotter.plot_comparison_grid(subset, self.tmp_dir)
+            self.assertTrue(os.path.exists(out_path))
 
     def test_plot_difference_matrix(self):
         plotter = ConfusionMatrixPlotter(self.config)

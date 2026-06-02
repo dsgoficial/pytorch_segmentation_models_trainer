@@ -111,6 +111,65 @@ class TestComparisonPlotter(unittest.TestCase):
         )
         self.assertTrue(os.path.exists(out_path))
 
+    def test_init_uses_metrics_to_plot_fallback(self):
+        config = OmegaConf.create(
+            {
+                "visualization": {
+                    "comparison_plots": {
+                        "metrics_to_plot": ["Dice"],
+                        "save_format": "png",
+                    }
+                }
+            }
+        )
+
+        plotter = ComparisonPlotter(config)
+
+        self.assertEqual(plotter.metrics_to_compare, ["Dice"])
+
+    def test_init_uses_default_metrics_and_style(self):
+        config = OmegaConf.create({"visualization": {"comparison_plots": {}}})
+
+        plotter = ComparisonPlotter(config)
+
+        self.assertEqual(
+            plotter.metrics_to_compare, ["Accuracy", "JaccardIndex", "Dice", "F1Score"]
+        )
+
+    def test_plot_per_image_boxplot_returns_none_without_metric(self):
+        plotter = ComparisonPlotter(self.config)
+
+        out_path = plotter.plot_per_image_boxplot(
+            self.exp_data, self.tmp_dir, metric="missing"
+        )
+
+        self.assertIsNone(out_path)
+
+    def test_plot_radar_chart_returns_none_for_less_than_three_metrics(self):
+        plotter = ComparisonPlotter(self.config)
+
+        out_path = plotter.plot_radar_chart(self.exp_data, self.tmp_dir)
+
+        self.assertIsNone(out_path)
+
+    def test_plot_best_worst_images_skips_missing_metric(self):
+        plotter = ComparisonPlotter(self.config)
+
+        out_paths = plotter.plot_best_worst_images(
+            self.exp_data, self.tmp_dir, metric="missing"
+        )
+
+        self.assertEqual(out_paths, {})
+
+    def test_plot_per_class_comparison_returns_none_without_per_class_metrics(self):
+        plotter = ComparisonPlotter(self.config)
+
+        out_path = plotter.plot_per_class_comparison(
+            self.exp_data, self.tmp_dir, metric_prefix="missing"
+        )
+
+        self.assertIsNone(out_path)
+
 
 if __name__ == "__main__":
     unittest.main()

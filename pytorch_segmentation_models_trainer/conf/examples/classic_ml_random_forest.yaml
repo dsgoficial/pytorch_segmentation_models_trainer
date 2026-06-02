@@ -1,0 +1,58 @@
+# Classic ML segmentation pipeline — Random Forest + multi-scale cucim features
+# + Dense CRF post-processing.
+#
+# Run with:
+#   uv run python -m pytorch_segmentation_models_trainer.main --config-dir conf/examples \
+#       --config-name classic_ml_random_forest
+#
+# GPU acceleration (optional):
+#   Call `enable_gpu_acceleration()` in your entry point to route sklearn
+#   operations through NVIDIA RAPIDS cuml backends.
+
+defaults:
+  - _self_
+
+# ---------------------------------------------------------------------------
+# Feature engineering
+# ---------------------------------------------------------------------------
+feature_pipeline:
+  _target_: pytorch_segmentation_models_trainer.classic_ml.feature_engineering.FeatureEngineeringPipeline
+  extractors:
+    - _target_: pytorch_segmentation_models_trainer.classic_ml.feature_engineering.GaborFilterExtractor
+      frequencies: [0.1, 0.25, 0.4]
+      num_orientations: 4
+
+    - _target_: pytorch_segmentation_models_trainer.classic_ml.feature_engineering.GradientExtractor
+
+    - _target_: pytorch_segmentation_models_trainer.classic_ml.feature_engineering.MultiscaleExtractor
+      sigmas: [1.0, 2.0, 4.0]
+
+# ---------------------------------------------------------------------------
+# Classifier
+# ---------------------------------------------------------------------------
+classifier:
+  _target_: pytorch_segmentation_models_trainer.classic_ml.estimators.GPUAcceleratedRandomForest
+  n_estimators: 200
+  max_depth: null
+  random_state: 42
+
+# ---------------------------------------------------------------------------
+# Post-processing  (comment out to use argmax only)
+# ---------------------------------------------------------------------------
+postprocessor:
+  _target_: pytorch_segmentation_models_trainer.classic_ml.postprocessing.DenseCRFPostprocessor
+  n_iterations: 5
+  bilateral_sxy: 80.0
+  bilateral_srgb: 13.0
+  bilateral_compat: 10.0
+  gaussian_sxy: 3.0
+  gaussian_compat: 3.0
+
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
+orchestrator:
+  _target_: pytorch_segmentation_models_trainer.classic_ml.orchestrator.ClassicMLOrchestrator
+  feature_pipeline: ${feature_pipeline}
+  classifier: ${classifier}
+  postprocessor: ${postprocessor}

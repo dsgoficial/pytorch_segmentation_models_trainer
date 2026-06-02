@@ -17,6 +17,7 @@
  *   (at your option) any later version.                                   *
  ****
 """
+
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 import logging
@@ -96,9 +97,11 @@ class TemplatePolygonizerProcessor(ABC):
             return self.post_process(
                 out_contours_batch[0],
                 profile,
-                parent_dir_name=parent_dir_name[0]
-                if parent_dir_name is not None and len(parent_dir_name)
-                else None,
+                parent_dir_name=(
+                    parent_dir_name[0]
+                    if parent_dir_name is not None and len(parent_dir_name)
+                    else None
+                ),
                 convert_output_to_world_coords=convert_output_to_world_coords,
             )
         # ignore profile for now, just wanna get some results, I'll fix it later
@@ -152,12 +155,14 @@ class TemplatePolygonizerProcessor(ABC):
         projected_polygons = (
             polygons_to_world_coords(
                 polygons,
-                transform=profile["transform"]
-                if profile["crs"] is not None
-                else Affine(1, 0, 0, 0, -1, 0),
-                epsg_number=profile["crs"].to_epsg()
-                if profile["crs"] is not None
-                else None,
+                transform=(
+                    profile["transform"]
+                    if profile["crs"] is not None
+                    else Affine(1, 0, 0, 0, -1, 0)
+                ),
+                epsg_number=(
+                    profile["crs"].to_epsg() if profile["crs"] is not None else None
+                ),
             )
             if convert_output_to_world_coords
             else coerce_polygons_to_single_geometry(polygons)

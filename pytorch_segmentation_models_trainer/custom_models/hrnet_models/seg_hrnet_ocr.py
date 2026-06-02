@@ -518,7 +518,7 @@ class HRNetOCR(nn.Module):
         align_corners=True,
         bn_momentum=0.1,
         ocr=None,
-        **kwargs
+        **kwargs,
     ):
         super(HRNetOCR, self).__init__()
         self.n_classes = n_classes

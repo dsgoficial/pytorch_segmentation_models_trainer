@@ -13,3 +13,6 @@ from pytorch_segmentation_models_trainer.dataset_loader.image_dataset import (  
     IterableWindowedImageDataset,
     TiledInferenceImageDataset,
 )
+from pytorch_segmentation_models_trainer.dataset_loader.mbtiles_dataset import (  # noqa: F401
+    MBTilesPolygonDataset,
+)

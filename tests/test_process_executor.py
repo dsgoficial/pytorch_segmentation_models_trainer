@@ -27,6 +27,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import (
     Executor,
+    ProcessPoolExecutor,
 )
 from pytorch_segmentation_models_trainer.utils.os_utils import (
     hash_file,
@@ -65,3 +66,16 @@ class Test_ProcessExecutor(BasicTestCase):
             self.assertEqual(
                 hash_file(file_path), hash_file(output_files_dict[filename])
             )
+
+    def test_process_pool_executor_sets_executor_class(self) -> None:
+        executor = ProcessPoolExecutor(str, simultaneous_tasks=1)
+
+        self.assertEqual(executor.simultaneous_tasks, 1)
+        self.assertEqual(executor.executor_class.__name__, "ProcessPoolExecutor")
+
+    def test_execute_tasks_processes_all_items(self) -> None:
+        executor = Executor(lambda x: x * 2, simultaneous_tasks=2)
+
+        output = executor.execute_tasks(iter([1, 2, 3, 4]), n_tasks=4)
+
+        self.assertEqual(sorted(output), [2, 4, 6, 8])

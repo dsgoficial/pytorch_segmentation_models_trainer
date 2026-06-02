@@ -13,6 +13,7 @@ from pytorch_segmentation_models_trainer.config_definitions.dataset_config impor
     IterableWindowedImageAutoencoderDatasetConfig,
     WindowedImageAutoencoderDatasetConfig,
     RasterPatchDatasetConfig,
+    MBTilesMaskWindowedDatasetConfig,
     CSVWindowedDatasetConfig,
     CSVWindowedImageDatasetConfig,
 )
@@ -74,6 +75,13 @@ class TestDatasetConfigs:
             _ = cfg.image_dir
         assert cfg.patch_size == 256
         assert cfg.stride == 128
+
+    def test_mbtiles_mask_windowed_dataset_config(self):
+        cfg = OmegaConf.structured(MBTilesMaskWindowedDatasetConfig)
+        with pytest.raises(MissingMandatoryValue):
+            _ = cfg.mbtiles_path
+        assert "MBTilesMaskWindowedDataset" in cfg._target_
+        assert cfg.patch_size == 512
 
     def test_csv_windowed_dataset_config(self):
         cfg = OmegaConf.structured(CSVWindowedDatasetConfig)

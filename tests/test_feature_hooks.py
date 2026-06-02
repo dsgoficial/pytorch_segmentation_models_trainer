@@ -2,6 +2,7 @@
 """
 Tests for FeatureExtractorHook.
 """
+
 import pytest
 import torch
 import torch.nn as nn
@@ -9,7 +10,6 @@ import torch.nn as nn
 from pytorch_segmentation_models_trainer.domain_adaptation.feature_hooks import (
     FeatureExtractorHook,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper model with named layers

@@ -103,6 +103,13 @@ class TestEvidentialMSELoss:
         # They won't be equal because different fractions are used
         assert loss_clean.item() != loss_ignore.item() or True  # not crash
 
+    def test_all_ignore_pixels_use_fallback_mean(self):
+        loss_fn = self._make_loss()
+        labels = torch.full((B, H, W), 255, dtype=torch.long)
+        alpha = {"alpha": torch.ones(B, K, H, W) * 2.0}
+        loss, _ = loss_fn(alpha, labels)
+        assert torch.isfinite(loss)
+
     def test_soft_labels_accepted(self):
         loss_fn = self._make_loss()
         soft_labels = torch.zeros(B, K, H, W)
@@ -173,6 +180,13 @@ class TestEvidentialKLLoss:
         labels = torch.zeros(B, H, W, dtype=torch.long)
         loss, _ = loss_fn(alpha, labels)
         assert loss.item() < 0.1
+
+    def test_all_ignore_pixels_use_fallback_mean(self):
+        loss_fn = self._make_loss()
+        labels = torch.full((B, H, W), 255, dtype=torch.long)
+        alpha = {"alpha": torch.ones(B, K, H, W) * 2.0}
+        loss, _ = loss_fn(alpha, labels)
+        assert torch.isfinite(loss)
 
     def test_backward_computes_grad(self):
         loss_fn = self._make_loss()

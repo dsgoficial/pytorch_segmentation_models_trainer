@@ -475,5 +475,7 @@ except ValueError as e:
 | Structured folder hierarchy, no CSV needed | `SegmentationDatasetFromFolder` |
 | **Custom patch coordinates in CSV (windowed read)** | [`CSVWindowedSegmentationDataset`](./dataset-csv-windowed.md) |
 | **Custom image-only patches in CSV (windowed read)** | [`CSVWindowedImageDataset`](./dataset-csv-windowed-image.md) |
+| MBTiles imagery with GeoTIFF masks for training | [`MBTilesMaskWindowedDataset`](./dataset-mbtiles-mask.md) |
+| MBTiles imagery with GeoTIFF masks, visual QA before training | [`export-mbtiles-mask-aligned`](./export-mbtiles-mask-aligned-images.md) |
 | Large full-scene images, on-the-fly random cropping | [`RandomCropSegmentationDataset`](../advanced/random-crop-dataset.md) |
 | Systematic sliding-window evaluation | `RasterPatchDataset` |
