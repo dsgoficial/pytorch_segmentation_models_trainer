@@ -1524,3 +1524,171 @@ class TestRun:
             "w_conf_path",
         }
         assert len(df) == 1
+
+    def test_run_accepts_entropy_norm_minmax(self, same_res_setup, tmp_path):
+        """run() propagates entropy_norm='minmax' end-to-end without error."""
+        import pandas as pd
+        from pytorch_segmentation_models_trainer.tools.soft_labels.build_soft_labels import (
+            run,
+        )
+
+        img_path, path_a, path_b, _, _ = same_res_setup
+        csv_path = self._sources_csv(tmp_path, img_path, path_a, path_b)
+        out_dir = tmp_path / "output_minmax"
+        manifest_path = run(
+            input_csv=str(csv_path),
+            output_dir=out_dir,
+            num_classes=3,
+            max_workers=1,
+            use_border=False,
+            entropy_norm="minmax",
+        )
+        assert manifest_path.exists()
+        df = pd.read_csv(manifest_path)
+        assert len(df) == 1
+
+
+# ---------------------------------------------------------------------------
+# compute_w_conf — entropy_norm parameter
+# ---------------------------------------------------------------------------
+
+
+class TestComputeWConfEntropyNorm:
+    """Tests for the entropy_norm parameter of compute_w_conf."""
+
+    def _make_extreme_p_soft(self, num_classes=4, h=4, w=4):
+        """Return p_soft where left half is hard (entropy=0), right half uniform (max entropy)."""
+        p = np.zeros((num_classes, h, w), dtype=np.float32)
+        p[0, :, : w // 2] = 1.0
+        p[:, :, w // 2 :] = 1.0 / num_classes
+        return p
+
+    def test_default_is_max_entropy(self):
+        """No entropy_norm arg → same as entropy_norm='max_entropy'."""
+        p = self._make_extreme_p_soft()
+        w_default = compute_w_conf(p, alpha=1.0, use_border=False)
+        w_explicit = compute_w_conf(
+            p, alpha=1.0, use_border=False, entropy_norm="max_entropy"
+        )
+        assert np.allclose(w_default, w_explicit)
+
+    def test_max_entropy_math(self):
+        """entropy_norm='max_entropy' matches manual 1 - H/log(C) computation."""
+        p = self._make_extreme_p_soft()
+        eps = 1e-8
+        log_p = np.log(np.clip(p, eps, 1.0))
+        entropy = -(p * log_p).sum(axis=0)
+        expected = (1.0 - entropy / np.log(p.shape[0])).astype(np.float32)
+        result = compute_w_conf(
+            p, alpha=1.0, use_border=False, entropy_norm="max_entropy"
+        )
+        assert np.allclose(result[0], expected, atol=1e-5)
+
+    def test_minmax_hard_pixel_gets_w_one(self):
+        """entropy_norm='minmax': pixel with entropy=0 → w_entropy=1."""
+        p = self._make_extreme_p_soft(num_classes=4, h=4, w=4)
+        result = compute_w_conf(p, alpha=1.0, use_border=False, entropy_norm="minmax")
+        assert np.allclose(result[0, :, : p.shape[-1] // 2], 1.0, atol=1e-5)
+
+    def test_minmax_uniform_pixel_gets_w_zero(self):
+        """entropy_norm='minmax': pixel with max entropy → w_entropy=0."""
+        p = self._make_extreme_p_soft(num_classes=4, h=4, w=4)
+        result = compute_w_conf(p, alpha=1.0, use_border=False, entropy_norm="minmax")
+        assert np.allclose(result[0, :, p.shape[-1] // 2 :], 0.0, atol=1e-5)
+
+    def test_minmax_values_in_unit_interval(self):
+        """entropy_norm='minmax' output is always in [0, 1]."""
+        rng = np.random.default_rng(42)
+        raw = rng.random((4, 16, 16)).astype(np.float32)
+        p = raw / raw.sum(axis=0, keepdims=True)
+        result = compute_w_conf(p, alpha=1.0, use_border=False, entropy_norm="minmax")
+        assert result.min() >= 0.0 - 1e-6
+        assert result.max() <= 1.0 + 1e-6
+
+    def test_minmax_output_shape(self):
+        """entropy_norm='minmax' returns (1, H, W)."""
+        p = np.zeros((4, 8, 8), dtype=np.float32)
+        p[0] = 1.0
+        assert compute_w_conf(p, use_border=False, entropy_norm="minmax").shape == (
+            1,
+            8,
+            8,
+        )
+
+    def test_minmax_output_dtype_float32(self):
+        """entropy_norm='minmax' returns float32."""
+        p = np.zeros((4, 8, 8), dtype=np.float32)
+        p[0] = 1.0
+        assert (
+            compute_w_conf(p, use_border=False, entropy_norm="minmax").dtype
+            == np.float32
+        )
+
+    def test_minmax_degenerate_uniform_all_same_entropy(self):
+        """Uniform p_soft everywhere → denom=0 → u_norm=0 → w_entropy=1.0 for all."""
+        p = np.full((4, 8, 8), 0.25, dtype=np.float32)
+        result = compute_w_conf(p, alpha=1.0, use_border=False, entropy_norm="minmax")
+        assert np.allclose(result, 1.0, atol=1e-5)
+
+    def test_minmax_differs_from_max_entropy_norm(self):
+        """'minmax' and 'max_entropy' produce different outputs on non-extreme input."""
+        rng = np.random.default_rng(42)
+        raw = rng.random((4, 8, 8)).astype(np.float32) + 0.1
+        p = raw / raw.sum(axis=0, keepdims=True)
+        w_max = compute_w_conf(
+            p, alpha=1.0, use_border=False, entropy_norm="max_entropy"
+        )
+        w_mm = compute_w_conf(p, alpha=1.0, use_border=False, entropy_norm="minmax")
+        assert not np.allclose(w_max, w_mm)
+
+    def test_invalid_entropy_norm_raises_value_error(self):
+        """Unknown entropy_norm value raises ValueError."""
+        p = np.zeros((4, 8, 8), dtype=np.float32)
+        p[0] = 1.0
+        with pytest.raises(ValueError, match="entropy_norm"):
+            compute_w_conf(p, entropy_norm="bad_norm")
+
+    def test_minmax_with_use_border_true(self):
+        """entropy_norm='minmax' works together with use_border=True."""
+        p = self._make_extreme_p_soft()
+        result = compute_w_conf(p, alpha=0.6, use_border=True, entropy_norm="minmax")
+        assert result.shape == (1, 4, 4)
+        assert result.min() >= 0.0 - 1e-6
+        assert result.max() <= 1.0 + 1e-6
+
+
+# ---------------------------------------------------------------------------
+# process_tile — entropy_norm propagation
+# ---------------------------------------------------------------------------
+
+
+class TestProcessTileEntropyNorm:
+    def test_process_tile_accepts_entropy_norm_minmax(self, same_res_setup, tmp_path):
+        """process_tile propagates entropy_norm='minmax' to compute_w_conf without error."""
+        img_path, path_a, _, h, w = same_res_setup
+        import pandas as pd
+
+        rows = pd.DataFrame(
+            [
+                {
+                    "source_name": "a",
+                    "lulc_path": str(path_a),
+                    "weight": 1.0,
+                    "image_path": str(img_path),
+                }
+            ]
+        )
+        _, _, _, w_conf_path = process_tile(
+            "tile_0",
+            rows,
+            tmp_path,
+            num_classes=3,
+            alpha=0.6,
+            use_border=False,
+            entropy_norm="minmax",
+        )
+        with rasterio.open(w_conf_path) as src:
+            data = src.read(1)
+        assert data.shape == (h, w)
+        assert data.min() >= 0.0 - 1e-5
+        assert data.max() <= 1.0 + 1e-5

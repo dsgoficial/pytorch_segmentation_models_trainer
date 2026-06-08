@@ -411,6 +411,17 @@ def ddoq_vae_cmd(yaml_path, k, checkpoint_path, output_dir, distilled_image_form
     flag_value=False,
     help="Omit the border-distance component (replicates original paper formula).",
 )
+@click.option(
+    "--entropy-norm",
+    default="max_entropy",
+    show_default=True,
+    type=click.Choice(["max_entropy", "minmax"], case_sensitive=False),
+    help=(
+        "Entropy normalisation strategy for w_entropy. "
+        "'max_entropy' (default) normalises by log(C); "
+        "'minmax' applies per-tile min-max normalisation (LaTeX Eq. 9-10, Experiment E4)."
+    ),
+)
 def build_soft_labels_cmd(
     input_csv,
     output_dir,
@@ -424,6 +435,7 @@ def build_soft_labels_cmd(
     aef_resampling,
     beta,
     use_border,
+    entropy_norm,
 ):
     """Build P_soft and W_conf rasters from multiple LULC sources in INPUT_CSV.
 
@@ -445,6 +457,7 @@ def build_soft_labels_cmd(
         aef_resampling=aef_resampling,
         beta=beta,
         use_border=use_border,
+        entropy_norm=entropy_norm,
     )
     click.echo(f"Manifest written to '{manifest_path}'.")
 

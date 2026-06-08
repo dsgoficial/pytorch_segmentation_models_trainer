@@ -127,6 +127,7 @@ def compute_w_conf(
     w_embed: Optional[np.ndarray] = None,
     beta: float = 0.0,
     use_border: bool = True,
+    entropy_norm: str = "max_entropy",
 ) -> np.ndarray:
     """Compute W_conf confidence weight map.
 
@@ -141,6 +142,16 @@ def compute_w_conf(
       where ``beta_eff = beta`` when *w_embed* is provided, else 0.
       No constraint on ``alpha + beta``.
 
+    Two entropy normalisation modes are available, controlled by *entropy_norm*:
+
+    * ``"max_entropy"`` (default): ``w_entropy = 1 - H(P_soft) / log(C)``
+      where ``log(C)`` is the theoretical maximum entropy for *C* classes.
+
+    * ``"minmax"``: per-tile min-max normalisation following LaTeX Eq. 9–10:
+      ``U_norm(i) = (U(i) - min U) / (max U - min U)``
+      ``w_entropy(i) = 1 - U_norm(i)``
+      When all pixels share the same entropy (zero range), ``w_entropy=1`` for all.
+
     Args:
         p_soft: (C, H, W) float32 probability distribution.
         alpha: Entropy component weight (default 0.6).
@@ -149,12 +160,16 @@ def compute_w_conf(
         use_border: When True (default) include the border-distance component,
             which is the user's contribution beyond the original paper.
             Set to False to replicate the original paper formula.
+        entropy_norm: Entropy normalisation strategy. ``"max_entropy"`` (default)
+            normalises by the theoretical maximum ``log(C)``; ``"minmax"``
+            applies per-tile min-max normalisation (LaTeX Eq. 9–10, Experiment E4).
 
     Returns:
         w_conf: (1, H, W) float32 array with values in [0, 1].
 
     Raises:
-        ValueError: if ``use_border=True`` and ``alpha + beta > 1.0``.
+        ValueError: if ``use_border=True`` and ``alpha + beta > 1.0``, or if
+            ``entropy_norm`` is not ``"max_entropy"`` or ``"minmax"``.
     """
     if use_border and alpha + beta > 1.0 + 1e-8:
         raise ValueError(
@@ -166,8 +181,19 @@ def compute_w_conf(
 
     log_p = np.log(np.clip(p_soft, eps, 1.0))
     entropy = -(p_soft * log_p).sum(axis=0)  # (H, W)
-    max_entropy = np.log(num_classes)
-    w_entropy = 1.0 - entropy / max_entropy  # (H, W)
+
+    if entropy_norm == "max_entropy":
+        w_entropy = 1.0 - entropy / np.log(num_classes)  # (H, W)
+    elif entropy_norm == "minmax":
+        e_min, e_max = entropy.min(), entropy.max()
+        denom = e_max - e_min
+        u_norm = (entropy - e_min) / denom if denom > 0.0 else np.zeros_like(entropy)
+        w_entropy = 1.0 - u_norm  # (H, W)
+    else:
+        raise ValueError(
+            f"Unknown entropy_norm: '{entropy_norm}'. "
+            "Must be 'max_entropy' or 'minmax'."
+        )
 
     if use_border:
         argmax_map = p_soft.argmax(axis=0)
@@ -487,6 +513,7 @@ def process_tile(
     class_centroids: Optional[np.ndarray] = None,
     use_border: bool = True,
     aef_resampling: AEFResamplingStrategy = "auto",
+    entropy_norm: str = "max_entropy",
 ) -> Tuple[str, str, Path, Path]:
     """Build P_soft and W_conf rasters for one tile.
 
@@ -515,6 +542,8 @@ def process_tile(
         aef_resampling: AEF raster alignment strategy for GCS mode. ``"auto"``
                         aggregates when target pixels are coarser than AEF and
                         uses nearest-neighbor when target pixels are finer.
+        entropy_norm: Entropy normalisation strategy passed to ``compute_w_conf``.
+                      ``"max_entropy"`` (default) or ``"minmax"``.
 
     Returns:
         Tuple of (tile_id, image_path, p_soft_path, w_conf_path).
@@ -560,7 +589,12 @@ def process_tile(
             )
 
     w_conf = compute_w_conf(
-        p_soft, alpha=alpha, w_embed=w_embed, beta=beta, use_border=use_border
+        p_soft,
+        alpha=alpha,
+        w_embed=w_embed,
+        beta=beta,
+        use_border=use_border,
+        entropy_norm=entropy_norm,
     )
 
     transform, crs, profile = img_transform, img_crs, img_profile
@@ -665,6 +699,7 @@ def run(
     beta: float = 0.0,
     use_border: bool = True,
     aef_resampling: AEFResamplingStrategy = "auto",
+    entropy_norm: str = "max_entropy",
 ) -> Path:
     """Build P_soft and W_conf rasters for all tiles in *input_csv*.
 
@@ -684,6 +719,9 @@ def run(
         use_border: When True (default), include the border-distance component in
                     W_conf. Set to False to replicate the original paper formula.
         aef_resampling: AEF raster alignment strategy for GCS mode.
+        entropy_norm: Entropy normalisation strategy. ``"max_entropy"`` (default)
+                      normalises by ``log(C)``; ``"minmax"`` applies per-tile
+                      min-max normalisation (LaTeX Eq. 9–10, Experiment E4).
 
     Returns:
         Path to the written manifest CSV.
@@ -722,6 +760,7 @@ def run(
                 class_centroids=class_centroids,
                 use_border=use_border,
                 aef_resampling=aef_resampling,
+                entropy_norm=entropy_norm,
             ): tile_id
             for tile_id, grp in groups.items()
         }

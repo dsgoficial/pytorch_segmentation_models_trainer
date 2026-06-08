@@ -26,6 +26,7 @@ ambiguity is highest.  See [W_conf formula](#w_conf-formula) for details.
 |-----------|-------|---------|
 | Dataset | `SoftLabelDataset` | Reads P_soft and W_conf GeoTIFFs, returns `batch["mask"]` as a dict |
 | Windowed Dataset | `SoftLabelWindowedDataset` | Reads patches on-the-fly from full-scene rasters via row/col offsets |
+| Cached Dataset | `SoftLabelCachedDataset` | Computes P_soft lazily from `sources_csv`, caches to disk; supports windowed read |
 | Loss | `SoftLabelWeightedCELoss` | Pixel-wise soft cross-entropy weighted by W_conf |
 | Model | `SoftLabelModel` | Subclass of `Model` that passes W_conf through the loss pipeline |
 | Preprocessing | `build_soft_labels.py` | Computes P_soft and W_conf from multiple LULC sources; optionally blends AEF embeddings |
@@ -82,7 +83,7 @@ W_conf = alpha · w_entropy + (1 - alpha - beta) · w_border + beta · w_embed
 
 | Term | Description |
 |------|-------------|
-| `w_entropy` | `1 - H(P_soft) / log(C)` — high when the class distribution is peaked |
+| `w_entropy` | Entropy-based confidence (see [Entropy normalisation](#entropy-normalisation)) |
 | `w_border` | Distance transform from class boundaries, normalised to [0, 1] — high far from borders |
 | `w_embed` | AEF cosine similarity to class centroid — high when the pixel matches its class in embedding space |
 
@@ -101,6 +102,29 @@ W_conf = (alpha · w_entropy + beta · w_embed) / (alpha + beta)   (with AEF)
 ```
 
 When `--no-border` is set, the `alpha + beta ≤ 1.0` constraint is relaxed.
+
+### Entropy normalisation
+
+The `--entropy-norm` option controls how `w_entropy` is computed from the
+Shannon entropy `H(P_soft)`.  Two modes are available:
+
+| Mode | Formula | Use case |
+|------|---------|----------|
+| `max_entropy` (default) | `w_entropy = 1 - H / log(C)` | Standard normalisation; scale is absolute |
+| `minmax` | `w_entropy = 1 - (H - min H) / (max H - min H)` | Per-tile relative normalisation; matches LaTeX Eq. 9–10 (Experiments E4/E5) |
+
+With `minmax`, the pixel with the lowest entropy in a tile always gets
+`w_entropy = 1` and the pixel with the highest entropy gets `w_entropy = 0`,
+regardless of the absolute entropy range.  When all pixels share the same
+entropy (degenerate tile), `w_entropy = 1` for all pixels.
+
+```bash
+# Experiment E4 / E5 — per-tile min-max entropy normalisation
+pytorch-smt-tools build-soft-labels sources.csv \
+    --output-dir /data/soft_labels_e4 \
+    --num-classes 6 --alpha 1.0 --no-border \
+    --entropy-norm minmax
+```
 
 :::tip Ablation study
 
@@ -504,6 +528,60 @@ sample = ds[0]
 # sample["mask"]["mask"]   — (C, patch_size, patch_size) float32
 # sample["mask"]["w_conf"] — (1, patch_size, patch_size) float32 (when present)
 ```
+
+### `SoftLabelCachedDataset`
+
+Computes P_soft lazily from a `sources_csv` file (same format as `build-soft-labels`),
+writes the result as a full-tile GeoTIFF cache on first access, and reads from the cache
+on subsequent accesses.  W_conf is recomputed on every access so that `alpha`,
+`entropy_norm`, and `use_border` can be changed without invalidating the cache.
+
+When `patch_size` is given the dataset operates in **windowed mode**: it enumerates
+all `(patch_size, patch_stride)` patches across every tile and each `__getitem__`
+call reads only that window from the image and cache via rasterio windowed reads.
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.soft_label_cached_dataset import (
+    SoftLabelCachedDataset,
+)
+
+# Full-tile mode (one item per tile)
+ds = SoftLabelCachedDataset(
+    sources_csv="sources.csv",
+    cache_dir="/data/cache/p_soft",
+    num_classes=6,
+    alpha=0.6,
+    use_border=False,
+    entropy_norm="minmax",  # Experiment E4
+)
+
+# Windowed mode (one item per patch)
+ds_win = SoftLabelCachedDataset(
+    sources_csv="sources.csv",
+    cache_dir="/data/cache/p_soft",   # same cache — no rebuild needed
+    num_classes=6,
+    alpha=0.6,
+    use_border=True,
+    patch_size=(256, 256),
+    patch_stride=(256, 256),          # no overlap; use (128, 128) for 50% overlap
+)
+
+sample = ds[0]
+# sample["image"]          — (3, H, W) float32 in [0, 1]
+# sample["mask"]["mask"]   — (C, H, W) float32, sums to 1 per pixel
+# sample["mask"]["w_conf"] — (1, H, W) float32 in [0, 1]
+# sample["path"]           — image file path
+```
+
+**Caching contract:**
+
+- The full-tile P_soft is cached once in `cache_dir/{tile_id}.tif` regardless of
+  whether you use full-tile or windowed mode.
+- `alpha`, `entropy_norm`, and `use_border` do **not** affect the cache key —
+  change them between runs without clearing the cache.
+- Writes are atomic (`{tile_id}.tif.tmp` → rename) so concurrent DataLoader workers
+  (multi-process) cannot corrupt a partial write.
+- Stale `.tmp` files left by crashed workers are overwritten on the next access.
 
 ### `SoftLabelModel`
 

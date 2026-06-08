@@ -416,6 +416,64 @@ class SoftLabelWindowedDatasetConfig:
 
 
 @dataclass
+class SoftLabelCachedDatasetConfig:
+    """Configuration for ``SoftLabelCachedDataset``.
+
+    Accepts the same ``sources_csv`` format as ``build-soft-labels``
+    (``tile_id, image_path, source_name, lulc_path, weight``).  P_soft is
+    computed lazily on first access and cached to ``cache_dir``; W_conf is
+    recomputed each epoch from ``alpha``, ``entropy_norm``, and ``use_border``.
+
+    When ``patch_size`` is set the dataset operates in windowed mode: it
+    enumerates a regular grid of patches over every tile and each access reads
+    only that patch from the image and cache.
+
+    Example YAML:
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_cached_dataset.SoftLabelCachedDataset
+          sources_csv: /data/sources.csv
+          cache_dir: /data/cache/p_soft
+          num_classes: 6
+          alpha: 0.6
+          use_border: false
+          entropy_norm: minmax
+          patch_size: [256, 256]
+          patch_stride: [256, 256]
+          augmentation_list:
+            - _target_: albumentations.HorizontalFlip
+              p: 0.5
+            - _target_: albumentations.Normalize
+              mean: [0.485, 0.456, 0.406]
+              std: [0.229, 0.224, 0.225]
+            - _target_: albumentations.pytorch.ToTensorV2
+          data_loader:
+            batch_size: 16
+            num_workers: 8
+            shuffle: true
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".soft_label_cached_dataset.SoftLabelCachedDataset"
+    )
+    sources_csv: Optional[str] = None
+    cache_dir: Optional[str] = None
+    num_classes: int = 6
+    alpha: float = 0.6
+    use_border: bool = True
+    entropy_norm: str = "max_entropy"
+    image_key: str = "image_path"
+    augmentation_list: List = field(default_factory=list)
+    data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+    n_first_rows_to_read: Optional[int] = None
+    patch_size: Optional[List[int]] = None
+    patch_stride: Optional[List[int]] = None
+    windows_csv: Optional[str] = None
+    windows_coord_type: str = "image"
+    seed: Optional[int] = None
+
+
+@dataclass
 class LulcInputDatasetConfig:
     """Configuration for ``LulcInputDataset``.
 

@@ -1,5 +1,43 @@
 # Unreleased
 
+## Soft Labels — SoftLabelCachedDataset with windowed read
+
+- Added `SoftLabelCachedDataset` in `dataset_loader/soft_label_cached_dataset.py`:
+  accepts the same `sources_csv` format as `build-soft-labels`
+  (`tile_id, image_path, source_name, lulc_path, weight`), computes P_soft
+  lazily on first access (atomic `.tmp → rename` write, safe for multi-worker
+  DataLoaders), and reads from the GeoTIFF cache on subsequent accesses.
+  W_conf is recomputed on every access from the cached P_soft so that `alpha`,
+  `entropy_norm`, and `use_border` can be changed without invalidating the cache.
+- Added windowed read mode (two strategies):
+  1. `patch_size` / `patch_stride` — enumerates a regular grid of non-overlapping
+     (or strided) patches across every tile.
+  2. `windows_csv` — reads an explicit list of windows from a CSV, taking priority
+     over `patch_size` when both are given.  `windows_coord_type="image"` reads
+     pixel row/col offsets (`row_off, col_off, patch_h, patch_w`); `"world"` reads
+     geographic bounding boxes (`minx, miny, maxx, maxy`) with an optional `crs`
+     column — when `crs` differs from the tile's CRS,
+     `rasterio.warp.transform_bounds` reprojects the bounds automatically.
+     In both modes only the requested window is loaded into memory; the full-tile
+     P_soft cache is still stored as a single GeoTIFF.
+- Added `SoftLabelCachedDatasetConfig` dataclass in
+  `config_definitions/dataset_config.py` for Hydra integration.
+- Added `conf/examples/soft_label_cached.yaml` with full-tile and windowed
+  config examples.
+- 100% test coverage (39 tests in `tests/test_soft_label_cached_dataset.py`).
+
+## Soft Labels — entropy_norm parameter (Experiment E4)
+
+- Added `entropy_norm: str = "max_entropy"` parameter to `compute_w_conf`,
+  `process_tile`, and `run` in `tools/soft_labels/build_soft_labels.py`.
+  When `entropy_norm="minmax"`, applies per-tile min-max normalisation to the
+  uncertainty map before computing `w_entropy` (LaTeX Eq. 9–10):
+  `U_norm(i) = (U(i) - min U) / (max U - min U)`, `w_entropy(i) = 1 - U_norm(i)`.
+  Default `"max_entropy"` preserves the previous behaviour `1 - H/log(C)`.
+  When all pixels share the same entropy (degenerate case), `w_entropy=1.0` for all.
+- Added `--entropy-norm` CLI option to `build-soft-labels` command with choices
+  `max_entropy` (default) and `minmax`.  Use `--entropy-norm minmax` for Experiments E4/E5.
+
 ## LULC Input Dataset
 
 - Added `LulcInputDataset` in `dataset_loader/lulc_input_dataset.py`: reads an
