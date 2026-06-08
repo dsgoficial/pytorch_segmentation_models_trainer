@@ -416,6 +416,76 @@ class SoftLabelWindowedDatasetConfig:
 
 
 @dataclass
+class LulcInputDatasetConfig:
+    """Configuration for ``LulcInputDataset``.
+
+    Example YAML:
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.lulc_input_dataset.LulcInputDataset
+          input_csv_path: /data/splits/train.csv
+          image_key: image_path
+          mask_key: mask_path
+          lulc_keys:
+            - mapbiomas_path
+            - esri_path
+            - dw_path
+          num_classes: 6
+          augmentation_list:
+            - _target_: albumentations.HorizontalFlip
+              p: 0.5
+            - _target_: albumentations.Normalize
+              mean: [0.485, 0.456, 0.406]
+              std: [0.229, 0.224, 0.225]
+            - _target_: albumentations.pytorch.ToTensorV2
+          data_loader:
+            batch_size: 16
+            num_workers: 8
+            shuffle: true
+            pin_memory: true
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".lulc_input_dataset.LulcInputDataset"
+    )
+    input_csv_path: Optional[str] = None
+    root_dir: Optional[str] = None
+    lulc_keys: List[str] = field(default_factory=list)
+    num_classes: int = 6
+    ignore_lulc_index: int = 255
+    image_key: str = "image_path"
+    mask_key: str = "mask_path"
+    augmentation_list: List = field(default_factory=list)
+    data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+    n_first_rows_to_read: Optional[int] = None
+    seed: Optional[int] = None
+
+
+@dataclass
+class LulcInputWindowedDatasetConfig(LulcInputDatasetConfig):
+    """Configuration for ``LulcInputWindowedDataset``.
+
+    Example YAML:
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.lulc_input_dataset.LulcInputWindowedDataset
+          input_csv_path: /data/splits/train.csv
+          lulc_keys: [mapbiomas_path, esri_path, dw_path]
+          num_classes: 6
+          row_off_key: row_off
+          col_off_key: col_off
+          patch_size_key: patch_size
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".lulc_input_dataset.LulcInputWindowedDataset"
+    )
+    row_off_key: str = "row_off"
+    col_off_key: str = "col_off"
+    patch_size_key: str = "patch_size"
+
+
+@dataclass
 class MBTilesCropsGeoTifMaskDatasetConfig:
     """Configuration for ``MBTilesCropsGeoTifMaskDataset``.
 

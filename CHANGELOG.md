@@ -1,5 +1,29 @@
 # Unreleased
 
+## LULC Input Dataset
+
+- Added `LulcInputDataset` in `dataset_loader/lulc_input_dataset.py`: reads an
+  RGB image and an arbitrary number of single-band LULC rasters, one-hot
+  encodes each raster, and concatenates the result with the RGB channels to
+  produce a `(3 + N × num_classes, H, W)` input tensor.  The training target
+  is a hard integer mask.
+- Added `LulcInputWindowedDataset` subclass: same output format, but reads
+  fixed-size patches on-the-fly from full-scene rasters using
+  `rasterio.windows.Window`.  Each CSV row specifies a patch via
+  `row_off` / `col_off` / `patch_size` columns.
+- One-hot encoding helper `_one_hot_chw` treats `ignore_lulc_index` (default
+  `255`) and out-of-range values as "no valid class", producing all-zero vectors.
+- Geometric augmentations (flip, rotate, …) are applied consistently to the
+  RGB image, the training mask, and all LULC rasters via albumentations
+  `additional_targets`; `Normalize` affects only the `image` target.
+- Added `LulcInputDatasetConfig` and `LulcInputWindowedDatasetConfig` dataclasses
+  in `config_definitions/dataset_config.py` for Hydra integration.
+- Added `conf/examples/lulc_input_dataset.yaml` with tile-based and windowed
+  config examples.
+- Added `website/docs/user-guide/lulc-input-dataset.md` with full documentation,
+  CSV format reference, parameter tables, and Python API examples.
+- 100% test coverage (19 tests in `tests/test_lulc_input_dataset.py`).
+
 ## JSON Raster Remapper + VRT Builder
 
 - Added `build_vrt(raster_paths, output_path, nodata_value)` to

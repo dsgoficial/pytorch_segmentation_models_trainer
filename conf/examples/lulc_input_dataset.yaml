@@ -1,0 +1,101 @@
+# LulcInputDataset — tile-based training with multi-source LULC as model input
+#
+# Each CSV row points to one pre-cut tile (image, mask, and N LULC rasters).
+# Output tensor: (3 + N * num_classes, H, W) — RGB concatenated with one-hot LULC.
+#
+# Two usage variants:
+#   Variant A (below): tile-based — one tile file per CSV row
+#   Variant B (commented): windowed — patch reads from full-scene rasters
+
+# ---------------------------------------------------------------------------
+# Variant A: LulcInputDataset — pre-cut tiles
+# ---------------------------------------------------------------------------
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.lulc_input_dataset.LulcInputDataset
+  input_csv_path: /data/splits/train.csv
+  image_key: image_path
+  mask_key: mask_path
+  # One column per LULC source — each must be a single-band integer raster.
+  lulc_keys:
+    - mapbiomas_path
+    - esri_path
+    - dw_path
+  num_classes: 6            # EDGV 3.0 six-class legend
+  ignore_lulc_index: 255    # pixels with this value become all-zero one-hot vectors
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.VerticalFlip
+      p: 0.5
+    - _target_: albumentations.RandomRotate90
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: 16
+    num_workers: 8
+    shuffle: true
+    pin_memory: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.lulc_input_dataset.LulcInputDataset
+  input_csv_path: /data/splits/val.csv
+  image_key: image_path
+  mask_key: mask_path
+  lulc_keys:
+    - mapbiomas_path
+    - esri_path
+    - dw_path
+  num_classes: 6
+  ignore_lulc_index: 255
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: 16
+    num_workers: 8
+    shuffle: false
+    pin_memory: true
+
+# ---------------------------------------------------------------------------
+# Variant B: LulcInputWindowedDataset — on-the-fly patches from full scenes
+# ---------------------------------------------------------------------------
+# CSV must have row_off, col_off, patch_size columns in addition to file paths.
+# The same scene file can appear in multiple rows (one row per patch).
+# ---------------------------------------------------------------------------
+
+# train_dataset:
+#   _target_: pytorch_segmentation_models_trainer.dataset_loader.lulc_input_dataset.LulcInputWindowedDataset
+#   input_csv_path: /data/splits/train_windows.csv
+#   image_key: image_path
+#   mask_key: mask_path
+#   lulc_keys:
+#     - mapbiomas_path
+#     - esri_path
+#     - dw_path
+#   num_classes: 6
+#   ignore_lulc_index: 255
+#   row_off_key: row_off
+#   col_off_key: col_off
+#   patch_size_key: patch_size
+#   augmentation_list:
+#     - _target_: albumentations.HorizontalFlip
+#       p: 0.5
+#     - _target_: albumentations.VerticalFlip
+#       p: 0.5
+#     - _target_: albumentations.RandomRotate90
+#       p: 0.5
+#     - _target_: albumentations.Normalize
+#       mean: [0.485, 0.456, 0.406]
+#       std: [0.229, 0.224, 0.225]
+#     - _target_: albumentations.pytorch.ToTensorV2
+#   data_loader:
+#     batch_size: 8
+#     num_workers: 8
+#     shuffle: true
+#     pin_memory: true
