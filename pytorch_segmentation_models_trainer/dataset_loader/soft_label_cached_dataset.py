@@ -10,9 +10,10 @@ W_conf is computed from the cached P_soft on every access, which keeps the cache
 parameter-independent: ``alpha``, ``entropy_norm``, and ``use_border`` can be
 changed without invalidating the cache.
 
-This class accepts the same ``sources_csv`` format as the ``build-soft-labels``
-CLI (``tile_id, image_path, source_name, lulc_path, weight``), so no
-pre-processing step is required before training.
+This class accepts the same wide ``sources_csv`` format as the
+``build-soft-labels`` CLI:
+``tile_id,image_path,mask_path,<lulc columns...>``. ``tile_id`` is optional.
+External LULC source columns are listed with ``lulc_keys``.
 
 Windowed reads are supported via two mechanisms:
 
@@ -47,7 +48,9 @@ from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     load_augmentation_object,
 )
 from pytorch_segmentation_models_trainer.tools.soft_labels.build_soft_labels import (
+    _CARTOGRAPHIC_SOURCE_NAME,
     _get_image_grid,
+    _normalize_sources_dataframe,
     _reproject_lulc_to_image_grid,
     _write_geotiff,
     compute_p_soft,
@@ -93,18 +96,21 @@ class SoftLabelCachedDataset(Dataset):
     GeoTIFF; only the requested window is loaded into memory per access.
 
     Args:
-        sources_csv: Path to a CSV with columns
-            ``tile_id, image_path, source_name, lulc_path, weight``.
+        sources_csv: Path to a wide CSV with one row per tile.
         cache_dir: Directory where P_soft GeoTIFFs are cached.  Created
             automatically if absent.
         num_classes: Number of land-cover classes (0-indexed).
         alpha: Entropy component weight for W_conf.
         use_border: When True (default), include the border-distance component
             in W_conf.  Set to False for the original paper formula.
-        entropy_norm: Entropy normalisation strategy. ``"max_entropy"``
-            (default) normalises by ``log(C)``; ``"minmax"`` applies per-tile
-            min-max normalisation (LaTeX Eq. 9–10, Experiment E4).
+        entropy_norm: Entropy normalization strategy. ``"max_entropy"``
+            (default) normalizes by ``log(C)``; ``"minmax"`` applies per-tile
+            min-max normalization (LaTeX Eq. 9-10, Experiment E4).
         image_key: Column name for image paths. Default ``"image_path"``.
+        mask_key: Column name for the BAGS cartographic mask. Default
+            ``"mask_path"``.
+        lulc_keys: CSV columns with external LULC source paths. The soft label
+            is an equal vote over ``mask_key`` plus these columns.
         augmentation_list: Albumentations transform configs.  Geometric
             transforms are applied identically to image, P_soft, and W_conf.
         data_loader: DataLoader configuration stored on the object for the
@@ -121,6 +127,8 @@ class SoftLabelCachedDataset(Dataset):
             ``"image"`` (default) — pixel row/col offsets.
             ``"world"`` — geographic bounding boxes.
         seed: Unused; kept for Hydra config compatibility.
+        border_radius: Fixed radius *R* in pixels for the
+            ``w_border_carta`` normalization (default 10).
         **kwargs: Reserved for Hydra compatibility.
 
     Example YAML::
@@ -150,6 +158,8 @@ class SoftLabelCachedDataset(Dataset):
         use_border: bool = True,
         entropy_norm: str = "max_entropy",
         image_key: str = "image_path",
+        mask_key: str = "mask_path",
+        lulc_keys: Optional[List[str]] = None,
         augmentation_list: Optional[List] = None,
         data_loader: Optional[Any] = None,
         n_first_rows_to_read: Optional[int] = None,
@@ -158,20 +168,29 @@ class SoftLabelCachedDataset(Dataset):
         windows_csv: Optional[Union[str, Path]] = None,
         windows_coord_type: str = "image",
         seed: Optional[int] = None,
+        border_radius: int = 10,
         **kwargs,
     ) -> None:
         self.num_classes = num_classes
         self.alpha = alpha
         self.use_border = use_border
         self.entropy_norm = entropy_norm
+        self.border_radius = border_radius
         self.image_key = image_key
+        self.mask_key = mask_key
+        self.lulc_keys = list(lulc_keys) if lulc_keys else []
         self.data_loader = data_loader or {}
         self._cache_dir = Path(cache_dir)
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
-        df = pd.read_csv(sources_csv)
+        df = _normalize_sources_dataframe(
+            pd.read_csv(sources_csv),
+            image_key=self.image_key,
+            mask_key=self.mask_key,
+            lulc_keys=self.lulc_keys,
+        )
         grouped = [
-            (tile_id, grp.iloc[0][image_key], grp)
+            (tile_id, grp.iloc[0]["image_path"], grp)
             for tile_id, grp in df.groupby("tile_id", sort=False)
         ]
         if n_first_rows_to_read is not None:
@@ -323,11 +342,15 @@ class SoftLabelCachedDataset(Dataset):
 
         image_np = self._read_image(image_path)
         p_soft_chw = self._ensure_p_soft_cached(tile_id, rows, image_path)
+
+        bags_mask = self._load_bags_mask_full(rows, image_path)
         w_conf_chw = compute_w_conf(
             p_soft_chw,
             alpha=self.alpha,
             use_border=self.use_border,
             entropy_norm=self.entropy_norm,
+            bags_mask=bags_mask,
+            border_radius=self.border_radius,
         )
 
         p_soft_hwc = np.ascontiguousarray(p_soft_chw.transpose(1, 2, 0))
@@ -362,11 +385,15 @@ class SoftLabelCachedDataset(Dataset):
 
         image_np = self._read_image_window(image_path, win)
         p_soft_chw = self._get_p_soft_window(tile_id, rows, image_path, win)
+
+        bags_mask = self._load_bags_mask_window(rows, image_path, win)
         w_conf_chw = compute_w_conf(
             p_soft_chw,
             alpha=self.alpha,
             use_border=self.use_border,
             entropy_norm=self.entropy_norm,
+            bags_mask=bags_mask,
+            border_radius=self.border_radius,
         )
 
         p_soft_hwc = np.ascontiguousarray(p_soft_chw.transpose(1, 2, 0))
@@ -392,6 +419,50 @@ class SoftLabelCachedDataset(Dataset):
         }
 
     # ------------------------------------------------------------------
+    # BAGS mask helpers (w_border_carta, E5)
+    # ------------------------------------------------------------------
+
+    def _load_bags_mask_full(
+        self,
+        rows: pd.DataFrame,
+        image_path: str,
+    ) -> Optional[np.ndarray]:
+        """Return the reprojected BAGS mask (H, W) uint8, or None.
+
+        When the cartographic source is absent from *rows*, returns ``None`` so
+        that ``compute_w_conf`` falls back to the argmax-based border.
+        """
+        if not self.use_border:
+            return None
+        bags_rows = rows[rows["source_name"] == _CARTOGRAPHIC_SOURCE_NAME]
+        if bags_rows.empty:
+            logger.warning(
+                "cartographic mask source not found in sources; "
+                "falling back to argmax-based border",
+            )
+            return None
+        img_h, img_w, img_transform, img_crs, _ = _get_image_grid(image_path)
+        return _reproject_lulc_to_image_grid(
+            bags_rows.iloc[0]["lulc_path"], img_h, img_w, img_transform, img_crs
+        )
+
+    def _load_bags_mask_window(
+        self,
+        rows: pd.DataFrame,
+        image_path: str,
+        window: "rasterio.windows.Window",
+    ) -> Optional[np.ndarray]:
+        """Return the window slice of the BAGS mask (ph, pw) uint8, or None."""
+        bags_mask_full = self._load_bags_mask_full(rows, image_path)
+        if bags_mask_full is None:
+            return None
+        ro = int(window.row_off)
+        co = int(window.col_off)
+        ph = int(window.height)
+        pw = int(window.width)
+        return bags_mask_full[ro : ro + ph, co : co + pw]
+
+    # ------------------------------------------------------------------
     # Cache logic
     # ------------------------------------------------------------------
 
@@ -410,15 +481,14 @@ class SoftLabelCachedDataset(Dataset):
 
         img_h, img_w, img_transform, img_crs, img_profile = _get_image_grid(image_path)
 
-        lulc_maps, weights = [], []
+        lulc_maps = []
         for _, row in rows.iterrows():
             lulc = _reproject_lulc_to_image_grid(
                 row["lulc_path"], img_h, img_w, img_transform, img_crs
             )
             lulc_maps.append(lulc)
-            weights.append(float(row["weight"]))
 
-        p_soft = compute_p_soft(lulc_maps, weights, self.num_classes)
+        p_soft = compute_p_soft(lulc_maps, self.num_classes)
 
         # Atomic write: .tmp → rename (safe for concurrent DataLoader workers)
         tmp_path = self._cache_dir / f"{tile_id}.tif.tmp"

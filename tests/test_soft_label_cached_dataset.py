@@ -87,18 +87,8 @@ def sources_setup(tmp_path):
             {
                 "tile_id": tile_id,
                 "image_path": str(img_path),
-                "source_name": "a",
-                "lulc_path": str(lulc_a_path),
-                "weight": 1.0,
-            }
-        )
-        rows.append(
-            {
-                "tile_id": tile_id,
-                "image_path": str(img_path),
-                "source_name": "b",
-                "lulc_path": str(lulc_b_path),
-                "weight": 1.0,
+                "mask_path": str(lulc_a_path),
+                "mapbiomas_path": str(lulc_b_path),
             }
         )
 
@@ -115,6 +105,7 @@ def _make_ds(sources_setup, tmp_path, **kwargs) -> SoftLabelCachedDataset:
         num_classes=NUM_CLASSES,
         alpha=0.6,
         use_border=False,
+        lulc_keys=["mapbiomas_path"],
     )
     defaults.update(kwargs)
     return SoftLabelCachedDataset(**defaults)
@@ -704,3 +695,182 @@ class TestSoftLabelCachedDatasetWindowsCsvWorld:
             sources_setup, tmp_path, windows_csv=str(wcsv), windows_coord_type="world"
         )
         assert len(ds) == 2
+
+
+# ---------------------------------------------------------------------------
+# cartographic mask / border_radius (w_border_carta, E5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def sources_setup_with_bags(tmp_path):
+    """Two wide source rows with a cartographic mask and two LULC sources.
+
+    The mask_path raster has a boundary at 3/4 height (row 24 out of 32),
+    which differs from the argmax(P_soft) boundary at row 16.
+    """
+    rows = []
+    for i in range(2):
+        tile_id = f"tile_{i}"
+        tile_dir = tmp_path / tile_id
+        tile_dir.mkdir()
+
+        img_path = tile_dir / "image.tif"
+        _write_image(img_path)
+
+        lulc_a = np.zeros((IMG_H, IMG_W), dtype=np.uint8)
+        lulc_a[: IMG_H // 2, :] = 1
+        lulc_a_path = tile_dir / "lulc_a.tif"
+        _write_lulc(lulc_a_path, lulc_a)
+
+        lulc_b = np.zeros((IMG_H, IMG_W), dtype=np.uint8)
+        lulc_b[IMG_H // 2 :, :] = 2
+        lulc_b_path = tile_dir / "lulc_b.tif"
+        _write_lulc(lulc_b_path, lulc_b)
+
+        # BAGS mask: boundary at 3/4 height, intentionally different from argmax.
+        bags_mask = np.zeros((IMG_H, IMG_W), dtype=np.uint8)
+        bags_mask[3 * IMG_H // 4 :, :] = 1
+        bags_path = tile_dir / "bags.tif"
+        _write_lulc(bags_path, bags_mask)
+
+        rows.append(
+            {
+                "tile_id": tile_id,
+                "image_path": str(img_path),
+                "mask_path": str(bags_path),
+                "mapbiomas_path": str(lulc_a_path),
+                "esri_path": str(lulc_b_path),
+            }
+        )
+
+    csv_path = tmp_path / "sources_with_bags.csv"
+    pd.DataFrame(rows).to_csv(csv_path, index=False)
+    return csv_path
+
+
+class TestSoftLabelCachedDatasetWithBagsMask:
+    """Tests for cartographic-mask border confidence (w_border_carta, E5)."""
+
+    def _make_ds_bags(self, csv_path, tmp_path, **kwargs):
+        cache_dir = tmp_path / "cache_bags"
+        defaults = dict(
+            sources_csv=str(csv_path),
+            cache_dir=str(cache_dir),
+            num_classes=NUM_CLASSES,
+            alpha=0.6,
+            use_border=True,
+            lulc_keys=["mapbiomas_path", "esri_path"],
+        )
+        defaults.update(kwargs)
+        return SoftLabelCachedDataset(**defaults)
+
+    def test_cartographic_mask_default_behavior(
+        self, sources_setup_with_bags, tmp_path
+    ):
+        """The cartographic mask is detected from mask_path by default."""
+        ds_default = self._make_ds_bags(sources_setup_with_bags, tmp_path)
+        cache_b = tmp_path / "cache_explicit"
+        ds_explicit = SoftLabelCachedDataset(
+            sources_csv=str(sources_setup_with_bags),
+            cache_dir=str(cache_b),
+            num_classes=NUM_CLASSES,
+            alpha=0.6,
+            use_border=True,
+            lulc_keys=["mapbiomas_path", "esri_path"],
+        )
+        w_default = ds_default[0]["mask"]["w_conf"]
+        w_explicit = ds_explicit[0]["mask"]["w_conf"]
+        assert torch.allclose(w_default, w_explicit, atol=1e-5)
+
+    def test_cartographic_mask_output_shape(self, sources_setup_with_bags, tmp_path):
+        ds = self._make_ds_bags(
+            sources_setup_with_bags,
+            tmp_path,
+            border_radius=10,
+        )
+        w_conf = ds[0]["mask"]["w_conf"]
+        assert w_conf.shape == (1, IMG_H, IMG_W)
+
+    def test_cartographic_mask_output_in_unit_interval(
+        self, sources_setup_with_bags, tmp_path
+    ):
+        ds = self._make_ds_bags(
+            sources_setup_with_bags,
+            tmp_path,
+            border_radius=10,
+        )
+        w_conf = ds[0]["mask"]["w_conf"]
+        assert w_conf.min() >= -1e-5
+        assert w_conf.max() <= 1.0 + 1e-5
+
+    def test_cartographic_mask_boundary_has_zero_confidence(
+        self, sources_setup_with_bags, tmp_path
+    ):
+        """Pixels on the mask_path boundary have zero border confidence."""
+        ds = SoftLabelCachedDataset(
+            sources_csv=str(sources_setup_with_bags),
+            cache_dir=str(tmp_path / "cache_bags_alt"),
+            num_classes=NUM_CLASSES,
+            alpha=0.0,
+            use_border=True,
+            border_radius=10,
+            lulc_keys=["mapbiomas_path", "esri_path"],
+        )
+        w_conf = ds[0]["mask"]["w_conf"]
+        assert w_conf[0, 3 * IMG_H // 4 - 1, 0] == pytest.approx(0.0, abs=1e-5)
+        assert w_conf[0, 3 * IMG_H // 4, 0] == pytest.approx(0.0, abs=1e-5)
+
+    def test_cartographic_mask_windowed_output_shape(
+        self, sources_setup_with_bags, tmp_path
+    ):
+        """Windowed mode with mask_path returns the correct patch shape."""
+        ds = self._make_ds_bags(
+            sources_setup_with_bags,
+            tmp_path,
+            border_radius=10,
+            patch_size=(16, 16),
+        )
+        w_conf = ds[0]["mask"]["w_conf"]
+        assert w_conf.shape == (1, 16, 16)
+
+    def test_cartographic_mask_windowed_in_unit_interval(
+        self, sources_setup_with_bags, tmp_path
+    ):
+        """Windowed mode with mask_path returns w_conf in [0, 1]."""
+        ds = self._make_ds_bags(
+            sources_setup_with_bags,
+            tmp_path,
+            border_radius=10,
+            patch_size=(16, 16),
+        )
+        for i in range(len(ds)):
+            w_conf = ds[i]["mask"]["w_conf"]
+            assert w_conf.min() >= -1e-5
+            assert w_conf.max() <= 1.0 + 1e-5
+
+    def test_border_radius_propagated(self, sources_setup_with_bags, tmp_path):
+        """Different border_radius values produce different w_conf maps."""
+        cache_r5 = tmp_path / "cache_r5"
+        cache_r20 = tmp_path / "cache_r20"
+        ds_r5 = SoftLabelCachedDataset(
+            sources_csv=str(sources_setup_with_bags),
+            cache_dir=str(cache_r5),
+            num_classes=NUM_CLASSES,
+            alpha=0.0,
+            use_border=True,
+            border_radius=5,
+            lulc_keys=["mapbiomas_path", "esri_path"],
+        )
+        ds_r20 = SoftLabelCachedDataset(
+            sources_csv=str(sources_setup_with_bags),
+            cache_dir=str(cache_r20),
+            num_classes=NUM_CLASSES,
+            alpha=0.0,
+            use_border=True,
+            border_radius=20,
+            lulc_keys=["mapbiomas_path", "esri_path"],
+        )
+        w_r5 = ds_r5[0]["mask"]["w_conf"]
+        w_r20 = ds_r20[0]["mask"]["w_conf"]
+        assert not torch.allclose(w_r5, w_r20)

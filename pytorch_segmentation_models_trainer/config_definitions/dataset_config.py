@@ -419,10 +419,11 @@ class SoftLabelWindowedDatasetConfig:
 class SoftLabelCachedDatasetConfig:
     """Configuration for ``SoftLabelCachedDataset``.
 
-    Accepts the same ``sources_csv`` format as ``build-soft-labels``
-    (``tile_id, image_path, source_name, lulc_path, weight``).  P_soft is
-    computed lazily on first access and cached to ``cache_dir``; W_conf is
-    recomputed each epoch from ``alpha``, ``entropy_norm``, and ``use_border``.
+    Accepts the same wide ``sources_csv`` format as ``build-soft-labels``:
+    one row per tile with ``image_key``, ``mask_key``, and the columns listed
+    in ``lulc_keys``. P_soft is computed lazily on first access and cached to
+    ``cache_dir``; W_conf is recomputed each epoch from ``alpha``,
+    ``entropy_norm``, ``use_border``, and ``border_radius``.
 
     When ``patch_size`` is set the dataset operates in windowed mode: it
     enumerates a regular grid of patches over every tile and each access reads
@@ -435,8 +436,12 @@ class SoftLabelCachedDatasetConfig:
           cache_dir: /data/cache/p_soft
           num_classes: 6
           alpha: 0.6
-          use_border: false
+          use_border: true
           entropy_norm: minmax
+          image_key: image_path
+          mask_key: mask_path
+          lulc_keys: [mapbiomas_path, esri_path, dw_path]
+          border_radius: 10
           patch_size: [256, 256]
           patch_stride: [256, 256]
           augmentation_list:
@@ -462,7 +467,10 @@ class SoftLabelCachedDatasetConfig:
     alpha: float = 0.6
     use_border: bool = True
     entropy_norm: str = "max_entropy"
+    border_radius: int = 10
     image_key: str = "image_path"
+    mask_key: str = "mask_path"
+    lulc_keys: List[str] = field(default_factory=list)
     augmentation_list: List = field(default_factory=list)
     data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
     n_first_rows_to_read: Optional[int] = None

@@ -422,6 +422,34 @@ def ddoq_vae_cmd(yaml_path, k, checkpoint_path, output_dir, distilled_image_form
         "'minmax' applies per-tile min-max normalisation (LaTeX Eq. 9-10, Experiment E4)."
     ),
 )
+@click.option(
+    "--image-key",
+    default="image_path",
+    show_default=True,
+    help="CSV column containing RGB image paths.",
+)
+@click.option(
+    "--mask-key",
+    default="mask_path",
+    show_default=True,
+    help="CSV column containing the BAGS cartographic mask path.",
+)
+@click.option(
+    "--lulc-key",
+    "lulc_keys",
+    multiple=True,
+    help=(
+        "CSV column containing one external LULC source raster. "
+        "Repeat for each source, e.g. --lulc-key mapbiomas_path --lulc-key esri_path."
+    ),
+)
+@click.option(
+    "--border-radius",
+    default=10,
+    show_default=True,
+    type=int,
+    help="Fixed radius R in pixels for BAGS-based w_border_carta.",
+)
 def build_soft_labels_cmd(
     input_csv,
     output_dir,
@@ -436,10 +464,16 @@ def build_soft_labels_cmd(
     beta,
     use_border,
     entropy_norm,
+    image_key,
+    mask_key,
+    lulc_keys,
+    border_radius,
 ):
     """Build P_soft and W_conf rasters from multiple LULC sources in INPUT_CSV.
 
-    INPUT_CSV must have columns: tile_id, image_path, source_name, lulc_path, weight.
+    INPUT_CSV must be a wide CSV with one row per tile. Use --mask-key for
+    the BAGS cartographic mask column and repeat --lulc-key for each external
+    LULC source column.
     """
     from pathlib import Path
     from pytorch_segmentation_models_trainer.tools.soft_labels import build_soft_labels
@@ -458,6 +492,10 @@ def build_soft_labels_cmd(
         beta=beta,
         use_border=use_border,
         entropy_norm=entropy_norm,
+        image_key=image_key,
+        mask_key=mask_key,
+        lulc_keys=list(lulc_keys),
+        border_radius=border_radius,
     )
     click.echo(f"Manifest written to '{manifest_path}'.")
 

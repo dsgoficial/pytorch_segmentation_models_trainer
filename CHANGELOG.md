@@ -1,10 +1,28 @@
 # Unreleased
 
+## Soft Labels - BAGS border confidence for Experiment E5
+
+- Added BAGS-based `w_border_carta` support to soft-label confidence maps:
+  `compute_w_conf` now accepts `bags_mask` and `border_radius` and computes
+  `min(1, d_carta / R)` from the 3x3 morphological boundary of the BAGS mask.
+  The legacy argmax-based border remains the default when no BAGS mask is
+  provided.
+- Added `--image-key`, `--mask-key`, repeatable `--lulc-key`, and
+  `--border-radius` to the `build-soft-labels` CLI. The source CSV is now a
+  wide one-row-per-tile file; the soft label is an equal vote over `mask_key`
+  plus the listed `lulc_keys`.
+- Added `mask_key`, `lulc_keys`, and `border_radius` to
+  `SoftLabelCachedDataset` and `SoftLabelCachedDatasetConfig`, so lazy
+  full-tile and windowed reads can use the same E5 confidence formula without
+  rebuilding the P_soft cache.
+- Updated `conf/examples/soft_label_cached.yaml` and the soft-label training
+  guide with functional Experiment E5 examples.
+
 ## Soft Labels — SoftLabelCachedDataset with windowed read
 
 - Added `SoftLabelCachedDataset` in `dataset_loader/soft_label_cached_dataset.py`:
-  accepts the same `sources_csv` format as `build-soft-labels`
-  (`tile_id, image_path, source_name, lulc_path, weight`), computes P_soft
+  accepts the same wide `sources_csv` format as `build-soft-labels`
+  (`tile_id, image_path, mask_path, <lulc columns...>`), computes P_soft
   lazily on first access (atomic `.tmp → rename` write, safe for multi-worker
   DataLoaders), and reads from the GeoTIFF cache on subsequent accesses.
   W_conf is recomputed on every access from the cached P_soft so that `alpha`,

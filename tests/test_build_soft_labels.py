@@ -15,6 +15,8 @@ from pytorch_segmentation_models_trainer.tools.soft_labels.build_soft_labels imp
     aggregate_aef_to_image_grid,
     load_aef_embedding,
     _compute_hf_class_centroids,
+    _detect_boundary,
+    _normalize_sources_dataframe,
     _reproject_lulc_to_image_grid,
     generate_patch_rows,
     expand_manifest_to_patches,
@@ -112,40 +114,92 @@ def diff_res_setup(tmp_path):
 class TestComputePSoft:
     def test_output_shape(self):
         maps = [np.zeros((8, 8), dtype=np.uint8)]
-        p = compute_p_soft(maps, [1.0], num_classes=3)
+        p = compute_p_soft(maps, num_classes=3)
         assert p.shape == (3, 8, 8)
 
     def test_sums_to_one(self):
         maps = [np.zeros((8, 8), dtype=np.uint8)]
-        p = compute_p_soft(maps, [1.0], num_classes=3)
+        p = compute_p_soft(maps, num_classes=3)
         assert np.allclose(p.sum(axis=0), 1.0)
 
     def test_single_source_hard_label(self):
         lulc = np.full((4, 4), 2, dtype=np.uint8)
-        p = compute_p_soft([lulc], [1.0], num_classes=4)
+        p = compute_p_soft([lulc], num_classes=4)
         assert np.all(p[2] == 1.0)
         assert np.all(p[0] == 0.0)
 
-    def test_two_sources_equal_weight(self):
-        """Two conflicting sources at equal weight → P_soft = 0.5 each."""
+    def test_two_sources_equal_vote(self):
+        """Two conflicting sources with equal vote give P_soft = 0.5 each."""
         a = np.zeros((4, 4), dtype=np.uint8)  # all class 0
         b = np.full((4, 4), 1, dtype=np.uint8)  # all class 1
-        p = compute_p_soft([a, b], [1.0, 1.0], num_classes=2)
+        p = compute_p_soft([a, b], num_classes=2)
         assert np.allclose(p[0], 0.5)
         assert np.allclose(p[1], 0.5)
 
-    def test_weights_respected(self):
-        """Heavier source dominates probability."""
-        a = np.zeros((4, 4), dtype=np.uint8)  # class 0, weight 3
-        b = np.full((4, 4), 1, dtype=np.uint8)  # class 1, weight 1
-        p = compute_p_soft([a, b], [3.0, 1.0], num_classes=2)
-        assert np.allclose(p[0], 0.75)
-        assert np.allclose(p[1], 0.25)
-
     def test_output_dtype_float32(self):
         maps = [np.zeros((4, 4), dtype=np.uint8)]
-        p = compute_p_soft(maps, [1.0], num_classes=2)
+        p = compute_p_soft(maps, num_classes=2)
         assert p.dtype == np.float32
+
+
+# ---------------------------------------------------------------------------
+# _normalize_sources_dataframe
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeSourcesDataFrame:
+    def test_wide_csv_uses_listed_lulc_keys(self):
+        import pandas as pd
+
+        df = pd.DataFrame(
+            [
+                {
+                    "tile_id": "tile_0",
+                    "image_path": "/img/tile_0.tif",
+                    "mask_path": "/lulc/bags_0.tif",
+                    "mapbiomas_path": "/lulc/mb_0.tif",
+                    "esri_path": "/lulc/esri_0.tif",
+                    "unlisted_path": "/lulc/ignored_0.tif",
+                }
+            ]
+        )
+        normalized = _normalize_sources_dataframe(
+            df,
+            mask_key="mask_path",
+            lulc_keys=["mapbiomas_path", "esri_path"],
+        )
+        assert normalized["source_name"].tolist() == [
+            "bags",
+            "mapbiomas_path",
+            "esri_path",
+        ]
+        assert normalized["lulc_path"].tolist() == [
+            "/lulc/bags_0.tif",
+            "/lulc/mb_0.tif",
+            "/lulc/esri_0.tif",
+        ]
+
+    def test_wide_csv_requires_mask_key(self):
+        import pandas as pd
+
+        df = pd.DataFrame([{"tile_id": "tile_0", "image_path": "/img/tile_0.tif"}])
+        with pytest.raises(ValueError, match="mask_key 'mask_path'"):
+            _normalize_sources_dataframe(df, mask_key="mask_path")
+
+    def test_missing_listed_lulc_key_raises(self):
+        import pandas as pd
+
+        df = pd.DataFrame(
+            [
+                {
+                    "tile_id": "tile_0",
+                    "image_path": "/img/tile_0.tif",
+                    "mask_path": "/lulc/bags_0.tif",
+                }
+            ]
+        )
+        with pytest.raises(ValueError, match="missing LULC key 'mapbiomas_path'"):
+            _normalize_sources_dataframe(df, lulc_keys=["mapbiomas_path"])
 
 
 # ---------------------------------------------------------------------------
@@ -317,13 +371,11 @@ class TestProcessTile:
                 {
                     "source_name": "a",
                     "lulc_path": str(path_a),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 },
                 {
                     "source_name": "b",
                     "lulc_path": str(path_b),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 },
             ]
@@ -345,7 +397,6 @@ class TestProcessTile:
                 {
                     "source_name": "a",
                     "lulc_path": str(lulc_path),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 },
             ]
@@ -367,7 +418,6 @@ class TestProcessTile:
                 {
                     "source_name": "a",
                     "lulc_path": str(path_a),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 },
             ]
@@ -386,13 +436,11 @@ class TestProcessTile:
                 {
                     "source_name": "a",
                     "lulc_path": str(path_a),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 },
                 {
                     "source_name": "b",
                     "lulc_path": str(path_b),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 },
             ]
@@ -413,7 +461,6 @@ class TestProcessTile:
                 {
                     "source_name": "a",
                     "lulc_path": str(path_a),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 },
             ]
@@ -435,7 +482,6 @@ class TestProcessTile:
                 {
                     "source_name": "a",
                     "lulc_path": str(lulc_path),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 },
             ]
@@ -458,7 +504,6 @@ class TestProcessTile:
                 {
                     "source_name": "a",
                     "lulc_path": str(path_a),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 }
             ]
@@ -537,7 +582,6 @@ class TestExpandManifestToPatches:
                 {
                     "source_name": "a",
                     "lulc_path": str(path_a),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 },
             ]
@@ -1162,7 +1206,6 @@ class TestProcessTileWithAEF:
                 {
                     "source_name": "a",
                     "lulc_path": str(path_a),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 }
             ]
@@ -1192,7 +1235,6 @@ class TestProcessTileWithAEF:
                 {
                     "source_name": "a",
                     "lulc_path": str(path_a),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 }
             ]
@@ -1243,7 +1285,6 @@ class TestProcessTileWithAEF:
                 {
                     "source_name": "a",
                     "lulc_path": str(path_a),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 }
             ]
@@ -1300,7 +1341,6 @@ class TestProcessTileWithAEF:
                 {
                     "source_name": "a",
                     "lulc_path": str(path_a),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 }
             ]
@@ -1338,7 +1378,6 @@ class TestProcessTileWithAEF:
                 {
                     "source_name": "a",
                     "lulc_path": str(path_a),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 }
             ]
@@ -1371,16 +1410,8 @@ class TestRun:
             {
                 "tile_id": "tile_0",
                 "image_path": str(img_path),
-                "source_name": "a",
-                "lulc_path": str(path_a),
-                "weight": 1.0,
-            },
-            {
-                "tile_id": "tile_0",
-                "image_path": str(img_path),
-                "source_name": "b",
-                "lulc_path": str(path_b),
-                "weight": 0.5,
+                "mask_path": str(path_a),
+                "mapbiomas_path": str(path_b),
             },
         ]
         csv_path = tmp_path / "sources.csv"
@@ -1400,6 +1431,7 @@ class TestRun:
             output_dir=out_dir,
             num_classes=3,
             max_workers=1,
+            lulc_keys=["mapbiomas_path"],
         )
         assert manifest_path.exists()
         import pandas as pd
@@ -1422,7 +1454,13 @@ class TestRun:
         img_path, path_a, path_b, h, w = same_res_setup
         csv_path = self._sources_csv(tmp_path, img_path, path_a, path_b)
         out_dir = tmp_path / "output"
-        manifest_path = run(str(csv_path), out_dir, num_classes=3, max_workers=1)
+        manifest_path = run(
+            str(csv_path),
+            out_dir,
+            num_classes=3,
+            max_workers=1,
+            lulc_keys=["mapbiomas_path"],
+        )
         row = pd.read_csv(manifest_path).iloc[0]
         assert Path(row["p_soft_path"]).exists()
         assert Path(row["w_conf_path"]).exists()
@@ -1443,6 +1481,7 @@ class TestRun:
             max_workers=1,
             patch_size=16,
             stride=16,
+            lulc_keys=["mapbiomas_path"],
         )
         df = pd.read_csv(manifest_path)
         assert "row_off" in df.columns
@@ -1470,6 +1509,7 @@ class TestRun:
             aef_embeddings_dir=str(aef_dir),
             aef_source="hf",
             beta=0.3,
+            lulc_keys=["mapbiomas_path"],
         )
         assert manifest_path.exists()
 
@@ -1485,9 +1525,7 @@ class TestRun:
             {
                 "tile_id": "bad_tile",
                 "image_path": str(tmp_path / "nonexistent.tif"),
-                "source_name": "a",
-                "lulc_path": str(tmp_path / "nonexistent.tif"),
-                "weight": 1.0,
+                "mask_path": str(tmp_path / "nonexistent.tif"),
             }
         ]
         csv_path = tmp_path / "bad.csv"
@@ -1514,6 +1552,7 @@ class TestRun:
             num_classes=3,
             max_workers=1,
             use_border=False,
+            lulc_keys=["mapbiomas_path"],
         )
         assert manifest_path.exists()
         df = pd.read_csv(manifest_path)
@@ -1542,6 +1581,7 @@ class TestRun:
             max_workers=1,
             use_border=False,
             entropy_norm="minmax",
+            lulc_keys=["mapbiomas_path"],
         )
         assert manifest_path.exists()
         df = pd.read_csv(manifest_path)
@@ -1673,7 +1713,6 @@ class TestProcessTileEntropyNorm:
                 {
                     "source_name": "a",
                     "lulc_path": str(path_a),
-                    "weight": 1.0,
                     "image_path": str(img_path),
                 }
             ]
@@ -1686,6 +1725,281 @@ class TestProcessTileEntropyNorm:
             alpha=0.6,
             use_border=False,
             entropy_norm="minmax",
+        )
+        with rasterio.open(w_conf_path) as src:
+            data = src.read(1)
+        assert data.shape == (h, w)
+        assert data.min() >= 0.0 - 1e-5
+        assert data.max() <= 1.0 + 1e-5
+
+
+# ---------------------------------------------------------------------------
+# _detect_boundary
+# ---------------------------------------------------------------------------
+
+
+class TestDetectBoundary:
+    def test_output_dtype_bool(self):
+        mask = np.zeros((8, 8), dtype=np.uint8)
+        assert _detect_boundary(mask).dtype == bool
+
+    def test_output_shape_matches_input(self):
+        mask = np.zeros((10, 12), dtype=np.uint8)
+        assert _detect_boundary(mask).shape == (10, 12)
+
+    def test_uniform_mask_has_no_border(self):
+        mask = np.zeros((8, 8), dtype=np.uint8)
+        assert not _detect_boundary(mask).any()
+
+    def test_two_class_horizontal_split_border(self):
+        """Top half class 0, bottom half class 1 yields junction-row borders."""
+        mask = np.zeros((8, 8), dtype=np.uint8)
+        mask[4:, :] = 1
+        border = _detect_boundary(mask)
+        assert border[3, :].all()
+        assert border[4, :].all()
+        assert not border[0, :].any()
+        assert not border[7, :].any()
+
+    def test_diagonal_difference_detected(self):
+        """8-connected: a diagonal class difference is detected."""
+        mask = np.zeros((6, 6), dtype=np.uint8)
+        mask[3, 3] = 1
+        border = _detect_boundary(mask)
+        assert border[3, 3]
+        assert border[2, 2]
+
+    def test_single_different_pixel_surrounded(self):
+        """An isolated single-pixel island marks itself and all 8 neighbors."""
+        mask = np.zeros((5, 5), dtype=np.uint8)
+        mask[2, 2] = 1
+        border = _detect_boundary(mask)
+        assert border[2, 2]
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                if dr == 0 and dc == 0:
+                    continue
+                assert border[2 + dr, 2 + dc]
+
+    def test_checkerboard_all_border(self):
+        """Checkerboard pattern makes every pixel a border pixel."""
+        idx = np.indices((6, 6)).sum(axis=0) % 2
+        mask = idx.astype(np.uint8)
+        assert _detect_boundary(mask).all()
+
+
+# ---------------------------------------------------------------------------
+# compute_w_conf - bags_mask / border_radius parameters (LaTeX Eq. 13, E5)
+# ---------------------------------------------------------------------------
+
+
+class TestComputeWConfWithBagsMask:
+    def _two_class_mask(self, h=16, w=16):
+        mask = np.zeros((h, w), dtype=np.uint8)
+        mask[h // 2 :, :] = 1
+        return mask
+
+    def _hard_p_soft(self, c=2, h=16, w=16, cls=0):
+        p = np.zeros((c, h, w), dtype=np.float32)
+        p[cls] = 1.0
+        return p
+
+    def test_bags_mask_none_preserves_existing_behavior(self):
+        """bags_mask=None is identical to not passing the argument."""
+        p = self._hard_p_soft()
+        w_old = compute_w_conf(p, alpha=0.6)
+        w_new = compute_w_conf(p, alpha=0.6, bags_mask=None)
+        assert np.allclose(w_old, w_new)
+
+    def test_bags_mask_output_shape(self):
+        h, w = 16, 16
+        p = self._hard_p_soft(h=h, w=w)
+        mask = self._two_class_mask(h, w)
+        result = compute_w_conf(p, alpha=0.6, bags_mask=mask)
+        assert result.shape == (1, h, w)
+
+    def test_bags_mask_output_dtype_float32(self):
+        p = self._hard_p_soft()
+        mask = self._two_class_mask()
+        assert compute_w_conf(p, alpha=0.6, bags_mask=mask).dtype == np.float32
+
+    def test_bags_mask_output_in_unit_interval(self):
+        p = self._hard_p_soft()
+        mask = self._two_class_mask()
+        result = compute_w_conf(p, alpha=0.6, bags_mask=mask)
+        assert result.min() >= 0.0 - 1e-6
+        assert result.max() <= 1.0 + 1e-6
+
+    def test_bags_mask_differs_from_argmax_border(self):
+        """BAGS boundary at a different location from argmax changes w_conf."""
+        h, w = 16, 16
+        # p_soft: boundary argmax at row h//2
+        p = np.zeros((2, h, w), dtype=np.float32)
+        p[0, : h // 2, :] = 1.0
+        p[1, h // 2 :, :] = 1.0
+        # bags mask: boundary at 3*h//4
+        bags = np.zeros((h, w), dtype=np.uint8)
+        bags[3 * h // 4 :, :] = 1
+        w_argmax = compute_w_conf(p, alpha=0.6, bags_mask=None)
+        w_bags = compute_w_conf(p, alpha=0.6, bags_mask=bags)
+        assert not np.allclose(w_argmax, w_bags)
+
+    def test_border_pixel_has_zero_w_border(self):
+        """Pixels on the BAGS boundary (d_carta=0) have w_border_carta=0."""
+        h, w = 16, 16
+        bags = np.zeros((h, w), dtype=np.uint8)
+        bags[h // 2 :, :] = 1  # border at rows h//2-1 and h//2
+        p = self._hard_p_soft(h=h, w=w)
+        result = compute_w_conf(p, alpha=0.0, bags_mask=bags, border_radius=10)
+        assert result[0, h // 2 - 1, 0] == pytest.approx(0.0, abs=1e-5)
+        assert result[0, h // 2, 0] == pytest.approx(0.0, abs=1e-5)
+
+    def test_far_from_border_clamped_to_one(self):
+        """Pixels farther than R from the boundary have w_border_carta=1.0."""
+        h, w = 32, 32
+        bags = np.zeros((h, w), dtype=np.uint8)
+        bags[h // 2 :, :] = 1
+        p = self._hard_p_soft(h=h, w=w)
+        result = compute_w_conf(p, alpha=0.0, bags_mask=bags, border_radius=3)
+        # Row 0 is at least 15 pixels from the border, so it is clamped to 1.
+        assert result[0, 0, 0] == pytest.approx(1.0, abs=1e-5)
+
+    def test_at_radius_equals_one(self):
+        """Pixel at exactly R pixels from the boundary has w_border_carta=1.0."""
+        h, w = 32, 32
+        bags = np.zeros((h, w), dtype=np.uint8)
+        bags[h // 2 :, :] = 1  # border at rows h//2-1 and h//2
+        p = self._hard_p_soft(h=h, w=w)
+        R = 5
+        # Row h//2 - 1 - R is exactly R from the border row h//2 - 1
+        result = compute_w_conf(p, alpha=0.0, bags_mask=bags, border_radius=R)
+        assert result[0, h // 2 - 1 - R, 0] == pytest.approx(1.0, abs=1e-5)
+
+    def test_use_border_false_ignores_bags_mask(self):
+        """use_border=False means bags_mask has no effect."""
+        h, w = 8, 8
+        p = self._hard_p_soft(h=h, w=w)
+        bags = self._two_class_mask(h, w)
+        w_no_border = compute_w_conf(p, alpha=0.6, use_border=False)
+        w_with_bags = compute_w_conf(p, alpha=0.6, use_border=False, bags_mask=bags)
+        assert np.allclose(w_no_border, w_with_bags)
+
+    def test_uniform_bags_mask_no_border_w_border_is_one(self):
+        """Single-class BAGS mask has no border, so w_border is 1 everywhere."""
+        h, w = 8, 8
+        bags = np.zeros((h, w), dtype=np.uint8)  # all class 0, no border
+        p = self._hard_p_soft(h=h, w=w)
+        result = compute_w_conf(p, alpha=0.0, bags_mask=bags, border_radius=10)
+        assert np.allclose(result, 1.0, atol=1e-5)
+
+    def test_border_radius_must_be_positive(self):
+        p = self._hard_p_soft()
+        mask = self._two_class_mask()
+        with pytest.raises(ValueError, match="border_radius must be > 0"):
+            compute_w_conf(p, alpha=0.6, bags_mask=mask, border_radius=0)
+
+    def test_border_radius_controls_gradient_steepness(self):
+        """Smaller R makes confidence recover faster from the boundary."""
+        h, w = 32, 32
+        bags = np.zeros((h, w), dtype=np.uint8)
+        bags[h // 2 :, :] = 1
+        p = self._hard_p_soft(h=h, w=w)
+        r5 = compute_w_conf(p, alpha=0.0, bags_mask=bags, border_radius=5)
+        r20 = compute_w_conf(p, alpha=0.0, bags_mask=bags, border_radius=20)
+        # At a row 3 pixels from boundary: min(1,3/5)=0.6 > min(1,3/20)=0.15
+        assert r5[0, h // 2 - 4, 0] > r20[0, h // 2 - 4, 0]
+
+
+# ---------------------------------------------------------------------------
+# process_tile - cartographic mask / border_radius (E5)
+# ---------------------------------------------------------------------------
+
+
+class TestProcessTileWithBagsMask:
+    def _make_rows(self, img_path, lulc_path, bags_path=None):
+        import pandas as pd
+
+        rows = [
+            {
+                "source_name": "a",
+                "lulc_path": str(lulc_path),
+                "image_path": str(img_path),
+            }
+        ]
+        if bags_path is not None:
+            rows.append(
+                {
+                    "source_name": "bags",
+                    "lulc_path": str(bags_path),
+                    "image_path": str(img_path),
+                }
+            )
+        return pd.DataFrame(rows)
+
+    def test_without_cartographic_mask_uses_default_border(
+        self, same_res_setup, tmp_path
+    ):
+        """Absent cartographic mask gives the default argmax border."""
+        img_path, path_a, _, h, w = same_res_setup
+        rows = self._make_rows(img_path, path_a)
+        tmp_ref = tmp_path / "ref"
+        tmp_exp = tmp_path / "exp"
+        _, _, _, w_ref = process_tile("tile_0", rows, tmp_ref, num_classes=3, alpha=0.6)
+        _, _, _, w_exp = process_tile("tile_0", rows, tmp_exp, num_classes=3, alpha=0.6)
+        with rasterio.open(w_ref) as s1, rasterio.open(w_exp) as s2:
+            assert np.allclose(s1.read(1), s2.read(1))
+
+    def test_cartographic_mask_produces_valid_w_conf(self, same_res_setup, tmp_path):
+        """The internal cartographic source gives a valid W_conf raster."""
+        img_path, path_a, path_b, h, w = same_res_setup
+        rows = self._make_rows(img_path, path_a, bags_path=path_b)
+        _, _, _, w_conf_path = process_tile(
+            "tile_0",
+            rows,
+            tmp_path,
+            num_classes=3,
+            alpha=0.6,
+            border_radius=10,
+        )
+        with rasterio.open(w_conf_path) as src:
+            data = src.read(1)
+        assert data.shape == (h, w)
+        assert data.min() >= 0.0 - 1e-5
+        assert data.max() <= 1.0 + 1e-5
+
+    def test_cartographic_mask_changes_w_conf(self, same_res_setup, tmp_path):
+        """W_conf computed from BAGS boundary differs from argmax-based W_conf."""
+        img_path, path_a, path_b, h, w = same_res_setup
+        rows_without_bags = self._make_rows(img_path, path_a)
+        rows_with_bags = self._make_rows(img_path, path_a, bags_path=path_b)
+        tmp_ref = tmp_path / "ref"
+        tmp_bags = tmp_path / "bags"
+        _, _, _, w_ref_path = process_tile(
+            "tile_0", rows_without_bags, tmp_ref, num_classes=3, alpha=0.6
+        )
+        _, _, _, w_bags_path = process_tile(
+            "tile_0",
+            rows_with_bags,
+            tmp_bags,
+            num_classes=3,
+            alpha=0.6,
+            border_radius=10,
+        )
+        with rasterio.open(w_ref_path) as s1, rasterio.open(w_bags_path) as s2:
+            assert not np.allclose(s1.read(1), s2.read(1))
+
+    def test_cartographic_mask_not_found_falls_back_gracefully(
+        self, same_res_setup, tmp_path
+    ):
+        """Missing bags source in rows falls back to argmax border."""
+        img_path, path_a, _, h, w = same_res_setup
+        rows = self._make_rows(img_path, path_a)  # no 'bags' source
+        _, _, _, w_conf_path = process_tile(
+            "tile_0",
+            rows,
+            tmp_path,
+            num_classes=3,
+            alpha=0.6,
         )
         with rasterio.open(w_conf_path) as src:
             data = src.read(1)

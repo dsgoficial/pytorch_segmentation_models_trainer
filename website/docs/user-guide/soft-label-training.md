@@ -44,6 +44,10 @@ pytorch-smt-tools build-soft-labels sources.csv \
     --output-dir /data/soft_labels \
     --num-classes 4 \
     --alpha 0.6 \
+    --mask-key mask_path \
+    --lulc-key mapbiomas_path \
+    --lulc-key esri_path \
+    --lulc-key dw_path \
     --max-workers 8
 ```
 
@@ -53,11 +57,8 @@ pytorch-smt-tools build-soft-labels sources.csv \
 **sources.csv format:**
 
 ```csv
-tile_id,image_path,source_name,lulc_path,weight
-tile_0,/data/images/tile_0.tif,mapbiomas,/data/mapbiomas/tile_0.tif,0.8
-tile_0,/data/images/tile_0.tif,esri_lulc,/data/esri/tile_0.tif,0.6
-tile_0,/data/images/tile_0.tif,dw,/data/dw/tile_0.tif,0.5
-tile_0,/data/images/tile_0.tif,carta25k,/data/carta/tile_0.tif,1.0
+tile_id,image_path,mask_path,mapbiomas_path,esri_path,dw_path
+tile_0,/data/images/tile_0.tif,/data/carta/tile_0.tif,/data/mapbiomas/tile_0.tif,/data/esri/tile_0.tif,/data/dw/tile_0.tif
 ```
 
 All LULC rasters are automatically reprojected to the image's CRS, resolution,
@@ -124,6 +125,40 @@ pytorch-smt-tools build-soft-labels sources.csv \
     --output-dir /data/soft_labels_e4 \
     --num-classes 6 --alpha 1.0 --no-border \
     --entropy-norm minmax
+```
+
+### BAGS border distance for Experiment E5
+
+Experiment E5 uses the cartographic BAGS mask, not `argmax(P_soft)`, to compute
+the border-distance component:
+
+```text
+w_border_carta(i) = min(1, d_carta(i) / R)
+```
+
+`d_carta(i)` is the Euclidean distance from pixel `i` to the nearest 3x3
+morphological boundary pixel in the BAGS mask. The default radius is `R=10`
+pixels.
+
+The source CSV must contain the BAGS cartographic mask column selected by
+`--mask-key`, plus any external LULC columns listed with `--lulc-key`:
+
+```csv
+tile_id,image_path,mask_path,mapbiomas_path,esri_path,dw_path
+tile_0,/data/images/tile_0.tif,/data/lulc/bags_0.tif,/data/lulc/mapbiomas_0.tif,/data/lulc/esri_0.tif,/data/lulc/dw_0.tif
+```
+
+```bash
+pytorch-smt-tools build-soft-labels sources.csv \
+    --output-dir /data/soft_labels_e5 \
+    --num-classes 6 \
+    --alpha 0.6 \
+    --entropy-norm minmax \
+    --mask-key mask_path \
+    --lulc-key mapbiomas_path \
+    --lulc-key esri_path \
+    --lulc-key dw_path \
+    --border-radius 10
 ```
 
 :::tip Ablation study
@@ -551,8 +586,11 @@ ds = SoftLabelCachedDataset(
     cache_dir="/data/cache/p_soft",
     num_classes=6,
     alpha=0.6,
-    use_border=False,
-    entropy_norm="minmax",  # Experiment E4
+    use_border=True,
+    entropy_norm="minmax",  # Experiment E5
+    mask_key="mask_path",
+    lulc_keys=["mapbiomas_path", "esri_path", "dw_path"],
+    border_radius=10,
 )
 
 # Windowed mode (one item per patch)
@@ -562,6 +600,9 @@ ds_win = SoftLabelCachedDataset(
     num_classes=6,
     alpha=0.6,
     use_border=True,
+    mask_key="mask_path",
+    lulc_keys=["mapbiomas_path", "esri_path", "dw_path"],
+    border_radius=10,
     patch_size=(256, 256),
     patch_stride=(256, 256),          # no overlap; use (128, 128) for 50% overlap
 )
@@ -577,7 +618,8 @@ sample = ds[0]
 
 - The full-tile P_soft is cached once in `cache_dir/{tile_id}.tif` regardless of
   whether you use full-tile or windowed mode.
-- `alpha`, `entropy_norm`, and `use_border` do **not** affect the cache key —
+- `alpha`, `entropy_norm`, `use_border`, `mask_key`, `lulc_keys`, and `border_radius`
+  do **not** affect the cache key —
   change them between runs without clearing the cache.
 - Writes are atomic (`{tile_id}.tif.tmp` → rename) so concurrent DataLoader workers
   (multi-process) cannot corrupt a partial write.
@@ -604,8 +646,8 @@ _target_: pytorch_segmentation_models_trainer.model_loader.soft_label_model.Soft
 | E2-NB | `alpha·w_entropy` | `--alpha 0.6 --no-border` | `soft_label_no_border.yaml` |
 | E2 | `alpha·w_entropy + (1-alpha)·w_border` | `--alpha 0.6` | `soft_label_unet.yaml` |
 | E3 | `alpha·w_e + beta·w_embed + (1-a-b)·w_border` | `--alpha 0.5 --beta 0.2 --aef-source hf` | `soft_label_unet.yaml` |
-| E4 | `alpha·w_e + beta·w_embed + (1-a-b)·w_border` | `--alpha 0.5 --beta 0.2 --aef-source gcs` | `soft_label_aef_gcs.yaml` |
-| E5 | same as E4, patch manifest | `--patch-size 512` | `soft_label_windowed_unet.yaml` |
+| E4 | `alpha·w_entropy` with min-max entropy | `--alpha 1.0 --no-border --entropy-norm minmax` | `soft_label_no_border.yaml` |
+| E5 | `alpha·w_entropy + (1-alpha)·w_border_carta` | `--alpha 0.6 --entropy-norm minmax --mask-key mask_path --lulc-key mapbiomas_path --lulc-key esri_path --lulc-key dw_path --border-radius 10` | `soft_label_cached.yaml` |
 
 > **E2-NB** ("no border") is the formula from the original paper.
 > **E2** adds the border-distance component — a framework contribution not in the paper.
