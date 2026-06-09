@@ -165,3 +165,141 @@ def test_read_tiles_class_dist_already_dict():
 
     for val in df["class_dist"]:
         assert isinstance(val, dict)
+
+
+def _raw_df_with_embedding() -> pd.DataFrame:
+    """Raw DataFrame with embedding column as list (psycopg2 + pgvector adapter)."""
+    import numpy as np
+
+    df = _raw_df()
+    df["embedding"] = [
+        [0.1, 0.2, 0.3, 0.4],
+        [0.5, 0.6, 0.7, 0.8],
+    ]
+    return df
+
+
+def _raw_df_with_embedding_str() -> pd.DataFrame:
+    """Raw DataFrame with embedding column as string (pgvector default repr)."""
+    df = _raw_df()
+    df["embedding"] = ["[0.1,0.2,0.3,0.4]", "[0.5,0.6,0.7,0.8]"]
+    return df
+
+
+def test_fetch_embeddings_includes_column_in_query():
+    cfg = _default_config(fetch_embeddings=True)
+    reader = PostgresReader(cfg)
+    mock_psycopg2 = _make_psycopg2_mock()
+
+    with (
+        patch.dict("sys.modules", {"psycopg2": mock_psycopg2}),
+        patch("pandas.read_sql", return_value=_raw_df_with_embedding()) as mock_sql,
+    ):
+        reader.read_tiles()
+
+    query = mock_sql.call_args[0][0]
+    assert "embedding" in query
+
+
+def test_fetch_embeddings_false_excludes_column_from_query():
+    cfg = _default_config(fetch_embeddings=False)
+    reader = PostgresReader(cfg)
+    mock_psycopg2 = _make_psycopg2_mock()
+
+    with (
+        patch.dict("sys.modules", {"psycopg2": mock_psycopg2}),
+        patch("pandas.read_sql", return_value=_raw_df()) as mock_sql,
+    ):
+        reader.read_tiles()
+
+    query = mock_sql.call_args[0][0]
+    assert "embedding" not in query
+
+
+def test_fetch_embeddings_parses_list_to_numpy():
+    import numpy as np
+
+    cfg = _default_config(fetch_embeddings=True)
+    reader = PostgresReader(cfg)
+    mock_psycopg2 = _make_psycopg2_mock()
+
+    with (
+        patch.dict("sys.modules", {"psycopg2": mock_psycopg2}),
+        patch("pandas.read_sql", return_value=_raw_df_with_embedding()),
+    ):
+        df = reader.read_tiles()
+
+    assert "embedding" in df.columns
+    assert isinstance(df["embedding"].iloc[0], np.ndarray)
+    assert df["embedding"].iloc[0].dtype == np.float32
+
+
+def test_fetch_embeddings_parses_string_to_numpy():
+    import numpy as np
+
+    cfg = _default_config(fetch_embeddings=True)
+    reader = PostgresReader(cfg)
+    mock_psycopg2 = _make_psycopg2_mock()
+
+    with (
+        patch.dict("sys.modules", {"psycopg2": mock_psycopg2}),
+        patch("pandas.read_sql", return_value=_raw_df_with_embedding_str()),
+    ):
+        df = reader.read_tiles()
+
+    assert isinstance(df["embedding"].iloc[0], np.ndarray)
+    assert df["embedding"].iloc[0].shape == (4,)
+
+
+def test_fetch_embeddings_result_not_in_df_when_false():
+    cfg = _default_config(fetch_embeddings=False)
+    reader = PostgresReader(cfg)
+    mock_psycopg2 = _make_psycopg2_mock()
+
+    with (
+        patch.dict("sys.modules", {"psycopg2": mock_psycopg2}),
+        patch("pandas.read_sql", return_value=_raw_df()),
+    ):
+        df = reader.read_tiles()
+
+    assert "embedding" not in df.columns
+
+
+def test_fetch_embeddings_handles_none_value():
+    import numpy as np
+
+    df_with_none = _raw_df()
+    df_with_none["embedding"] = [None, [0.5, 0.6, 0.7, 0.8]]
+    cfg = _default_config(fetch_embeddings=True)
+    reader = PostgresReader(cfg)
+    mock_psycopg2 = _make_psycopg2_mock()
+
+    with (
+        patch.dict("sys.modules", {"psycopg2": mock_psycopg2}),
+        patch("pandas.read_sql", return_value=df_with_none),
+    ):
+        df = reader.read_tiles()
+
+    assert df["embedding"].iloc[0] is None
+    assert isinstance(df["embedding"].iloc[1], np.ndarray)
+
+
+def test_fetch_embeddings_parses_ndarray_to_float32():
+    import numpy as np
+
+    df_with_ndarray = _raw_df()
+    df_with_ndarray["embedding"] = [
+        np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float64),
+        np.array([0.5, 0.6, 0.7, 0.8], dtype=np.float64),
+    ]
+    cfg = _default_config(fetch_embeddings=True)
+    reader = PostgresReader(cfg)
+    mock_psycopg2 = _make_psycopg2_mock()
+
+    with (
+        patch.dict("sys.modules", {"psycopg2": mock_psycopg2}),
+        patch("pandas.read_sql", return_value=df_with_ndarray),
+    ):
+        df = reader.read_tiles()
+
+    assert df["embedding"].iloc[0].dtype == np.float32

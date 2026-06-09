@@ -3,8 +3,9 @@
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -122,16 +123,21 @@ class BalancedDatasetBuilder:
         exc_cfg = self.config.exclusion
 
         def _compute_row(row) -> Dict:
-            stats = compute_mask_stats(
+            return compute_mask_stats(
                 row["mask_path"],
                 int(row["row_off"]),
                 int(row["col_off"]),
                 int(row["patch_size"]),
                 nodata_class=exc_cfg.nodata_class,
             )
-            return stats
 
-        results = [_compute_row(row) for _, row in df.iterrows()]
+        from tqdm import tqdm
+
+        rows: List = [row for _, row in df.iterrows()]
+        with ThreadPoolExecutor(max_workers=self.config.num_workers) as pool:
+            results = list(
+                tqdm(pool.map(_compute_row, rows), total=len(rows), desc="mask stats")
+            )
 
         df = df.copy()
         df["class_dist"] = [r["class_dist"] for r in results]
@@ -150,9 +156,9 @@ class BalancedDatasetBuilder:
         if exc_cfg.exclude_mask_border_nodata:
             import rasterio
             import rasterio.windows
+            from tqdm import tqdm
 
-            flags = []
-            for _, row in df.iterrows():
+            def _check_mask_border(row) -> bool:
                 try:
                     window = rasterio.windows.Window(
                         int(row["col_off"]),
@@ -162,11 +168,19 @@ class BalancedDatasetBuilder:
                     )
                     with rasterio.open(row["mask_path"]) as src:
                         mask_data = src.read(1, window=window)
-                    flags.append(
-                        has_border_nodata_mask(mask_data, exc_cfg.nodata_class)
-                    )
+                    return has_border_nodata_mask(mask_data, exc_cfg.nodata_class)
                 except Exception:
-                    flags.append(False)
+                    return False
+
+            rows: List = [row for _, row in df.iterrows()]
+            with ThreadPoolExecutor(max_workers=self.config.num_workers) as pool:
+                flags = list(
+                    tqdm(
+                        pool.map(_check_mask_border, rows),
+                        total=len(rows),
+                        desc="border nodata",
+                    )
+                )
             df["has_mask_border_nodata"] = flags
         else:
             df["has_mask_border_nodata"] = False
@@ -174,9 +188,9 @@ class BalancedDatasetBuilder:
         if exc_cfg.exclude_image_black_border:
             import rasterio
             import rasterio.windows
+            from tqdm import tqdm
 
-            flags = []
-            for _, row in df.iterrows():
+            def _check_image_border(row) -> bool:
                 try:
                     window = rasterio.windows.Window(
                         int(row["col_off"]),
@@ -187,18 +201,41 @@ class BalancedDatasetBuilder:
                     with rasterio.open(row["image_path"]) as src:
                         img_data = src.read(window=window)
                     img_hwc = np.transpose(img_data, (1, 2, 0))
-                    flags.append(
-                        has_black_border_image(
-                            img_hwc, tolerance=exc_cfg.black_border_tolerance
-                        )
+                    return has_black_border_image(
+                        img_hwc, tolerance=exc_cfg.black_border_tolerance
                     )
                 except Exception:
-                    flags.append(False)
+                    return False
+
+            rows: List = [row for _, row in df.iterrows()]
+            with ThreadPoolExecutor(max_workers=self.config.num_workers) as pool:
+                flags = list(
+                    tqdm(
+                        pool.map(_check_image_border, rows),
+                        total=len(rows),
+                        desc="black border",
+                    )
+                )
             df["has_image_black_border"] = flags
         else:
             df["has_image_black_border"] = False
 
-        df["excluded"] = df["has_mask_border_nodata"] | df["has_image_black_border"]
+        if exc_cfg.min_entropy_threshold > 0.0:
+            df["has_low_entropy"] = df["class_entropy"] < exc_cfg.min_entropy_threshold
+        else:
+            df["has_low_entropy"] = False
+
+        if exc_cfg.max_nodata_ratio < 1.0:
+            df["has_high_nodata"] = df["nodata_ratio"] > exc_cfg.max_nodata_ratio
+        else:
+            df["has_high_nodata"] = False
+
+        df["excluded"] = (
+            df["has_mask_border_nodata"]
+            | df["has_image_black_border"]
+            | df["has_low_entropy"]
+            | df["has_high_nodata"]
+        )
         return df
 
     # ------------------------------------------------------------------
@@ -320,6 +357,13 @@ class BalancedDatasetBuilder:
 
         weights = combine_weights(comp_score, uniq_score, method=method)
 
+        if self.config.boost.rare_class_boost and "class_dist" in df.columns:
+            boost = self._compute_rare_class_boost(df)
+            weights = weights * boost
+            max_w = weights.max()
+            if max_w > 0:
+                weights = weights / max_w
+
         # Ensure every non-excluded patch has a positive weight so
         # WeightedRandomSampler can sample any patch.
         min_weight = 1.0 / max(len(df), 1)
@@ -334,6 +378,56 @@ class BalancedDatasetBuilder:
 
         df["sampler_weight"] = weights
         return df
+
+    def _compute_rare_class_boost(self, df: pd.DataFrame) -> np.ndarray:
+        """Return per-patch boost factor based on rare-class presence.
+
+        Patches with more rare-class pixels receive a higher multiplier up to
+        ``boost.rare_class_multiplier``.  The result is a float array of shape
+        (N,) with values in [1, multiplier].
+        """
+        boost_cfg = self.config.boost
+
+        global_freq: Dict = {}
+        for dist in df["class_dist"]:
+            if not isinstance(dist, dict):
+                continue
+            for cls, freq in dist.items():
+                key = str(cls)
+                global_freq[key] = global_freq.get(key, 0.0) + float(freq)
+
+        total = sum(global_freq.values())
+        if total == 0:
+            return np.ones(len(df), dtype=np.float64)
+
+        global_freq = {k: v / total for k, v in global_freq.items()}
+
+        if boost_cfg.rare_class_ids is not None:
+            rare_ids = {str(c) for c in boost_cfg.rare_class_ids}
+        else:
+            mean_freq = float(np.mean(list(global_freq.values())))
+            rare_ids = {k for k, v in global_freq.items() if v < mean_freq}
+
+        if not rare_ids:
+            return np.ones(len(df), dtype=np.float64)
+
+        multiplier = float(boost_cfg.rare_class_multiplier)
+        boost = np.ones(len(df), dtype=np.float64)
+        for i, dist in enumerate(df["class_dist"]):
+            if not isinstance(dist, dict):
+                continue
+            rare_presence = sum(
+                float(
+                    dist.get(r, dist.get(int(r), 0.0))
+                    if r.isdigit()
+                    else dist.get(r, 0.0)
+                )
+                for r in rare_ids
+            )
+            rare_presence = min(rare_presence, 1.0)
+            boost[i] = 1.0 + (multiplier - 1.0) * rare_presence
+
+        return boost
 
     # ------------------------------------------------------------------
     # CSV output

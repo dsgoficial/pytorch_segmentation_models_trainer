@@ -1882,6 +1882,7 @@ def build_balanced_dataset_cmd(yaml_path):
         OutputConfig,
         PostgresConfig,
         UniquenessConfig,
+        WeightBoostConfig,
     )
 
     with open(yaml_path) as fh:
@@ -1900,6 +1901,7 @@ def build_balanced_dataset_cmd(yaml_path):
         uniqueness = UniquenessConfig(**d.pop("uniqueness", {}))
         embeddings = EmbeddingsConfig(**d.pop("embeddings", {}))
         exclusion = ExclusionConfig(**d.pop("exclusion", {}))
+        boost = WeightBoostConfig(**d.pop("boost", {}))
         output = OutputConfig(**d.pop("output"))
         return BalancedDatasetConfig(
             input=input_cfg,
@@ -1907,6 +1909,7 @@ def build_balanced_dataset_cmd(yaml_path):
             uniqueness=uniqueness,
             embeddings=embeddings,
             exclusion=exclusion,
+            boost=boost,
             output=output,
             **d,
         )
@@ -1922,6 +1925,66 @@ def build_balanced_dataset_cmd(yaml_path):
     )
     if config.output.geojson_path:
         click.echo(f"GeoJSON written to '{config.output.geojson_path}'.")
+
+
+@cli.command("select-coreset")
+@click.argument("yaml_path", type=click.Path(exists=True, dir_okay=False))
+def select_coreset_cmd(yaml_path):
+    """Select a core-set from a balanced dataset CSV using YAML_PATH config.
+
+    YAML_PATH must contain a ``coreset`` key whose value matches the
+    ``CoreSetConfig`` dataclass.  The input CSV (output of
+    ``build-balanced-dataset``) is read from ``config.input_csv_path``.
+    The output CSV adds ``coreset_score`` and ``coreset_selected`` columns.
+
+    \b
+    Minimal example (LC method — no embeddings needed):
+
+        coreset:
+          method: lc
+          budget: 0.5
+          budget_mode: fraction
+          input_csv_path: /path/to/balanced_dataset.csv
+          output_csv_path: /path/to/coreset.csv
+
+    \b
+    See conf/examples/coreset_local.yaml for a full example.
+    """
+    import pandas as pd
+    import yaml
+
+    from pytorch_segmentation_models_trainer.tools.coreset.coreset_config import (
+        CoreSetConfig,
+    )
+    from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+        get_scorer,
+    )
+    from pytorch_segmentation_models_trainer.tools.coreset.coreset_selector import (
+        CoreSetSelector,
+    )
+
+    with open(yaml_path) as fh:
+        raw = yaml.safe_load(fh)
+
+    cfg_dict = raw.get("coreset", raw)
+
+    try:
+        config = CoreSetConfig(**cfg_dict)
+    except TypeError as exc:
+        raise click.UsageError(f"Invalid config in '{yaml_path}': {exc}") from exc
+
+    # Validate method early so the error message is user-friendly
+    try:
+        get_scorer(config.method)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    df = pd.read_csv(config.input_csv_path)
+    result = CoreSetSelector(config).select(df)
+    n_selected = int(result["coreset_selected"].sum())
+    click.echo(
+        f"Selected {n_selected}/{len(result)} patches → '{config.output_csv_path}'."
+    )
 
 
 def entry():

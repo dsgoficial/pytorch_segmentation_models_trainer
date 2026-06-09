@@ -21,6 +21,7 @@ from pytorch_segmentation_models_trainer.tools.sampling.sampling_config import (
     LocalInputConfig,
     OutputConfig,
     PostgresConfig,
+    WeightBoostConfig,
 )
 
 # ---------------------------------------------------------------------------
@@ -595,6 +596,281 @@ def test_geojson_output_written(local_dataset_dir, tmp_path):
     assert gj["type"] == "FeatureCollection"
     assert len(gj["features"]) == len(records)
     assert "sampler_weight" in gj["features"][0]["properties"]
+
+
+# ---------------------------------------------------------------------------
+# Entropy threshold exclusion
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def entropy_dataset(tmp_path):
+    """4 patches: 2 mono-class (entropy≈0), 2 mixed (entropy>0.6)."""
+    msk_dir = tmp_path / "masks"
+    msk_dir.mkdir()
+    records = []
+    for i, (c1, c2) in enumerate([(3, 3), (4, 4), (3, 4), (3, 5)]):
+        path = msk_dir / f"tile_{i}.tif"
+        classes = np.zeros((256, 256), dtype=np.uint8)
+        classes[:128, :] = c1
+        classes[128:, :] = c2
+        _make_mask(path, classes)
+        records.append(
+            {
+                "mask_path": str(path),
+                "row_off": 0,
+                "col_off": 0,
+                "patch_size": 256,
+            }
+        )
+    return pd.DataFrame(records)
+
+
+def test_entropy_threshold_excludes_low_entropy_patches(tmp_path, entropy_dataset):
+    config = BalancedDatasetConfig(
+        mode="masks_only",
+        sampling_method="composition_only",
+        input=LocalInputConfig(patch_records=entropy_dataset),
+        clustering=ClusteringConfig(k_min=2, k_max=3, k_selection="fixed", k=2),
+        exclusion=ExclusionConfig(
+            exclude_mask_border_nodata=False,
+            exclude_image_black_border=False,
+            min_entropy_threshold=0.5,
+        ),
+        output=OutputConfig(csv_path=str(tmp_path / "out.csv"), include_excluded=True),
+    )
+    df = BalancedDatasetBuilder(config).build()
+    assert "has_low_entropy" in df.columns
+    assert df["has_low_entropy"].sum() == 2
+    assert df["excluded"].sum() == 2
+
+
+def test_entropy_threshold_zero_disables_filter(tmp_path, entropy_dataset):
+    config = BalancedDatasetConfig(
+        mode="masks_only",
+        sampling_method="composition_only",
+        input=LocalInputConfig(patch_records=entropy_dataset),
+        clustering=ClusteringConfig(k_min=2, k_max=3, k_selection="fixed", k=2),
+        exclusion=ExclusionConfig(
+            exclude_mask_border_nodata=False,
+            exclude_image_black_border=False,
+            min_entropy_threshold=0.0,
+        ),
+        output=OutputConfig(csv_path=str(tmp_path / "out.csv"), include_excluded=True),
+    )
+    df = BalancedDatasetBuilder(config).build()
+    assert df["has_low_entropy"].sum() == 0
+
+
+# ---------------------------------------------------------------------------
+# Nodata ratio threshold exclusion
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def nodata_dataset(tmp_path):
+    """4 patches: 2 with high nodata (>50%), 2 clean."""
+    msk_dir = tmp_path / "masks"
+    msk_dir.mkdir()
+    records = []
+    # nodata_class=0; patches 0+1 have >50% nodata, 2+3 are clean
+    for i, nodata_frac in enumerate([0.8, 0.6, 0.0, 0.1]):
+        path = msk_dir / f"tile_{i}.tif"
+        classes = np.full((256, 256), 3, dtype=np.uint8)
+        n_nodata = int(nodata_frac * 256 * 256)
+        classes.flat[:n_nodata] = 0
+        _make_mask(path, classes)
+        records.append(
+            {
+                "mask_path": str(path),
+                "row_off": 0,
+                "col_off": 0,
+                "patch_size": 256,
+            }
+        )
+    return pd.DataFrame(records)
+
+
+def test_nodata_ratio_threshold_excludes_high_nodata_patches(tmp_path, nodata_dataset):
+    config = BalancedDatasetConfig(
+        mode="masks_only",
+        sampling_method="composition_only",
+        input=LocalInputConfig(patch_records=nodata_dataset),
+        clustering=ClusteringConfig(k_min=2, k_max=3, k_selection="fixed", k=2),
+        exclusion=ExclusionConfig(
+            exclude_mask_border_nodata=False,
+            exclude_image_black_border=False,
+            nodata_class=0,
+            max_nodata_ratio=0.5,
+        ),
+        output=OutputConfig(csv_path=str(tmp_path / "out.csv"), include_excluded=True),
+    )
+    df = BalancedDatasetBuilder(config).build()
+    assert "has_high_nodata" in df.columns
+    assert df["has_high_nodata"].sum() == 2
+    assert df["excluded"].sum() == 2
+
+
+def test_nodata_ratio_one_disables_filter(tmp_path, nodata_dataset):
+    config = BalancedDatasetConfig(
+        mode="masks_only",
+        sampling_method="composition_only",
+        input=LocalInputConfig(patch_records=nodata_dataset),
+        clustering=ClusteringConfig(k_min=2, k_max=3, k_selection="fixed", k=2),
+        exclusion=ExclusionConfig(
+            exclude_mask_border_nodata=False,
+            exclude_image_black_border=False,
+            nodata_class=0,
+            max_nodata_ratio=1.0,
+        ),
+        output=OutputConfig(csv_path=str(tmp_path / "out.csv"), include_excluded=True),
+    )
+    df = BalancedDatasetBuilder(config).build()
+    assert df["has_high_nodata"].sum() == 0
+
+
+# ---------------------------------------------------------------------------
+# Rare-class boost
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def rare_class_dataset(tmp_path):
+    """6 patches: 3 have rare class 1, 3 have only common classes 3+4."""
+    msk_dir = tmp_path / "masks"
+    msk_dir.mkdir()
+    records = []
+    for i in range(3):
+        # rare: 50% class 1, 50% class 3
+        path = msk_dir / f"rare_{i}.tif"
+        classes = np.zeros((256, 256), dtype=np.uint8)
+        classes[:128, :] = 1
+        classes[128:, :] = 3
+        _make_mask(path, classes)
+        records.append(
+            {"mask_path": str(path), "row_off": 0, "col_off": 0, "patch_size": 256}
+        )
+    for i in range(3):
+        # common: 50% class 3, 50% class 4
+        path = msk_dir / f"common_{i}.tif"
+        classes = np.zeros((256, 256), dtype=np.uint8)
+        classes[:128, :] = 3
+        classes[128:, :] = 4
+        _make_mask(path, classes)
+        records.append(
+            {"mask_path": str(path), "row_off": 0, "col_off": 0, "patch_size": 256}
+        )
+    return pd.DataFrame(records)
+
+
+def _boost_builder(tmp_path, rare_class_ids, boost_on):
+    """Helper: build config for rare-class boost tests using pre-populated class_dist."""
+    records = pd.DataFrame(
+        {
+            "mask_path": ["/fake/mask.tif"] * 6,
+            "row_off": [0] * 6,
+            "col_off": [0] * 6,
+            "patch_size": [256] * 6,
+            # first 3 = rare (50% class 1), last 3 = common (0% class 1)
+            "class_dist": [{"1": 0.5, "3": 0.5}] * 3 + [{"3": 0.5, "4": 0.5}] * 3,
+            "class_entropy": [0.693] * 6,
+            "nodata_ratio": [0.0] * 6,
+        }
+    )
+    return BalancedDatasetConfig(
+        mode="masks_only",
+        sampling_method="composition_only",
+        input=LocalInputConfig(patch_records=records),
+        clustering=ClusteringConfig(k_min=2, k_max=3, k_selection="fixed", k=2),
+        exclusion=ExclusionConfig(
+            exclude_mask_border_nodata=False, exclude_image_black_border=False
+        ),
+        boost=WeightBoostConfig(
+            rare_class_boost=boost_on,
+            rare_class_ids=rare_class_ids,
+            rare_class_multiplier=3.0,
+        ),
+        output=OutputConfig(csv_path=str(tmp_path / "out.csv")),
+    )
+
+
+def test_rare_class_boost_disabled_by_default(tmp_path):
+    cfg_off = _boost_builder(tmp_path, rare_class_ids=[1], boost_on=False)
+    cfg_on = _boost_builder(tmp_path, rare_class_ids=[1], boost_on=True)
+    df_off = BalancedDatasetBuilder(cfg_off).build()
+    df_on = BalancedDatasetBuilder(cfg_on).build()
+    rare_ratio_off = df_off.iloc[:3]["sampler_weight"].mean()
+    rare_ratio_on = df_on.iloc[:3]["sampler_weight"].mean()
+    # With boost ON, rare-patch mean weight should be strictly higher
+    assert rare_ratio_on > rare_ratio_off
+
+
+def test_rare_class_boost_increases_rare_patch_weights(tmp_path):
+    cfg = _boost_builder(tmp_path, rare_class_ids=[1], boost_on=True)
+    builder = BalancedDatasetBuilder(cfg)
+    df = pd.DataFrame(
+        {
+            "class_dist": [{"1": 0.5, "3": 0.5}] * 3 + [{"3": 0.5, "4": 0.5}] * 3,
+            "freq_cluster_weight": [1 / 3] * 6,
+        }
+    )
+    boost = builder._compute_rare_class_boost(df)
+    assert boost[:3].mean() > boost[3:].mean()
+
+
+def test_rare_class_boost_auto_detects_rare_classes(tmp_path):
+    cfg = _boost_builder(tmp_path, rare_class_ids=None, boost_on=True)
+    builder = BalancedDatasetBuilder(cfg)
+    # 2 rare + 4 common: class 1 freq=0.167, class 4 freq=0.333, mean=0.333
+    # Only class 1 satisfies freq < mean (strict less-than)
+    df = pd.DataFrame(
+        {
+            "class_dist": [{"1": 0.5, "3": 0.5}] * 2 + [{"3": 0.5, "4": 0.5}] * 4,
+            "freq_cluster_weight": [1 / 3] * 6,
+        }
+    )
+    boost = builder._compute_rare_class_boost(df)
+    assert boost[:2].mean() > boost[2:].mean()
+
+
+def test_weight_boost_config_defaults():
+    cfg = WeightBoostConfig()
+    assert cfg.rare_class_boost is False
+    assert cfg.rare_class_ids is None
+    assert cfg.rare_class_multiplier == 3.0
+
+
+def test_exclusion_config_new_defaults():
+    cfg = ExclusionConfig()
+    assert cfg.min_entropy_threshold == 0.0
+    assert cfg.max_nodata_ratio == 1.0
+
+
+def test_balanced_dataset_config_boost_default():
+    cfg = BalancedDatasetConfig()
+    assert isinstance(cfg.boost, WeightBoostConfig)
+    assert cfg.boost.rare_class_boost is False
+
+
+def test_rare_class_boost_no_rare_classes_found_no_crash(tmp_path, rare_class_dataset):
+    config = BalancedDatasetConfig(
+        mode="masks_only",
+        sampling_method="composition_only",
+        input=LocalInputConfig(patch_records=rare_class_dataset),
+        clustering=ClusteringConfig(k_min=2, k_max=3, k_selection="fixed", k=2),
+        exclusion=ExclusionConfig(
+            exclude_mask_border_nodata=False, exclude_image_black_border=False
+        ),
+        boost=WeightBoostConfig(
+            rare_class_boost=True,
+            rare_class_ids=[99],  # class 99 not present in any patch
+            rare_class_multiplier=3.0,
+        ),
+        output=OutputConfig(csv_path=str(tmp_path / "out.csv")),
+    )
+    df = BalancedDatasetBuilder(config).build()
+    assert "sampler_weight" in df.columns
+    assert np.all(df["sampler_weight"].values >= 0)
 
 
 def test_postgres_backend_mocked(tmp_path):

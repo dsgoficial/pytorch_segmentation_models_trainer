@@ -1,0 +1,40 @@
+# CoreSet selection — local filesystem backend
+# Input: output CSV from build-balanced-dataset
+# Output: same CSV + coreset_score + coreset_selected columns
+#
+# Usage:
+#   pytorch-smt-tools select-coreset conf/examples/coreset_local.yaml
+
+coreset:
+  # Method: lc | cb | fa | fd | lc_fd | fa_cb
+  method: lc
+
+  # Budget: fraction [0,1] or integer count
+  budget: 0.5
+  budget_mode: fraction   # "fraction" | "count"
+
+  # Input/output paths
+  input_csv_path: /path/to/balanced_dataset.csv
+  output_csv_path: /path/to/coreset.csv
+
+  # -------------------------------------------------------------------
+  # Embedding-based methods (fa, fd, lc_fd, fa_cb) require this column
+  # to be present in the input CSV. Leave null for lc/cb.
+  # -------------------------------------------------------------------
+  embedding_column: null   # e.g. "embedding" or "dino_embedding"
+
+  # FD / LC-FD params
+  fd_k_min: 2
+  fd_k_max: 20
+  fd_vendi_delta: 0.005
+  fd_use_vendi: false      # true = Vendi K-selection; false = elbow
+
+  # LC/FD hybrid: number of top-FD patches before LC fill
+  # null → auto = int(0.1 * N)
+  lc_fd_cutoff_m: null
+
+  # FA/CB hybrid mixing coefficient (lambda * FA + (1-lambda) * CB)
+  fa_cb_lambda: 0.5
+
+  # Output column name for the score
+  score_column: coreset_score

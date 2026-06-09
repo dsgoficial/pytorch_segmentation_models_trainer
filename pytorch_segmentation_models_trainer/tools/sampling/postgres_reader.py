@@ -4,9 +4,28 @@
 import json
 import logging
 
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_embedding(v) -> np.ndarray:
+    """Convert a pgvector value to a float32 numpy array.
+
+    Handles three representations returned by psycopg2:
+    - Python list / numpy ndarray (registered pgvector adapter)
+    - JSON string ``"[0.1, 0.2, ...]"`` (default pgvector text repr)
+    - None → returns None (caller must handle missing embeddings)
+    """
+    if v is None:
+        return None
+    if isinstance(v, np.ndarray):
+        return v.astype(np.float32)
+    if isinstance(v, list):
+        return np.array(v, dtype=np.float32)
+    # String form: "[0.1,0.2,0.3]"
+    return np.array(json.loads(v), dtype=np.float32)
 
 
 class PostgresReader:
@@ -47,19 +66,21 @@ class PostgresReader:
             password=cfg.password,
         )
 
-        cols = ", ".join(
-            [
-                cfg.image_path_column,
-                cfg.mask_path_column,
-                cfg.row_off_column,
-                cfg.col_off_column,
-                cfg.patch_size_column,
-                cfg.class_dist_column,
-                cfg.uniqueness_score_column,
-                "class_entropy",
-                "nodata_ratio",
-            ]
-        )
+        col_list = [
+            cfg.image_path_column,
+            cfg.mask_path_column,
+            cfg.row_off_column,
+            cfg.col_off_column,
+            cfg.patch_size_column,
+            cfg.class_dist_column,
+            cfg.uniqueness_score_column,
+            "class_entropy",
+            "nodata_ratio",
+        ]
+        if cfg.fetch_embeddings:
+            col_list.append(cfg.embedding_column)
+
+        cols = ", ".join(col_list)
         query = f"SELECT {cols} FROM {cfg.table}"
         if cfg.where_clause:
             query += f" WHERE {cfg.where_clause}"
@@ -84,5 +105,8 @@ class PostgresReader:
         df["class_dist"] = df["class_dist"].apply(
             lambda v: json.loads(v) if isinstance(v, str) else v
         )
+
+        if cfg.fetch_embeddings and cfg.embedding_column in df.columns:
+            df[cfg.embedding_column] = df[cfg.embedding_column].apply(_parse_embedding)
 
         return df

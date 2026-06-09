@@ -2,7 +2,7 @@
 """Dataclasses for BalancedDatasetBuilder configuration."""
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 
 @dataclass
@@ -66,6 +66,7 @@ class PostgresConfig:
     embedding_column: str = "embedding"
     tile_id_column: str = "id"
     where_clause: Optional[str] = None
+    fetch_embeddings: bool = False
 
 
 @dataclass
@@ -130,12 +131,36 @@ class ExclusionConfig:
         exclude_image_black_border: exclude patches with black border on image.
         black_border_tolerance: pixel value at or below this is 'black'.
         nodata_class: mask pixel value treated as no-data.
+        min_entropy_threshold: exclude patches whose class entropy is below this
+            value (0.0 disables the filter).
+        max_nodata_ratio: exclude patches whose nodata pixel ratio exceeds this
+            value (1.0 disables the filter).
     """
 
     exclude_mask_border_nodata: bool = True
     exclude_image_black_border: bool = True
     black_border_tolerance: int = 0
     nodata_class: int = 0
+    min_entropy_threshold: float = 0.0
+    max_nodata_ratio: float = 1.0
+
+
+@dataclass
+class WeightBoostConfig:
+    """Configuration for boosting weights of patches containing rare classes.
+
+    Args:
+        rare_class_boost: enable rare-class weight boosting.
+        rare_class_ids: explicit list of class ids to treat as rare.  When
+            ``None``, classes whose global frequency is below the mean are
+            automatically selected.
+        rare_class_multiplier: maximum weight multiplier applied to a patch
+            that consists entirely of rare-class pixels (default 3.0).
+    """
+
+    rare_class_boost: bool = False
+    rare_class_ids: Optional[List[int]] = None
+    rare_class_multiplier: float = 3.0
 
 
 @dataclass
@@ -164,22 +189,26 @@ class BalancedDatasetConfig:
         backend: 'local' or 'postgres'.
         mode: 'masks_only', 'embeddings_only', or 'both'.
         sampling_method: weight combination method.
+        num_workers: number of threads for mask stats and exclusion loops.
         input: local input config.
         postgres: postgres connection config.
         clustering: K-Means clustering config.
         uniqueness: uniqueness scoring config.
         embeddings: DINOv2 extraction config.
-        exclusion: border-nodata exclusion config.
+        exclusion: exclusion filter config.
+        boost: rare-class weight boosting config.
         output: output CSV config.
     """
 
     backend: str = "local"
     mode: str = "masks_only"
     sampling_method: str = "rank_max"
+    num_workers: int = 8
     input: LocalInputConfig = field(default_factory=LocalInputConfig)
     postgres: Optional[PostgresConfig] = None
     clustering: ClusteringConfig = field(default_factory=ClusteringConfig)
     uniqueness: UniquenessConfig = field(default_factory=UniquenessConfig)
     embeddings: EmbeddingsConfig = field(default_factory=EmbeddingsConfig)
     exclusion: ExclusionConfig = field(default_factory=ExclusionConfig)
+    boost: WeightBoostConfig = field(default_factory=WeightBoostConfig)
     output: OutputConfig = field(default_factory=OutputConfig)

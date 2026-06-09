@@ -1,5 +1,44 @@
 # Unreleased
 
+## CoreSet Selection — Embedding Sources
+
+- `CoreSetConfig` gains `parquet_path: Optional[str]`; when set and
+  `embedding_column` is absent from the input DataFrame, `CoreSetSelector`
+  auto-merges embeddings from the Parquet file (join on `image_path`,
+  `row_off`, `col_off`) before scoring — no manual merge needed for FA/FD
+  methods when coming from the local pipeline.
+- `PostgresConfig` gains `fetch_embeddings: bool = False`; when `True`,
+  `PostgresReader` includes the embedding column in the SELECT query and parses
+  pgvector values (list, ndarray, or `"[…]"` string) to `float32` numpy arrays.
+
+## CoreSet Selection
+
+- Added `tools/coreset/` module implementing 6 model-agnostic core-set selection
+  methods from Nogueira et al. 2026 (IEEE Access, DOI 10.1109/ACCESS.2026.3659734):
+  LC, CB, FA, FD, LC/FD hybrid, FA/CB hybrid.
+- `CoreSetSelector` takes `balanced_dataset.csv` as input and outputs a CSV with
+  `coreset_score` and `coreset_selected` columns for hard-budget selection of the
+  most informative training patches.
+- `CoreSetConfig` dataclass controls method, budget (fraction or count), embedding
+  column, FD K-selection strategy, and hybrid mixing coefficients.
+- New CLI command `select-coreset <yaml_path>` for YAML-driven pipeline integration.
+- `vendi_score.py`: optional Vendi-score-based K selection for the FD method
+  (default is elbow, matching the existing `class_freq_clustering` module).
+- LC and CB methods operate on pre-computed `class_entropy`/`class_dist_json`
+  columns (no mask I/O — runs in seconds on 100k+ patches).
+- FA and FD methods consume pre-computed embeddings column (e.g. DINOv2 output
+  from `embedding_extractor.py`); raise `ValueError` loudly when not provided.
+- Added `conf/examples/coreset_local.yaml` reference config.
+
+## Balanced Dataset Sampling
+
+- Added `num_workers` field to `BalancedDatasetConfig` (default 8) to control thread parallelism for
+  mask-stats and exclusion loops.
+- Replaced serial `iterrows` loops in `_compute_mask_stats` and `_apply_exclusions` with
+  `ThreadPoolExecutor.map`, giving ~2–3× throughput improvement on I/O-bound raster reads.
+- Added `tqdm` progress bars to all three parallel loops (`mask stats`, `border nodata`,
+  `black border`) so long runs show live throughput and ETA.
+
 ## Tutorials and notebooks
 
 - Added a new `website/docs/tutorials/` section that indexes notebook-based
