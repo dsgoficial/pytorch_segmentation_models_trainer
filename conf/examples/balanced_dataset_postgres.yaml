@@ -1,0 +1,66 @@
+# Balanced dataset sampling — PostgreSQL backend (dataset_explorer)
+#
+# Usage:
+#   pytorch-smt-tools build-balanced-dataset conf/examples/balanced_dataset_postgres.yaml
+#
+# Requires: pip install psycopg2-binary
+# For visual uniqueness mode: pip install transformers torch
+
+balanced_dataset:
+  mode: embeddings   # masks_only | embeddings
+
+  sampling_method: rank_max   # rank_max | rank_multiply | rank_add |
+                               # multiplicative | composition_only | uniqueness_only
+
+  input:
+    # PostgreSQL connection (dataset_explorer schema)
+    host: localhost
+    port: 5432
+    database: dataset_explorer
+    user: postgres
+    password: ""
+    table: tiles
+
+    # Optional SQL WHERE clause to filter rows
+    where_clause: "nodata_ratio < 0.05"
+
+    # Column name overrides (defaults shown)
+    image_path_column: file_path
+    mask_path_column: mask_path
+    row_off_column: row_off
+    col_off_column: col_off
+    patch_size_column: patch_size
+    class_dist_column: class_dist
+    uniqueness_score_column: uniqueness_score
+
+  clustering:
+    k_min: 4
+    k_max: 20
+    k_selection: elbow
+    random_state: 42
+
+  uniqueness:
+    k_neighbors: 5          # number of nearest neighbours for kNN
+    # backend options (in order of speed for N=155k):
+    #   sklearn  — exact, uses all CPU cores; baseline ~2-4 min for 155k patches
+    #   faiss    — exact BLAS+SIMD; requires: pip install faiss-cpu  (~1-3 min)
+    #   hnsw     — approximate O(N log N); requires: pip install hnswlib  (~10-30 sec)
+    backend: hnsw
+
+  embeddings:
+    dino_model: facebook/dinov2-base   # HuggingFace model ID
+    batch_size: 32
+    num_workers: 4
+    use_gpu: false
+    # parquet_path: /data/embeddings.parquet  # cache; reloaded on re-run if exists
+
+  exclusion:
+    exclude_border_nodata: true
+    exclude_black_border: true
+    nodata_class: 0
+    black_tolerance: 10
+
+  output:
+    csv_path: /data/balanced.csv
+    # geojson_path: /data/balanced_patches.geojson
+    # geojson_crs: EPSG:4326

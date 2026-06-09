@@ -1838,6 +1838,92 @@ def split_manual_patches_cmd(
         )
 
 
+@cli.command("build-balanced-dataset")
+@click.argument("yaml_path", type=click.Path(exists=True, dir_okay=False))
+def build_balanced_dataset_cmd(yaml_path):
+    """Build a balanced training dataset CSV with sampler weights from YAML_PATH.
+
+    YAML_PATH must contain a ``balanced_dataset`` key whose value matches
+    the ``BalancedDatasetConfig`` dataclass.  The output CSV includes a
+    ``sampler_weight`` column ready for ``torch.utils.data.WeightedRandomSampler``.
+
+    \b
+    Minimal example (masks_only mode):
+
+        balanced_dataset:
+          mode: masks_only
+          sampling_method: rank_max
+          input:
+            patch_records:
+              - image_path: /data/img_0.tif
+                mask_path: /data/msk_0.tif
+                row_off: 0
+                col_off: 0
+                patch_size: 256
+          clustering:
+            k_min: 4
+            k_max: 12
+          output:
+            csv_path: /data/balanced.csv
+
+    \b
+    See conf/examples/balanced_dataset_local.yaml for a full example.
+    """
+    import yaml
+    from pytorch_segmentation_models_trainer.tools.sampling.balanced_dataset_builder import (
+        BalancedDatasetBuilder,
+    )
+    from pytorch_segmentation_models_trainer.tools.sampling.sampling_config import (
+        BalancedDatasetConfig,
+        ClusteringConfig,
+        EmbeddingsConfig,
+        ExclusionConfig,
+        LocalInputConfig,
+        OutputConfig,
+        PostgresConfig,
+        UniquenessConfig,
+    )
+
+    with open(yaml_path) as fh:
+        raw = yaml.safe_load(fh)
+
+    cfg_dict = raw.get("balanced_dataset", raw)
+
+    def _build_input(d):
+        if "table" in d:
+            return PostgresConfig(**d)
+        return LocalInputConfig(**d)
+
+    def _build_config(d):
+        input_cfg = _build_input(d.pop("input"))
+        clustering = ClusteringConfig(**d.pop("clustering", {}))
+        uniqueness = UniquenessConfig(**d.pop("uniqueness", {}))
+        embeddings = EmbeddingsConfig(**d.pop("embeddings", {}))
+        exclusion = ExclusionConfig(**d.pop("exclusion", {}))
+        output = OutputConfig(**d.pop("output"))
+        return BalancedDatasetConfig(
+            input=input_cfg,
+            clustering=clustering,
+            uniqueness=uniqueness,
+            embeddings=embeddings,
+            exclusion=exclusion,
+            output=output,
+            **d,
+        )
+
+    try:
+        config = _build_config(cfg_dict)
+    except (TypeError, KeyError) as exc:
+        raise click.UsageError(f"Invalid config in '{yaml_path}': {exc}") from exc
+
+    df = BalancedDatasetBuilder(config).build()
+    click.echo(
+        f"Built balanced dataset: {len(df)} patches → '{config.output.csv_path}'."
+    )
+    if config.output.geojson_path:
+        click.echo(f"GeoJSON written to '{config.output.geojson_path}'.")
+
+
 def entry():
     """Entry point registered in pyproject.toml."""
     cli()

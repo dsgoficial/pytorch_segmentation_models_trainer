@@ -3,11 +3,13 @@
 Tests for new methods in pytorch_segmentation_models_trainer.model_loader.model.Model
 """
 
+import pandas as pd
 import pytest
 import torch
 import torch.nn as nn
-from unittest.mock import MagicMock, patch, PropertyMock
 from omegaconf import OmegaConf
+from torch.utils.data import WeightedRandomSampler
+from unittest.mock import MagicMock, patch, PropertyMock
 
 from pytorch_segmentation_models_trainer.custom_losses.base_loss import MultiLoss
 
@@ -321,3 +323,132 @@ class TestCheckIfShouldNormalize:
     def test_no_loss_params_returns_false(self):
         model = _make_model()
         assert model.check_if_should_normalize() is False
+
+
+# ---------------------------------------------------------------------------
+# _make_weighted_sampler / train_dataloader with WeightedRandomSampler
+# ---------------------------------------------------------------------------
+
+
+def _dl_cfg(weighted_sampler=False, num_samples=None, replacement=True):
+    d = {
+        "shuffle": True,
+        "num_workers": 0,
+        "weighted_sampler": weighted_sampler,
+    }
+    if num_samples is not None:
+        d["weighted_sampler_num_samples"] = num_samples
+    if not replacement:
+        d["weighted_sampler_replacement"] = False
+    return OmegaConf.create(d)
+
+
+def _attach_train_ds(model, weights, extra_cols=None):
+    """Attach a mock train_ds with a sampler_weight column."""
+    df = pd.DataFrame({"sampler_weight": weights})
+    if extra_cols:
+        for k, v in extra_cols.items():
+            df[k] = v
+    mock_ds = MagicMock()
+    mock_ds.__len__ = MagicMock(return_value=len(weights))
+    mock_ds.df = df
+    model.train_ds = mock_ds
+    return mock_ds
+
+
+class TestMakeWeightedSampler:
+    def test_returns_none_when_disabled(self):
+        model = _make_model()
+        dl_cfg = _dl_cfg(weighted_sampler=False)
+        assert model._make_weighted_sampler(dl_cfg) is None
+
+    def test_returns_sampler_when_enabled(self):
+        model = _make_model()
+        _attach_train_ds(model, [0.1, 0.5, 0.9, 0.3])
+        dl_cfg = _dl_cfg(weighted_sampler=True)
+        sampler = model._make_weighted_sampler(dl_cfg)
+        assert isinstance(sampler, WeightedRandomSampler)
+
+    def test_default_num_samples_equals_dataset_len(self):
+        model = _make_model()
+        _attach_train_ds(model, [0.2, 0.8, 0.5])
+        dl_cfg = _dl_cfg(weighted_sampler=True)
+        sampler = model._make_weighted_sampler(dl_cfg)
+        assert sampler.num_samples == 3
+
+    def test_custom_num_samples(self):
+        model = _make_model()
+        _attach_train_ds(model, [0.2, 0.8, 0.5, 0.4])
+        dl_cfg = _dl_cfg(weighted_sampler=True, num_samples=10)
+        sampler = model._make_weighted_sampler(dl_cfg)
+        assert sampler.num_samples == 10
+
+    def test_replacement_false(self):
+        model = _make_model()
+        _attach_train_ds(model, [0.2, 0.8, 0.5, 0.4])
+        dl_cfg = _dl_cfg(weighted_sampler=True, replacement=False)
+        sampler = model._make_weighted_sampler(dl_cfg)
+        assert sampler.replacement is False
+
+    def test_raises_when_column_missing(self):
+        model = _make_model()
+        mock_ds = MagicMock()
+        mock_ds.df = pd.DataFrame({"image_path": ["/a.tif"]})
+        model.train_ds = mock_ds
+        dl_cfg = _dl_cfg(weighted_sampler=True)
+        with pytest.raises(ValueError, match="sampler_weight"):
+            model._make_weighted_sampler(dl_cfg)
+
+    def test_raises_when_ds_has_no_df(self):
+        model = _make_model()
+        mock_ds = MagicMock(spec=[])  # no .df attribute
+        model.train_ds = mock_ds
+        dl_cfg = _dl_cfg(weighted_sampler=True)
+        with pytest.raises(ValueError, match="sampler_weight"):
+            model._make_weighted_sampler(dl_cfg)
+
+
+class TestTrainDataloaderWeightedSampler:
+    def _full_dl_cfg(self, weighted=True):
+        return OmegaConf.create(
+            {
+                "shuffle": True,
+                "num_workers": 0,
+                "weighted_sampler": weighted,
+                "pin_memory": False,
+                "drop_last": False,
+                "persistent_workers": False,
+            }
+        )
+
+    def _setup_model(self, weights, weighted=True):
+        model = _make_model()
+        _attach_train_ds(model, weights)
+        model.cfg = OmegaConf.merge(
+            model.cfg,
+            OmegaConf.create(
+                {"train_dataset": {"data_loader": self._full_dl_cfg(weighted)}}
+            ),
+        )
+        return model
+
+    def test_dataloader_uses_sampler_when_enabled(self):
+        model = self._setup_model([0.1, 0.5, 0.9, 0.3], weighted=True)
+        dl = model.train_dataloader()
+        assert dl.sampler is not None
+        assert isinstance(dl.sampler, WeightedRandomSampler)
+
+    def test_dataloader_shuffle_false_when_sampler_active(self):
+        model = self._setup_model([0.1, 0.5, 0.9], weighted=True)
+        dl = model.train_dataloader()
+        # When sampler is set, DataLoader uses SequentialSampler internally
+        # (the WeightedRandomSampler *is* the sampler); shuffle must not be True
+        from torch.utils.data import SequentialSampler
+
+        assert not isinstance(dl.sampler, SequentialSampler)
+        assert isinstance(dl.sampler, WeightedRandomSampler)
+
+    def test_dataloader_no_sampler_when_disabled(self):
+        model = self._setup_model([0.1, 0.5, 0.9], weighted=False)
+        dl = model.train_dataloader()
+        assert not isinstance(dl.sampler, WeightedRandomSampler)

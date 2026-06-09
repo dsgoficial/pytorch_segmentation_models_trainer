@@ -374,3 +374,29 @@ During training, the following metrics are written to the logger automatically:
 | `losses/train_<name>` | Per component when using compound loss |
 | `losses/val_<name>` | Per component when using compound loss |
 | `losses/test_<name>` | Per component when using compound loss (test run) |
+
+---
+
+## Addressing Class Imbalance
+
+When your training set has significant class imbalance (e.g., rare urban classes in a
+predominantly background dataset), enable weighted random sampling:
+
+1. Generate a balanced CSV with `sampler_weight` per patch:
+
+   ```bash
+   pytorch-smt-tools build-balanced-dataset conf/balanced_train.yaml
+   ```
+
+2. Use the balanced CSV in `train_dataset` and set `weighted_sampler: true`:
+
+   ```yaml
+   train_dataset:
+     input_csv_path: /data/balanced_train.csv
+     data_loader:
+       shuffle: true
+       weighted_sampler: true   # activates WeightedRandomSampler; shuffle is auto-disabled
+   ```
+
+See [Balanced Dataset Sampling](./balanced-dataset-sampling.md) for the full pipeline,
+YAML reference, QGIS inspection, and performance guidance for large datasets.
