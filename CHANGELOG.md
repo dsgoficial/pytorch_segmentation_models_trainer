@@ -1,5 +1,15 @@
 # Unreleased
 
+## Tutorials and notebooks
+
+- Added a new `website/docs/tutorials/` section that indexes notebook-based
+  walkthroughs alongside the existing user guide and examples.
+- Added starter notebooks under `notebooks/` for quickstart, Potsdam
+  windowed segmentation, and tiled inference/export, so users can follow a
+  practical path from data preparation to prediction.
+- Linked the tutorials section from the docs introduction so the notebook
+  path is discoverable from the main documentation entry point.
+
 ## H3 Spatial Val/Test Split
 
 - Added `pytorch_segmentation_models_trainer/utils/h3_val_test_split.py` implementing

@@ -26,7 +26,7 @@ import torch
 import torch.nn as nn
 from hydra.utils import instantiate
 
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from typing import Any, List, Optional, Union, Dict, Tuple
 from pytorch_segmentation_models_trainer.utils.model_utils import replace_activation
@@ -663,30 +663,59 @@ class Model(pl.LightningModule):
         g.manual_seed(int(seed) % (2**32))
         return g
 
+    def _make_weighted_sampler(self, dl_cfg) -> Optional[WeightedRandomSampler]:
+        """Build a WeightedRandomSampler from the dataset's sampler_weight column.
+
+        Activated when ``data_loader.weighted_sampler: true`` is set in the YAML.
+        The dataset's underlying DataFrame must contain a ``sampler_weight`` column,
+        which is produced by ``pytorch-smt-tools build-balanced-dataset``.
+
+        Args:
+            dl_cfg: The ``data_loader`` config node for the relevant dataset split.
+
+        Returns:
+            A WeightedRandomSampler, or None when weighted sampling is disabled.
+
+        Raises:
+            ValueError: when weighted_sampler is enabled but the dataset has no
+                ``sampler_weight`` column.
+        """
+        if not dl_cfg.get("weighted_sampler", False):
+            return None
+        df = getattr(self.train_ds, "df", None)
+        if df is None or "sampler_weight" not in df.columns:
+            raise ValueError(
+                "weighted_sampler requires the training dataset to have a "
+                "'sampler_weight' column. Run 'pytorch-smt-tools build-balanced-dataset' "
+                "to generate the balanced CSV and use it as input_csv_path."
+            )
+        weights = torch.tensor(df["sampler_weight"].to_numpy(), dtype=torch.double)
+        num_samples = int(dl_cfg.get("weighted_sampler_num_samples", len(df)))
+        replacement = bool(dl_cfg.get("weighted_sampler_replacement", True))
+        return WeightedRandomSampler(
+            weights=weights,
+            num_samples=num_samples,
+            replacement=replacement,
+            generator=self._make_dataloader_generator(),
+        )
+
     def train_dataloader(self):
         num_workers = self.cfg.train_dataset.data_loader.num_workers
+        dl_cfg = self.cfg.train_dataset.data_loader
+        sampler = self._make_weighted_sampler(dl_cfg)
+        # WeightedRandomSampler is mutually exclusive with shuffle=True in PyTorch
+        shuffle = dl_cfg.shuffle if sampler is None else False
         return DataLoader(
             self.train_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
-            shuffle=self.cfg.train_dataset.data_loader.shuffle,
+            shuffle=shuffle,
+            sampler=sampler,
             num_workers=num_workers,
-            pin_memory=(
-                self.cfg.train_dataset.data_loader.pin_memory
-                if "pin_memory" in self.cfg.train_dataset.data_loader
-                else True
-            ),
-            drop_last=(
-                self.cfg.train_dataset.data_loader.drop_last
-                if "drop_last" in self.cfg.train_dataset.data_loader
-                else True
-            ),
-            prefetch_factor=self._prefetch_factor(
-                self.cfg.train_dataset.data_loader, num_workers
-            ),
+            pin_memory=(dl_cfg.pin_memory if "pin_memory" in dl_cfg else True),
+            drop_last=(dl_cfg.drop_last if "drop_last" in dl_cfg else True),
+            prefetch_factor=self._prefetch_factor(dl_cfg, num_workers),
             persistent_workers=(
-                self.cfg.train_dataset.data_loader.persistent_workers
-                if "persistent_workers" in self.cfg.train_dataset.data_loader
-                else False
+                dl_cfg.persistent_workers if "persistent_workers" in dl_cfg else False
             ),
             worker_init_fn=_worker_init_fn,
             generator=self._make_dataloader_generator(),

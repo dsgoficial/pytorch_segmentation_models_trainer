@@ -85,6 +85,7 @@ Transform segmentation masks into precise vector polygons:
 4. **[User Guide](/docs/user-guide/training-segmentation)** - In-depth guides for training and inference
 5. **[API Reference](/docs/api/main)** - Full API documentation
 6. **[Examples](/docs/examples/basic-segmentation)** - Working examples
+7. **[Tutorials](/docs/tutorials/notebooks)** - Notebook walkthroughs with real datasets
 
 ## Citation
 

@@ -1,0 +1,135 @@
+# Segmentation training with WeightedRandomSampler for class-imbalanced datasets.
+#
+# Prerequisites:
+#   1. Generate the balanced CSV (produces the sampler_weight column):
+#        pytorch-smt-tools build-balanced-dataset conf/examples/balanced_dataset_local.yaml
+#
+#   2. Use the balanced CSV as input_csv_path below and set weighted_sampler: true.
+#
+# What happens at runtime:
+#   - WeightedRandomSampler replaces the default random shuffle.
+#   - Patches with high sampler_weight (rare classes or visually unique) are
+#     drawn more often each epoch; patches with low weight are drawn less.
+#   - No data is discarded — every patch remains reachable by the sampler.
+#   - val_dataset and test_dataset are NOT affected; they always use sequential sampling.
+#
+# CSV columns required in train CSV:
+#   image_path      - path to the image GeoTIFF
+#   mask_path       - path to the mask GeoTIFF
+#   row_off         - patch row offset (pixels)
+#   col_off         - patch column offset (pixels)
+#   patch_size      - patch size (pixels, square)
+#   sampler_weight  - per-patch sampling weight (produced by build-balanced-dataset)
+
+_target_: pytorch_segmentation_models_trainer.model_loader.model.Model
+
+hyperparameters:
+  num_epochs: 100
+  batch_size: 16
+  learning_rate: 1.0e-4
+  devices: 1
+  accelerator: gpu
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedSegmentationDataset
+  input_csv_path: /data/balanced_train.csv   # ← CSV with sampler_weight column
+  n_classes: 6
+  use_rasterio: true
+  image_dtype: uint8
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.VerticalFlip
+      p: 0.5
+    - _target_: albumentations.RandomRotate90
+      p: 0.5
+    - _target_: albumentations.RandomBrightnessContrast
+      brightness_limit: 0.2
+      contrast_limit: 0.2
+      p: 0.3
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    shuffle: true              # ignored when weighted_sampler: true
+    num_workers: 8
+    pin_memory: true
+    drop_last: true
+    prefetch_factor: 2
+    weighted_sampler: true     # ← activate WeightedRandomSampler
+
+    # Optional overrides (defaults shown, comment out to use defaults):
+    # weighted_sampler_num_samples: 155000   # samples per epoch; default = len(dataset)
+    # weighted_sampler_replacement: true     # sample with replacement (recommended)
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedSegmentationDataset
+  input_csv_path: /data/val.csv   # val CSV does NOT need sampler_weight
+  n_classes: 6
+  use_rasterio: true
+  image_dtype: uint8
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    shuffle: false
+    num_workers: 4
+    pin_memory: true
+    drop_last: false
+    prefetch_factor: 2
+
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet50
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: 6
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.loss.SCELoss
+  name: sce
+  num_classes: 6
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.learning_rate}
+  weight_decay: 1.0e-4
+
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: ${hyperparameters.num_epochs}
+    monitor: val/loss
+
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: 6
+    average: macro
+  - _target_: torchmetrics.F1Score
+    task: multiclass
+    num_classes: 6
+    average: macro
+
+pl_trainer:
+  max_epochs: ${hyperparameters.num_epochs}
+  accelerator: ${hyperparameters.accelerator}
+  devices: ${hyperparameters.devices}
+
+callbacks:
+  - _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    monitor: val/JaccardIndex
+    mode: max
+    save_top_k: 3
+    filename: "epoch={epoch}-val_iou={val/JaccardIndex:.4f}"
+  - _target_: pytorch_lightning.callbacks.EarlyStopping
+    monitor: val/JaccardIndex
+    mode: max
+    patience: 15
+  - _target_: pytorch_lightning.callbacks.LearningRateMonitor
+    logging_interval: epoch
+
+mode: train

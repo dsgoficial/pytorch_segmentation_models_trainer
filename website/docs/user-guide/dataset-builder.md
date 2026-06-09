@@ -201,3 +201,7 @@ df = build_sliding_window_dataset(
 )
 print(f"{len(df)} patches saved")
 ```
+
+### Tutorial notebook
+
+See [Notebook Tutorials](../tutorials/notebooks.md) for an end-to-end Potsdam walkthrough that starts from image/mask folders, generates a CSV, and creates a small windowed training set.

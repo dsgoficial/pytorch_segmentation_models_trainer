@@ -1,0 +1,11 @@
+{
+  "label": "Tutorials",
+  "position": 4,
+  "link": {
+    "type": "generated-index",
+    "title": "Tutorials",
+    "description": "Hands-on tutorials and notebook walkthroughs for the framework.",
+    "keywords": ["tutorials", "notebooks", "potsdam", "hydra"]
+  },
+  "collapsed": false
+}
