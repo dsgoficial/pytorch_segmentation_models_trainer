@@ -1,5 +1,22 @@
 # Unreleased
 
+## H3 Spatial Val/Test Split
+
+- Added `pytorch_segmentation_models_trainer/utils/h3_val_test_split.py` implementing
+  the §5.1.2 Dataset Partitions protocol: assigns GeoTIFF patch centroids to H3
+  resolution-7 cells (≈1.4 km edge), then uses 20 000-trial random search with
+  frozenset deduplication to find the H3-cell-intact split whose validation class
+  distribution is closest to the full set (target val ≈ 20%).
+- Added `filter_weak_training_tiles` to exclude training tiles within a 1 km
+  buffer of any val/test patch via geopandas spatial join.
+- `train_csv` parameter is optional in `run()`; omit to skip training filtering entirely.
+- Added `split-manual-patches` CLI command (via `pytorch-smt-tools`) with options
+  for `--val-fraction`, `--class-col`, `--h3-resolution`, `--seed`, `--n-trials`,
+  `--train-csv`, `--buffer-m`.
+- Added `h3>=3.7.0,<5` to `requirements.txt` and `pyproject.toml` dependencies.
+- 45 unit/integration tests in `tests/test_h3_val_test_split.py`; 100% coverage on
+  new module.
+
 ## Soft Labels - BAGS border confidence for Experiment E5
 
 - Added BAGS-based `w_border_carta` support to soft-label confidence maps:

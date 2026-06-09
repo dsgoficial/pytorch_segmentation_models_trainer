@@ -73,8 +73,16 @@ logger = logging.getLogger(__name__)
 
 MAPBIOMAS_COLLECTIONS: Dict[str, str] = {
     "brazil": (
-        "projects/mapbiomas-workspace/public/collection8/"
-        "mapbiomas_collection80_integration_v1"
+        "projects/mapbiomas-public/assets/brazil/lulc/collection10/"
+        "mapbiomas_brazil_collection10_coverage_v2"
+    ),
+    "brazil-10m": (
+        "projects/mapbiomas-public/assets/brazil/lulc/"
+        "collection_S2_beta/collection_LULC_S2_beta"
+    ),
+    "brazil-10m-v3": (
+        "projects/mapbiomas-public/assets/brazil/lulc_10m/collection3/"
+        "mapbiomas_10m_collection3_integration_v1"
     ),
     "amazon": (
         "projects/mapbiomas-raisg/public/collection5/"
@@ -135,6 +143,8 @@ ESRI_LULC_COLLECTION = "projects/sat-io/open-datasets/landcover/ESRI_Global-LULC
 
 _DEFAULT_SCALES: Dict[str, int] = {
     "mapbiomas": 30,
+    "mapbiomas-10m": 10,
+    "mapbiomas-10m-v3": 10,
     "dynamic-world": 10,
     "esri-lulc": 10,
 }
@@ -873,7 +883,15 @@ def download_regions(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    effective_scale = scale if scale is not None else _DEFAULT_SCALES[source]
+    effective_scale = scale
+    if effective_scale is None:
+        if source == "mapbiomas" and mapbiomas_collection in (
+            "brazil-10m",
+            "brazil-10m-v3",
+        ):
+            effective_scale = _DEFAULT_SCALES["mapbiomas-10m"]
+        else:
+            effective_scale = _DEFAULT_SCALES[source]
 
     results: Dict[str, bool] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:

@@ -1702,6 +1702,142 @@ def remap_raster_from_json_cmd(
             click.echo(f"VRT written to '{out_vrt}'.")
 
 
+@cli.command("split-manual-patches")
+@click.argument("patches_csv", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Directory where val.csv and test.csv (and optionally train_filtered.csv) are written.",
+)
+@click.option(
+    "--image-col",
+    default="image_path",
+    show_default=True,
+    help="Column in PATCHES_CSV holding GeoTIFF paths.",
+)
+@click.option(
+    "--class-col",
+    default=None,
+    help=(
+        "Column holding class labels. Used to rank candidate splits by class "
+        "distribution balance (LaTeX §5.1.2). Omit to rank by fraction only."
+    ),
+)
+@click.option(
+    "--val-fraction",
+    default=0.20,
+    show_default=True,
+    type=float,
+    help="Target fraction of patches for validation.",
+)
+@click.option(
+    "--h3-resolution",
+    default=7,
+    show_default=True,
+    type=int,
+    help="H3 resolution for cell assignment (0–15).",
+)
+@click.option(
+    "--seed",
+    default=42,
+    show_default=True,
+    type=int,
+    help="Random seed for reproducibility.",
+)
+@click.option(
+    "--n-trials",
+    default=20000,
+    show_default=True,
+    type=int,
+    help="Number of random cell-order shuffles evaluated during the search.",
+)
+@click.option(
+    "--train-csv",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help=(
+        "Optional CSV of weak-training tiles. When provided, tiles overlapping "
+        "the --buffer-m exclusion zone around val/test patches are removed and "
+        "the result is written to train_filtered.csv. Omit to skip this step."
+    ),
+)
+@click.option(
+    "--buffer-m",
+    default=1000.0,
+    show_default=True,
+    type=float,
+    help="Exclusion buffer radius in metres around val/test patches (EPSG:3857).",
+)
+def split_manual_patches_cmd(
+    patches_csv,
+    output_dir,
+    image_col,
+    class_col,
+    val_fraction,
+    h3_resolution,
+    seed,
+    n_trials,
+    train_csv,
+    buffer_m,
+):
+    """Split manually labeled patches into val/test sets using H3 spatial cells.
+
+    PATCHES_CSV must have a column (--image-col) with GeoTIFF paths.
+    Centroids are assigned to H3 cells at --h3-resolution; entire cells are
+    allocated to val (~--val-fraction) or test, keeping cells intact.
+
+    The split that minimises the class-distribution distance from the full set
+    is selected (LaTeX §5.1.2). Pass --class-col to enable class-aware ranking.
+
+    When --train-csv is given, training tiles overlapping a --buffer-m radius
+    around any val/test patch are removed and saved as train_filtered.csv.
+    Omit --train-csv to skip the filtering step entirely.
+
+    \b
+    Examples:
+
+        # Val/test split only (no training filter)
+        pytorch-smt-tools split-manual-patches patches.csv \\
+            --output-dir splits/ --class-col majority_class
+
+        # Val/test split + filter training tiles
+        pytorch-smt-tools split-manual-patches patches.csv \\
+            --output-dir splits/ \\
+            --class-col majority_class \\
+            --train-csv /data/train_tiles.csv \\
+            --buffer-m 1000
+    """
+    from pytorch_segmentation_models_trainer.utils.h3_val_test_split import (
+        run as _run,
+    )
+
+    try:
+        stats = _run(
+            patches_csv=patches_csv,
+            output_dir=output_dir,
+            image_col=image_col,
+            class_col=class_col,
+            val_fraction=val_fraction,
+            h3_resolution=h3_resolution,
+            seed=seed,
+            n_trials=n_trials,
+            train_csv=train_csv,
+            buffer_m=buffer_m,
+        )
+    except (ValueError, ImportError) as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    click.echo(f"val    : {stats['n_val']} patches  ({stats['val_fraction']:.1%})")
+    click.echo(f"test   : {stats['n_test']} patches")
+    click.echo(f"val H3 cells : {stats['val_h3_cells']}")
+    if "n_train_before" in stats:
+        click.echo(
+            f"train  : {stats['n_train_before']} → {stats['n_train_after']} "
+            f"(removed {stats['n_train_before'] - stats['n_train_after']} tiles)"
+        )
+
+
 def entry():
     """Entry point registered in pyproject.toml."""
     cli()
