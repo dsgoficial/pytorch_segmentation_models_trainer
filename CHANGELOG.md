@@ -1,50 +1,14 @@
 # Unreleased
 
-## Balanced Dataset Sampling
+## Tutorials and notebooks
 
-- Added `pytorch_segmentation_models_trainer/tools/sampling/` package with six
-  modules implementing a two-signal patch weighting pipeline for class-imbalanced
-  segmentation datasets:
-  - `mask_stats.py` — computes per-patch class distribution, Shannon entropy,
-    nodata ratio, and detects border-nodata / black-border patches.
-  - `class_freq_clustering.py` — centered log-ratio (CLR) transform + KMeans
-    with automatic elbow-based k selection to cluster patches by semantic composition.
-  - `uniqueness.py` — cosine kNN uniqueness scores via sklearn (default) or
-    faiss (optional) backends; vectorized batch computation.
-  - `weight_calculator.py` — six combination strategies (`rank_max`, `rank_multiply`,
-    `rank_add`, `multiplicative`, `composition_only`, `uniqueness_only`) that combine
-    clustering and uniqueness signals into final sampler weights.
-  - `embedding_extractor.py` — DINOv2 CLS-token extraction via HuggingFace
-    `AutoModel`/`AutoProcessor` with rasterio windowed reads, multi-worker
-    DataLoader prefetching, and parquet persistence.
-  - `postgres_reader.py` — reads patch metadata from a dataset_explorer PostgreSQL
-    tile table with lazy psycopg2 import and column renaming.
-  - `sampling_config.py` — dataclasses for all configuration options
-    (`LocalInputConfig`, `PostgresConfig`, `ClusteringConfig`, `UniquenessConfig`,
-    `EmbeddingsConfig`, `ExclusionConfig`, `OutputConfig`, `BalancedDatasetConfig`).
-  - `balanced_dataset_builder.py` — orchestrates the full pipeline; produces a CSV
-    with a `sampler_weight` column ready for
-    `torch.utils.data.WeightedRandomSampler`; optional GeoJSON output with patch
-    footprints for QGIS inspection.
-- Added `build-balanced-dataset` CLI command (`pytorch-smt-tools`) accepting a YAML
-  config and printing the output CSV path on completion.
-- Added example configs `conf/examples/balanced_dataset_local.yaml` and
-  `conf/examples/balanced_dataset_postgres.yaml`.
-- Added HNSW backend (`backend: hnsw`, requires `hnswlib`) to `compute_uniqueness` for
-  O(N log N) approximate kNN — recommended for N > 50k patches; sklearn backend now uses
-  `n_jobs=-1` for free multi-core speedup.
-- Integrated `WeightedRandomSampler` into `Model.train_dataloader()`: set
-  `data_loader.weighted_sampler: true` in the training YAML to activate sampling weighted
-  by the `sampler_weight` column produced by `build-balanced-dataset`. Incompatible
-  `shuffle: true` is silently replaced by the sampler. Optional keys:
-  `weighted_sampler_num_samples` (default: `len(dataset)`) and
-  `weighted_sampler_replacement` (default: `true`).
-- Added training example config `conf/examples/weighted_sampler_segmentation.yaml`
-  showing a full Unet training setup with `weighted_sampler: true`.
-- 98 unit tests across 7 test files; 100% coverage on all new modules. 10 additional tests
-  in `tests/test_model_methods.py` covering `_make_weighted_sampler` and
-  `train_dataloader` with weighted sampling.
-- Added user-guide documentation: `website/docs/user-guide/balanced-dataset-sampling.md`.
+- Added a new `website/docs/tutorials/` section that indexes notebook-based
+  walkthroughs alongside the existing user guide and examples.
+- Added starter notebooks under `notebooks/` for quickstart, Potsdam
+  windowed segmentation, and tiled inference/export, so users can follow a
+  practical path from data preparation to prediction.
+- Linked the tutorials section from the docs introduction so the notebook
+  path is discoverable from the main documentation entry point.
 
 ## H3 Spatial Val/Test Split
 
