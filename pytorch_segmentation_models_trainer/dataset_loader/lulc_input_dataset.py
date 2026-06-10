@@ -3,7 +3,7 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import albumentations as A
 import numpy as np
@@ -13,6 +13,13 @@ import torch
 
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     AbstractDataset,
+)
+from pytorch_segmentation_models_trainer.dataset_loader.mbtiles_mask_dataset import (
+    MBTilesMaskWindowedDataset,
+)
+from pytorch_segmentation_models_trainer.tools.mbtiles.alignment import (
+    read_mask_window,
+    read_source_aligned_to_mask_window,
 )
 
 logger = logging.getLogger(__name__)
@@ -466,3 +473,179 @@ class LulcInputWindowedDataset(LulcInputDataset):
             for key in self.lulc_keys
         }
         return self._assemble_sample(image_np, mask_np, lulc_arrays, idx)
+
+
+class MBTilesLulcInputMaskWindowedDataset(MBTilesMaskWindowedDataset):
+    """MBTiles RGB plus one-hot LULC sources on mask-referenced windows.
+
+    This dataset extends :class:`MBTilesMaskWindowedDataset` for experiments
+    where RGB must be read directly from an MBTiles source while external LULC
+    rasters are concatenated as one-hot input channels. Each sample window is
+    still defined by the cartographic mask grid, so RGB, LULC, and target mask
+    are spatially aligned before augmentation.
+
+    Args:
+        mbtiles_path: RGB source MBTiles or rasterio-readable raster.
+        lulc_paths: Single-band LULC rasters/VRTs with class ids.
+        mask_paths: Explicit mask GeoTIFF paths.
+        mask_dir: Directory scanned recursively when ``mask_paths`` is omitted.
+        window_index_cache: Optional CSV/Parquet with selected windows.
+        patch_size: Square patch size used when building a window index.
+        num_classes: Number of classes used for LULC one-hot encoding and the
+            hard target mask.
+        ignore_lulc_index: Value treated as invalid in LULC rasters.
+        lulc_resampling: Rasterio resampling method for LULC sources. Keep this
+            as ``"nearest"`` for categorical rasters.
+        **kwargs: Other arguments accepted by ``MBTilesMaskWindowedDataset``.
+
+    Returns:
+        Dict with ``image`` tensor ``(3 + len(lulc_paths) * num_classes, H, W)``
+        and ``mask`` tensor ``(H, W)``.
+
+    Example YAML:
+        ```yaml
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.lulc_input_dataset.MBTilesLulcInputMaskWindowedDataset
+          mbtiles_path: /data/tiles.mbtiles
+          mask_dir: /data/masks
+          window_index_cache: /data/coreset.csv
+          lulc_paths: [/data/mapbiomas.vrt, /data/esri.vrt, /data/dw.vrt]
+          num_classes: 6
+        ```
+    """
+
+    def __init__(
+        self,
+        mbtiles_path,
+        lulc_paths: Sequence[Union[str, Path]],
+        mask_paths: Optional[Sequence[str]] = None,
+        mask_dir: Optional[str] = None,
+        mask_extension: str = ".tif",
+        patch_size: int = 512,
+        stride: Optional[int] = None,
+        selected_bands: Optional[Sequence[int]] = None,
+        image_dtype: str = "uint8",
+        image_resampling: str = "bilinear",
+        num_classes: int = 6,
+        ignore_lulc_index: int = 255,
+        lulc_resampling: str = "nearest",
+        augmentation_list=None,
+        data_loader=None,
+        return_metadata: bool = True,
+        window_index_cache: Optional[str] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            mbtiles_path=mbtiles_path,
+            mask_paths=mask_paths,
+            mask_dir=mask_dir,
+            mask_extension=mask_extension,
+            patch_size=patch_size,
+            stride=stride,
+            selected_bands=selected_bands,
+            image_dtype=image_dtype,
+            image_resampling=image_resampling,
+            n_classes=num_classes,
+            augmentation_list=augmentation_list,
+            data_loader=data_loader,
+            return_metadata=return_metadata,
+            window_index_cache=window_index_cache,
+            **kwargs,
+        )
+        self.lulc_paths = [Path(p) for p in lulc_paths]
+        self.num_classes = num_classes
+        self.ignore_lulc_index = ignore_lulc_index
+        self.lulc_resampling = lulc_resampling
+
+        if self.transform is not None and self.lulc_paths:
+            self.transform = A.Compose(
+                self.transform.transforms,
+                additional_targets={
+                    f"lulc_{idx}": "mask" for idx in range(len(self.lulc_paths))
+                },
+            )
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        """Return one MBTiles RGB + LULC feature patch.
+
+        Args:
+            idx: Dataset item index.
+
+        Returns:
+            Dict with concatenated image tensor and hard-label mask tensor.
+
+        Raises:
+            IndexError: If *idx* is outside the dataset range.
+        """
+        if idx < 0 or idx >= len(self):
+            raise IndexError(f"Index {idx} out of bounds for size {len(self)}.")
+
+        record = self.windows[idx]
+        mask_path = record["mask_path"]
+        window = rasterio.windows.Window(
+            record["col_off"],
+            record["row_off"],
+            record["width"],
+            record["height"],
+        )
+
+        with rasterio.open(mask_path) as mask_src:
+            image_chw = read_source_aligned_to_mask_window(
+                source_path=self.mbtiles_path,
+                mask_src=mask_src,
+                window=window,
+                selected_bands=self.selected_bands,
+                image_dtype=self.image_dtype,
+                image_resampling=self.image_resampling,
+            )
+            mask = read_mask_window(mask_src, window, n_classes=self.n_classes)
+            lulc_arrays = [
+                read_source_aligned_to_mask_window(
+                    source_path=path,
+                    mask_src=mask_src,
+                    window=window,
+                    selected_bands=[1],
+                    image_dtype="uint8",
+                    image_resampling=self.lulc_resampling,
+                )[0]
+                for path in self.lulc_paths
+            ]
+
+        image_hwc = np.ascontiguousarray(image_chw.transpose(1, 2, 0))
+        lulc_targets = {f"lulc_{i}": arr for i, arr in enumerate(lulc_arrays)}
+
+        if self.transform is not None:
+            result = self.transform(image=image_hwc, mask=mask, **lulc_targets)
+            image_out = result["image"]
+            mask_out = result["mask"]
+            lulc_out = {key: result[key] for key in lulc_targets}
+        else:
+            image_out = image_hwc
+            mask_out = mask
+            lulc_out = lulc_targets
+
+        image_t = LulcInputDataset._image_to_chw_float(image_out)
+        lulc_tensors = [
+            torch.from_numpy(
+                _one_hot_chw(
+                    LulcInputDataset._lulc_to_hw_uint8(lulc_out[key]),
+                    self.num_classes,
+                    self.ignore_lulc_index,
+                )
+            )
+            for key in sorted(lulc_out)
+        ]
+        combined = torch.cat([image_t, *lulc_tensors], dim=0)
+
+        sample: Dict[str, Any] = {
+            "image": combined,
+            "mask": LulcInputDataset._mask_to_hw_long(mask_out),
+            "path": str(mask_path),
+        }
+        if self.return_metadata:
+            sample["metadata"] = {
+                "mask_path": str(mask_path),
+                "row_off": int(record["row_off"]),
+                "col_off": int(record["col_off"]),
+            }
+        return sample

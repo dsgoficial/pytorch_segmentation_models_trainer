@@ -292,3 +292,18 @@ uniqueness:
 DINOv2 embedding extraction time depends on GPU availability. With `use_gpu: false`
 and `batch_size: 32`, expect ~10-30 minutes for 155k patches on a modern CPU.
 Embeddings are cached to `parquet_path` — subsequent runs skip extraction entirely.
+
+---
+
+## Next Step — CoreSet Selection
+
+`build-balanced-dataset` produces weights for the *full* pool. When compute budget requires
+training on only 30–50% of patches, pass `balanced_dataset.csv` to `select-coreset` to identify
+the most informative subset before training:
+
+```bash
+pytorch-smt-tools select-coreset conf/examples/coreset_local.yaml
+```
+
+See [CoreSet Selection](coreset-selection.md) for the six selection methods, GPU acceleration,
+spatial diversity flags, and sampler weight integration.

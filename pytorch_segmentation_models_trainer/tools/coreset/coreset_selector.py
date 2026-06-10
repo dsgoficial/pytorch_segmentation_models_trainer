@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """CoreSetSelector: orchestrates core-set scoring and budget selection."""
 
+import json
+
 import numpy as np
 import pandas as pd
 
@@ -141,4 +143,103 @@ class CoreSetSelector:
         df["coreset_selected"] = selected_mask
 
         df.to_csv(self.config.output_csv_path, index=False)
+        return df
+
+    def compute_sampler_weights(
+        self,
+        df: pd.DataFrame,
+        cap: float = 0.25,
+        class_dist_column: str = "class_dist_json",
+        weight_column: str = "sampler_weight",
+    ) -> pd.DataFrame:
+        """Compute per-patch sampler weights for ``WeightedRandomSampler``.
+
+        Implements the *sampler_weight_v3* recipe: inverse class frequency
+        weighted average, capped to prevent rare-class dominance.
+
+        Class frequencies are measured **only over selected patches**
+        (``coreset_selected=True``).  Each patch weight is the dot product of
+        its class proportion vector and the normalised inverse-frequency weight
+        vector.  Non-selected patches receive 0.0.
+
+        Args:
+            df: output of :meth:`select` — must contain ``coreset_selected``
+                and ``class_dist_column`` columns.
+            cap: maximum weight; clips outliers from extremely rare classes.
+                Defaults to 0.25.
+            class_dist_column: column holding per-patch class distribution as a
+                JSON string or dict (e.g. ``'{"0": 0.3, "1": 0.7}'``).
+            weight_column: name of the new weight column.
+
+        Returns:
+            Copy of ``df`` with ``weight_column`` added.  Selected patches have
+            ``weight > 0``; non-selected patches have ``weight == 0.0``.
+
+        Raises:
+            ValueError: if ``coreset_selected`` is missing from ``df``.
+            ValueError: if ``class_dist_column`` is missing from ``df``.
+
+        Example:
+            .. code-block:: python
+
+                result = selector.select(df)
+                result = selector.compute_sampler_weights(result, cap=0.25)
+                weights = result.loc[
+                    result["coreset_selected"], "sampler_weight"
+                ]
+        """
+        if "coreset_selected" not in df.columns:
+            raise ValueError(
+                "'coreset_selected' column missing — call select() before "
+                "compute_sampler_weights()."
+            )
+        if class_dist_column not in df.columns:
+            raise ValueError(f"'{class_dist_column}' column missing from DataFrame.")
+
+        selected_df = df[df["coreset_selected"]]
+
+        global_count: dict = {}
+        for v in selected_df[class_dist_column]:
+            try:
+                d = json.loads(v) if isinstance(v, str) else v
+                if not d:
+                    continue
+                for k, val in d.items():
+                    key = str(k)
+                    global_count[key] = global_count.get(key, 0.0) + float(val)
+            except Exception:
+                continue
+
+        df = df.copy()
+
+        if not global_count:
+            df[weight_column] = 0.0
+            return df
+
+        total = sum(global_count.values())
+        class_freq = {k: v / total for k, v in global_count.items()}
+        raw_weights = {k: 1.0 / f for k, f in class_freq.items()}
+        mean_w = float(np.mean(list(raw_weights.values())))
+        class_weight_map = {k: w / mean_w for k, w in raw_weights.items()}
+
+        def _patch_weight(dist_json) -> float:
+            try:
+                d = json.loads(dist_json) if isinstance(dist_json, str) else dist_json
+                if not d:
+                    return 0.0
+                t = sum(float(v) for v in d.values())
+                if t == 0:
+                    return 0.0
+                return sum(
+                    class_weight_map.get(str(k), 0.0) * float(v) / t
+                    for k, v in d.items()
+                )
+            except Exception:
+                return 0.0
+
+        weights = df[class_dist_column].apply(_patch_weight).values
+        selected_mask = df["coreset_selected"].values.astype(bool)
+        weights = np.where(selected_mask, weights, 0.0)
+        weights = np.clip(weights, None, cap)
+        df[weight_column] = weights
         return df

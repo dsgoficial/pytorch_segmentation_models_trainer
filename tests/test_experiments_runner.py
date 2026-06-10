@@ -279,6 +279,18 @@ class TestCollectMetrics(BasicTestCase):
         self.assertIn("val/loss", val)
         self.assertNotIn("train/loss", val)
 
+    def test_lightning_suffix_metric_convention_is_collected(self):
+        ExperimentsRunner = self._import()
+        cfg = _make_runner_cfg(seeds=[42])
+        runner = ExperimentsRunner(cfg)
+        trainer = _make_mock_trainer(
+            {"loss/val": 0.35, "JaccardIndex/val": 0.6, "loss/train": 0.2}
+        )
+        train, val, _ = runner._collect_metrics(trainer)
+        self.assertIn("loss/val", val)
+        self.assertIn("JaccardIndex/val", val)
+        self.assertIn("loss/train", train)
+
     def test_train_metrics_separated(self):
         ExperimentsRunner = self._import()
         cfg = _make_runner_cfg(seeds=[42])

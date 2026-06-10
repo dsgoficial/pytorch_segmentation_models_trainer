@@ -9,13 +9,17 @@ import pandas as pd
 import pytest
 import rasterio
 import torch
+import torch.nn as nn
+from omegaconf import OmegaConf
 from rasterio.transform import from_bounds
 
 from pytorch_segmentation_models_trainer.dataset_loader.lulc_input_dataset import (
     LulcInputDataset,
     LulcInputWindowedDataset,
+    MBTilesLulcInputMaskWindowedDataset,
     _one_hot_chw,
 )
+from pytorch_segmentation_models_trainer.model_loader.model import Model
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -126,6 +130,35 @@ def windowed_csv(scene_dir, tmp_path):
     ]
     pd.DataFrame(rows).to_csv(csv_path, index=False)
     return csv_path
+
+
+@pytest.fixture()
+def mbtiles_lulc_setup(scene_dir, tmp_path):
+    """Create a window index for MBTiles-style RGB plus mask-referenced LULC."""
+    cache = str(tmp_path / "mbtiles_lulc_windows.csv")
+    rows = [
+        {
+            "mask_path": scene_dir["mask"],
+            "row_off": 0,
+            "col_off": 0,
+            "patch_size": H,
+            "sampler_weight": 1.0,
+        },
+        {
+            "mask_path": scene_dir["mask"],
+            "row_off": H,
+            "col_off": W,
+            "patch_size": H,
+            "sampler_weight": 1.0,
+        },
+    ]
+    pd.DataFrame(rows).to_csv(cache, index=False)
+    return {
+        "image": scene_dir["image"],
+        "mask": scene_dir["mask"],
+        "lulc_paths": [scene_dir["lulc_0"], scene_dir["lulc_1"]],
+        "cache": cache,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -383,3 +416,118 @@ class TestConversionHelpers:
         out = LulcInputDataset._lulc_to_hw_uint8(t)
         assert out.dtype == np.uint8
         assert out.shape == (H, W)
+
+
+# ---------------------------------------------------------------------------
+# MBTilesLulcInputMaskWindowedDataset
+# ---------------------------------------------------------------------------
+
+
+class TestMBTilesLulcInputMaskWindowedDataset:
+    def test_contract_shape_and_dtype(self, mbtiles_lulc_setup):
+        ds = MBTilesLulcInputMaskWindowedDataset(
+            mbtiles_path=mbtiles_lulc_setup["image"],
+            mask_paths=[mbtiles_lulc_setup["mask"]],
+            lulc_paths=mbtiles_lulc_setup["lulc_paths"],
+            window_index_cache=mbtiles_lulc_setup["cache"],
+            num_classes=C,
+            return_metadata=False,
+        )
+
+        item = ds[0]
+        assert len(ds) == 2
+        assert set(item) == {"image", "mask", "path"}
+        assert item["image"].shape == (3 + 2 * C, H, W)
+        assert item["mask"].shape == (H, W)
+        assert item["image"].dtype == torch.float32
+        assert item["mask"].dtype == torch.int64
+
+    def test_batch_sizes_and_lulc_one_hot_values(self, mbtiles_lulc_setup):
+        ds = MBTilesLulcInputMaskWindowedDataset(
+            mbtiles_path=mbtiles_lulc_setup["image"],
+            mask_paths=[mbtiles_lulc_setup["mask"]],
+            lulc_paths=mbtiles_lulc_setup["lulc_paths"],
+            window_index_cache=mbtiles_lulc_setup["cache"],
+            num_classes=C,
+            return_metadata=False,
+        )
+        batch = next(iter(torch.utils.data.DataLoader(ds, batch_size=2)))
+
+        assert batch["image"].shape == (2, 3 + 2 * C, H, W)
+        assert batch["mask"].shape == (2, H, W)
+        unique = torch.unique(batch["image"][:, 3:])
+        assert set(unique.tolist()).issubset({0.0, 1.0})
+
+    def test_ignore_lulc_index_produces_zero_vector(self, mbtiles_lulc_setup):
+        with rasterio.open(mbtiles_lulc_setup["lulc_paths"][0], "r+") as dst:
+            data = dst.read(1)
+            data[:H, :W] = 255
+            dst.write(data, 1)
+        ds = MBTilesLulcInputMaskWindowedDataset(
+            mbtiles_path=mbtiles_lulc_setup["image"],
+            mask_paths=[mbtiles_lulc_setup["mask"]],
+            lulc_paths=mbtiles_lulc_setup["lulc_paths"],
+            window_index_cache=mbtiles_lulc_setup["cache"],
+            num_classes=C,
+            ignore_lulc_index=255,
+            return_metadata=False,
+        )
+
+        first_lulc = ds[0]["image"][3 : 3 + C]
+        assert torch.count_nonzero(first_lulc) == 0
+
+    def test_gradient_flow_with_dataset_batch(self, mbtiles_lulc_setup):
+        ds = MBTilesLulcInputMaskWindowedDataset(
+            mbtiles_path=mbtiles_lulc_setup["image"],
+            mask_paths=[mbtiles_lulc_setup["mask"]],
+            lulc_paths=mbtiles_lulc_setup["lulc_paths"],
+            window_index_cache=mbtiles_lulc_setup["cache"],
+            num_classes=C,
+            return_metadata=False,
+        )
+        batch = next(iter(torch.utils.data.DataLoader(ds, batch_size=2)))
+        model = nn.Conv2d(3 + 2 * C, C, kernel_size=1)
+        loss = nn.CrossEntropyLoss()(model(batch["image"]), batch["mask"])
+        loss.backward()
+
+        assert model.weight.grad is not None
+        assert torch.count_nonzero(model.weight.grad) > 0
+
+    def test_lightning_model_integration(self, mbtiles_lulc_setup):
+        dataset_cfg = {
+            "_target_": (
+                "pytorch_segmentation_models_trainer.dataset_loader"
+                ".lulc_input_dataset.MBTilesLulcInputMaskWindowedDataset"
+            ),
+            "mbtiles_path": mbtiles_lulc_setup["image"],
+            "mask_paths": [mbtiles_lulc_setup["mask"]],
+            "lulc_paths": mbtiles_lulc_setup["lulc_paths"],
+            "window_index_cache": mbtiles_lulc_setup["cache"],
+            "num_classes": C,
+            "return_metadata": False,
+            "data_loader": {
+                "shuffle": False,
+                "num_workers": 0,
+                "pin_memory": False,
+                "drop_last": False,
+            },
+        }
+        cfg = OmegaConf.create(
+            {
+                "model": {
+                    "_target_": "torch.nn.Conv2d",
+                    "in_channels": 3 + 2 * C,
+                    "out_channels": C,
+                    "kernel_size": 1,
+                },
+                "loss": {"_target_": "torch.nn.CrossEntropyLoss"},
+                "hyperparameters": {"batch_size": 2},
+                "train_dataset": dataset_cfg,
+                "val_dataset": dataset_cfg,
+            }
+        )
+
+        lightning_model = Model(cfg, inference_mode=False)
+        batch = next(iter(lightning_model.train_dataloader()))
+        loss = lightning_model.training_step(batch, 0)
+        assert loss.ndim == 0

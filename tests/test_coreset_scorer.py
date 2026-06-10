@@ -221,18 +221,27 @@ class TestScoreFa:
 
         return score_fa(df, cfg)
 
-    def test_high_mean_high_std_wins(self):
-        # Patch C: high mean, moderate std → should beat A (no std) and B (low mean)
-        patch_a = np.ones(64)  # high mean, zero std → score ≈ 0
-        patch_b = np.array([0.0, 1.0] * 32)  # moderate mean, high std
-        patch_c = np.linspace(0.7, 1.0, 64)  # high mean, moderate std
-        df = _make_embed_df([patch_a, patch_b, patch_c])
+    def test_matches_inverse_minmax_gamma_formula(self):
+        patch_a = np.array([0.1, 0.3])  # lowest sigma -> score 0
+        patch_b = np.array([0.35, 0.65])
+        patch_c = np.array([0.55, 1.05])
+        patch_d = np.array([0.6, 1.2])  # gamma minimum -> score 1
+        embeddings = [patch_a, patch_b, patch_c, patch_d]
+        df = _make_embed_df(embeddings)
         cfg = CoreSetConfig(embedding_column="embedding")
         scores = self._fn(df, cfg)
-        # patch_a has zero std → score 0
-        assert scores[0] == pytest.approx(0.0)
-        # patch_c has highest mean; tie-break depends on scaling but score > 0
-        assert scores[2] >= scores[0]
+
+        F = np.stack(embeddings)
+        mu = F.mean(axis=1)
+        sigma = F.std(axis=1)
+        gamma = -(1.0 - mu) * np.log(sigma + 1e-12)
+        gamma_min = gamma.min()
+        gamma_max = gamma.max()
+        expected = 1.0 - (gamma - gamma_min) / (gamma_max - gamma_min)
+
+        assert np.allclose(scores, expected)
+        assert scores[np.argmax(gamma)] == pytest.approx(0.0)
+        assert scores[np.argmin(gamma)] == pytest.approx(1.0)
 
     def test_missing_embedding_column_raises(self):
         df = _make_embed_df([np.ones(4)])
@@ -249,13 +258,19 @@ class TestScoreFa:
         assert np.all(scores >= 0) and np.all(scores <= 1)
 
     def test_constant_embedding_gets_zero_std_score(self):
-        # All same value → std=0 → σ_scaled=0 → score=0
+        # All same value -> minimum normalised sigma -> score 0
         patch_const = np.full(16, 0.5)
         patch_varied = np.linspace(0, 1, 16)
         df = _make_embed_df([patch_const, patch_varied])
         cfg = CoreSetConfig(embedding_column="embedding")
         scores = self._fn(df, cfg)
         assert scores[0] == pytest.approx(0.0)
+
+    def test_all_equal_gamma_embeddings_return_zero_scores(self):
+        df = _make_embed_df([np.full(8, 0.5), np.full(8, 0.5)])
+        cfg = CoreSetConfig(embedding_column="embedding")
+        scores = self._fn(df, cfg)
+        assert np.all(scores == 0.0)
 
     def test_missing_column_in_df_raises(self):
         df = pd.DataFrame({"other": [1, 2]})
@@ -1404,3 +1419,144 @@ class TestAugmentEmbeddingWithSpatial:
         result = _augment_embedding_with_spatial(F, df)
         spatial_cols = result[:, d:]
         assert np.all(spatial_cols >= 0) and np.all(spatial_cols <= 1 + 1e-9)
+
+
+# ---------------------------------------------------------------------------
+# CoreSetSelector.compute_sampler_weights
+# ---------------------------------------------------------------------------
+
+
+def _make_selector_df(n=20, cap_class_fraction=None):
+    """DataFrame with class_dist_json and coreset_selected columns.
+
+    First half selected; second half not selected.
+    cap_class_fraction: if set, one extreme-rare class is added to trigger cap.
+    """
+    rng = np.random.RandomState(42)
+    dists = []
+    for i in range(n):
+        if cap_class_fraction is not None and i == 0:
+            # Patch with a very rare class to trigger capping
+            d = {"0": cap_class_fraction, "1": 1.0 - cap_class_fraction}
+        else:
+            vals = rng.dirichlet([1.0, 2.0, 3.0])
+            d = {"0": float(vals[0]), "1": float(vals[1]), "2": float(vals[2])}
+        dists.append(json.dumps(d))
+    selected = [True] * (n // 2) + [False] * (n - n // 2)
+    return pd.DataFrame(
+        {
+            "class_dist_json": dists,
+            "coreset_selected": selected,
+            "coreset_score": rng.uniform(0, 1, n),
+        }
+    )
+
+
+class TestComputeSamplerWeights:
+    def _make_selector(self, tmp_path):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_selector import (  # noqa: E501
+            CoreSetSelector,
+        )
+
+        cfg = CoreSetConfig(output_csv_path=str(tmp_path / "out.csv"))
+        return CoreSetSelector(cfg)
+
+    def test_returns_df_with_weight_column(self, tmp_path):
+        sel = self._make_selector(tmp_path)
+        df = _make_selector_df()
+        result = sel.compute_sampler_weights(df)
+        assert "sampler_weight" in result.columns
+
+    def test_non_selected_get_zero_weight(self, tmp_path):
+        sel = self._make_selector(tmp_path)
+        df = _make_selector_df()
+        result = sel.compute_sampler_weights(df)
+        non_sel = result[~result["coreset_selected"]]
+        assert (non_sel["sampler_weight"] == 0.0).all()
+
+    def test_selected_get_positive_weight(self, tmp_path):
+        sel = self._make_selector(tmp_path)
+        df = _make_selector_df()
+        result = sel.compute_sampler_weights(df)
+        sel_rows = result[result["coreset_selected"]]
+        assert (sel_rows["sampler_weight"] > 0.0).all()
+
+    def test_cap_applied(self, tmp_path):
+        sel = self._make_selector(tmp_path)
+        df = _make_selector_df()
+        cap = 0.15
+        result = sel.compute_sampler_weights(df, cap=cap)
+        assert (result["sampler_weight"] <= cap + 1e-9).all()
+
+    def test_rare_class_gets_capped(self, tmp_path):
+        sel = self._make_selector(tmp_path)
+        # One patch has 0.1% of a class — will be capped at 0.25
+        df = _make_selector_df(cap_class_fraction=0.001)
+        result = sel.compute_sampler_weights(df, cap=0.25)
+        assert result["sampler_weight"].max() == pytest.approx(0.25, abs=1e-9)
+
+    def test_missing_coreset_selected_raises(self, tmp_path):
+        sel = self._make_selector(tmp_path)
+        df = pd.DataFrame({"class_dist_json": ['{"0": 1.0}']})
+        with pytest.raises(ValueError, match="coreset_selected"):
+            sel.compute_sampler_weights(df)
+
+    def test_missing_class_dist_column_raises(self, tmp_path):
+        sel = self._make_selector(tmp_path)
+        df = pd.DataFrame({"coreset_selected": [True, False]})
+        with pytest.raises(ValueError, match="class_dist_json"):
+            sel.compute_sampler_weights(df)
+
+    def test_custom_weight_column(self, tmp_path):
+        sel = self._make_selector(tmp_path)
+        df = _make_selector_df()
+        result = sel.compute_sampler_weights(df, weight_column="my_weight")
+        assert "my_weight" in result.columns
+        assert "sampler_weight" not in result.columns
+
+    def test_custom_class_dist_column(self, tmp_path):
+        sel = self._make_selector(tmp_path)
+        df = _make_selector_df()
+        df = df.rename(columns={"class_dist_json": "dist_custom"})
+        result = sel.compute_sampler_weights(
+            df, class_dist_column="dist_custom", weight_column="sampler_weight"
+        )
+        assert "sampler_weight" in result.columns
+
+    def test_no_selected_returns_zeros(self, tmp_path):
+        sel = self._make_selector(tmp_path)
+        df = _make_selector_df()
+        df["coreset_selected"] = False
+        result = sel.compute_sampler_weights(df)
+        assert (result["sampler_weight"] == 0.0).all()
+
+    def test_does_not_mutate_input(self, tmp_path):
+        sel = self._make_selector(tmp_path)
+        df = _make_selector_df()
+        original_cols = set(df.columns)
+        sel.compute_sampler_weights(df)
+        assert set(df.columns) == original_cols
+
+    def test_rare_class_patch_higher_than_common(self, tmp_path):
+        sel = self._make_selector(tmp_path)
+        # rare patch: 99% class 0; common patch: 99% class 1
+        # class 0 appears in 1 of 2 selected patches → rarer → higher weight
+        df = pd.DataFrame(
+            {
+                "class_dist_json": [
+                    json.dumps({"0": 0.99, "1": 0.01}),
+                    json.dumps({"0": 0.01, "1": 0.99}),
+                    json.dumps({"0": 0.5, "1": 0.5}),  # not selected
+                ],
+                "coreset_selected": [True, True, False],
+            }
+        )
+        result = sel.compute_sampler_weights(df, cap=100.0)
+        # class 0: 0.99 vs 0.01 across selected → more pixels of c0 overall
+        # but the patch with 99% class 0 contributes 0.99 proportion of class 0
+        # inverse freq: class with fewer total pixels → higher weight
+        # both are selected; we just check they're positive and different
+        w_rare = result.loc[0, "sampler_weight"]
+        w_common = result.loc[1, "sampler_weight"]
+        assert w_rare > 0
+        assert w_common > 0

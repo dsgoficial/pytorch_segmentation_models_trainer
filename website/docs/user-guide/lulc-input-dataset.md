@@ -5,8 +5,9 @@ title: LULC Input Dataset
 
 # LULC Input Dataset
 
-`LulcInputDataset` and `LulcInputWindowedDataset` feed multi-source LULC
-classification rasters as extra input channels alongside the RGB image.
+`LulcInputDataset`, `LulcInputWindowedDataset`, and
+`MBTilesLulcInputMaskWindowedDataset` feed multi-source LULC classification
+rasters as extra input channels alongside the RGB image.
 
 Each LULC raster is **one-hot encoded** and concatenated with the RGB bands,
 producing a `(3 + N × C, H, W)` tensor where `N` is the number of LULC
@@ -56,6 +57,19 @@ image_path,mask_path,mapbiomas_path,esri_path,dw_path,row_off,col_off,patch_size
 ```
 
 The same scene file can appear in multiple rows (one row per patch).
+
+### MBTiles + mask windows (`MBTilesLulcInputMaskWindowedDataset`)
+
+Use this variant when RGB is stored in an MBTiles source and the mask GeoTIFFs
+define the training grid. The window CSV follows the same format accepted by
+`MBTilesMaskWindowedDataset`:
+
+```csv
+mask_path,row_off,col_off,patch_size
+/data/masks/76.tif,4,4,256
+```
+
+LULC sources are passed as raster/VRT paths in the YAML, not as CSV columns.
 
 ## Configuration
 
@@ -121,6 +135,32 @@ train_dataset:
     pin_memory: true
 ```
 
+### MBTiles + LULC Windowed
+
+```yaml
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.lulc_input_dataset.MBTilesLulcInputMaskWindowedDataset
+  mbtiles_path: /data/tiles.mbtiles
+  mask_dir: /data/masks
+  window_index_cache: /data/coreset_windows.csv
+  patch_size: 256
+  selected_bands: [1, 2, 3]
+  lulc_paths:
+    - /data/mapbiomas_edgv_2_5m.vrt
+    - /data/esri_edgv_2_5m.vrt
+    - /data/dynamic_world_edgv_2_5m.vrt
+  num_classes: 6
+  ignore_lulc_index: 255
+  lulc_resampling: nearest
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+```
+
 ## Parameters
 
 ### Shared (`LulcInputDataset`)
@@ -143,6 +183,15 @@ train_dataset:
 | `row_off_key` | `str` | `"row_off"` | CSV column for patch top-left row offset |
 | `col_off_key` | `str` | `"col_off"` | CSV column for patch top-left col offset |
 | `patch_size_key` | `str` | `"patch_size"` | CSV column for patch size (square) |
+
+### Extra (`MBTilesLulcInputMaskWindowedDataset`)
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `mbtiles_path` | `str` | required | RGB MBTiles or rasterio-readable source |
+| `lulc_paths` | `list[str]` | required | LULC raster/VRT paths, one source per entry |
+| `window_index_cache` | `str` | `None` | CSV/Parquet with `mask_path,row_off,col_off,width,height` or `patch_size` |
+| `lulc_resampling` | `str` | `"nearest"` | Resampling for categorical LULC sources |
 
 ## Python API
 

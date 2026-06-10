@@ -27,6 +27,7 @@ ambiguity is highest.  See [W_conf formula](#w_conf-formula) for details.
 | Dataset | `SoftLabelDataset` | Reads P_soft and W_conf GeoTIFFs, returns `batch["mask"]` as a dict |
 | Windowed Dataset | `SoftLabelWindowedDataset` | Reads patches on-the-fly from full-scene rasters via row/col offsets |
 | Cached Dataset | `SoftLabelCachedDataset` | Computes P_soft lazily from `sources_csv`, caches to disk; supports windowed read |
+| MBTiles Dataset | `MBTilesSoftLabelMaskWindowedDataset` | Reads RGB from MBTiles and computes P_soft/W_conf on mask-referenced windows |
 | Loss | `SoftLabelWeightedCELoss` | Pixel-wise soft cross-entropy weighted by W_conf |
 | Model | `SoftLabelModel` | Subclass of `Model` that passes W_conf through the loss pipeline |
 | Preprocessing | `build_soft_labels.py` | Computes P_soft and W_conf from multiple LULC sources; optionally blends AEF embeddings |
@@ -624,6 +625,37 @@ sample = ds[0]
 - Writes are atomic (`{tile_id}.tif.tmp` → rename) so concurrent DataLoader workers
   (multi-process) cannot corrupt a partial write.
 - Stale `.tmp` files left by crashed workers are overwritten on the next access.
+
+### `MBTilesSoftLabelMaskWindowedDataset`
+
+Use this dataset when RGB imagery lives in MBTiles and mask GeoTIFFs define the
+training grid. The soft label is computed per sampled window as an equal vote
+over the BAGS mask window and each LULC raster/VRT listed in `lulc_paths`.
+
+```yaml
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_soft_label_dataset.MBTilesSoftLabelMaskWindowedDataset
+  mbtiles_path: /data/tiles.mbtiles
+  mask_dir: /data/masks
+  window_index_cache: /data/coreset_windows.csv
+  patch_size: 256
+  selected_bands: [1, 2, 3]
+  lulc_paths:
+    - /data/mapbiomas_edgv_2_5m.vrt
+    - /data/esri_edgv_2_5m.vrt
+    - /data/dynamic_world_edgv_2_5m.vrt
+  num_classes: 6
+  return_w_conf: true
+  alpha: 0.6
+  use_border: true
+  entropy_norm: minmax
+  border_radius: 10
+```
+
+Set `return_w_conf: false` for uniform-weight soft-label training (E3). Use
+`return_w_conf: true`, `use_border: false`, and `alpha: 1.0` for entropy-only
+weighting (E4). Use `use_border: true` and `alpha: 0.6` for entropy plus BAGS
+border weighting (E5).
 
 ### `SoftLabelModel`
 

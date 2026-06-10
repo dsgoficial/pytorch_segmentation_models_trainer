@@ -267,6 +267,69 @@ class MBTilesMaskWindowedDatasetConfig:
     data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
     return_metadata: bool = True
     window_index_cache: Optional[str] = None
+    window_index_mask_path_key: str = "mask_path"
+    window_index_coordinate_mode: str = "auto"
+
+
+@dataclass
+class MBTilesLulcInputMaskWindowedDatasetConfig(MBTilesMaskWindowedDatasetConfig):
+    """Configuration for ``MBTilesLulcInputMaskWindowedDataset``.
+
+    Example YAML:
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.lulc_input_dataset.MBTilesLulcInputMaskWindowedDataset
+          mbtiles_path: /data/tiles.mbtiles
+          mask_dir: /data/masks
+          window_index_cache: /data/coreset_windows.csv
+          lulc_paths:
+            - /data/mapbiomas.vrt
+            - /data/esri.vrt
+            - /data/dynamic_world.vrt
+          num_classes: 6
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".lulc_input_dataset.MBTilesLulcInputMaskWindowedDataset"
+    )
+    lulc_paths: List[str] = field(default_factory=list)
+    num_classes: int = 6
+    ignore_lulc_index: int = 255
+    lulc_resampling: str = "nearest"
+
+
+@dataclass
+class MBTilesSoftLabelMaskWindowedDatasetConfig(MBTilesMaskWindowedDatasetConfig):
+    """Configuration for ``MBTilesSoftLabelMaskWindowedDataset``.
+
+    Example YAML:
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_soft_label_dataset.MBTilesSoftLabelMaskWindowedDataset
+          mbtiles_path: /data/tiles.mbtiles
+          mask_dir: /data/masks
+          window_index_cache: /data/coreset_windows.csv
+          lulc_paths:
+            - /data/mapbiomas.vrt
+            - /data/esri.vrt
+            - /data/dynamic_world.vrt
+          num_classes: 6
+          return_w_conf: true
+          alpha: 0.6
+          use_border: true
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".mbtiles_soft_label_dataset.MBTilesSoftLabelMaskWindowedDataset"
+    )
+    lulc_paths: List[str] = field(default_factory=list)
+    num_classes: int = 6
+    lulc_resampling: str = "nearest"
+    return_w_conf: bool = True
+    alpha: float = 0.6
+    use_border: bool = True
+    entropy_norm: str = "max_entropy"
+    border_radius: int = 10
 
 
 @dataclass

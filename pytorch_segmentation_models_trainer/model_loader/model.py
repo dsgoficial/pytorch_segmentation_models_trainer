@@ -832,8 +832,16 @@ class Model(pl.LightningModule):
             )
         else:
             # Simple loss just returns scalar
-            loss = self.loss_function(predicted_masks, masks)
-            return loss, {}, {}
+            loss_output = self.loss_function(predicted_masks, masks)
+            if isinstance(loss_output, tuple):
+                loss = loss_output[0]
+                extra_info = (
+                    loss_output[1]
+                    if len(loss_output) > 1 and isinstance(loss_output[1], dict)
+                    else {}
+                )
+                return loss, {}, extra_info
+            return loss_output, {}, {}
 
     def _unpack_batch(self, batch):
         """Extract (images, masks) from a batch dict or tuple."""

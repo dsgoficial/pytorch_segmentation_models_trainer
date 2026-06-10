@@ -65,6 +65,7 @@ Não espere o usuário pedir cada um separadamente:
 - Toda classe nova instanciável via Hydra deve aceitar `**kwargs` no `__init__` e ser testável
   sem Trainer real (usar `MagicMock` para o trainer nos testes).
 - Configurações novas devem ter um dataclass correspondente em `config_definitions/`
+- Toda rotina que envolver processamento, deve informar para o usuario o andamento (usando a tqdm).
 
   ---
 

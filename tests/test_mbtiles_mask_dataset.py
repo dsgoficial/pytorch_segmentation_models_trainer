@@ -257,6 +257,104 @@ def test_window_index_cache_csv_is_written_and_reused(tmp_path):
     assert cached.windows[0]["mask_path"] == mask
 
 
+def test_window_index_cache_accepts_patch_size_column(tmp_path):
+    source = tmp_path / "source.tif"
+    mask = tmp_path / "masks" / "mask.tif"
+    cache = tmp_path / "coreset_windows.csv"
+    _write_rgb_raster(source)
+    _write_mask(mask)
+    pd.DataFrame(
+        [
+            {
+                "mask_path": str(mask),
+                "row_off": 8,
+                "col_off": 8,
+                "patch_size": 16,
+                "class_entropy": 0.5,
+            }
+        ]
+    ).to_csv(cache, index=False)
+
+    ds = mbtiles_mask_dataset.MBTilesMaskWindowedDataset(
+        mbtiles_path=source,
+        mask_paths=[mask],
+        window_index_cache=cache,
+    )
+
+    item = ds[0]
+    assert len(ds) == 1
+    assert item["image"].shape == (3, 16, 16)
+    assert item["mask"].shape == (16, 16)
+    assert ds.windows[0]["width"] == 16
+    assert ds.windows[0]["height"] == 16
+
+
+def test_window_index_cache_accepts_world_bounds(tmp_path):
+    source = tmp_path / "source.tif"
+    mask = tmp_path / "masks" / "mask.tif"
+    cache = tmp_path / "bounds_windows.csv"
+    _write_rgb_raster(source)
+    _write_mask(mask)
+    pd.DataFrame(
+        [
+            {
+                "image_path": str(mask),
+                "minx": 8,
+                "miny": 8,
+                "maxx": 24,
+                "maxy": 24,
+                "crs": "EPSG:3857",
+            }
+        ]
+    ).to_csv(cache, index=False)
+
+    ds = mbtiles_mask_dataset.MBTilesMaskWindowedDataset(
+        mbtiles_path=source,
+        window_index_cache=cache,
+        window_index_mask_path_key="image_path",
+        window_index_coordinate_mode="bounds",
+    )
+
+    item = ds[0]
+    assert len(ds) == 1
+    assert item["image"].shape == (3, 16, 16)
+    assert item["mask"].shape == (16, 16)
+    assert ds.windows[0]["row_off"] == 8
+    assert ds.windows[0]["col_off"] == 8
+    assert ds.windows[0]["width"] == 16
+    assert ds.windows[0]["height"] == 16
+
+
+def test_window_index_cache_accepts_tile_world_bounds_alias(tmp_path):
+    source = tmp_path / "source.tif"
+    mask = tmp_path / "masks" / "mask.tif"
+    cache = tmp_path / "tile_bounds_windows.csv"
+    _write_rgb_raster(source)
+    _write_mask(mask)
+    pd.DataFrame(
+        [
+            {
+                "mask_path": str(mask),
+                "tile_minx": 8,
+                "tile_miny": 8,
+                "tile_maxx": 24,
+                "tile_maxy": 24,
+            }
+        ]
+    ).to_csv(cache, index=False)
+
+    ds = mbtiles_mask_dataset.MBTilesMaskWindowedDataset(
+        mbtiles_path=source,
+        window_index_cache=cache,
+        window_index_coordinate_mode="bounds",
+    )
+
+    assert ds.windows[0]["row_off"] == 8
+    assert ds.windows[0]["col_off"] == 8
+    assert ds.windows[0]["width"] == 16
+    assert ds.windows[0]["height"] == 16
+
+
 def test_window_index_cache_parquet_is_written(tmp_path):
     source = tmp_path / "source.tif"
     mask = tmp_path / "masks" / "mask.tif"

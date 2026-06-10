@@ -80,6 +80,35 @@ loads these columns and skips mask discovery:
 mask_path,row_off,col_off,width,height
 ```
 
+For pre-selected square windows, the cache may provide `patch_size` instead of
+`width,height`. Extra columns are ignored, so coreset or sampling CSVs can be
+used directly:
+
+```csv
+mask_path,row_off,col_off,patch_size,class_entropy,sampler_weight
+```
+
+The cache can also describe windows by world-coordinate bounds in the mask CRS.
+This is useful when sampling outputs already contain patch footprints:
+
+```csv
+mask_path,minx,miny,maxx,maxy,crs
+```
+
+Sampling outputs that use `tile_minx`, `tile_miny`, `tile_maxx`, and
+`tile_maxy` are also accepted in bounds mode.
+
+By default, the dataset auto-detects pixel windows first and then bounds. For
+CSV files where the mask path column has another name, set
+`window_index_mask_path_key`. To force bounds interpretation:
+
+```yaml
+train_dataset:
+  window_index_cache: /data/splits/val.csv
+  window_index_mask_path_key: image_path
+  window_index_coordinate_mode: bounds
+```
+
 When the cache does not exist, the dataset scans the masks, builds the index,
 and writes the cache for future runs.
 

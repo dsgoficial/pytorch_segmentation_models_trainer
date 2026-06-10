@@ -308,15 +308,15 @@ def _score_cb_gpu(
 
 
 def score_fa(df: pd.DataFrame, config: CoreSetConfig) -> np.ndarray:
-    """Feature Activation (FA) scorer — embedding magnitude × variance.
+    """Feature Activation (FA) scorer using the paper's gamma formula.
 
-    Computes per-patch mean (μ) and std (σ) of the embedding vector, scales
-    each to [0, 1] via min-max normalisation, then returns μ_scaled × σ_scaled.
+    Computes per-patch embedding mean (``mu``) and standard deviation
+    (``sigma``), evaluates ``gamma_i = -(1 - mu_i) * log(sigma_i)``, and
+    returns the inverse min-max-normalised gamma score:
+    ``s_i^FA = 1 - (gamma_i - min(gamma)) / (max(gamma) - min(gamma))``.
 
-    Note: the paper's exact formula was not provided in the available text.
-    This product of min-max-normalised mean and std captures the stated goal
-    of selecting patches with high activation magnitude AND high activation
-    variance.  Patches with constant embeddings (σ = 0) receive score 0.
+    The implementation mirrors the reference code's ``log(sigma + eps)`` guard
+    to avoid undefined ``log(0)`` behaviour.
 
     Args:
         df: DataFrame containing the embedding column.
@@ -343,13 +343,16 @@ def score_fa(df: pd.DataFrame, config: CoreSetConfig) -> np.ndarray:
     mu = F.mean(axis=1)
     sigma = F.std(axis=1)
 
-    def _minmax(arr):
-        lo, hi = arr.min(), arr.max()
-        if hi - lo < 1e-8:
-            return np.zeros_like(arr)
-        return (arr - lo) / (hi - lo)
+    eps = 1e-12
+    gamma = -(1.0 - mu.astype(np.float64)) * np.log(sigma.astype(np.float64) + eps)
+    gamma_min = float(gamma.min())
+    gamma_max = float(gamma.max())
+    denom = gamma_max - gamma_min
+    if denom < 1e-8:
+        return np.zeros(len(df), dtype=np.float64)
 
-    return _minmax(mu) * _minmax(sigma)
+    scores = 1.0 - (gamma - gamma_min) / denom
+    return np.clip(scores, 0.0, 1.0)
 
 
 def score_fd(df: pd.DataFrame, config: CoreSetConfig) -> np.ndarray:

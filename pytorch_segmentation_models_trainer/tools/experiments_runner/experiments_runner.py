@@ -249,9 +249,21 @@ class ExperimentsRunner:
             Tuple of (train_metrics, val_metrics, test_metrics).
         """
         all_metrics = {k: float(v) for k, v in trainer.callback_metrics.items()}
-        train_metrics = {k: v for k, v in all_metrics.items() if k.startswith("train/")}
-        val_metrics = {k: v for k, v in all_metrics.items() if k.startswith("val/")}
-        test_metrics = {k: v for k, v in all_metrics.items() if k.startswith("test/")}
+        train_metrics = {
+            k: v
+            for k, v in all_metrics.items()
+            if k.startswith("train/") or k.endswith("/train")
+        }
+        val_metrics = {
+            k: v
+            for k, v in all_metrics.items()
+            if k.startswith("val/") or k.endswith("/val")
+        }
+        test_metrics = {
+            k: v
+            for k, v in all_metrics.items()
+            if k.startswith("test/") or k.endswith("/test")
+        }
         return train_metrics, val_metrics, test_metrics
 
     # ------------------------------------------------------------------

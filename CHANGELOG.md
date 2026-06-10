@@ -1,5 +1,51 @@
 # Unreleased
 
+## MBTiles Mask Dataset
+
+- `MBTilesMaskWindowedDataset` now accepts `window_index_cache` CSV/Parquet files
+  with a square `patch_size` column instead of requiring `width` and `height`,
+  allowing coreset/sampling window CSVs to be used directly while preserving the
+  existing `width,height` cache format.
+- `MBTilesMaskWindowedDataset` can also load `window_index_cache` rows expressed
+  as world-coordinate bounds (`minx`, `miny`, `maxx`, `maxy`) in the mask CRS,
+  converting them to rasterio windows. The `tile_minx/tile_miny/tile_maxx/
+  tile_maxy` naming used by sampling outputs is accepted as a bounds alias, and
+  `window_index_mask_path_key` supports CSVs whose mask path column is not named
+  `mask_path`.
+- Added `MBTilesSoftLabelMaskWindowedDataset`, which reads RGB from MBTiles,
+  aligns BAGS/LULC sources to each mask-referenced window, and computes
+  `P_soft`/`W_conf` on the fly for E3-E5-style soft-label experiments without
+  pre-exporting RGB or materializing soft-label GeoTIFFs.
+
+## LULC Input Dataset
+
+- Added `MBTilesLulcInputMaskWindowedDataset`, which reads RGB from MBTiles,
+  aligns external LULC rasters/VRTs to each mask-referenced window, one-hot
+  encodes them, and concatenates them with RGB for E2-style experiments without
+  pre-exporting RGB tiles.
+
+## Experiments Runner
+
+- `ExperimentsRunner` now collects Lightning metric keys logged with the current
+  suffix convention (`loss/val`, `JaccardIndex/val`, etc.) in addition to the
+  legacy prefix convention (`val/loss`), so `summary.csv` includes the metrics
+  emitted by `Model.log_dict`.
+- `Model._compute_loss()` now unwraps direct loss functions that return
+  `(loss, extra_info)`, matching the framework `Loss` base class contract used
+  by `SoftLabelWeightedCELoss`.
+
+## CoreSet Selection — Sampler Weight Integration
+
+- `CoreSetSelector.compute_sampler_weights(df, cap=0.25, class_dist_column="class_dist_json", weight_column="sampler_weight")` added: computes per-patch inverse-class-frequency weights for `WeightedRandomSampler`, measured over the selected coreset subset. Non-selected patches get weight 0.0; selected patches are capped at `cap` to prevent rare-class dominance. Implements the `sampler_weight_v3` recipe used in the coreset experiments — previously only available in external scripts.
+
+## CoreSet Selection — Feature Activation
+
+- `score_fa` now follows the paper's gamma-based FA formula:
+  `gamma_i = -(1 - mu_i) * log(sigma_i + eps)` and
+  `s_i^FA = 1 - minmax(gamma_i)`, replacing the previous
+  `mu_scaled * sigma_scaled` approximation and matching the reference
+  implementation's raw mean/std gamma calculation.
+
 ## Embedding Extraction
 
 - `extract_embeddings` now wraps the DataLoader inference loop with a `tqdm` progress bar (per-batch, with total count) so extraction progress is always visible for large pools.
