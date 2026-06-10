@@ -77,9 +77,37 @@ class CoreSetSelector:
         )
         return df.merge(emb_subset, on=join_cols, how="left")
 
+    def _apply_exclusion_filters(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply hard exclusion filters before scoring.
+
+        Always excludes patches flagged by ``has_mask_border_nodata``,
+        ``has_image_black_border``, or ``has_high_nodata`` when those columns
+        are present.  Excludes ``has_low_entropy`` patches only when
+        ``config.exclude_low_entropy`` is True.
+
+        Args:
+            df: full pool DataFrame.
+
+        Returns:
+            Filtered DataFrame (same columns, subset of rows).
+        """
+        keep = pd.Series(True, index=df.index)
+        for col in (
+            "has_mask_border_nodata",
+            "has_image_black_border",
+            "has_high_nodata",
+        ):
+            if col in df.columns:
+                keep &= ~df[col].astype(bool)
+        if self.config.exclude_low_entropy and "has_low_entropy" in df.columns:
+            keep &= ~df["has_low_entropy"].astype(bool)
+        return df[keep].copy()
+
     def select(self, df: pd.DataFrame) -> pd.DataFrame:
         """Score all patches and select the top-budget subset.
 
+        Applies hard exclusion filters (nodata, black border) and optionally
+        the entropy filter (``config.exclude_low_entropy``) before scoring.
         If ``config.embedding_column`` is set but not present in df, and
         ``config.parquet_path`` points to a Parquet file produced by
         ``embedding_extractor``, the embeddings are loaded and merged
@@ -92,7 +120,8 @@ class CoreSetSelector:
             Copy of df with ``coreset_score`` and ``coreset_selected`` columns
             added.  The file at ``config.output_csv_path`` is written.
         """
-        df = self._resolve_embeddings(df.copy())
+        df = self._apply_exclusion_filters(df.copy())
+        df = self._resolve_embeddings(df)
         N = len(df)
 
         scorer = get_scorer(self.config.method)

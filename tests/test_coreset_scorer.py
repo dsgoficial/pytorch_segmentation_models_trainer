@@ -3,7 +3,6 @@
 
 import json
 import os
-import tempfile
 
 import numpy as np
 import pandas as pd
@@ -190,7 +189,6 @@ class TestScoreCb:
 
     def test_budget_early_stop(self):
         # Only top-3 patches get score > 0
-        n = 100
         dists = [{"1": 0.5, "2": 0.5}] * 50 + [{"1": 1.0}] * 50
         df = _make_cb_df(dists)
         cfg = CoreSetConfig(budget=3.0, budget_mode="count")
@@ -225,7 +223,6 @@ class TestScoreFa:
 
     def test_high_mean_high_std_wins(self):
         # Patch C: high mean, moderate std → should beat A (no std) and B (low mean)
-        rng = np.random.RandomState(0)
         patch_a = np.ones(64)  # high mean, zero std → score ≈ 0
         patch_b = np.array([0.0, 1.0] * 32)  # moderate mean, high std
         patch_c = np.linspace(0.7, 1.0, 64)  # high mean, moderate std
@@ -904,3 +901,506 @@ class TestSelectorParquetEmbeddings:
         )
         result = CoreSetSelector(cfg).select(df)
         assert result["coreset_selected"].sum() == 5
+
+
+# ---------------------------------------------------------------------------
+# Spatial CB (cb_use_spatial)
+# ---------------------------------------------------------------------------
+
+
+def _make_spatial_cb_df(n=20, seed=42):
+    """DataFrame with class_dist_json and tile bounds for spatial CB tests."""
+    rng = np.random.RandomState(seed)
+    lats = np.linspace(-30.0, 0.0, n)
+    lons = np.linspace(-60.0, -40.0, n)
+    size = 0.002
+    return pd.DataFrame(
+        {
+            "class_dist_json": [
+                json.dumps({"0": rng.uniform(0, 0.5), "1": rng.uniform(0, 0.5)})
+                for _ in range(n)
+            ],
+            "class_entropy": [0.5] * n,
+            "tile_miny": lats,
+            "tile_maxy": lats + size,
+            "tile_minx": lons,
+            "tile_maxx": lons + size,
+        }
+    )
+
+
+class TestScoreCbSpatial:
+    def test_spatial_mode_returns_same_shape(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_cb,
+        )
+
+        df = _make_spatial_cb_df(n=20)
+        cfg_plain = CoreSetConfig(method="cb", budget=0.5, cb_use_spatial=False)
+        cfg_spatial = CoreSetConfig(method="cb", budget=0.5, cb_use_spatial=True)
+        plain = score_cb(df, cfg_plain)
+        spatial = score_cb(df, cfg_spatial)
+        assert plain.shape == spatial.shape == (20,)
+
+    def test_spatial_mode_produces_different_scores(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_cb,
+        )
+
+        df = _make_spatial_cb_df(n=20)
+        cfg_plain = CoreSetConfig(method="cb", budget=0.5, cb_use_spatial=False)
+        cfg_spatial = CoreSetConfig(method="cb", budget=0.5, cb_use_spatial=True)
+        plain = score_cb(df, cfg_plain)
+        spatial = score_cb(df, cfg_spatial)
+        assert not np.allclose(
+            plain, spatial
+        ), "Spatial CB should select different patches than plain CB"
+
+    def test_spatial_mode_scores_in_01(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_cb,
+        )
+
+        df = _make_spatial_cb_df(n=20)
+        cfg = CoreSetConfig(method="cb", budget=0.5, cb_use_spatial=True)
+        scores = score_cb(df, cfg)
+        assert scores.min() >= 0.0
+        assert scores.max() <= 1.0 + 1e-9
+
+    def test_spatial_missing_tile_columns_raises(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_cb,
+        )
+
+        df = _make_cb_df([{"0": 0.5, "1": 0.5}] * 5)  # no tile bounds
+        cfg = CoreSetConfig(method="cb", budget=0.5, cb_use_spatial=True)
+        with pytest.raises(ValueError, match="spatial augmentation requires columns"):
+            score_cb(df, cfg)
+
+    def test_spatial_single_location_normalises_to_zeros(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            _build_spatial_matrix,
+        )
+
+        df = pd.DataFrame(
+            {
+                "tile_miny": [-10.0] * 5,
+                "tile_maxy": [-10.0 + 0.002] * 5,
+                "tile_minx": [-50.0] * 5,
+                "tile_maxx": [-50.0 + 0.002] * 5,
+            }
+        )
+        mat = _build_spatial_matrix(df)
+        assert mat.shape == (5, 2)
+        assert np.allclose(mat, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Exclusion filters (exclude_low_entropy, has_* flags)
+# ---------------------------------------------------------------------------
+
+
+class TestExclusionFilters:
+    def _make_flagged_df(self, n=30, tmp_path=None):
+        rng = np.random.RandomState(0)
+        df = pd.DataFrame(
+            {
+                "class_dist_json": [
+                    json.dumps({"0": rng.uniform(0, 1), "1": rng.uniform(0, 1)})
+                    for _ in range(n)
+                ],
+                "class_entropy": rng.uniform(0, 1, n),
+                "has_low_entropy": [i % 3 == 0 for i in range(n)],
+                "has_mask_border_nodata": [i % 7 == 0 for i in range(n)],
+                "has_high_nodata": [i % 11 == 0 for i in range(n)],
+                "has_image_black_border": [False] * n,
+            }
+        )
+        return df
+
+    def test_nodata_always_excluded(self, tmp_path):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_selector import (
+            CoreSetSelector,
+        )
+
+        df = self._make_flagged_df(n=30)
+        nodata_count = (df["has_mask_border_nodata"] | df["has_high_nodata"]).sum()
+        cfg = CoreSetConfig(
+            method="cb",
+            budget=1.0,
+            budget_mode="fraction",
+            exclude_low_entropy=False,
+            output_csv_path=str(tmp_path / "out.csv"),
+        )
+        result = CoreSetSelector(cfg).select(df)
+        assert len(result) == 30 - nodata_count
+
+    def test_entropy_excluded_when_flag_true(self, tmp_path):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_selector import (
+            CoreSetSelector,
+        )
+
+        df = self._make_flagged_df(n=30)
+        df_clean = df[~df["has_mask_border_nodata"] & ~df["has_high_nodata"]]
+        low_ent = df_clean["has_low_entropy"].sum()
+        cfg = CoreSetConfig(
+            method="cb",
+            budget=1.0,
+            budget_mode="fraction",
+            exclude_low_entropy=True,
+            output_csv_path=str(tmp_path / "out.csv"),
+        )
+        result = CoreSetSelector(cfg).select(df)
+        assert len(result) == len(df_clean) - low_ent
+
+    def test_entropy_kept_when_flag_false(self, tmp_path):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_selector import (
+            CoreSetSelector,
+        )
+
+        df = self._make_flagged_df(n=30)
+        df_clean = df[~df["has_mask_border_nodata"] & ~df["has_high_nodata"]]
+        cfg = CoreSetConfig(
+            method="cb",
+            budget=1.0,
+            budget_mode="fraction",
+            exclude_low_entropy=False,
+            output_csv_path=str(tmp_path / "out.csv"),
+        )
+        result = CoreSetSelector(cfg).select(df)
+        assert len(result) == len(df_clean)
+
+    def test_no_flag_columns_no_filtering(self, tmp_path):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_selector import (
+            CoreSetSelector,
+        )
+
+        df = _make_cb_df([{"0": 0.5, "1": 0.5}] * 10)  # no flag columns
+        cfg = CoreSetConfig(
+            method="cb",
+            budget=1.0,
+            budget_mode="fraction",
+            output_csv_path=str(tmp_path / "out.csv"),
+        )
+        result = CoreSetSelector(cfg).select(df)
+        assert len(result) == 10
+
+
+# ---------------------------------------------------------------------------
+# CoreSetConfig new defaults
+# ---------------------------------------------------------------------------
+
+
+class TestCoreSetConfigNewDefaults:
+    def test_cb_use_spatial_default_false(self):
+        cfg = CoreSetConfig()
+        assert cfg.cb_use_spatial is False
+
+    def test_fd_use_spatial_default_false(self):
+        cfg = CoreSetConfig()
+        assert cfg.fd_use_spatial is False
+
+    def test_fd_use_spatial_override(self):
+        cfg = CoreSetConfig(fd_use_spatial=True)
+        assert cfg.fd_use_spatial is True
+
+    def test_exclude_low_entropy_default_true(self):
+        cfg = CoreSetConfig()
+        assert cfg.exclude_low_entropy is True
+
+    def test_cb_use_spatial_override(self):
+        cfg = CoreSetConfig(cb_use_spatial=True)
+        assert cfg.cb_use_spatial is True
+
+    def test_exclude_low_entropy_override(self):
+        cfg = CoreSetConfig(exclude_low_entropy=False)
+        assert cfg.exclude_low_entropy is False
+
+    def test_device_default_none(self):
+        cfg = CoreSetConfig()
+        assert cfg.device is None
+
+    def test_device_override_cpu(self):
+        cfg = CoreSetConfig(device="cpu")
+        assert cfg.device == "cpu"
+
+    def test_device_override_cuda(self):
+        cfg = CoreSetConfig(device="cuda")
+        assert cfg.device == "cuda"
+
+
+# ---------------------------------------------------------------------------
+# GPU/CPU device dispatch
+# ---------------------------------------------------------------------------
+
+
+class TestDeviceDispatch:
+    def test_get_device_none_returns_torch_device(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            _get_device,
+        )
+        import torch
+
+        cfg = CoreSetConfig(device=None)
+        dev = _get_device(cfg)
+        assert isinstance(dev, torch.device)
+
+    def test_get_device_cpu_forces_cpu(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            _get_device,
+        )
+        import torch
+
+        cfg = CoreSetConfig(device="cpu")
+        assert _get_device(cfg) == torch.device("cpu")
+
+    def test_cb_cpu_explicit_same_result_as_default(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_cb,
+        )
+
+        df = _make_cb_df([{"0": 0.6, "1": 0.4}] * 5 + [{"0": 0.1, "1": 0.9}] * 5)
+        cfg_default = CoreSetConfig(method="cb", budget=0.5, device=None)
+        cfg_cpu = CoreSetConfig(method="cb", budget=0.5, device="cpu")
+        scores_default = score_cb(df, cfg_default)
+        scores_cpu = score_cb(df, cfg_cpu)
+        assert np.allclose(scores_default, scores_cpu)
+
+    def test_cb_gpu_high_overlap_with_cpu(self):
+        """GPU CB (float32) and CPU CB (float64) should agree on most selections.
+
+        Tie-breaking differences due to float32 vs float64 precision can cause
+        minor set differences; we require ≥ 80% overlap.
+        """
+        import torch
+
+        if not torch.cuda.is_available():
+            pytest.skip("CUDA not available")
+
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_cb,
+        )
+
+        rng = np.random.RandomState(0)
+        n = 40
+        dists = [
+            {"0": float(rng.uniform()), "1": float(rng.uniform())} for _ in range(n)
+        ]
+        df = _make_cb_df(dists)
+        cfg_cpu = CoreSetConfig(method="cb", budget=0.5, device="cpu")
+        cfg_gpu = CoreSetConfig(method="cb", budget=0.5, device="cuda")
+        selected_cpu = set(np.where(score_cb(df, cfg_cpu) > 0)[0].tolist())
+        selected_gpu = set(np.where(score_cb(df, cfg_gpu) > 0)[0].tolist())
+        overlap = len(selected_cpu & selected_gpu) / max(len(selected_cpu), 1)
+        assert overlap >= 0.8, f"CPU/GPU CB overlap too low: {overlap:.2f}"
+
+    def test_fd_cpu_explicit(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_fd,
+        )
+
+        df = _make_embed_df([np.random.randn(8).astype(np.float32) for _ in range(20)])
+        cfg = CoreSetConfig(
+            method="fd",
+            embedding_column="embedding",
+            fd_k_min=2,
+            fd_k_max=4,
+            device="cpu",
+        )
+        scores = score_fd(df, cfg)
+        assert scores.shape == (20,)
+        assert 0.0 <= scores.min() and scores.max() <= 1.0 + 1e-9
+
+
+# ---------------------------------------------------------------------------
+# Spatial FD (fd_use_spatial)
+# ---------------------------------------------------------------------------
+
+
+def _make_spatial_embed_df(n=20, dim=8, seed=42):
+    """DataFrame with embeddings and tile bounds for spatial FD/FA tests."""
+    rng = np.random.RandomState(seed)
+    lats = np.linspace(-30.0, 0.0, n)
+    lons = np.linspace(-60.0, -40.0, n)
+    size = 0.002
+    embeddings = [rng.randn(dim).astype(np.float32) for _ in range(n)]
+    return pd.DataFrame(
+        {
+            "embedding": embeddings,
+            "class_entropy": [0.5] * n,
+            "class_dist_json": [json.dumps({"1": 0.5, "2": 0.5})] * n,
+            "tile_miny": lats,
+            "tile_maxy": lats + size,
+            "tile_minx": lons,
+            "tile_maxx": lons + size,
+        }
+    )
+
+
+class TestScoreFdSpatial:
+    def test_fd_spatial_returns_same_shape(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_fd,
+        )
+
+        df = _make_spatial_embed_df(n=20)
+        cfg_plain = CoreSetConfig(
+            embedding_column="embedding", fd_k_min=2, fd_k_max=4, fd_use_spatial=False
+        )
+        cfg_spatial = CoreSetConfig(
+            embedding_column="embedding", fd_k_min=2, fd_k_max=4, fd_use_spatial=True
+        )
+        plain = score_fd(df, cfg_plain)
+        spatial = score_fd(df, cfg_spatial)
+        assert plain.shape == spatial.shape == (20,)
+
+    def test_fd_spatial_scores_in_01(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_fd,
+        )
+
+        df = _make_spatial_embed_df(n=20)
+        cfg = CoreSetConfig(
+            embedding_column="embedding", fd_k_min=2, fd_k_max=4, fd_use_spatial=True
+        )
+        scores = score_fd(df, cfg)
+        assert np.all(scores >= 0) and scores.max() <= 1.0 + 1e-9
+
+    def test_fd_spatial_missing_tile_columns_raises(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_fd,
+        )
+
+        df = _make_embed_df([np.random.randn(8).astype(np.float32) for _ in range(10)])
+        cfg = CoreSetConfig(
+            embedding_column="embedding", fd_k_min=2, fd_k_max=4, fd_use_spatial=True
+        )
+        with pytest.raises(ValueError, match="spatial augmentation requires columns"):
+            score_fd(df, cfg)
+
+    def test_fd_spatial_augments_embedding_dimension(self):
+        """FD with fd_use_spatial augments the feature matrix used for clustering.
+
+        We verify this indirectly: score_fd with fd_use_spatial=True must call
+        _augment_embedding_with_spatial, which raises ValueError if tile columns
+        are missing — so a DataFrame without tile columns must raise.
+        """
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_fd,
+        )
+
+        df = _make_embed_df([np.random.randn(8).astype(np.float32) for _ in range(10)])
+        cfg = CoreSetConfig(
+            embedding_column="embedding", fd_k_min=2, fd_k_max=2, fd_use_spatial=True
+        )
+        # Missing tile columns → spatial augmentation path is reached and raises
+        with pytest.raises(ValueError, match="spatial augmentation requires columns"):
+            score_fd(df, cfg)
+
+    def test_lc_fd_spatial_propagates_to_fd(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_fd,
+            score_lc_fd,
+        )
+
+        df = _make_spatial_embed_df(n=12)
+        df["class_entropy"] = [0.1 * i for i in range(12)]
+        cfg = CoreSetConfig(
+            embedding_column="embedding",
+            fd_k_min=2,
+            fd_k_max=2,
+            fd_use_spatial=True,
+            lc_fd_cutoff_m=4,
+        )
+        fd_spatial = score_fd(df, cfg)
+        lc_fd_spatial = score_lc_fd(df, cfg)
+        top4_fd = set(np.argsort(-fd_spatial)[:4].tolist())
+        top4_lc_fd = set(np.argsort(-lc_fd_spatial)[:4].tolist())
+        assert top4_lc_fd.issubset(top4_fd)
+
+
+# ---------------------------------------------------------------------------
+# Spatial FA (fd_use_spatial for FA)
+# ---------------------------------------------------------------------------
+
+
+class TestScoreFaSpatial:
+    def test_fa_spatial_returns_same_shape(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_fa,
+        )
+
+        df = _make_spatial_embed_df(n=20)
+        cfg_plain = CoreSetConfig(embedding_column="embedding", fd_use_spatial=False)
+        cfg_spatial = CoreSetConfig(embedding_column="embedding", fd_use_spatial=True)
+        plain = score_fa(df, cfg_plain)
+        spatial = score_fa(df, cfg_spatial)
+        assert plain.shape == spatial.shape == (20,)
+
+    def test_fa_spatial_scores_in_01(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_fa,
+        )
+
+        df = _make_spatial_embed_df(n=20)
+        cfg = CoreSetConfig(embedding_column="embedding", fd_use_spatial=True)
+        scores = score_fa(df, cfg)
+        assert np.all(scores >= 0) and scores.max() <= 1.0 + 1e-9
+
+    def test_fa_spatial_missing_tile_columns_raises(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_fa,
+        )
+
+        df = _make_embed_df([np.random.randn(8).astype(np.float32) for _ in range(10)])
+        cfg = CoreSetConfig(embedding_column="embedding", fd_use_spatial=True)
+        with pytest.raises(ValueError, match="spatial augmentation requires columns"):
+            score_fa(df, cfg)
+
+    def test_fa_cb_spatial_propagates_to_fa(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            score_fa,
+            score_fa_cb,
+        )
+
+        df = _make_spatial_embed_df(n=12, seed=1)
+        cfg = CoreSetConfig(
+            embedding_column="embedding",
+            fa_cb_lambda=1.0,
+            fd_use_spatial=True,
+            budget=1.0,
+            budget_mode="fraction",
+        )
+        fa_scores = score_fa(df, cfg)
+        fa_cb_scores = score_fa_cb(df, cfg)
+        assert np.allclose(fa_cb_scores, fa_scores)
+
+
+# ---------------------------------------------------------------------------
+# _augment_embedding_with_spatial helper
+# ---------------------------------------------------------------------------
+
+
+class TestAugmentEmbeddingWithSpatial:
+    def test_output_shape(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            _augment_embedding_with_spatial,
+        )
+
+        n, d = 10, 8
+        F = np.random.randn(n, d).astype(np.float32)
+        df = _make_spatial_embed_df(n=n)
+        result = _augment_embedding_with_spatial(F, df)
+        assert result.shape == (n, d + 2)
+
+    def test_spatial_cols_in_01(self):
+        from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+            _augment_embedding_with_spatial,
+        )
+
+        n, d = 10, 4
+        F = np.zeros((n, d))
+        df = _make_spatial_embed_df(n=n)
+        result = _augment_embedding_with_spatial(F, df)
+        spatial_cols = result[:, d:]
+        assert np.all(spatial_cols >= 0) and np.all(spatial_cols <= 1 + 1e-9)

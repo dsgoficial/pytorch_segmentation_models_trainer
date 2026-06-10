@@ -1,5 +1,43 @@
 # Unreleased
 
+## Embedding Extraction
+
+- `extract_embeddings` now wraps the DataLoader inference loop with a `tqdm` progress bar (per-batch, with total count) so extraction progress is always visible for large pools.
+
+## CoreSet Selection — GPU Acceleration
+
+- `CoreSetConfig` gains `device: Optional[str] = None`; `None` auto-selects
+  CUDA when available, `"cpu"` forces CPU, `"cuda"` forces GPU.
+- `score_cb` dispatches to `_score_cb_gpu` (torch float32 tensors, full greedy
+  loop on device) or `_score_cb_cpu` (numpy float64) based on resolved device.
+  GPU path is equivalent to CPU but uses float32 — minor tie-breaking differences
+  at identical entropy values are expected.
+- `score_fd` uses the framework's `MiniBatchKMeans` (GPU-accelerated, batched
+  K-Means++) instead of sklearn when device resolves to CUDA; elbow search and
+  final clustering both run on GPU.
+- `tqdm` progress bars added to `score_cb` (per-patch) and `score_fd` (per-k
+  elbow search) for visibility on large pools.
+
+## CoreSet Selection — Spatial Diversity & Pool Filtering
+
+- `CoreSetConfig` gains `fd_use_spatial: bool = False`: when `True`, `score_fa`
+  and `score_fd` append normalised `(lat_norm, lon_norm)` from the tile centroid
+  to the embedding matrix before FA scoring and FD K-Means clustering.
+  `score_lc_fd` and `score_fa_cb` inherit the flag automatically because they
+  delegate to `score_fd` / `score_fa` internally.
+- `CoreSetConfig` gains `cb_use_spatial: bool = False`: when `True`, `score_cb`
+  appends normalised `(lat_norm, lon_norm)` derived from tile centroid
+  (`tile_minx/maxx/miny/maxy`) to the class-frequency vector before greedy
+  entropy maximisation, enforcing geographic spread alongside class balance.
+- `CoreSetConfig` gains `exclude_low_entropy: bool = True`: when `False`,
+  patches with `has_low_entropy=True` are kept in the pool, recovering
+  homogeneous patches (e.g. solid built-up areas) previously discarded by the
+  entropy threshold. Hard exclusion of `has_mask_border_nodata`,
+  `has_image_black_border`, and `has_high_nodata` is always applied.
+- `CoreSetSelector.select()` now applies exclusion filters internally before
+  scoring, so callers pass the full `balanced_dataset.csv` and control
+  filtering via config instead of pre-filtering externally.
+
 ## CoreSet Selection — Embedding Sources
 
 - `CoreSetConfig` gains `parquet_path: Optional[str]`; when set and

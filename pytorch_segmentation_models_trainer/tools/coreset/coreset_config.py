@@ -67,3 +67,27 @@ class CoreSetConfig:
     # CoreSetSelector merges the embeddings automatically before scoring.
     # Required for FA, FD, LC/FD, and FA/CB methods when embeddings are not
     # already in the input CSV.
+
+    device: Optional[str] = None
+    # Compute device for CB greedy and FD KMeans.
+    # ``None`` = auto (``"cuda"`` when available, else ``"cpu"``).
+    # ``"cpu"`` forces CPU regardless of GPU availability.
+    # ``"cuda"`` forces GPU (raises at runtime if unavailable).
+
+    cb_use_spatial: bool = False
+    # When True, score_cb appends (lat_rad_norm, lon_rad_norm) derived from
+    # tile centroid (tile_minx/maxx/miny/maxy columns) to the class-frequency
+    # vector before greedy entropy maximisation.  Values are normalised to
+    # [0, 1] within the pool so they are comparable to class proportions.
+
+    fd_use_spatial: bool = False
+    # When True, appends (lat_norm, lon_norm) derived from tile centroid
+    # (tile_minx/maxx/miny/maxy columns) to the embedding matrix before FD
+    # clustering and FA scoring.  Same min-max normalisation as cb_use_spatial.
+    # Applies to FD, LC/FD, FA, and FA/CB methods.
+
+    exclude_low_entropy: bool = True
+    # When False, patches with has_low_entropy=True are kept in the pool
+    # instead of being excluded before coreset selection.  Patches with
+    # has_mask_border_nodata, has_image_black_border, or has_high_nodata are
+    # always excluded regardless of this flag.

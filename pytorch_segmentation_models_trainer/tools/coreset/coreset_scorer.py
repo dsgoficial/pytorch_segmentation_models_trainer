@@ -10,7 +10,9 @@ import json
 
 import numpy as np
 import pandas as pd
+import torch
 from sklearn.cluster import KMeans
+from tqdm import tqdm
 
 from pytorch_segmentation_models_trainer.tools.coreset.coreset_config import (
     CoreSetConfig,
@@ -63,6 +65,69 @@ def _build_freq_matrix(class_dists: list):
             if idx is not None:
                 freq_matrix[i, idx] = float(v)
     return freq_matrix, all_classes
+
+
+def _get_device(config: CoreSetConfig) -> torch.device:
+    """Resolve compute device from config.
+
+    Args:
+        config: CoreSetConfig with optional ``device`` field.
+
+    Returns:
+        torch.device — cuda when available and not overridden, else cpu.
+    """
+    if config.device is None:
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device(config.device)
+
+
+def _build_spatial_matrix(df: pd.DataFrame) -> np.ndarray:
+    """Build (N, 2) spatial feature matrix [lat_norm, lon_norm] from tile bounds.
+
+    Computes the tile centroid from bounding box columns and min-max normalises
+    each coordinate to [0, 1] within the pool so that spatial features are on
+    the same scale as class proportions or embedding dimensions.
+
+    Args:
+        df: DataFrame with ``tile_minx``, ``tile_maxx``, ``tile_miny``,
+            ``tile_maxy`` columns (any coordinate system).
+
+    Returns:
+        (N, 2) float64 array: ``[:, 0]`` = lat_norm, ``[:, 1]`` = lon_norm.
+
+    Raises:
+        ValueError: if any required tile-bounds column is absent.
+    """
+    required = {"tile_minx", "tile_maxx", "tile_miny", "tile_maxy"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"spatial augmentation requires columns {sorted(missing)} in the DataFrame."
+        )
+    lat = (df["tile_miny"].values + df["tile_maxy"].values) / 2.0
+    lon = (df["tile_minx"].values + df["tile_maxx"].values) / 2.0
+
+    def _minmax_norm(arr):
+        lo, hi = arr.min(), arr.max()
+        if hi - lo < 1e-10:
+            return np.zeros_like(arr, dtype=np.float64)
+        return (arr - lo) / (hi - lo)
+
+    return np.column_stack([_minmax_norm(lat), _minmax_norm(lon)])
+
+
+def _augment_embedding_with_spatial(F: np.ndarray, df: pd.DataFrame) -> np.ndarray:
+    """Append min-max-normalised centroid coords to an embedding matrix.
+
+    Args:
+        F: (N, D) embedding array (any dtype).
+        df: DataFrame with tile bound columns consumed by ``_build_spatial_matrix``.
+
+    Returns:
+        (N, D+2) float64 array.
+    """
+    spatial = _build_spatial_matrix(df)
+    return np.hstack([F, spatial])
 
 
 def _round_robin_rank(
@@ -170,33 +235,76 @@ def score_cb(df: pd.DataFrame, config: CoreSetConfig) -> np.ndarray:
     class_dists = _parse_class_dist(df["class_dist_json"])
     freq_matrix, _ = _build_freq_matrix(class_dists)
 
+    if config.cb_use_spatial:
+        spatial = _build_spatial_matrix(df)
+        freq_matrix = np.hstack([freq_matrix, spatial])
+
     if config.budget_mode == "fraction":
         budget_count = max(1, int(config.budget * N))
     else:
         budget_count = max(1, int(config.budget))
     budget_count = min(budget_count, N)
 
+    device = _get_device(config)
+    desc = "CB spatial" if config.cb_use_spatial else "CB"
+
+    if device.type == "cuda":
+        rank = _score_cb_gpu(freq_matrix, budget_count, N, device, desc)
+    else:
+        rank = _score_cb_cpu(freq_matrix, budget_count, N, desc)
+
+    return rank / (N - 1)
+
+
+def _score_cb_cpu(
+    freq_matrix: np.ndarray, budget_count: int, N: int, desc: str
+) -> np.ndarray:
     rank = np.zeros(N, dtype=np.float64)
     selected = np.zeros(N, dtype=bool)
     cumulative = np.zeros(freq_matrix.shape[1], dtype=np.float64)
-
-    for t in range(1, budget_count + 1):
+    eps = 1e-12
+    for t in tqdm(range(1, budget_count + 1), desc=desc, unit="patch", leave=True):
         unsel = np.where(~selected)[0]
         candidates = cumulative + freq_matrix[unsel]
         totals = candidates.sum(axis=1, keepdims=True)
         totals = np.where(totals == 0, 1.0, totals)
         props = candidates / totals
-        eps = 1e-12
         entropies = -np.sum(props * np.log(props + eps), axis=1)
-
         best_local = int(np.argmax(entropies))
         best_i = unsel[best_local]
-
         rank[best_i] = N - t
         selected[best_i] = True
         cumulative += freq_matrix[best_i]
+    return rank
 
-    return rank / (N - 1)
+
+def _score_cb_gpu(
+    freq_matrix: np.ndarray,
+    budget_count: int,
+    N: int,
+    device: torch.device,
+    desc: str,
+) -> np.ndarray:
+    F = torch.tensor(freq_matrix, dtype=torch.float32, device=device)
+    cumulative = torch.zeros(F.shape[1], dtype=torch.float32, device=device)
+    selected = torch.zeros(N, dtype=torch.bool, device=device)
+    rank = np.zeros(N, dtype=np.float64)
+    eps = 1e-12
+    for t in tqdm(
+        range(1, budget_count + 1), desc=f"{desc} [GPU]", unit="patch", leave=True
+    ):
+        unsel_idx = torch.where(~selected)[0]
+        candidates = cumulative + F[unsel_idx]
+        totals = candidates.sum(dim=1, keepdim=True)
+        totals = torch.where(totals == 0, torch.ones_like(totals), totals)
+        props = candidates / totals
+        entropies = -(props * torch.log(props + eps)).sum(dim=1)
+        best_local = int(torch.argmax(entropies).item())
+        best_i = int(unsel_idx[best_local].item())
+        rank[best_i] = N - t
+        selected[best_i] = True
+        cumulative += F[best_i]
+    return rank
 
 
 def score_fa(df: pd.DataFrame, config: CoreSetConfig) -> np.ndarray:
@@ -230,6 +338,8 @@ def score_fa(df: pd.DataFrame, config: CoreSetConfig) -> np.ndarray:
         )
 
     F = _get_embeddings(df, config.embedding_column)
+    if config.fd_use_spatial:
+        F = _augment_embedding_with_spatial(F, df)
     mu = F.mean(axis=1)
     sigma = F.std(axis=1)
 
@@ -250,9 +360,13 @@ def score_fd(df: pd.DataFrame, config: CoreSetConfig) -> np.ndarray:
     round-robin selection order across clusters.  This guarantees visual
     diversity across semantic clusters; within-cluster ordering is random.
 
+    When ``config.device`` resolves to ``"cuda"``, uses the framework's
+    GPU-accelerated ``MiniBatchKMeans`` instead of sklearn; otherwise falls
+    back to sklearn ``KMeans``.
+
     Args:
         df: DataFrame containing the embedding column.
-        config: CoreSetConfig; ``embedding_column`` and ``fd_*`` params.
+        config: CoreSetConfig; ``embedding_column``, ``fd_*``, and ``device``.
 
     Returns:
         (N,) float array in [0, 1]; higher = selected earlier in round-robin.
@@ -270,7 +384,11 @@ def score_fd(df: pd.DataFrame, config: CoreSetConfig) -> np.ndarray:
         )
 
     F = _get_embeddings(df, config.embedding_column)
+    if config.fd_use_spatial:
+        F = _augment_embedding_with_spatial(F, df)
     N = len(F)
+    device = _get_device(config)
+    use_gpu = device.type == "cuda"
 
     k_min = config.fd_k_min
     k_max = min(config.fd_k_max, N - 1)
@@ -282,18 +400,47 @@ def score_fd(df: pd.DataFrame, config: CoreSetConfig) -> np.ndarray:
         )
 
         K = select_k_vendi(F, k_min=k_min, delta=config.fd_vendi_delta)
+    elif use_gpu:
+        from pytorch_segmentation_models_trainer.tools.kmeans.kmeans_calculator import (
+            MiniBatchKMeans as TorchKMeans,
+        )
+
+        F_tensor = torch.tensor(F, dtype=torch.float32)
+        inertias = []
+        for ki in tqdm(range(k_min, k_max + 1), desc="FD elbow [GPU]", unit="k"):
+            km = TorchKMeans(n_clusters=ki, random_state=42, device=device)
+            km.fit(F_tensor)
+            batch_size = 2048
+            inertia = 0.0
+            for i in range(0, N, batch_size):
+                batch = F_tensor[i : i + batch_size].to(device)
+                dist = torch.cdist(batch, km.centroids, p=2)
+                min_dist, _ = torch.min(dist, dim=1)
+                inertia += min_dist.pow(2).sum().item()
+            inertias.append(inertia)
+        K = select_k_elbow(inertias, k_min=k_min)
     else:
         inertias = []
-        for ki in range(k_min, k_max + 1):
+        for ki in tqdm(range(k_min, k_max + 1), desc="FD elbow [CPU]", unit="k"):
             km = KMeans(n_clusters=ki, random_state=42, n_init="auto")
             km.fit(F)
             inertias.append(km.inertia_)
         K = select_k_elbow(inertias, k_min=k_min)
 
     K = max(K, 1)
-    km_final = KMeans(n_clusters=K, random_state=42, n_init="auto")
-    km_final.fit(F)
-    cluster_ids = km_final.labels_
+    if use_gpu:
+        from pytorch_segmentation_models_trainer.tools.kmeans.kmeans_calculator import (
+            MiniBatchKMeans as TorchKMeans,
+        )
+
+        F_tensor = torch.tensor(F, dtype=torch.float32)
+        km_final = TorchKMeans(n_clusters=K, random_state=42, device=device)
+        km_final.fit(F_tensor)
+        cluster_ids = km_final.predict(F_tensor).cpu().numpy()
+    else:
+        km_final = KMeans(n_clusters=K, random_state=42, n_init="auto")
+        km_final.fit(F)
+        cluster_ids = km_final.labels_
 
     rank = _round_robin_rank(cluster_ids, K, N)
     return rank / max(N - 1, 1)

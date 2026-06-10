@@ -14,6 +14,7 @@ import rasterio.windows
 import torch
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 from transformers import AutoModel, AutoProcessor
 
 logger = logging.getLogger(__name__)
@@ -169,9 +170,12 @@ def extract_embeddings(
         prefetch_factor=2 if num_workers > 0 else None,
     )
 
+    n_batches = (len(image_paths) + batch_size - 1) // batch_size
     all_embeddings: List[np.ndarray] = []
     with torch.no_grad():
-        for batch_images in loader:
+        for batch_images in tqdm(
+            loader, total=n_batches, desc="Extracting embeddings", unit="batch"
+        ):
             inputs = processor(images=batch_images, return_tensors="pt")
             pixel_values = inputs["pixel_values"].to(device)
             outputs = model(pixel_values=pixel_values)
