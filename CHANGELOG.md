@@ -2,6 +2,10 @@
 
 ## MBTiles Mask Dataset
 
+- `MBTilesMaskWindowedDataset` now accepts `mask_base_path` parameter: when set,
+  relative mask paths stored in `window_index_cache` are resolved against this
+  base directory. Absolute paths in the CSV are left unchanged, so existing
+  configurations continue to work without modification.
 - `MBTilesMaskWindowedDataset` now accepts `window_index_cache` CSV/Parquet files
   with a square `patch_size` column instead of requiring `width` and `height`,
   allowing coreset/sampling window CSVs to be used directly while preserving the
