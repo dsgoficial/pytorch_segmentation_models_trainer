@@ -164,7 +164,12 @@ def train(cfg: DictConfig):
     trainer.fit(model)
     if "test_dataset" in cfg:
         logger.info("test_dataset found in config — running trainer.test()")
-        trainer.test(model)
+        ckpt_cb = getattr(trainer, "checkpoint_callback", None)
+        best_ckpt = getattr(ckpt_cb, "best_model_path", None) if ckpt_cb else None
+        ckpt_path = best_ckpt if best_ckpt else None
+        if ckpt_path:
+            logger.info("Using best checkpoint for test: %s", ckpt_path)
+        trainer.test(model, ckpt_path=ckpt_path)
     return trainer
 
 
