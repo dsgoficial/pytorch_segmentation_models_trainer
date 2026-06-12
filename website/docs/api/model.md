@@ -41,6 +41,7 @@ Model(cfg, inference_mode=False)
 | `forward` | `(x) -> Tensor` | Delegates to `self.model(x)` |
 | `predict_step` | `(batch, batch_idx, dataloader_idx=0) -> Tensor` | Runs `self(batch)` for inference |
 | `set_encoder_trainable` | `(trainable=False) -> None` | Freezes or unfreezes the `model.encoder` parameters |
+| `_zero_init_extra_input_channels` | `(model, n_base=3) -> None` | Static. Zeroes `weight[:, n_base:, :, :]` in the first `Conv2d` whose `in_channels > n_base`. Call via `get_model()` by setting `zero_init_extra_input_channels: true` in the config |
 
 ### Configuration Keys
 
@@ -62,6 +63,33 @@ Model(cfg, inference_mode=False)
 | `val_dataset` | No | Dataset config for per-epoch validation during `fit`. When absent, `val_dataloader()` returns `None` and Lightning skips the validation loop |
 | `test_dataset` | No | Dataset config for final held-out evaluation. When present, `trainer.test()` is called automatically after `fit`; metrics are logged with `test/` prefix |
 | `replace_model_activation` | No | Dict with `old_activation` and `new_activation` for activation replacement |
+| `zero_init_extra_input_channels` | No | When `true`, zeroes the extra input channels (channels `3:`) of the first `Conv2d` after instantiation. Required when extending a 3-channel ImageNet encoder with additional binary input channels (e.g. one-hot LULC bands) so that at t=0 the model behaves identically to the 3-channel baseline. See example below |
+
+### Zero-initializing extra input channels
+
+When using a pre-trained encoder with more than 3 input channels, `segmentation_models_pytorch` fills
+the extra channels by cycling the 3 RGB filter weights (scaled by `3 / in_channels`). This means the
+extra channels start with non-zero weights that were trained on RGB images, creating a mismatch when the
+extra channels carry a different signal domain (e.g. binary one-hot LULC maps).
+
+Setting `zero_init_extra_input_channels: true` zeroes those weights after instantiation, so the model
+behaves exactly like the 3-channel RGB baseline at epoch 0 and learns the extra channels from scratch.
+
+```yaml
+# Extend a ResNet-50 encoder with 18 one-hot LULC channels (3 RGB + 18 LULC = 21).
+# Channels 3-20 are zero-initialized so training starts from the RGB baseline.
+zero_init_extra_input_channels: true  # must be a top-level key, NOT inside model:
+
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet50
+  encoder_weights: imagenet
+  in_channels: 21
+  classes: 6
+```
+
+A full working example with datasets, metrics, and scheduler is available at
+`conf/examples/multichannel_zero_init_segmentation.yaml`.
 
 ---
 

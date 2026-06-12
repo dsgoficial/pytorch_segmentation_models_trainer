@@ -55,9 +55,12 @@ def _make_runner_cfg(
     return OmegaConf.create(cfg)
 
 
-def _make_mock_trainer(metrics=None):
+def _make_mock_trainer(metrics=None, current_epoch=4, best_checkpoint_path=""):
     mock_trainer = MagicMock(spec=pl.Trainer)
     mock_trainer.callback_metrics = metrics or {"val/loss": 0.5, "train/loss": 0.3}
+    mock_trainer.current_epoch = current_epoch
+    mock_trainer.checkpoint_callback = MagicMock()
+    mock_trainer.checkpoint_callback.best_model_path = best_checkpoint_path
     return mock_trainer
 
 
@@ -998,3 +1001,410 @@ class TestKFoldRunMethod(BasicTestCase):
         results = ExperimentsRunner(cfg).run()
         fold_indices = sorted(r.fold_idx for r in results)
         self.assertEqual(fold_indices, [0, 1, 2])
+
+
+class TestRunResultNewFields(BasicTestCase):
+    """RunResult must expose epochs_trained and best_checkpoint_path fields."""
+
+    def _make_minimal(self, **kwargs):
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            RunResult,
+        )
+
+        defaults = dict(
+            run_idx=0,
+            seed=42,
+            training_time_seconds=1.0,
+            train_metrics={},
+            val_metrics={},
+            test_metrics={},
+            output_dir="/tmp",
+        )
+        defaults.update(kwargs)
+        return RunResult(**defaults)
+
+    def test_epochs_trained_defaults_to_none(self):
+        r = self._make_minimal()
+        self.assertIsNone(r.epochs_trained)
+
+    def test_best_checkpoint_path_defaults_to_none(self):
+        r = self._make_minimal()
+        self.assertIsNone(r.best_checkpoint_path)
+
+    def test_can_set_epochs_trained(self):
+        r = self._make_minimal(epochs_trained=7)
+        self.assertEqual(r.epochs_trained, 7)
+
+    def test_can_set_best_checkpoint_path(self):
+        r = self._make_minimal(best_checkpoint_path="/ckpt/best.ckpt")
+        self.assertEqual(r.best_checkpoint_path, "/ckpt/best.ckpt")
+
+
+class TestRunSingleExtractsTrainingInfo(BasicTestCase):
+    """_run_single must capture epochs_trained and best_checkpoint_path."""
+
+    def setUp(self):
+        super().setUp()
+        self.tmp = self.make_temp_dir()
+
+    def _make_cfg(self, seeds=None):
+        return _make_runner_cfg(seeds=seeds or [42], output_base_dir=self.tmp)
+
+    @patch(_TRAIN_PATH)
+    def test_epochs_trained_is_current_epoch_plus_one(self, mock_train):
+        mock_train.return_value = _make_mock_trainer(current_epoch=6)
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        results = ExperimentsRunner(self._make_cfg()).run()
+        self.assertEqual(results[0].epochs_trained, 7)
+
+    @patch(_TRAIN_PATH)
+    def test_best_checkpoint_path_captured_from_callback(self, mock_train):
+        mock_train.return_value = _make_mock_trainer(
+            best_checkpoint_path="/ckpt/best.ckpt"
+        )
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        results = ExperimentsRunner(self._make_cfg()).run()
+        self.assertEqual(results[0].best_checkpoint_path, "/ckpt/best.ckpt")
+
+    @patch(_TRAIN_PATH)
+    def test_best_checkpoint_path_empty_when_no_callback(self, mock_train):
+        trainer = _make_mock_trainer()
+        trainer.checkpoint_callback = None
+        mock_train.return_value = trainer
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        results = ExperimentsRunner(self._make_cfg()).run()
+        self.assertEqual(results[0].best_checkpoint_path, "")
+
+
+class TestSelectRepresentativeRun(BasicTestCase):
+    """_select_representative_run returns the run closest to the mean metric."""
+
+    def _import(self):
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+            RunResult,
+        )
+
+        return ExperimentsRunner, RunResult
+
+    def _make_results(self, metric_values, metric_key="val/iou"):
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            RunResult,
+        )
+
+        return [
+            RunResult(
+                run_idx=i,
+                seed=i * 10,
+                training_time_seconds=1.0,
+                train_metrics={},
+                val_metrics={metric_key: v},
+                test_metrics={},
+                output_dir=f"/tmp/run_{i:02d}",
+                best_checkpoint_path=f"/ckpt/run_{i:02d}.ckpt",
+            )
+            for i, v in enumerate(metric_values)
+        ]
+
+    def test_closest_to_mean_selected(self):
+        ExperimentsRunner, _ = self._import()
+        cfg = _make_runner_cfg(seeds=[0, 10, 20])
+        runner = ExperimentsRunner(cfg)
+        # mean = (0.5 + 0.7 + 0.9) / 3 = 0.7 → run 1 is closest
+        results = self._make_results([0.5, 0.7, 0.9], "val/iou")
+        rep = runner._select_representative_run(results, "val/iou")
+        self.assertEqual(rep.run_idx, 1)
+
+    def test_single_run_returns_that_run(self):
+        ExperimentsRunner, _ = self._import()
+        cfg = _make_runner_cfg(seeds=[42])
+        runner = ExperimentsRunner(cfg)
+        results = self._make_results([0.65], "val/iou")
+        rep = runner._select_representative_run(results, "val/iou")
+        self.assertEqual(rep.run_idx, 0)
+
+    def test_returns_none_when_metric_absent_in_all_runs(self):
+        ExperimentsRunner, _ = self._import()
+        cfg = _make_runner_cfg(seeds=[42])
+        runner = ExperimentsRunner(cfg)
+        results = self._make_results([0.65], "val/iou")
+        rep = runner._select_representative_run(results, "val/loss")
+        self.assertIsNone(rep)
+
+    def test_tie_returns_a_valid_run(self):
+        ExperimentsRunner, _ = self._import()
+        cfg = _make_runner_cfg(seeds=[0, 10, 20, 30])
+        runner = ExperimentsRunner(cfg)
+        # mean = 0.7; |0.6-0.7|=|0.8-0.7|=0.1 → either run 1 or run 2 valid
+        results = self._make_results([0.5, 0.6, 0.8, 0.9], "val/iou")
+        rep = runner._select_representative_run(results, "val/iou")
+        self.assertIn(rep.run_idx, [1, 2])
+
+    def test_representative_metric_from_cfg_used(self):
+        ExperimentsRunner, _ = self._import()
+        cfg = _make_runner_cfg(
+            seeds=[0, 10, 20],
+            extra={"representative_metric": "val/iou"},
+        )
+        runner = ExperimentsRunner(cfg)
+        metric_key = runner._resolve_representative_metric(
+            self._make_results([0.5, 0.7, 0.9], "val/iou")
+        )
+        self.assertEqual(metric_key, "val/iou")
+
+
+class TestSelectBestRun(BasicTestCase):
+    """_select_best_run returns the run with the highest metric value."""
+
+    def _import(self):
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+            RunResult,
+        )
+
+        return ExperimentsRunner, RunResult
+
+    def _make_results(self, metric_values, metric_key="val/iou"):
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            RunResult,
+        )
+
+        return [
+            RunResult(
+                run_idx=i,
+                seed=i * 10,
+                training_time_seconds=1.0,
+                train_metrics={},
+                val_metrics={metric_key: v},
+                test_metrics={},
+                output_dir=f"/tmp/run_{i:02d}",
+                best_checkpoint_path=f"/ckpt/run_{i:02d}.ckpt",
+            )
+            for i, v in enumerate(metric_values)
+        ]
+
+    def test_best_run_has_highest_metric(self):
+        ExperimentsRunner, _ = self._import()
+        cfg = _make_runner_cfg(seeds=[0, 10, 20])
+        runner = ExperimentsRunner(cfg)
+        results = self._make_results([0.5, 0.9, 0.7], "val/iou")
+        best = runner._select_best_run(results, "val/iou")
+        self.assertEqual(best.run_idx, 1)
+
+    def test_single_run_returns_that_run(self):
+        ExperimentsRunner, _ = self._import()
+        cfg = _make_runner_cfg(seeds=[42])
+        runner = ExperimentsRunner(cfg)
+        results = self._make_results([0.65], "val/iou")
+        best = runner._select_best_run(results, "val/iou")
+        self.assertEqual(best.run_idx, 0)
+
+    def test_returns_none_when_metric_absent(self):
+        ExperimentsRunner, _ = self._import()
+        cfg = _make_runner_cfg(seeds=[42])
+        runner = ExperimentsRunner(cfg)
+        results = self._make_results([0.65], "val/iou")
+        best = runner._select_best_run(results, "val/loss")
+        self.assertIsNone(best)
+
+
+class TestStateFileRepresentative(BasicTestCase):
+    """runner_state.json must include representative and best_run entries."""
+
+    def setUp(self):
+        super().setUp()
+        self.tmp = self.make_temp_dir()
+
+    @patch(_TRAIN_PATH)
+    def test_state_has_representative_key(self, mock_train):
+        mock_train.return_value = _make_mock_trainer(
+            metrics={"val/iou": 0.7}, best_checkpoint_path="/ckpt/best.ckpt"
+        )
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        ExperimentsRunner(
+            _make_runner_cfg(seeds=[42, 101], output_base_dir=self.tmp)
+        ).run()
+        with open(os.path.join(self.tmp, "runner_state.json")) as f:
+            state = json.load(f)
+        self.assertIn("representative", state)
+        self.assertIn("run_idx", state["representative"])
+        self.assertIn("checkpoint_path", state["representative"])
+
+    @patch(_TRAIN_PATH)
+    def test_state_has_best_run_key(self, mock_train):
+        mock_train.return_value = _make_mock_trainer(
+            metrics={"val/iou": 0.7}, best_checkpoint_path="/ckpt/best.ckpt"
+        )
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        ExperimentsRunner(
+            _make_runner_cfg(seeds=[42, 101], output_base_dir=self.tmp)
+        ).run()
+        with open(os.path.join(self.tmp, "runner_state.json")) as f:
+            state = json.load(f)
+        self.assertIn("best_run", state)
+        self.assertIn("run_idx", state["best_run"])
+        self.assertIn("checkpoint_path", state["best_run"])
+
+    @patch(_TRAIN_PATH)
+    def test_state_representative_is_none_when_no_val_metrics(self, mock_train):
+        mock_train.return_value = _make_mock_trainer(metrics={"train/loss": 0.3})
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        ExperimentsRunner(_make_runner_cfg(seeds=[42], output_base_dir=self.tmp)).run()
+        with open(os.path.join(self.tmp, "runner_state.json")) as f:
+            state = json.load(f)
+        self.assertIsNone(state["representative"])
+        self.assertIsNone(state["best_run"])
+
+
+class TestSummaryCSVNewColumns(BasicTestCase):
+    """summary.csv must include epochs_trained, best_checkpoint_path, representative, best_run."""
+
+    def setUp(self):
+        super().setUp()
+        self.tmp = self.make_temp_dir()
+
+    def _make_cfg(self, seeds):
+        return _make_runner_cfg(
+            seeds=seeds, output_base_dir=self.tmp, save_summary=True
+        )
+
+    @patch(_TRAIN_PATH)
+    def test_summary_has_epochs_trained_column(self, mock_train):
+        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5}, current_epoch=4)
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        ExperimentsRunner(self._make_cfg([42])).run()
+        with open(os.path.join(self.tmp, "summary.csv")) as f:
+            header = f.readline()
+        self.assertIn("epochs_trained", header)
+
+    @patch(_TRAIN_PATH)
+    def test_summary_has_best_checkpoint_path_column(self, mock_train):
+        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5})
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        ExperimentsRunner(self._make_cfg([42])).run()
+        with open(os.path.join(self.tmp, "summary.csv")) as f:
+            header = f.readline()
+        self.assertIn("best_checkpoint_path", header)
+
+    @patch(_TRAIN_PATH)
+    def test_summary_has_representative_column(self, mock_train):
+        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5})
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        ExperimentsRunner(self._make_cfg([42])).run()
+        with open(os.path.join(self.tmp, "summary.csv")) as f:
+            header = f.readline()
+        self.assertIn("representative", header)
+
+    @patch(_TRAIN_PATH)
+    def test_summary_has_best_run_column(self, mock_train):
+        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5})
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        ExperimentsRunner(self._make_cfg([42])).run()
+        with open(os.path.join(self.tmp, "summary.csv")) as f:
+            header = f.readline()
+        self.assertIn("best_run", header)
+
+    @patch(_TRAIN_PATH)
+    def test_exactly_one_representative_marked(self, mock_train):
+        import csv as csv_mod
+
+        mock_train.side_effect = [
+            _make_mock_trainer({"val/iou": 0.7}, best_checkpoint_path="/c0.ckpt"),
+            _make_mock_trainer({"val/iou": 0.8}, best_checkpoint_path="/c1.ckpt"),
+            _make_mock_trainer({"val/iou": 0.6}, best_checkpoint_path="/c2.ckpt"),
+        ]
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        ExperimentsRunner(self._make_cfg([42, 101, 28])).run()
+        with open(os.path.join(self.tmp, "summary.csv")) as f:
+            rows = list(csv_mod.DictReader(f))
+        run_rows = [r for r in rows if r["run"] not in ("mean", "std")]
+        marked = [r for r in run_rows if r.get("representative") == "*"]
+        self.assertEqual(len(marked), 1)
+
+    @patch(_TRAIN_PATH)
+    def test_exactly_one_best_run_marked(self, mock_train):
+        import csv as csv_mod
+
+        mock_train.side_effect = [
+            _make_mock_trainer({"val/iou": 0.7}, best_checkpoint_path="/c0.ckpt"),
+            _make_mock_trainer({"val/iou": 0.8}, best_checkpoint_path="/c1.ckpt"),
+            _make_mock_trainer({"val/iou": 0.6}, best_checkpoint_path="/c2.ckpt"),
+        ]
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        ExperimentsRunner(self._make_cfg([42, 101, 28])).run()
+        with open(os.path.join(self.tmp, "summary.csv")) as f:
+            rows = list(csv_mod.DictReader(f))
+        run_rows = [r for r in rows if r["run"] not in ("mean", "std")]
+        marked = [r for r in run_rows if r.get("best_run") == "*"]
+        self.assertEqual(len(marked), 1)
+
+    @patch(_TRAIN_PATH)
+    def test_best_run_marks_highest_metric_run(self, mock_train):
+        import csv as csv_mod
+
+        mock_train.side_effect = [
+            _make_mock_trainer({"val/iou": 0.7}, best_checkpoint_path="/c0.ckpt"),
+            _make_mock_trainer({"val/iou": 0.9}, best_checkpoint_path="/c1.ckpt"),
+            _make_mock_trainer({"val/iou": 0.6}, best_checkpoint_path="/c2.ckpt"),
+        ]
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        ExperimentsRunner(self._make_cfg([42, 101, 28])).run()
+        with open(os.path.join(self.tmp, "summary.csv")) as f:
+            rows = list(csv_mod.DictReader(f))
+        run_rows = [r for r in rows if r["run"] not in ("mean", "std")]
+        best_row = next(r for r in run_rows if r.get("best_run") == "*")
+        self.assertEqual(int(best_row["run"]), 1)
+
+    @patch(_TRAIN_PATH)
+    def test_epochs_trained_value_correct(self, mock_train):
+        import csv as csv_mod
+
+        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5}, current_epoch=9)
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        ExperimentsRunner(self._make_cfg([42])).run()
+        with open(os.path.join(self.tmp, "summary.csv")) as f:
+            rows = list(csv_mod.DictReader(f))
+        run_rows = [r for r in rows if r["run"] not in ("mean", "std")]
+        self.assertEqual(run_rows[0]["epochs_trained"], "10")

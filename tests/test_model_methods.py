@@ -452,3 +452,114 @@ class TestTrainDataloaderWeightedSampler:
         model = self._setup_model([0.1, 0.5, 0.9], weighted=False)
         dl = model.train_dataloader()
         assert not isinstance(dl.sampler, WeightedRandomSampler)
+
+
+# ---------------------------------------------------------------------------
+# _zero_init_extra_input_channels
+# ---------------------------------------------------------------------------
+
+
+class TestZeroInitExtraInputChannels:
+    """Tests for Model._zero_init_extra_input_channels static method."""
+
+    def _make_conv(self, in_channels, out_channels=64, kernel_size=7):
+        conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, bias=False)
+        nn.init.ones_(conv.weight)
+        return conv
+
+    def test_zeros_channels_beyond_n_base(self):
+        conv = self._make_conv(21)
+        model = nn.Sequential(conv)
+        from pytorch_segmentation_models_trainer.model_loader.model import Model
+
+        Model._zero_init_extra_input_channels(model, n_base=3)
+        assert conv.weight[:, 3:, :, :].abs().max().item() == 0.0
+
+    def test_preserves_base_channels(self):
+        conv = self._make_conv(21)
+        model = nn.Sequential(conv)
+        from pytorch_segmentation_models_trainer.model_loader.model import Model
+
+        Model._zero_init_extra_input_channels(model, n_base=3)
+        assert conv.weight[:, :3, :, :].abs().max().item() > 0.0
+
+    def test_only_first_conv_is_modified(self):
+        conv1 = self._make_conv(21)
+        conv2 = self._make_conv(21)
+        model = nn.Sequential(conv1, conv2)
+        from pytorch_segmentation_models_trainer.model_loader.model import Model
+
+        Model._zero_init_extra_input_channels(model, n_base=3)
+        # conv1 extra channels zeroed
+        assert conv1.weight[:, 3:, :, :].abs().max().item() == 0.0
+        # conv2 untouched
+        assert conv2.weight[:, 3:, :, :].abs().max().item() > 0.0
+
+    def test_no_op_when_in_channels_equals_n_base(self):
+        conv = self._make_conv(3)
+        model = nn.Sequential(conv)
+        original = conv.weight.clone()
+        from pytorch_segmentation_models_trainer.model_loader.model import Model
+
+        Model._zero_init_extra_input_channels(model, n_base=3)
+        assert torch.equal(conv.weight, original)
+
+    def test_get_model_applies_zero_init_when_flag_set(self):
+        """get_model() with zero_init_extra_input_channels=true zeroes extra channels."""
+        import segmentation_models_pytorch as smp
+        from omegaconf import OmegaConf
+        from pytorch_segmentation_models_trainer.model_loader.model import Model
+
+        cfg = OmegaConf.create(
+            {
+                "model": {
+                    "_target_": "segmentation_models_pytorch.Unet",
+                    "encoder_name": "resnet18",
+                    "encoder_weights": None,
+                    "in_channels": 6,
+                    "classes": 6,
+                },
+                "zero_init_extra_input_channels": True,
+            }
+        )
+        with patch.object(Model, "__init__", lambda self, *a, **kw: None):
+            instance = Model.__new__(Model)
+            instance.cfg = cfg
+            smp_model = instance.get_model()
+
+        first_conv = next(
+            m
+            for m in smp_model.modules()
+            if isinstance(m, nn.Conv2d) and m.in_channels == 6
+        )
+        assert first_conv.weight[:, 3:, :, :].abs().max().item() == 0.0
+        assert first_conv.weight[:, :3, :, :].abs().max().item() > 0.0
+
+    def test_get_model_skips_zero_init_when_flag_absent(self):
+        """get_model() without the flag leaves all weights as initialized."""
+        from omegaconf import OmegaConf
+        from pytorch_segmentation_models_trainer.model_loader.model import Model
+
+        cfg = OmegaConf.create(
+            {
+                "model": {
+                    "_target_": "segmentation_models_pytorch.Unet",
+                    "encoder_name": "resnet18",
+                    "encoder_weights": None,
+                    "in_channels": 6,
+                    "classes": 6,
+                },
+            }
+        )
+        with patch.object(Model, "__init__", lambda self, *a, **kw: None):
+            instance = Model.__new__(Model)
+            instance.cfg = cfg
+            smp_model = instance.get_model()
+
+        first_conv = next(
+            m
+            for m in smp_model.modules()
+            if isinstance(m, nn.Conv2d) and m.in_channels == 6
+        )
+        # Without zero-init, SMP averaging fills all channels — none are all-zero
+        assert first_conv.weight[:, 3:, :, :].abs().max().item() > 0.0

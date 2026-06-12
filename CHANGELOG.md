@@ -1,7 +1,15 @@
 # Unreleased
 
+## Model
+
+- `Model.get_model()` now supports `zero_init_extra_input_channels: true` as a top-level config key. When set, the weights of input channels beyond the first 3 in the first `Conv2d` are zeroed after instantiation. This ensures that models extended with extra input channels (e.g. one-hot LULC bands appended to RGB) behave identically to the 3-channel RGB baseline at epoch 0, instead of inheriting the cyclic-averaging initialization that `segmentation_models_pytorch` applies by default when `in_channels > 3`. See `conf/examples/multichannel_zero_init_segmentation.yaml` for a full working example.
+
 ## MBTiles Mask Dataset
 
+- `MBTilesMaskWindowedDataset` now accepts `mask_base_path` parameter: when set,
+  relative mask paths stored in `window_index_cache` are resolved against this
+  base directory. Absolute paths in the CSV are left unchanged, so existing
+  configurations continue to work without modification.
 - `MBTilesMaskWindowedDataset` now accepts `window_index_cache` CSV/Parquet files
   with a square `patch_size` column instead of requiring `width` and `height`,
   allowing coreset/sampling window CSVs to be used directly while preserving the

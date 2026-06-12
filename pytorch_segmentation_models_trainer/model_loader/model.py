@@ -323,7 +323,29 @@ class Model(pl.LightningModule):
             replace_activation(model, old_activation, new_activation)
         if "fine_tuning" in self.cfg:
             model = apply_fine_tuning_strategy(model, self.cfg.fine_tuning)
+        if self.cfg.get("zero_init_extra_input_channels", False):
+            self._zero_init_extra_input_channels(model)
         return model
+
+    @staticmethod
+    def _zero_init_extra_input_channels(model, n_base: int = 3) -> None:
+        """Zero-initialize input channels beyond n_base in the first Conv2d.
+
+        Preserves pre-trained weights for the first n_base channels and zeros
+        the remainder. Required when extending a 3-channel ImageNet encoder with
+        extra input channels (e.g. one-hot LULC bands) so that at t=0 the model
+        behaves identically to the 3-channel baseline.
+        """
+        for module in model.modules():
+            if isinstance(module, nn.Conv2d) and module.in_channels > n_base:
+                with torch.no_grad():
+                    module.weight[:, n_base:, :, :].zero_()
+                logger.info(
+                    "Zero-initialized extra input channels %d:%d in first Conv2d",
+                    n_base,
+                    module.in_channels,
+                )
+                break
 
     def get_gpu_augmentations(self, augmentation_list):
         return torch.nn.Sequential(

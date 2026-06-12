@@ -60,6 +60,10 @@ class MBTilesMaskWindowedDataset(Dataset):
         window_index_mask_path_key: Column containing mask paths in
             ``window_index_cache``.
         window_index_coordinate_mode: ``auto``, ``pixel``, or ``bounds``.
+        mask_base_path: Optional base directory prepended to relative mask
+            paths read from ``window_index_cache``. Has no effect when paths
+            are already absolute. Useful for storing only filenames in the CSV
+            and resolving them at runtime via the YAML config.
         **kwargs: Compatibility kwargs for Hydra instantiation.
 
     Returns:
@@ -98,6 +102,7 @@ class MBTilesMaskWindowedDataset(Dataset):
         window_index_cache: Optional[str] = None,
         window_index_mask_path_key: str = "mask_path",
         window_index_coordinate_mode: str = "auto",
+        mask_base_path: Optional[str] = None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -123,6 +128,7 @@ class MBTilesMaskWindowedDataset(Dataset):
         self.return_metadata = return_metadata
         self.window_index_mask_path_key = window_index_mask_path_key
         self.window_index_coordinate_mode = window_index_coordinate_mode
+        self.mask_base_path = Path(mask_base_path) if mask_base_path else None
         if self.window_index_coordinate_mode not in {"auto", "pixel", "bounds"}:
             raise ValueError(
                 "window_index_coordinate_mode must be 'auto', 'pixel', or 'bounds'."
@@ -144,8 +150,13 @@ class MBTilesMaskWindowedDataset(Dataset):
                 self.window_index_cache,
                 mask_path_key=self.window_index_mask_path_key,
                 coordinate_mode=self.window_index_coordinate_mode,
+                mask_base_path=self.mask_base_path,
             )
             self.mask_paths = sorted({record["mask_path"] for record in self.windows})
+            p = self.window_index_cache
+            self.df = (
+                pd.read_csv(p) if p.suffix.lower() == ".csv" else pd.read_parquet(p)
+            )
         else:
             self.mask_paths = self._collect_mask_paths(
                 mask_paths=mask_paths,
@@ -153,6 +164,7 @@ class MBTilesMaskWindowedDataset(Dataset):
                 mask_extension=mask_extension,
             )
             self.windows = self._build_window_index(self.mask_paths)
+            self.df = None
             if self.window_index_cache is not None:
                 self._write_window_index_cache(self.window_index_cache, self.windows)
 
@@ -284,6 +296,7 @@ class MBTilesMaskWindowedDataset(Dataset):
         path: Path,
         mask_path_key: str = "mask_path",
         coordinate_mode: str = "auto",
+        mask_base_path: Optional[Path] = None,
     ) -> List[Dict[str, Any]]:
         if path.suffix.lower() == ".csv":
             df = pd.read_csv(path)
@@ -323,6 +336,8 @@ class MBTilesMaskWindowedDataset(Dataset):
         records = []
         for row in df.to_dict(orient="records"):
             mask_path = Path(row[mask_path_key])
+            if mask_base_path is not None and not mask_path.is_absolute():
+                mask_path = mask_base_path / mask_path
             if resolved_mode == "pixel":
                 width = (
                     int(row["width"]) if has_width_height else int(row["patch_size"])
