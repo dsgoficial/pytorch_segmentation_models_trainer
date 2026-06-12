@@ -153,6 +153,10 @@ class MBTilesMaskWindowedDataset(Dataset):
                 mask_base_path=self.mask_base_path,
             )
             self.mask_paths = sorted({record["mask_path"] for record in self.windows})
+            p = self.window_index_cache
+            self.df = (
+                pd.read_csv(p) if p.suffix.lower() == ".csv" else pd.read_parquet(p)
+            )
         else:
             self.mask_paths = self._collect_mask_paths(
                 mask_paths=mask_paths,
@@ -160,6 +164,7 @@ class MBTilesMaskWindowedDataset(Dataset):
                 mask_extension=mask_extension,
             )
             self.windows = self._build_window_index(self.mask_paths)
+            self.df = None
             if self.window_index_cache is not None:
                 self._write_window_index_cache(self.window_index_cache, self.windows)
 

@@ -442,6 +442,58 @@ def test_mask_base_path_does_not_affect_absolute_paths(tmp_path):
     assert ds.windows[0]["mask_path"] == mask
 
 
+def test_df_attribute_set_when_cache_exists(tmp_path):
+    source = tmp_path / "source.tif"
+    mask = tmp_path / "masks" / "mask.tif"
+    cache = tmp_path / "coreset_v8.csv"
+    _write_rgb_raster(source)
+    _write_mask(mask)
+    pd.DataFrame(
+        [
+            {
+                "mask_path": str(mask),
+                "row_off": 0,
+                "col_off": 0,
+                "patch_size": 16,
+                "sampler_weight": 0.25,
+            },
+            {
+                "mask_path": str(mask),
+                "row_off": 16,
+                "col_off": 0,
+                "patch_size": 16,
+                "sampler_weight": 0.10,
+            },
+        ]
+    ).to_csv(cache, index=False)
+
+    ds = mbtiles_mask_dataset.MBTilesMaskWindowedDataset(
+        mbtiles_path=source,
+        window_index_cache=cache,
+    )
+
+    assert ds.df is not None
+    assert "sampler_weight" in ds.df.columns
+    assert len(ds.df) == 2
+    assert list(ds.df["sampler_weight"]) == [0.25, 0.10]
+
+
+def test_df_is_none_without_cache(tmp_path):
+    source = tmp_path / "source.tif"
+    mask = tmp_path / "masks" / "mask.tif"
+    _write_rgb_raster(source)
+    _write_mask(mask)
+
+    ds = mbtiles_mask_dataset.MBTilesMaskWindowedDataset(
+        mbtiles_path=source,
+        mask_paths=[mask],
+        patch_size=16,
+        stride=16,
+    )
+
+    assert ds.df is None
+
+
 def test_invalid_window_index_cache_extension_raises(tmp_path):
     source = tmp_path / "source.tif"
     mask = tmp_path / "masks" / "mask.tif"
