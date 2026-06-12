@@ -1211,7 +1211,11 @@ class Model(pl.LightningModule):
         images, masks = self._unpack_batch(batch)
         if self.gpu_test_transform is not None:
             images = self.gpu_test_transform(images)
-        masks = masks.long()
+        if masks.is_floating_point():
+            hard_masks = self._soft_to_hard_masks(masks)
+        else:
+            masks = masks.long()
+            hard_masks = masks
         tta_augmentations = self._get_tta_augmentations()
         if tta_augmentations is not None:
             predicted_masks = self._predict_with_tta(images)
@@ -1253,7 +1257,7 @@ class Model(pl.LightningModule):
         if hasattr(self, "test_metrics"):
             preds_for_metrics = self._prepare_preds_for_metrics(predicted_masks)
             if preds_for_metrics is not None:
-                metrics = self.test_metrics(preds_for_metrics, masks)
+                metrics = self.test_metrics(preds_for_metrics, hard_masks)
                 self.log_dict(
                     metrics,
                     on_step=False,
@@ -1285,7 +1289,11 @@ class Model(pl.LightningModule):
         images, masks = self._unpack_batch(batch)
         if self.gpu_test_transform is not None:
             images = self.gpu_test_transform(images)
-        masks = masks.long()
+        if masks.is_floating_point():
+            hard_masks = self._soft_to_hard_masks(masks)
+        else:
+            masks = masks.long()
+            hard_masks = masks
 
         image_paths = (
             list(batch.get("image_path", [])) if isinstance(batch, dict) else []
@@ -1297,7 +1305,8 @@ class Model(pl.LightningModule):
         for i in range(images.shape[0]):
             sw_output = sw_core.predict(images[i])  # [1, C, H, W]
             predicted_masks = sw_output.prediction  # [1, C, H, W]
-            mask_i = masks[i].unsqueeze(0)  # [1, H, W]
+            mask_i = masks[i].unsqueeze(0)  # [1, H, W] or [1, C, H, W] for soft
+            hard_mask_i = hard_masks[i].unsqueeze(0)  # [1, H, W]
 
             loss, _, _ = self._compute_loss(predicted_masks, mask_i)
             total_loss = total_loss + loss
@@ -1305,7 +1314,7 @@ class Model(pl.LightningModule):
             if hasattr(self, "test_metrics"):
                 preds_for_metrics = self._prepare_preds_for_metrics(predicted_masks)
                 if preds_for_metrics is not None:
-                    self.test_metrics.update(preds_for_metrics, mask_i)
+                    self.test_metrics.update(preds_for_metrics, hard_mask_i)
 
             if i < len(image_paths) and image_paths[i] is not None:
                 self._save_test_prediction(sw_output, image_paths[i])

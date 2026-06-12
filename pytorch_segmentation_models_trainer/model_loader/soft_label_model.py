@@ -56,6 +56,17 @@ class SoftLabelModel(Model):
 
         return super()._shared_step(batch, prefix)
 
+    def test_step(self, batch, batch_idx):
+        """Unwrap dict-mask before delegating to the parent test_step."""
+        self._w_conf: Optional[torch.Tensor] = None
+
+        mask_val = batch.get(self.cfg.get("mask_key", "mask"))
+        if isinstance(mask_val, dict):
+            self._w_conf = mask_val.get("w_conf")
+            batch = {**batch, self.cfg.get("mask_key", "mask"): mask_val.get("mask")}
+
+        return super().test_step(batch, batch_idx)
+
     def _compute_loss(
         self,
         predicted_masks: torch.Tensor,
