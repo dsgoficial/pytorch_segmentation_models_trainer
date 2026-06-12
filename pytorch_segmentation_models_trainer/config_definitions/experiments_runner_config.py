@@ -49,6 +49,10 @@ class ExperimentsRunnerConfig:
             execution continues from the first pending run.  Seeds are
             loaded from the state file so auto-generated seeds are stable
             across restarts.
+        representative_metric: Metric key used to select the representative
+            run (closest to mean) and the best run (highest value).  When
+            absent, the first val metric found alphabetically is used.
+            Example: ``"val/JaccardIndex"``.
 
     Example YAML:
 
@@ -71,6 +75,7 @@ class ExperimentsRunnerConfig:
     summary_metrics: List[str] = field(default_factory=lambda: ["val/loss"])
     resume: bool = False
     kfold: Optional[Any] = None
+    representative_metric: Optional[str] = None
 
 
 def _register_configs() -> None:
