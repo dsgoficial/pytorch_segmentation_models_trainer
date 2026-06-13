@@ -4,7 +4,7 @@
 import pytest
 import torch
 import torch.nn as nn
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 from pytorch_segmentation_models_trainer.model_loader.co_teaching_model import (
     CoTeachingModel,
@@ -228,12 +228,17 @@ class TestCoTeachingModelTrainingStep:
     def test_current_epoch_passed_to_loss(self):
         obj = _minimal_model_instance()
         opt_a, opt_b = MagicMock(), MagicMock()
-        obj._trainer.current_epoch = 10  # set via trainer mock
 
         with patch.object(obj, "optimizers", return_value=[opt_a, opt_b]):
             with patch.object(obj, "log"):
                 with patch.object(obj, "manual_backward"):
-                    obj.training_step(self._batch(), 0)
+                    with patch.object(
+                        type(obj),
+                        "current_epoch",
+                        new_callable=PropertyMock,
+                        return_value=10,
+                    ):
+                        obj.training_step(self._batch(), 0)
 
         assert obj.loss_function.current_epoch == 10
 
