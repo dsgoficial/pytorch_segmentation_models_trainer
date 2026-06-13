@@ -2,6 +2,7 @@
 """Soft-label dataset that reads RGB from MBTiles on mask-referenced windows."""
 
 import hashlib
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Union
 
@@ -155,7 +156,7 @@ class MBTilesSoftLabelMaskWindowedDataset(MBTilesMaskWindowedDataset):
         if self.cache_dir is None:
             return
         cache_file = self.cache_dir / self._cache_key(record)
-        tmp_file = cache_file.with_name(cache_file.stem + ".tmp")
+        tmp_file = cache_file.with_name(f"{cache_file.stem}_{os.getpid()}.tmp")
         with open(tmp_file, "wb") as f:
             np.save(f, p_soft)
         tmp_file.rename(cache_file)
