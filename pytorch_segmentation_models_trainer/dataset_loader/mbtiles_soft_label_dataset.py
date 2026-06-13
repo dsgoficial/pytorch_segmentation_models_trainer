@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Soft-label dataset that reads RGB from MBTiles on mask-referenced windows."""
 
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Union
 
@@ -93,6 +94,7 @@ class MBTilesSoftLabelMaskWindowedDataset(MBTilesMaskWindowedDataset):
         return_metadata: bool = True,
         window_index_cache: Optional[str] = None,
         seed: Optional[int] = None,
+        cache_dir: Optional[Union[str, Path]] = None,
         **kwargs,
     ) -> None:
         super().__init__(
@@ -120,6 +122,11 @@ class MBTilesSoftLabelMaskWindowedDataset(MBTilesMaskWindowedDataset):
         self.use_border = use_border
         self.entropy_norm = entropy_norm
         self.border_radius = border_radius
+        if cache_dir is not None:
+            self.cache_dir = Path(cache_dir)
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            self.cache_dir = None
 
         self.transform = None
         if augmentation_list is not None:
@@ -131,6 +138,27 @@ class MBTilesSoftLabelMaskWindowedDataset(MBTilesMaskWindowedDataset):
                 base.transforms,
                 additional_targets=additional_targets,
             )
+
+    def _cache_key(self, record: dict) -> str:
+        key = f"{record['mask_path']}|{record['row_off']}|{record['col_off']}"
+        return hashlib.sha1(key.encode()).hexdigest()[:16] + ".npy"
+
+    def _load_cached_p_soft(self, record: dict) -> Optional[np.ndarray]:
+        if self.cache_dir is None:
+            return None
+        cache_file = self.cache_dir / self._cache_key(record)
+        if cache_file.exists():
+            return np.load(cache_file)
+        return None
+
+    def _save_cached_p_soft(self, record: dict, p_soft: np.ndarray) -> None:
+        if self.cache_dir is None:
+            return
+        cache_file = self.cache_dir / self._cache_key(record)
+        tmp_file = cache_file.with_name(cache_file.stem + ".tmp")
+        with open(tmp_file, "wb") as f:
+            np.save(f, p_soft)
+        tmp_file.rename(cache_file)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """Return one MBTiles RGB patch with on-the-fly soft labels.
@@ -166,19 +194,23 @@ class MBTilesSoftLabelMaskWindowedDataset(MBTilesMaskWindowedDataset):
                 image_resampling=self.image_resampling,
             )
             bags_mask = read_mask_window(mask_src, window, n_classes=self.n_classes)
-            lulc_maps = [
-                read_source_aligned_to_mask_window(
-                    source_path=path,
-                    mask_src=mask_src,
-                    window=window,
-                    selected_bands=[1],
-                    image_dtype="uint8",
-                    image_resampling=self.lulc_resampling,
-                )[0]
-                for path in self.lulc_paths
-            ]
 
-        p_soft = compute_p_soft([bags_mask, *lulc_maps], self.num_classes)
+            p_soft = self._load_cached_p_soft(record)
+            if p_soft is None:
+                lulc_maps = [
+                    read_source_aligned_to_mask_window(
+                        source_path=path,
+                        mask_src=mask_src,
+                        window=window,
+                        selected_bands=[1],
+                        image_dtype="uint8",
+                        image_resampling=self.lulc_resampling,
+                    )[0]
+                    for path in self.lulc_paths
+                ]
+                p_soft = compute_p_soft([bags_mask, *lulc_maps], self.num_classes)
+                self._save_cached_p_soft(record, p_soft)
+
         w_conf = None
         if self.return_w_conf:
             w_conf = compute_w_conf(

@@ -144,6 +144,11 @@ class TestMBTilesSoftLabelMaskWindowedDataset:
         assert model.weight.grad is not None
         assert torch.count_nonzero(model.weight.grad) > 0
 
+    def test_index_error_raised_for_out_of_bounds(self, soft_mbtiles_setup):
+        ds = _make_dataset(soft_mbtiles_setup)
+        with pytest.raises(IndexError):
+            _ = ds[999]
+
     def test_lightning_model_integration(self, soft_mbtiles_setup):
         dataset_cfg = {
             "_target_": (
@@ -190,3 +195,80 @@ class TestMBTilesSoftLabelMaskWindowedDataset:
         batch = next(iter(lightning_model.train_dataloader()))
         loss = lightning_model.training_step(batch, 0)
         assert loss.ndim == 0
+
+
+class TestMBTilesSoftLabelCaching:
+    """P_soft disk cache: lazy population, atomic write, cache-hit skips LULC reads."""
+
+    def test_no_cache_files_when_cache_dir_is_none(self, soft_mbtiles_setup, tmp_path):
+        ds = _make_dataset(soft_mbtiles_setup)  # cache_dir defaults to None
+        _ = ds[0]
+        assert not list(tmp_path.glob("**/*.npy"))
+
+    def test_cache_dir_created_automatically(self, soft_mbtiles_setup, tmp_path):
+        cache_dir = tmp_path / "new" / "nested" / "cache"
+        _make_dataset(soft_mbtiles_setup, cache_dir=cache_dir)
+        assert cache_dir.exists()
+
+    def test_cache_file_created_on_first_access(self, soft_mbtiles_setup, tmp_path):
+        cache_dir = tmp_path / "cache"
+        ds = _make_dataset(soft_mbtiles_setup, cache_dir=cache_dir)
+        _ = ds[0]
+        assert len(list(cache_dir.glob("*.npy"))) == 1
+
+    def test_different_windows_get_different_cache_files(self, soft_mbtiles_setup, tmp_path):
+        cache_dir = tmp_path / "cache"
+        ds = _make_dataset(soft_mbtiles_setup, cache_dir=cache_dir)
+        _ = ds[0]
+        _ = ds[1]
+        assert len(list(cache_dir.glob("*.npy"))) == 2
+
+    def test_no_tmp_files_left_after_write(self, soft_mbtiles_setup, tmp_path):
+        cache_dir = tmp_path / "cache"
+        ds = _make_dataset(soft_mbtiles_setup, cache_dir=cache_dir)
+        _ = ds[0]
+        assert not list(cache_dir.glob("*.tmp"))
+
+    def test_cached_p_soft_matches_uncached(self, soft_mbtiles_setup, tmp_path):
+        cache_dir = tmp_path / "cache"
+        ds_no_cache = _make_dataset(soft_mbtiles_setup, return_w_conf=False)
+        ds_cached = _make_dataset(
+            soft_mbtiles_setup, return_w_conf=False, cache_dir=cache_dir
+        )
+        torch.testing.assert_close(
+            ds_no_cache[0]["mask"]["mask"],
+            ds_cached[0]["mask"]["mask"],
+        )
+
+    def test_cache_hit_returns_identical_p_soft(self, soft_mbtiles_setup, tmp_path):
+        cache_dir = tmp_path / "cache"
+        ds = _make_dataset(soft_mbtiles_setup, return_w_conf=False, cache_dir=cache_dir)
+        torch.testing.assert_close(
+            ds[0]["mask"]["mask"],
+            ds[0]["mask"]["mask"],
+        )
+
+    def test_cache_hit_skips_lulc_reads(self, soft_mbtiles_setup, tmp_path):
+        """After populating the cache, pointing lulc_paths to non-existent files still works."""
+        from pathlib import Path as _Path
+
+        cache_dir = tmp_path / "cache"
+        ds = _make_dataset(soft_mbtiles_setup, return_w_conf=False, cache_dir=cache_dir)
+        _ = ds[0]  # populate cache
+        ds.lulc_paths = [_Path("/nonexistent/lulc.tif")]  # would fail on LULC read
+        item = ds[0]  # must succeed via cache
+        assert item["mask"]["mask"].shape == (C, H, W)
+
+    def test_w_conf_computed_correctly_from_cached_p_soft(
+        self, soft_mbtiles_setup, tmp_path
+    ):
+        cache_dir = tmp_path / "cache"
+        ds_ref = _make_dataset(soft_mbtiles_setup, return_w_conf=True)
+        ds_cache = _make_dataset(
+            soft_mbtiles_setup, return_w_conf=True, cache_dir=cache_dir
+        )
+        _ = ds_cache[0]  # populate cache
+        torch.testing.assert_close(
+            ds_ref[0]["mask"]["w_conf"],
+            ds_cache[0]["mask"]["w_conf"],
+        )
