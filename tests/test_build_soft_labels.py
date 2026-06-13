@@ -141,6 +141,37 @@ class TestComputePSoft:
         p = compute_p_soft(maps, num_classes=2)
         assert p.dtype == np.float32
 
+    def test_source_weights_asymmetric_vote(self):
+        """BAGS weight=2, LULC weight=1: conflicting sources favour BAGS class."""
+        bags = np.zeros((4, 4), dtype=np.uint8)   # all class 0
+        lulc = np.full((4, 4), 1, dtype=np.uint8)  # all class 1
+        p = compute_p_soft([bags, lulc], num_classes=2, source_weights=[2.0, 1.0])
+        assert np.allclose(p[0], 2 / 3)
+        assert np.allclose(p[1], 1 / 3)
+
+    def test_source_weights_none_equals_equal_vote(self):
+        """source_weights=None must produce the same result as equal vote."""
+        a = np.zeros((4, 4), dtype=np.uint8)
+        b = np.full((4, 4), 1, dtype=np.uint8)
+        p_none = compute_p_soft([a, b], num_classes=2, source_weights=None)
+        p_equal = compute_p_soft([a, b], num_classes=2)
+        assert np.allclose(p_none, p_equal)
+
+    def test_source_weights_sums_to_one(self):
+        """P_soft must sum to 1 per pixel regardless of source_weights values."""
+        a = np.zeros((6, 6), dtype=np.uint8)
+        b = np.full((6, 6), 1, dtype=np.uint8)
+        c = np.full((6, 6), 2, dtype=np.uint8)
+        p = compute_p_soft([a, b, c], num_classes=3, source_weights=[3.0, 1.0, 1.0])
+        assert np.allclose(p.sum(axis=0), 1.0)
+
+    def test_source_weights_single_source_unchanged(self):
+        """A single source with any weight is always a hard label."""
+        lulc = np.full((4, 4), 2, dtype=np.uint8)
+        p = compute_p_soft([lulc], num_classes=4, source_weights=[5.0])
+        assert np.all(p[2] == 1.0)
+        assert np.all(p[0] == 0.0)
+
 
 # ---------------------------------------------------------------------------
 # _normalize_sources_dataframe

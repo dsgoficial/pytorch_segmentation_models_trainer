@@ -199,12 +199,14 @@ def _reproject_lulc_to_image_grid(
 def compute_p_soft(
     lulc_maps: List[np.ndarray],
     num_classes: int,
+    source_weights: Optional[List[float]] = None,
 ) -> np.ndarray:
-    """Compute equal-vote P_soft from LULC maps.
+    """Compute weighted-vote P_soft from LULC maps.
 
     Args:
         lulc_maps: List of (H, W) integer arrays, one per source.
         num_classes: Number of land-cover classes (0-indexed).
+        source_weights: Per-source vote weights. ``None`` gives equal vote.
 
     Returns:
         p_soft: (C, H, W) float32 array summing to 1 along axis 0.
@@ -212,11 +214,19 @@ def compute_p_soft(
     h, w = lulc_maps[0].shape
     p_soft = np.zeros((num_classes, h, w), dtype=np.float32)
 
-    for lulc in lulc_maps:
-        for c in range(num_classes):
-            p_soft[c] += lulc == c
+    weights = source_weights if source_weights is not None else [1.0] * len(lulc_maps)
+    if len(weights) != len(lulc_maps):
+        raise ValueError(
+            f"source_weights length ({len(weights)}) must match "
+            f"lulc_maps length ({len(lulc_maps)})"
+        )
+    total = sum(weights)
 
-    p_soft /= len(lulc_maps)
+    for lulc, weight in zip(lulc_maps, weights):
+        for c in range(num_classes):
+            p_soft[c] += weight * (lulc == c)
+
+    p_soft /= total
     return p_soft
 
 
