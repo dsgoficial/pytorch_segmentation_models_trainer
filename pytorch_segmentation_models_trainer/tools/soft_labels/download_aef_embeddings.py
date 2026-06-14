@@ -317,6 +317,60 @@ def _write_sourcecoop_crop(
                 dst.write(data)
 
 
+def _write_sourcecoop_crop_from_bbox(
+    href: str,
+    bbox_wgs84: Tuple[float, float, float, float],
+    out_path: Path,
+) -> None:
+    """Write a Source Cooperative AEF crop defined by a WGS84 bounding box.
+
+    Unlike :func:`_write_sourcecoop_crop`, this helper accepts a pre-computed
+    bounding box instead of an image path, making it suitable for union crops
+    that span multiple tiles.
+
+    Args:
+        href: Local path or public URL to the selected AEF COG.
+        bbox_wgs84: ``(left, bottom, right, top)`` in EPSG:4326 degrees.
+        out_path: Output GeoTIFF path.
+    """
+    env_options = {}
+    parsed = urlparse(href)
+    if parsed.scheme in {"http", "https"}:
+        env_options.update(
+            GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",
+            CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tiff,.tif",
+        )
+
+    with rasterio.Env(**env_options):
+        with rasterio.open(href) as src:
+            projected_bounds = transform_bounds(
+                CRS.from_epsg(4326),
+                src.crs,
+                bbox_wgs84[0],
+                bbox_wgs84[1],
+                bbox_wgs84[2],
+                bbox_wgs84[3],
+                densify_pts=21,
+            )
+            window = _window_covering_bounds(src, projected_bounds)
+            data = src.read(window=window)
+            profile = src.profile.copy()
+            profile.update(
+                driver="GTiff",
+                height=data.shape[1],
+                width=data.shape[2],
+                transform=src.window_transform(window),
+                compress="DEFLATE",
+                tiled=True,
+                blockxsize=256,
+                blockysize=256,
+                BIGTIFF="IF_SAFER",
+                interleave="band",
+            )
+            with rasterio.open(out_path, "w", **profile) as dst:
+                dst.write(data)
+
+
 # ---------------------------------------------------------------------------
 # Download functions
 # ---------------------------------------------------------------------------
@@ -475,6 +529,111 @@ def download_sourcecoop_embeddings(
         logger.info("Saved Source Cooperative AEF crop for %s to %s", tile_id, out_path)
 
 
+def download_sourcecoop_union_embeddings(
+    tiles_csv: str,
+    output_dir: Path,
+    index_path: Optional[str] = None,
+    index_url: str = SOURCECOOP_AEF_INDEX_URL,
+    year: Optional[int] = None,
+) -> None:
+    """Download one AEF crop per unique COG, covering the union bbox of all tiles.
+
+    Unlike :func:`download_sourcecoop_embeddings`, which issues one HTTP request
+    per tile, this mode groups tiles by the COG that covers them and downloads a
+    single crop whose spatial extent is the union of all tiles assigned to that
+    COG.  This eliminates redundant downloads when many tiles overlap the same
+    AEF scene.
+
+    Output files are named ``aef_{safe_key}.tif`` where ``safe_key`` is derived
+    from the COG item name and year (e.g. ``aef_AlphaEarthEmbeddings_2024.tif``).
+    The caller is responsible for mapping tile IDs to the correct output file.
+
+    Example YAML:
+        ```yaml
+        aef_download:
+          source: sourcecoop-union
+          tiles_csv: /data/tiles.csv
+          output_dir: /data/aef_embeddings
+          year: 2024
+        ```
+
+    Args:
+        tiles_csv: CSV file with ``tile_id`` and ``image_path`` columns. A
+            ``year`` column may be provided per tile when ``year`` is not set.
+        output_dir: Directory to write cropped GeoTIFF embeddings.
+        index_path: Optional local Source Cooperative STAC GeoParquet index.
+        index_url: Remote Source Cooperative STAC GeoParquet URL.
+        year: Optional annual AEF product year override for all tiles.
+
+    Raises:
+        ValueError: If a tile year cannot be inferred or no intersecting COG is
+            available for a tile/year pair.
+    """
+    df = pd.read_csv(tiles_csv)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    index_gdf = _load_sourcecoop_index(index_path, index_url)
+
+    # Group tiles by (cog_key, href) so we download each unique COG only once.
+    # cog_key = "<item_name>_<year>" — stable across tiles sharing the same scene.
+    groups: dict[str, dict] = {}  # cog_key → {href, bbox_union, tile_ids}
+
+    for _, row in df.iterrows():
+        tile_id = str(row["tile_id"])
+        tile_year = _infer_sourcecoop_year(row, year)
+        bbox = _get_tile_bbox(str(row["image_path"]))
+        item = _select_sourcecoop_item(index_gdf, bbox, tile_year)
+        if item is None:
+            raise ValueError(
+                f"No Source Cooperative AEF COG intersects tile '{tile_id}' "
+                f"for year {tile_year}."
+            )
+
+        item_name = str(item.get("name", item.name))
+        cog_key = f"{item_name}_{tile_year}"
+        href = _href_to_public_sourcecoop_url(str(item["assets"]["data"]["href"]))
+
+        if cog_key not in groups:
+            groups[cog_key] = {"href": href, "union_bbox": list(bbox), "tile_ids": []}
+
+        g = groups[cog_key]
+        g["tile_ids"].append(tile_id)
+        left, bottom, right, top = g["union_bbox"]
+        g["union_bbox"] = [
+            min(left, bbox[0]),
+            min(bottom, bbox[1]),
+            max(right, bbox[2]),
+            max(top, bbox[3]),
+        ]
+
+    n_tiles = len(df)
+    n_cogs = len(groups)
+    logger.info(
+        "sourcecoop-union: %d tiles map to %d unique COG(s) — %d fewer downloads",
+        n_tiles,
+        n_cogs,
+        n_tiles - n_cogs,
+    )
+
+    for cog_key, g in groups.items():
+        safe_key = re.sub(r"[^A-Za-z0-9_-]", "_", cog_key)
+        out_path = output_dir / f"aef_{safe_key}.tif"
+
+        if out_path.exists():
+            logger.info("Skipping %s — already exists", out_path.name)
+            continue
+
+        union_bbox = tuple(g["union_bbox"])
+        logger.info(
+            "Writing union AEF crop for %s (covers %d tiles) from %s",
+            cog_key,
+            len(g["tile_ids"]),
+            g["href"],
+        )
+        _write_sourcecoop_crop_from_bbox(g["href"], union_bbox, out_path)
+        logger.info("Saved union AEF crop → %s", out_path)
+
+
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
@@ -493,17 +652,24 @@ def run(
     """Download AEF embeddings for all tiles.
 
     Args:
-        source: ``"gcs"`` for per-pixel GeoTIFFs from GCS, ``"hf"`` for
-            patch-level vectors from HuggingFace, or ``"sourcecoop"`` for
-            cropped per-pixel GeoTIFFs from Source Cooperative COGs.
+        source: Download mode — one of:
+
+            * ``"gcs"`` — per-pixel GeoTIFFs from GCS.
+            * ``"hf"`` — patch-level vectors from HuggingFace.
+            * ``"sourcecoop"`` — per-tile cropped GeoTIFFs from Source
+              Cooperative COGs (one HTTP request per tile).
+            * ``"sourcecoop-union"`` — one crop per unique COG, covering the
+              union bbox of all tiles assigned to that COG.  Eliminates
+              redundant downloads when many tiles overlap the same scene.
         output_dir: Directory where downloaded embedding files will be written.
         gcs_paths_csv: CSV with tile_id and gcs_uri (required for source=gcs).
-        tiles_csv: CSV with tile_id and image_path (required for source=hf and
-            source=sourcecoop).
+        tiles_csv: CSV with tile_id and image_path (required for source=hf,
+            source=sourcecoop, and source=sourcecoop-union).
         sourcecoop_index_path: Optional local Source Cooperative STAC GeoParquet
             index path.
         sourcecoop_index_url: Remote Source Cooperative STAC GeoParquet URL.
-        year: Optional annual AEF product year override for source=sourcecoop.
+        year: Optional annual AEF product year override for source=sourcecoop
+            and source=sourcecoop-union.
         max_workers: Reserved for future parallel GCS downloads.
 
     Raises:
@@ -528,5 +694,15 @@ def run(
             index_url=sourcecoop_index_url,
             year=year,
         )
+    elif source == "sourcecoop-union":
+        if not tiles_csv:
+            raise ValueError("tiles_csv is required when source='sourcecoop-union'")
+        download_sourcecoop_union_embeddings(
+            tiles_csv,
+            output_dir,
+            index_path=sourcecoop_index_path,
+            index_url=sourcecoop_index_url,
+            year=year,
+        )
     else:
-        raise ValueError("source must be one of: gcs, hf, sourcecoop")
+        raise ValueError("source must be one of: gcs, hf, sourcecoop, sourcecoop-union")
