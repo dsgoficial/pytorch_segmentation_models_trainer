@@ -739,6 +739,11 @@ class Model(pl.LightningModule):
             persistent_workers=(
                 dl_cfg.persistent_workers if "persistent_workers" in dl_cfg else False
             ),
+            multiprocessing_context=(
+                dl_cfg.multiprocessing_context
+                if "multiprocessing_context" in dl_cfg
+                else None
+            ),
             worker_init_fn=_worker_init_fn,
             generator=self._make_dataloader_generator(),
         )
