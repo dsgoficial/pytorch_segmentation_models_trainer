@@ -21,6 +21,7 @@ import csv
 import dataclasses
 import json
 import logging
+import multiprocessing as mp
 import os
 import secrets
 import statistics
@@ -30,12 +31,83 @@ from typing import Dict, List, Optional, Tuple
 
 from omegaconf import DictConfig, OmegaConf
 
-from pytorch_segmentation_models_trainer.train import train
 from pytorch_segmentation_models_trainer.utils.spatial_kfold import SpatialKFoldSplitter
+
+# train is imported inside _seed_subprocess_worker so it runs in the subprocess,
+# not in the parent ER process.  The _collect_metrics method is also unused now
+# (metrics are collected inside the subprocess) but kept for API compatibility.
 
 logger = logging.getLogger(__name__)
 
 _STATE_FILE = "runner_state.json"
+_SEED_RESULT_FILE = "_seed_result.json"
+
+
+def _seed_subprocess_worker(yaml_cfg: str, output_dir: str, result_path: str) -> None:
+    """Subprocess entry point: runs one training seed and writes results to a JSON file.
+
+    Runs in a fresh ``spawn``-ed process so that CUDA contexts, DataLoader
+    worker processes (persistent_workers=True / forkserver), and any other
+    per-seed state are fully isolated between seeds.  The parent ExperimentsRunner
+    process never touches a GPU or a DataLoader — it only reads the JSON result.
+
+    Args:
+        yaml_cfg: OmegaConf YAML string of the per-seed training config.
+        output_dir: Directory for this seed's outputs (created if absent).
+        result_path: Path where this function writes the JSON result dict.
+    """
+    import json as _json
+    import os as _os
+
+    import yaml as _yaml
+    from omegaconf import OmegaConf as _OmegaConf
+    from pytorch_segmentation_models_trainer.train import train as _train
+
+    _os.makedirs(output_dir, exist_ok=True)
+
+    try:
+        cfg = _OmegaConf.create(_yaml.safe_load(yaml_cfg))
+        trainer = _train(cfg)
+
+        all_metrics: Dict[str, float] = {}
+        try:
+            all_metrics = {k: float(v) for k, v in trainer.callback_metrics.items()}
+        except Exception:
+            pass
+
+        train_m = {
+            k: v
+            for k, v in all_metrics.items()
+            if k.startswith("train/") or k.endswith("/train") or k.endswith("/train_epoch")
+        }
+        val_m = {
+            k: v
+            for k, v in all_metrics.items()
+            if k.startswith("val/") or k.endswith("/val")
+        }
+        test_m = {
+            k: v
+            for k, v in all_metrics.items()
+            if k.startswith("test/") or k.endswith("/test")
+        }
+
+        ckpt_cb = getattr(trainer, "checkpoint_callback", None)
+        best_ckpt = (getattr(ckpt_cb, "best_model_path", "") or "") if ckpt_cb else ""
+        epochs = trainer.current_epoch + 1
+
+        result = {
+            "ok": True,
+            "train_metrics": train_m,
+            "val_metrics": val_m,
+            "test_metrics": test_m,
+            "best_checkpoint_path": best_ckpt,
+            "epochs_trained": epochs,
+        }
+    except Exception as exc:
+        result = {"ok": False, "error": repr(exc)}
+
+    with open(result_path, "w") as _f:
+        _json.dump(result, _f)
 
 
 @dataclass
@@ -392,7 +464,12 @@ class ExperimentsRunner:
         fold_idx: Optional[int] = None,
         fold_paths: Optional[Tuple] = None,
     ) -> RunResult:
-        """Execute one training run and return its result.
+        """Execute one training run in an isolated subprocess and return its result.
+
+        Each seed is run inside a freshly ``spawn``-ed process so that CUDA
+        contexts and DataLoader worker processes (``persistent_workers=True`` /
+        ``forkserver``) are fully torn down between seeds, preventing the
+        inter-seed crash that plagued the original in-process approach.
 
         Args:
             run_idx: Zero-based index of this run.
@@ -402,10 +479,15 @@ class ExperimentsRunner:
 
         Returns:
             :class:`RunResult` with timing and metrics.
+
+        Raises:
+            RuntimeError: If the subprocess exits with a non-zero code or if
+                the worker reports an internal exception.
         """
         run_cfg, output_dir = self._build_run_cfg(
             run_idx, seed, fold_idx=fold_idx, fold_paths=fold_paths
         )
+        os.makedirs(output_dir, exist_ok=True)
 
         logger.info(
             "ExperimentsRunner — starting run %d | seed=%d%s | output=%s",
@@ -415,17 +497,39 @@ class ExperimentsRunner:
             output_dir,
         )
 
+        yaml_cfg = OmegaConf.to_yaml(run_cfg)
+        result_path = os.path.join(output_dir, _SEED_RESULT_FILE)
+
         start = time.perf_counter()
-        trainer = train(run_cfg)
+        ctx = mp.get_context("spawn")
+        p = ctx.Process(
+            target=_seed_subprocess_worker,
+            args=(yaml_cfg, output_dir, result_path),
+        )
+        p.start()
+        p.join()
         elapsed = time.perf_counter() - start
 
-        train_metrics, val_metrics, test_metrics = self._collect_metrics(trainer)
+        if p.exitcode != 0:
+            raise RuntimeError(
+                f"ExperimentsRunner: run {run_idx} (seed={seed}) subprocess "
+                f"exited with code {p.exitcode}. Check logs in {output_dir}."
+            )
 
-        epochs_trained = trainer.current_epoch + 1
-        ckpt_cb = getattr(trainer, "checkpoint_callback", None)
-        best_checkpoint_path = ""
-        if ckpt_cb is not None:
-            best_checkpoint_path = getattr(ckpt_cb, "best_model_path", "") or ""
+        with open(result_path) as f:
+            data = json.load(f)
+
+        if not data.get("ok"):
+            raise RuntimeError(
+                f"ExperimentsRunner: run {run_idx} (seed={seed}) failed — "
+                f"{data.get('error', 'unknown error')}"
+            )
+
+        train_metrics = data["train_metrics"]
+        val_metrics = data["val_metrics"]
+        test_metrics = data["test_metrics"]
+        epochs_trained = data["epochs_trained"]
+        best_checkpoint_path = data["best_checkpoint_path"]
 
         logger.info(
             "ExperimentsRunner — run %d done in %.1fs | epochs=%d | val: %s",
