@@ -70,6 +70,8 @@ dependencies = [
     "scikit-image>=0.21.0",
     "typing-extensions>=4.0.0",
     "opencv-python-headless",
+    "optuna>=3.0.0",
+    "plotly>=5.0.0",
 ]
 
 [project.optional-dependencies]
