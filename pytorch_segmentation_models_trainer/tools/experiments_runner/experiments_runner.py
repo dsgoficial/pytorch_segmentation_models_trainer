@@ -78,7 +78,9 @@ def _seed_subprocess_worker(yaml_cfg: str, output_dir: str, result_path: str) ->
         train_m = {
             k: v
             for k, v in all_metrics.items()
-            if k.startswith("train/") or k.endswith("/train") or k.endswith("/train_epoch")
+            if k.startswith("train/")
+            or k.endswith("/train")
+            or k.endswith("/train_epoch")
         }
         val_m = {
             k: v
@@ -185,6 +187,10 @@ class ExperimentsRunner:
     # ------------------------------------------------------------------
 
     def _validate(self) -> None:
+        # Optuna mode manages its own n_trials; seeds/n_runs are optional.
+        if self.runner_cfg.get("optuna_search", None) is not None:
+            return
+
         seeds = self.runner_cfg.get("seeds", None)
         n_runs = self.runner_cfg.get("n_runs", None)
 
@@ -463,6 +469,8 @@ class ExperimentsRunner:
         seed: int,
         fold_idx: Optional[int] = None,
         fold_paths: Optional[Tuple] = None,
+        run_cfg: Optional[DictConfig] = None,
+        output_dir: Optional[str] = None,
     ) -> RunResult:
         """Execute one training run in an isolated subprocess and return its result.
 
@@ -484,9 +492,10 @@ class ExperimentsRunner:
             RuntimeError: If the subprocess exits with a non-zero code or if
                 the worker reports an internal exception.
         """
-        run_cfg, output_dir = self._build_run_cfg(
-            run_idx, seed, fold_idx=fold_idx, fold_paths=fold_paths
-        )
+        if run_cfg is None or output_dir is None:
+            run_cfg, output_dir = self._build_run_cfg(
+                run_idx, seed, fold_idx=fold_idx, fold_paths=fold_paths
+            )
         os.makedirs(output_dir, exist_ok=True)
 
         logger.info(
@@ -552,16 +561,24 @@ class ExperimentsRunner:
             best_checkpoint_path=best_checkpoint_path,
         )
 
-    def run(self) -> List[RunResult]:
-        """Run all experiments in series, with optional resume and k-fold support.
+    def run(self):
+        """Run all experiments, dispatching to the appropriate loop.
 
-        When ``experiments_runner.kfold`` is present, iterates over all
-        ``seed × fold`` combinations (total = ``len(seeds) × n_splits`` runs).
-        Otherwise uses the original seed-only loop.
+        Priority order:
+        1. ``experiments_runner.optuna_search`` → :class:`OptunaRunner`
+        2. ``experiments_runner.kfold`` → :meth:`_run_kfold_loop`
+        3. Default → :meth:`_run_seed_loop`
 
         Returns:
-            List of :class:`RunResult`, one per run, ordered by ``run_idx``.
+            - When Optuna: tuple of ``(study, seed_results)``.
+            - Otherwise: list of :class:`RunResult` ordered by ``run_idx``.
         """
+        if self.runner_cfg.get("optuna_search", None) is not None:
+            from pytorch_segmentation_models_trainer.tools.experiments_runner.optuna_runner import (
+                OptunaRunner,
+            )
+
+            return OptunaRunner(self).run()
         kfold_cfg = self.runner_cfg.get("kfold", None)
         if kfold_cfg is not None:
             return self._run_kfold_loop(kfold_cfg)

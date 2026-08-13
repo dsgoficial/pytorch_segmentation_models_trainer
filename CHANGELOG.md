@@ -1,5 +1,20 @@
 # Unreleased
 
+## Optuna Hyperparameter Search
+
+- Added `OptunaRunner` (`tools/experiments_runner/optuna_runner.py`): integrates [Optuna](https://optuna.org/) HPO into the `ExperimentsRunner` pipeline. Configure via `experiments_runner.optuna_search` in any training YAML.
+- Supports four search param types: `float` (with optional log-scale), `int` (with optional step), `categorical`, and `config_block` — the last allows swapping entire config subtrees (loss function, scheduler, optimizer) where different choices have heterogeneous parameters.
+- Five samplers available: `TPE` (default, Bayesian), `GP` (Gaussian Process), `CmaES`, `Random`, and `Grid`.
+- Study persistence and automatic resume via SQLite (`storage: sqlite:///study.db`). Pointing to an existing database with the same `study_name` resumes from where it left off.
+- After each trial, an incremental `trial_summary.csv` is written. At study end: `best_trial_config.yaml` (full config with best HPs), `param_importances.json` (fANOVA scores), and four Plotly HTML visualisation files under `plots/`.
+- Mode B: when `seeds` or `n_runs` is also set in the runner block, a standard seed-loop run is automatically executed with the best trial's config after HPO completes.
+- `ExperimentsRunner._run_single` now accepts optional `run_cfg` and `output_dir` parameters to bypass `_build_run_cfg` — enables `OptunaRunner` to inject trial-specific configs without mutating the parent config.
+- `ExperimentsRunner._validate` no longer requires `seeds`/`n_runs` when `optuna_search` is present (Optuna manages its own `n_trials`).
+- Added `config_definitions/optuna_config.py` with `OptunaSearchConfig` and `SearchParamConfig` dataclasses.
+- New dependencies: `optuna>=3.0.0`, `plotly>=5.0.0`.
+- Example config: `conf/examples/optuna_search.yaml`.
+- Docs: `website/docs/user-guide/optuna-search.md`.
+
 ## Model
 
 - `Model.get_model()` now supports `zero_init_extra_input_channels: true` as a top-level config key. When set, the weights of input channels beyond the first 3 in the first `Conv2d` are zeroed after instantiation. This ensures that models extended with extra input channels (e.g. one-hot LULC bands appended to RGB) behave identically to the 3-channel RGB baseline at epoch 0, instead of inheriting the cyclic-averaging initialization that `segmentation_models_pytorch` applies by default when `in_channels > 3`. See `conf/examples/multichannel_zero_init_segmentation.yaml` for a full working example.

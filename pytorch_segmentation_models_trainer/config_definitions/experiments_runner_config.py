@@ -76,6 +76,7 @@ class ExperimentsRunnerConfig:
     resume: bool = False
     kfold: Optional[Any] = None
     representative_metric: Optional[str] = None
+    optuna_search: Optional[Any] = None
 
 
 def _register_configs() -> None:
