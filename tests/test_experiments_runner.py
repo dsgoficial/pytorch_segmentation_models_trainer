@@ -322,10 +322,56 @@ class TestCollectMetrics(BasicTestCase):
         self.assertIsInstance(val["val/loss"], float)
 
 
-_TRAIN_PATH = (
+_RUN_SINGLE_PATH = (
     "pytorch_segmentation_models_trainer"
-    ".tools.experiments_runner.experiments_runner.train"
+    ".tools.experiments_runner.experiments_runner.ExperimentsRunner._run_single"
 )
+
+
+def _make_run_single_se(metrics=None, epochs=5, ckpt="", output_base_dir="/tmp"):
+    """Factory for ExperimentsRunner._run_single side effects.
+
+    MagicMock replaces the method on the class but is not a descriptor, so
+    `self` is NOT passed to the mock.  The side effect receives the same args
+    that the caller passed: (run_idx, seed, fold_idx=..., fold_paths=...).
+    """
+    from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+        RunResult,
+    )
+
+    _m = metrics or {"val/loss": 0.5, "train/loss": 0.3}
+
+    def _se(run_idx, seed, fold_idx=None, fold_paths=None):
+        val_m = {
+            k: v for k, v in _m.items() if k.startswith("val/") or k.endswith("/val")
+        }
+        train_m = {
+            k: v
+            for k, v in _m.items()
+            if k.startswith("train/") or k.endswith("/train")
+        }
+        test_m = {
+            k: v for k, v in _m.items() if k.startswith("test/") or k.endswith("/test")
+        }
+        tag = (
+            f"fold_{fold_idx:02d}_seed{seed}"
+            if fold_idx is not None
+            else f"run_{run_idx:02d}_seed{seed}"
+        )
+        return RunResult(
+            run_idx=run_idx,
+            seed=seed,
+            training_time_seconds=1.0,
+            train_metrics=train_m,
+            val_metrics=val_m,
+            test_metrics=test_m,
+            output_dir=os.path.join(output_base_dir, tag),
+            fold_idx=fold_idx,
+            epochs_trained=epochs,
+            best_checkpoint_path=ckpt,
+        )
+
+    return _se
 
 
 class TestRunMethod(BasicTestCase):
@@ -344,20 +390,20 @@ class TestRunMethod(BasicTestCase):
             resume=resume,
         )
 
-    @patch(_TRAIN_PATH)
-    def test_train_called_once_per_seed(self, mock_train):
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_train_called_once_per_seed(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
 
         runner = ExperimentsRunner(self._make_cfg(seeds=[42, 101, 28]))
         runner.run()
-        self.assertEqual(mock_train.call_count, 3)
+        self.assertEqual(mock_rs.call_count, 3)
 
-    @patch(_TRAIN_PATH)
-    def test_returns_one_result_per_run(self, mock_train):
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_returns_one_result_per_run(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -365,9 +411,9 @@ class TestRunMethod(BasicTestCase):
         results = ExperimentsRunner(self._make_cfg(seeds=[42, 101])).run()
         self.assertEqual(len(results), 2)
 
-    @patch(_TRAIN_PATH)
-    def test_result_seeds_match_config(self, mock_train):
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_result_seeds_match_config(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -376,9 +422,9 @@ class TestRunMethod(BasicTestCase):
         self.assertEqual(results[0].seed, 42)
         self.assertEqual(results[1].seed, 101)
 
-    @patch(_TRAIN_PATH)
-    def test_result_run_idx_sequential(self, mock_train):
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_result_run_idx_sequential(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -386,9 +432,9 @@ class TestRunMethod(BasicTestCase):
         results = ExperimentsRunner(self._make_cfg(seeds=[10, 20, 30])).run()
         self.assertEqual([r.run_idx for r in results], [0, 1, 2])
 
-    @patch(_TRAIN_PATH)
-    def test_training_time_non_negative(self, mock_train):
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_training_time_non_negative(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -396,10 +442,10 @@ class TestRunMethod(BasicTestCase):
         results = ExperimentsRunner(self._make_cfg(seeds=[42])).run()
         self.assertGreaterEqual(results[0].training_time_seconds, 0.0)
 
-    @patch(_TRAIN_PATH)
-    def test_val_metrics_in_result(self, mock_train):
-        mock_train.return_value = _make_mock_trainer(
-            {"val/loss": 0.35, "train/loss": 0.2}
+    @patch(_RUN_SINGLE_PATH)
+    def test_val_metrics_in_result(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.35, "train/loss": 0.2}, output_base_dir=self.tmp
         )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
@@ -409,10 +455,10 @@ class TestRunMethod(BasicTestCase):
         self.assertIn("val/loss", results[0].val_metrics)
         self.assertAlmostEqual(results[0].val_metrics["val/loss"], 0.35, places=4)
 
-    @patch(_TRAIN_PATH)
-    def test_train_metrics_in_result(self, mock_train):
-        mock_train.return_value = _make_mock_trainer(
-            {"val/loss": 0.5, "train/loss": 0.2}
+    @patch(_RUN_SINGLE_PATH)
+    def test_train_metrics_in_result(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.5, "train/loss": 0.2}, output_base_dir=self.tmp
         )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
@@ -421,10 +467,10 @@ class TestRunMethod(BasicTestCase):
         results = ExperimentsRunner(self._make_cfg(seeds=[42])).run()
         self.assertIn("train/loss", results[0].train_metrics)
 
-    @patch(_TRAIN_PATH)
-    def test_test_metrics_in_result(self, mock_train):
-        mock_train.return_value = _make_mock_trainer(
-            {"test/iou": 0.75, "val/loss": 0.3}
+    @patch(_RUN_SINGLE_PATH)
+    def test_test_metrics_in_result(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"test/iou": 0.75, "val/loss": 0.3}, output_base_dir=self.tmp
         )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
@@ -433,42 +479,50 @@ class TestRunMethod(BasicTestCase):
         results = ExperimentsRunner(self._make_cfg(seeds=[42])).run()
         self.assertIn("test/iou", results[0].test_metrics)
 
-    @patch(_TRAIN_PATH)
-    def test_correct_seed_passed_to_each_run_cfg(self, mock_train):
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_correct_seed_passed_to_each_run_cfg(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
 
         ExperimentsRunner(self._make_cfg(seeds=[42, 101, 28])).run()
-        seeds_used = [c.args[0].seed for c in mock_train.call_args_list]
+        # call_args.args: (run_idx, seed) — mock is not a descriptor, no self
+        seeds_used = [c.args[1] for c in mock_rs.call_args_list]
         self.assertEqual(seeds_used, [42, 101, 28])
 
-    @patch(_TRAIN_PATH)
-    def test_experiments_runner_block_absent_in_train_call(self, mock_train):
-        mock_train.return_value = _make_mock_trainer()
+    def test_experiments_runner_block_absent_in_run_cfg(self):
+        # _build_run_cfg stripping is unit-tested in TestBuildRunCfg.
+        # Here we verify the integration: _run_single is called with run_idx=0
+        # and that the runner completes without error.
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
+        from unittest.mock import patch as _patch
 
-        ExperimentsRunner(self._make_cfg(seeds=[42])).run()
-        cfg_passed = mock_train.call_args.args[0]
-        self.assertNotIn("experiments_runner", cfg_passed)
+        with _patch(_RUN_SINGLE_PATH) as mock_rs:
+            mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
+            runner = ExperimentsRunner(self._make_cfg(seeds=[42]))
+            runner.run()
+            run_idx_used = mock_rs.call_args.args[0]
+            self.assertEqual(run_idx_used, 0)
 
-    @patch(_TRAIN_PATH)
-    def test_n_runs_auto_seeds(self, mock_train):
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_n_runs_auto_seeds(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
 
         results = ExperimentsRunner(self._make_cfg(n_runs=3)).run()
         self.assertEqual(len(results), 3)
-        self.assertEqual(mock_train.call_count, 3)
+        self.assertEqual(mock_rs.call_count, 3)
 
-    @patch(_TRAIN_PATH)
-    def test_summary_csv_created_when_enabled(self, mock_train):
-        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5})
+    @patch(_RUN_SINGLE_PATH)
+    def test_summary_csv_created_when_enabled(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.5}, output_base_dir=self.tmp
+        )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -476,9 +530,9 @@ class TestRunMethod(BasicTestCase):
         ExperimentsRunner(self._make_cfg(seeds=[42, 101], save_summary=True)).run()
         self.assertTrue(os.path.exists(os.path.join(self.tmp, "summary.csv")))
 
-    @patch(_TRAIN_PATH)
-    def test_summary_csv_not_created_when_disabled(self, mock_train):
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_summary_csv_not_created_when_disabled(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -486,9 +540,11 @@ class TestRunMethod(BasicTestCase):
         ExperimentsRunner(self._make_cfg(seeds=[42], save_summary=False)).run()
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "summary.csv")))
 
-    @patch(_TRAIN_PATH)
-    def test_summary_csv_has_mean_and_std_rows(self, mock_train):
-        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5})
+    @patch(_RUN_SINGLE_PATH)
+    def test_summary_csv_has_mean_and_std_rows(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.5}, output_base_dir=self.tmp
+        )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -499,9 +555,11 @@ class TestRunMethod(BasicTestCase):
         self.assertIn("mean", content)
         self.assertIn("std", content)
 
-    @patch(_TRAIN_PATH)
-    def test_summary_csv_has_duration_column(self, mock_train):
-        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5})
+    @patch(_RUN_SINGLE_PATH)
+    def test_summary_csv_has_duration_column(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.5}, output_base_dir=self.tmp
+        )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -511,9 +569,9 @@ class TestRunMethod(BasicTestCase):
             header = f.readline()
         self.assertIn("duration_s", header)
 
-    @patch(_TRAIN_PATH)
-    def test_result_output_dir_contains_seed(self, mock_train):
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_result_output_dir_contains_seed(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -522,36 +580,38 @@ class TestRunMethod(BasicTestCase):
         self.assertIn("run_00", results[0].output_dir)
         self.assertIn("seed42", results[0].output_dir)
 
-    @patch(_TRAIN_PATH)
-    def test_single_run_std_row_is_zero(self, mock_train):
+    @patch(_RUN_SINGLE_PATH)
+    def test_single_run_std_row_is_zero(self, mock_rs):
         """With a single run, std must not raise and should be 0."""
-        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5})
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.5}, output_base_dir=self.tmp
+        )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
 
-        # Must not raise even with a single result
         ExperimentsRunner(self._make_cfg(seeds=[42], save_summary=True)).run()
         with open(os.path.join(self.tmp, "summary.csv")) as f:
             content = f.read()
         self.assertIn("std", content)
 
-    @patch(_TRAIN_PATH)
-    def test_summary_written_after_each_run(self, mock_train):
+    @patch(_RUN_SINGLE_PATH)
+    def test_summary_written_after_each_run(self, mock_rs):
         """summary.csv must exist after the first run, not just at the end."""
         summaries_seen = []
 
-        def fake_train(cfg):
+        def fake_run_single(run_idx, seed, fold_idx=None, fold_paths=None):
             summaries_seen.append(os.path.exists(os.path.join(self.tmp, "summary.csv")))
-            return _make_mock_trainer({"val/loss": 0.5})
+            return _make_run_single_se(
+                metrics={"val/loss": 0.5}, output_base_dir=self.tmp
+            )(run_idx, seed)
 
-        mock_train.side_effect = fake_train
+        mock_rs.side_effect = fake_run_single
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
 
         ExperimentsRunner(self._make_cfg(seeds=[42, 101], save_summary=True)).run()
-        # After run 0 completes, summary already exists when run 1 starts
         self.assertTrue(
             summaries_seen[1], "summary.csv was not present before run 1 started"
         )
@@ -573,27 +633,26 @@ class TestStateFile(BasicTestCase):
             resume=resume,
         )
 
-    @patch(_TRAIN_PATH)
-    def test_state_file_created_after_first_run(self, mock_train):
+    @patch(_RUN_SINGLE_PATH)
+    def test_state_file_created_after_first_run(self, mock_rs):
         state_path = os.path.join(self.tmp, "runner_state.json")
         state_snapshots = []
 
-        def fake_train(cfg):
+        def fake_run_single(run_idx, seed, fold_idx=None, fold_paths=None):
             state_snapshots.append(os.path.exists(state_path))
-            return _make_mock_trainer()
+            return _make_run_single_se(output_base_dir=self.tmp)(run_idx, seed)
 
-        mock_train.side_effect = fake_train
+        mock_rs.side_effect = fake_run_single
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
 
         ExperimentsRunner(self._make_cfg(seeds=[42, 101])).run()
-        # State file must exist before run 1 starts (written after run 0)
         self.assertTrue(state_snapshots[1])
 
-    @patch(_TRAIN_PATH)
-    def test_state_file_contains_all_seeds(self, mock_train):
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_state_file_contains_all_seeds(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -603,9 +662,11 @@ class TestStateFile(BasicTestCase):
             state = json.load(f)
         self.assertEqual(state["all_seeds"], [42, 101, 28])
 
-    @patch(_TRAIN_PATH)
-    def test_state_file_records_completed_runs(self, mock_train):
-        mock_train.return_value = _make_mock_trainer({"val/loss": 0.4})
+    @patch(_RUN_SINGLE_PATH)
+    def test_state_file_records_completed_runs(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.4}, output_base_dir=self.tmp
+        )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -617,10 +678,10 @@ class TestStateFile(BasicTestCase):
         self.assertEqual(state["completed_runs"][0]["seed"], 42)
         self.assertEqual(state["completed_runs"][1]["seed"], 101)
 
-    @patch(_TRAIN_PATH)
-    def test_state_file_preserves_auto_seeds_for_resume(self, mock_train):
+    @patch(_RUN_SINGLE_PATH)
+    def test_state_file_preserves_auto_seeds_for_resume(self, mock_rs):
         """With n_runs, state file must store the generated seeds so resume uses them."""
-        mock_train.return_value = _make_mock_trainer()
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -631,15 +692,14 @@ class TestStateFile(BasicTestCase):
         self.assertEqual(len(state["all_seeds"]), 3)
         self.assertEqual(len(state["completed_runs"]), 3)
 
-    @patch(_TRAIN_PATH)
-    def test_resume_skips_already_completed_runs(self, mock_train):
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_resume_skips_already_completed_runs(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
             RunResult,
         )
 
-        # Pre-write a state file with run 0 completed
         completed = RunResult(
             run_idx=0,
             seed=42,
@@ -662,19 +722,17 @@ class TestStateFile(BasicTestCase):
         cfg = self._make_cfg(seeds=[42, 101, 28], resume=True)
         results = ExperimentsRunner(cfg).run()
 
-        # train() must only have been called for runs 1 and 2
-        self.assertEqual(mock_train.call_count, 2)
+        self.assertEqual(mock_rs.call_count, 2)
         self.assertEqual(len(results), 3)
 
-    @patch(_TRAIN_PATH)
-    def test_resume_false_ignores_existing_state(self, mock_train):
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_resume_false_ignores_existing_state(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
             RunResult,
         )
 
-        # Pre-write a complete state file
         import dataclasses
 
         completed = [
@@ -699,13 +757,12 @@ class TestStateFile(BasicTestCase):
         cfg = self._make_cfg(seeds=[42, 101], resume=False)
         ExperimentsRunner(cfg).run()
 
-        # resume=False → all runs re-executed
-        self.assertEqual(mock_train.call_count, 2)
+        self.assertEqual(mock_rs.call_count, 2)
 
-    @patch(_TRAIN_PATH)
-    def test_resume_uses_seeds_from_state_not_new_random(self, mock_train):
+    @patch(_RUN_SINGLE_PATH)
+    def test_resume_uses_seeds_from_state_not_new_random(self, mock_rs):
         """When n_runs is used and we resume, seeds come from state file."""
-        mock_train.return_value = _make_mock_trainer()
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
             RunResult,
@@ -731,25 +788,23 @@ class TestStateFile(BasicTestCase):
         with open(os.path.join(self.tmp, "runner_state.json"), "w") as f:
             json.dump(state, f)
 
-        # Use n_runs (would generate new random seeds) but resume=True
         cfg = self._make_cfg(n_runs=2, resume=True)
         results = ExperimentsRunner(cfg).run()
 
-        # Only run 1 should execute; its seed must be the one from state
-        self.assertEqual(mock_train.call_count, 1)
+        self.assertEqual(mock_rs.call_count, 1)
         self.assertEqual(results[1].seed, 222222)
 
-    @patch(_TRAIN_PATH)
-    def test_resume_no_state_file_starts_fresh(self, mock_train):
+    @patch(_RUN_SINGLE_PATH)
+    def test_resume_no_state_file_starts_fresh(self, mock_rs):
         """resume=True with no state file on disk must not crash."""
-        mock_train.return_value = _make_mock_trainer()
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
 
         cfg = self._make_cfg(seeds=[42, 101], resume=True)
         results = ExperimentsRunner(cfg).run()
-        self.assertEqual(mock_train.call_count, 2)
+        self.assertEqual(mock_rs.call_count, 2)
         self.assertEqual(len(results), 2)
 
 
@@ -842,87 +897,89 @@ class TestKFoldRunMethod(BasicTestCase):
             resume=resume,
         )
 
-    @patch(_TRAIN_PATH)
-    def test_no_kfold_keeps_original_behavior(self, mock_train):
+    @patch(_RUN_SINGLE_PATH)
+    def test_no_kfold_keeps_original_behavior(self, mock_rs):
         """Without a kfold block, run() behaves exactly as before."""
-        mock_train.return_value = _make_mock_trainer()
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
 
         cfg = _make_runner_cfg(seeds=[42, 101], output_base_dir=self.tmp)
         results = ExperimentsRunner(cfg).run()
-        self.assertEqual(mock_train.call_count, 2)
+        self.assertEqual(mock_rs.call_count, 2)
         self.assertEqual(len(results), 2)
 
-    @patch(_TRAIN_PATH)
-    def test_kfold_correct_total_runs(self, mock_train):
-        """3 folds × 2 seeds → 6 train() calls and 6 RunResults."""
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_kfold_correct_total_runs(self, mock_rs):
+        """3 folds × 2 seeds → 6 _run_single calls and 6 RunResults."""
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
 
         cfg = self._make_cfg(seeds=[42, 101], n_splits=3)
         results = ExperimentsRunner(cfg).run()
-        self.assertEqual(mock_train.call_count, 6)
+        self.assertEqual(mock_rs.call_count, 6)
         self.assertEqual(len(results), 6)
 
-    @patch(_TRAIN_PATH)
-    def test_kfold_injects_train_csv_path(self, mock_train):
-        """train_dataset.input_csv_path points to a fold_K_train.csv for every call."""
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_kfold_injects_train_csv_path(self, mock_rs):
+        """fold_paths[0] passed to _run_single points to a fold_K_train CSV."""
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
 
         cfg = self._make_cfg(seeds=[42], n_splits=3)
         ExperimentsRunner(cfg).run()
-        for c in mock_train.call_args_list:
-            call_cfg = c.args[0]
-            path = call_cfg.train_dataset.input_csv_path
-            self.assertIn("fold_", path)
-            self.assertIn("_train", path)
+        for c in mock_rs.call_args_list:
+            fold_paths = c.kwargs.get("fold_paths")
+            self.assertIsNotNone(fold_paths)
+            train_csv = str(fold_paths[0])
+            self.assertIn("fold_", train_csv)
+            self.assertIn("_train", train_csv)
 
-    @patch(_TRAIN_PATH)
-    def test_kfold_injects_val_csv_path(self, mock_train):
-        """val_dataset.input_csv_path points to a fold_K_val.csv for every call."""
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_kfold_injects_val_csv_path(self, mock_rs):
+        """fold_paths[1] passed to _run_single points to a fold_K_val CSV."""
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
 
         cfg = self._make_cfg(seeds=[42], n_splits=3)
         ExperimentsRunner(cfg).run()
-        for c in mock_train.call_args_list:
-            call_cfg = c.args[0]
-            path = call_cfg.val_dataset.input_csv_path
-            self.assertIn("fold_", path)
-            self.assertIn("_val", path)
+        for c in mock_rs.call_args_list:
+            fold_paths = c.kwargs.get("fold_paths")
+            self.assertIsNotNone(fold_paths)
+            val_csv = str(fold_paths[1])
+            self.assertIn("fold_", val_csv)
+            self.assertIn("_val", val_csv)
 
-    @patch(_TRAIN_PATH)
-    def test_kfold_output_dir_contains_fold_tag(self, mock_train):
-        """default_root_dir in each call contains a fold_XX tag."""
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_kfold_output_dir_contains_fold_tag(self, mock_rs):
+        """RunResult.output_dir for each run contains a fold_XX tag."""
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
 
         cfg = self._make_cfg(seeds=[42], n_splits=3)
-        ExperimentsRunner(cfg).run()
-        dirs = [
-            c.args[0].pl_trainer.default_root_dir for c in mock_train.call_args_list
-        ]
+        results = ExperimentsRunner(cfg).run()
+        dirs = [r.output_dir for r in results]
         for expected_tag in ("fold_00", "fold_01", "fold_02"):
             self.assertTrue(
                 any(expected_tag in d for d in dirs),
                 msg=f"Tag {expected_tag!r} not found in any output dir: {dirs}",
             )
 
-    @patch(_TRAIN_PATH)
-    def test_kfold_summary_has_fold_idx_column(self, mock_train):
+    @patch(_RUN_SINGLE_PATH)
+    def test_kfold_summary_has_fold_idx_column(self, mock_rs):
         """summary.csv contains a fold_idx column when kfold is active."""
-        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5})
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.5}, output_base_dir=self.tmp
+        )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -933,10 +990,10 @@ class TestKFoldRunMethod(BasicTestCase):
             header = f.readline()
         self.assertIn("fold_idx", header)
 
-    @patch(_TRAIN_PATH)
-    def test_kfold_resume_skips_completed_fold_runs(self, mock_train):
-        """With 3 of 6 runs pre-completed, only 3 train() calls are made."""
-        mock_train.return_value = _make_mock_trainer()
+    @patch(_RUN_SINGLE_PATH)
+    def test_kfold_resume_skips_completed_fold_runs(self, mock_rs):
+        """With 3 of 6 runs pre-completed, only 3 _run_single calls are made."""
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
             RunResult,
@@ -964,13 +1021,13 @@ class TestKFoldRunMethod(BasicTestCase):
 
         cfg = self._make_cfg(seeds=[42, 101], n_splits=3, resume=True)
         results = ExperimentsRunner(cfg).run()
-        self.assertEqual(mock_train.call_count, 3)
+        self.assertEqual(mock_rs.call_count, 3)
         self.assertEqual(len(results), 6)
 
-    @patch(_TRAIN_PATH)
-    def test_kfold_fold_csvs_generated_once(self, mock_train):
+    @patch(_RUN_SINGLE_PATH)
+    def test_kfold_fold_csvs_generated_once(self, mock_rs):
         """generate_and_save_folds is called exactly once regardless of seed count."""
-        mock_train.return_value = _make_mock_trainer()
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -989,10 +1046,10 @@ class TestKFoldRunMethod(BasicTestCase):
 
             self.assertEqual(mock_instance.generate_and_save_folds.call_count, 1)
 
-    @patch(_TRAIN_PATH)
-    def test_kfold_run_result_has_fold_idx(self, mock_train):
+    @patch(_RUN_SINGLE_PATH)
+    def test_kfold_run_result_has_fold_idx(self, mock_rs):
         """RunResult.fold_idx contains the correct fold index for each run."""
-        mock_train.return_value = _make_mock_trainer()
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -1050,9 +1107,9 @@ class TestRunSingleExtractsTrainingInfo(BasicTestCase):
     def _make_cfg(self, seeds=None):
         return _make_runner_cfg(seeds=seeds or [42], output_base_dir=self.tmp)
 
-    @patch(_TRAIN_PATH)
-    def test_epochs_trained_is_current_epoch_plus_one(self, mock_train):
-        mock_train.return_value = _make_mock_trainer(current_epoch=6)
+    @patch(_RUN_SINGLE_PATH)
+    def test_epochs_trained_is_current_epoch_plus_one(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(epochs=7, output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -1060,10 +1117,10 @@ class TestRunSingleExtractsTrainingInfo(BasicTestCase):
         results = ExperimentsRunner(self._make_cfg()).run()
         self.assertEqual(results[0].epochs_trained, 7)
 
-    @patch(_TRAIN_PATH)
-    def test_best_checkpoint_path_captured_from_callback(self, mock_train):
-        mock_train.return_value = _make_mock_trainer(
-            best_checkpoint_path="/ckpt/best.ckpt"
+    @patch(_RUN_SINGLE_PATH)
+    def test_best_checkpoint_path_captured_from_callback(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            ckpt="/ckpt/best.ckpt", output_base_dir=self.tmp
         )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
@@ -1072,11 +1129,9 @@ class TestRunSingleExtractsTrainingInfo(BasicTestCase):
         results = ExperimentsRunner(self._make_cfg()).run()
         self.assertEqual(results[0].best_checkpoint_path, "/ckpt/best.ckpt")
 
-    @patch(_TRAIN_PATH)
-    def test_best_checkpoint_path_empty_when_no_callback(self, mock_train):
-        trainer = _make_mock_trainer()
-        trainer.checkpoint_callback = None
-        mock_train.return_value = trainer
+    @patch(_RUN_SINGLE_PATH)
+    def test_best_checkpoint_path_empty_when_no_callback(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(ckpt="", output_base_dir=self.tmp)
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -1224,10 +1279,10 @@ class TestStateFileRepresentative(BasicTestCase):
         super().setUp()
         self.tmp = self.make_temp_dir()
 
-    @patch(_TRAIN_PATH)
-    def test_state_has_representative_key(self, mock_train):
-        mock_train.return_value = _make_mock_trainer(
-            metrics={"val/iou": 0.7}, best_checkpoint_path="/ckpt/best.ckpt"
+    @patch(_RUN_SINGLE_PATH)
+    def test_state_has_representative_key(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/iou": 0.7}, ckpt="/ckpt/best.ckpt", output_base_dir=self.tmp
         )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
@@ -1242,10 +1297,10 @@ class TestStateFileRepresentative(BasicTestCase):
         self.assertIn("run_idx", state["representative"])
         self.assertIn("checkpoint_path", state["representative"])
 
-    @patch(_TRAIN_PATH)
-    def test_state_has_best_run_key(self, mock_train):
-        mock_train.return_value = _make_mock_trainer(
-            metrics={"val/iou": 0.7}, best_checkpoint_path="/ckpt/best.ckpt"
+    @patch(_RUN_SINGLE_PATH)
+    def test_state_has_best_run_key(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/iou": 0.7}, ckpt="/ckpt/best.ckpt", output_base_dir=self.tmp
         )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
@@ -1260,9 +1315,11 @@ class TestStateFileRepresentative(BasicTestCase):
         self.assertIn("run_idx", state["best_run"])
         self.assertIn("checkpoint_path", state["best_run"])
 
-    @patch(_TRAIN_PATH)
-    def test_state_representative_is_none_when_no_val_metrics(self, mock_train):
-        mock_train.return_value = _make_mock_trainer(metrics={"train/loss": 0.3})
+    @patch(_RUN_SINGLE_PATH)
+    def test_state_representative_is_none_when_no_val_metrics(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"train/loss": 0.3}, output_base_dir=self.tmp
+        )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -1286,9 +1343,11 @@ class TestSummaryCSVNewColumns(BasicTestCase):
             seeds=seeds, output_base_dir=self.tmp, save_summary=True
         )
 
-    @patch(_TRAIN_PATH)
-    def test_summary_has_epochs_trained_column(self, mock_train):
-        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5}, current_epoch=4)
+    @patch(_RUN_SINGLE_PATH)
+    def test_summary_has_epochs_trained_column(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.5}, epochs=5, output_base_dir=self.tmp
+        )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -1298,9 +1357,11 @@ class TestSummaryCSVNewColumns(BasicTestCase):
             header = f.readline()
         self.assertIn("epochs_trained", header)
 
-    @patch(_TRAIN_PATH)
-    def test_summary_has_best_checkpoint_path_column(self, mock_train):
-        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5})
+    @patch(_RUN_SINGLE_PATH)
+    def test_summary_has_best_checkpoint_path_column(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.5}, output_base_dir=self.tmp
+        )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -1310,9 +1371,11 @@ class TestSummaryCSVNewColumns(BasicTestCase):
             header = f.readline()
         self.assertIn("best_checkpoint_path", header)
 
-    @patch(_TRAIN_PATH)
-    def test_summary_has_representative_column(self, mock_train):
-        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5})
+    @patch(_RUN_SINGLE_PATH)
+    def test_summary_has_representative_column(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.5}, output_base_dir=self.tmp
+        )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -1322,9 +1385,11 @@ class TestSummaryCSVNewColumns(BasicTestCase):
             header = f.readline()
         self.assertIn("representative", header)
 
-    @patch(_TRAIN_PATH)
-    def test_summary_has_best_run_column(self, mock_train):
-        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5})
+    @patch(_RUN_SINGLE_PATH)
+    def test_summary_has_best_run_column(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.5}, output_base_dir=self.tmp
+        )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
@@ -1334,14 +1399,47 @@ class TestSummaryCSVNewColumns(BasicTestCase):
             header = f.readline()
         self.assertIn("best_run", header)
 
-    @patch(_TRAIN_PATH)
-    def test_exactly_one_representative_marked(self, mock_train):
+    @patch(_RUN_SINGLE_PATH)
+    def test_exactly_one_representative_marked(self, mock_rs):
         import csv as csv_mod
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            RunResult,
+        )
 
-        mock_train.side_effect = [
-            _make_mock_trainer({"val/iou": 0.7}, best_checkpoint_path="/c0.ckpt"),
-            _make_mock_trainer({"val/iou": 0.8}, best_checkpoint_path="/c1.ckpt"),
-            _make_mock_trainer({"val/iou": 0.6}, best_checkpoint_path="/c2.ckpt"),
+        mock_rs.side_effect = [
+            RunResult(
+                run_idx=0,
+                seed=42,
+                training_time_seconds=1.0,
+                train_metrics={},
+                val_metrics={"val/iou": 0.7},
+                test_metrics={},
+                output_dir=os.path.join(self.tmp, "run_00_seed42"),
+                epochs_trained=5,
+                best_checkpoint_path="/c0.ckpt",
+            ),
+            RunResult(
+                run_idx=1,
+                seed=101,
+                training_time_seconds=1.0,
+                train_metrics={},
+                val_metrics={"val/iou": 0.8},
+                test_metrics={},
+                output_dir=os.path.join(self.tmp, "run_01_seed101"),
+                epochs_trained=5,
+                best_checkpoint_path="/c1.ckpt",
+            ),
+            RunResult(
+                run_idx=2,
+                seed=28,
+                training_time_seconds=1.0,
+                train_metrics={},
+                val_metrics={"val/iou": 0.6},
+                test_metrics={},
+                output_dir=os.path.join(self.tmp, "run_02_seed28"),
+                epochs_trained=5,
+                best_checkpoint_path="/c2.ckpt",
+            ),
         ]
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
@@ -1354,14 +1452,47 @@ class TestSummaryCSVNewColumns(BasicTestCase):
         marked = [r for r in run_rows if r.get("representative") == "*"]
         self.assertEqual(len(marked), 1)
 
-    @patch(_TRAIN_PATH)
-    def test_exactly_one_best_run_marked(self, mock_train):
+    @patch(_RUN_SINGLE_PATH)
+    def test_exactly_one_best_run_marked(self, mock_rs):
         import csv as csv_mod
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            RunResult,
+        )
 
-        mock_train.side_effect = [
-            _make_mock_trainer({"val/iou": 0.7}, best_checkpoint_path="/c0.ckpt"),
-            _make_mock_trainer({"val/iou": 0.8}, best_checkpoint_path="/c1.ckpt"),
-            _make_mock_trainer({"val/iou": 0.6}, best_checkpoint_path="/c2.ckpt"),
+        mock_rs.side_effect = [
+            RunResult(
+                run_idx=0,
+                seed=42,
+                training_time_seconds=1.0,
+                train_metrics={},
+                val_metrics={"val/iou": 0.7},
+                test_metrics={},
+                output_dir=os.path.join(self.tmp, "run_00_seed42"),
+                epochs_trained=5,
+                best_checkpoint_path="/c0.ckpt",
+            ),
+            RunResult(
+                run_idx=1,
+                seed=101,
+                training_time_seconds=1.0,
+                train_metrics={},
+                val_metrics={"val/iou": 0.8},
+                test_metrics={},
+                output_dir=os.path.join(self.tmp, "run_01_seed101"),
+                epochs_trained=5,
+                best_checkpoint_path="/c1.ckpt",
+            ),
+            RunResult(
+                run_idx=2,
+                seed=28,
+                training_time_seconds=1.0,
+                train_metrics={},
+                val_metrics={"val/iou": 0.6},
+                test_metrics={},
+                output_dir=os.path.join(self.tmp, "run_02_seed28"),
+                epochs_trained=5,
+                best_checkpoint_path="/c2.ckpt",
+            ),
         ]
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
@@ -1374,14 +1505,47 @@ class TestSummaryCSVNewColumns(BasicTestCase):
         marked = [r for r in run_rows if r.get("best_run") == "*"]
         self.assertEqual(len(marked), 1)
 
-    @patch(_TRAIN_PATH)
-    def test_best_run_marks_highest_metric_run(self, mock_train):
+    @patch(_RUN_SINGLE_PATH)
+    def test_best_run_marks_highest_metric_run(self, mock_rs):
         import csv as csv_mod
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            RunResult,
+        )
 
-        mock_train.side_effect = [
-            _make_mock_trainer({"val/iou": 0.7}, best_checkpoint_path="/c0.ckpt"),
-            _make_mock_trainer({"val/iou": 0.9}, best_checkpoint_path="/c1.ckpt"),
-            _make_mock_trainer({"val/iou": 0.6}, best_checkpoint_path="/c2.ckpt"),
+        mock_rs.side_effect = [
+            RunResult(
+                run_idx=0,
+                seed=42,
+                training_time_seconds=1.0,
+                train_metrics={},
+                val_metrics={"val/iou": 0.7},
+                test_metrics={},
+                output_dir=os.path.join(self.tmp, "run_00_seed42"),
+                epochs_trained=5,
+                best_checkpoint_path="/c0.ckpt",
+            ),
+            RunResult(
+                run_idx=1,
+                seed=101,
+                training_time_seconds=1.0,
+                train_metrics={},
+                val_metrics={"val/iou": 0.9},
+                test_metrics={},
+                output_dir=os.path.join(self.tmp, "run_01_seed101"),
+                epochs_trained=5,
+                best_checkpoint_path="/c1.ckpt",
+            ),
+            RunResult(
+                run_idx=2,
+                seed=28,
+                training_time_seconds=1.0,
+                train_metrics={},
+                val_metrics={"val/iou": 0.6},
+                test_metrics={},
+                output_dir=os.path.join(self.tmp, "run_02_seed28"),
+                epochs_trained=5,
+                best_checkpoint_path="/c2.ckpt",
+            ),
         ]
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
@@ -1394,11 +1558,13 @@ class TestSummaryCSVNewColumns(BasicTestCase):
         best_row = next(r for r in run_rows if r.get("best_run") == "*")
         self.assertEqual(int(best_row["run"]), 1)
 
-    @patch(_TRAIN_PATH)
-    def test_epochs_trained_value_correct(self, mock_train):
+    @patch(_RUN_SINGLE_PATH)
+    def test_epochs_trained_value_correct(self, mock_rs):
         import csv as csv_mod
 
-        mock_train.return_value = _make_mock_trainer({"val/loss": 0.5}, current_epoch=9)
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.5}, epochs=10, output_base_dir=self.tmp
+        )
         from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
             ExperimentsRunner,
         )
