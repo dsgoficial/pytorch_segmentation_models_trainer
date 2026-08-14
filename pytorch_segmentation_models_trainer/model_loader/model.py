@@ -1142,7 +1142,7 @@ class Model(pl.LightningModule):
 
         Checks ``cfg.tta_mode`` first (MultiClassInferenceProcessor-style
         interface), then falls back to ``cfg.use_tta`` + ``cfg.tta_augmentations``
-        (SingleImageInfereceProcessor-style interface).
+        (SingleImageInferenceProcessor-style interface).
 
         ``tta_mode`` values:
             - ``"d4"``   — all 8 dihedral symmetries (4 rotations × 2 flips)
