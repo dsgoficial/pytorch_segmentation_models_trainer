@@ -158,7 +158,7 @@ def train(cfg: DictConfig):
         if not any(isinstance(cb, FinalMetricsCallback) for cb in callback_list):
             callback_list.append(FinalMetricsCallback())
     model.setup("fit")
-    pl_trainer_cfg = dict(cfg.pl_trainer)
+    pl_trainer_cfg = OmegaConf.to_container(cfg.pl_trainer, resolve=True)
     if deterministic_cudnn:
         pl_trainer_cfg.setdefault("deterministic", True)
     trainer = Trainer(**pl_trainer_cfg, logger=trainer_logger, callbacks=callback_list)
