@@ -890,7 +890,7 @@ class Model(pl.LightningModule):
         Pixels where all class channels are zero (ignore regions) are mapped
         to ``ignore_value`` instead of class 0 (which argmax would return).
         """
-        valid_mask = masks.sum(dim=1) > 0  # (B, H, W)
+        valid_mask = masks.any(dim=1)  # (B, H, W)
         hard_masks = masks.argmax(dim=1)  # (B, H, W)
         hard_masks[~valid_mask] = ignore_value
         return hard_masks
