@@ -1,15 +1,10 @@
 // Mesmo padrão do LossSection: tipo determina quais campos aparecem
 import schema from '../assets/schema.json'
 import SearchableSelect from './SearchableSelect'
+import { OPTIMIZER_DEFAULTS } from './optimizerDefaults'
 
 const schemaOptimizers = schema.torch?.optimizers ?? ['Adam', 'AdamW', 'SGD', 'RMSprop']
 const OPTIMIZER_TYPES = schemaOptimizers.map(o => ({ value: `torch.optim.${o}`, label: o }))
-
-export const OPTIMIZER_DEFAULTS = {
-  'torch.optim.AdamW': { lr: 0.0001, weightDecay: 0.0001 },
-  'torch.optim.Adam':  { lr: 0.0001, weightDecay: 0.0 },
-  'torch.optim.SGD':   { lr: 0.01,   momentum: 0.9, weightDecay: 0.0001 },
-}
 
 export default function OptimizerSection({ optimizer, onChange }) {
   function handleTypeChange(newType) {

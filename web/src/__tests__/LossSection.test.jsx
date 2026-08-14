@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import LossSection, { LOSS_DEFAULTS } from '../components/LossSection'
+import LossSection from '../components/LossSection'
+import { LOSS_DEFAULTS } from '../components/lossDefaults'
 
 // Helpers
 const CE_KEY  = 'pytorch_segmentation_models_trainer.custom_losses.loss.WeightedDiceCrossEntropyLoss'
