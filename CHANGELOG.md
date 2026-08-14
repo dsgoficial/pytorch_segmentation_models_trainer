@@ -1,4 +1,17 @@
-# Version 1.4.0 - 2026-08-13
+# Unreleased
+
+## PyTorch upgrade to 2.13
+
+- Unpinned `torch`/`torchvision` (already unpinned) now resolve to **2.13.0 / 0.28.0** — the default PyPI Linux wheel bundles CUDA 13.0 (`+cu130`), which requires compute capability sm_75+ (Turing or newer). Tesla V100 (Volta, sm_70) is **not** supported by this default build.
+- Bumped `pytorch-toolbelt` pin from `==0.4.3` (2022) to `>=0.8.0` — the old pin predated years of torch internal-API changes and was a compatibility risk at this jump.
+- Added `[tool.uv] conflicts` forking the `gpu-ml` extra (cuml/cucim/cupy — RAPIDS) into its own lock resolution branch. RAPIDS transitively pins the CUDA stack to the 12.x line (`cuda-toolkit<13.dev0` via `libraft-cu12`), which was silently forcing `torch` back down to 2.4.1 (the last CUDA-12-compatible PyPI release) whenever `uv lock` resolved the whole project together. `gpu-ml` was never installed alongside real torch in CI anyway (mocked), so this fork has no behavior change there.
+- **V100/Volta users**: install the CUDA 12.6 build explicitly — `uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126` — after `uv sync`. A `[tool.uv.sources]`-based extra to automate this per-host was attempted and reverted: uv has no way to express "default index normally, override only for one extra" without declaring full mutual exclusion between extras (`[tool.uv.conflicts]`), which would leave the *default* `uv sync` with no torch at all — worse than a documented manual command.
+- Documented the CUDA 13.0 default / sm_75+ requirement and the V100 (Volta, sm_70) cu126 override in `README.md` ("CUDA / GPU Compatibility") and `website/docs/getting-started/installation.md` ("CUDA and GPU Compatibility"). Also refreshed that page's stale `cu118`-era troubleshooting snippet to `cu130`.
+
+## Bug fixes (torch 2.13 / dependency upgrade fallout)
+
+- `BboxTileMerger.__init__` (`tools/detection/bbox_handler.py`) assigned `self.device`, which broke under `pytorch-toolbelt>=0.8.0`: its `TileMerger` base class now exposes `device` as a read-only property derived from `self.image` (unused by this box-only subclass). Fixed by storing to `self._device` instead.
+- `EvidentialUncertaintyVisualizationCallback._make_figure` (`custom_callbacks/edl_callbacks.py`) called `matplotlib.cm.get_cmap`, removed in the matplotlib version pulled in by the upgrade. Replaced with `matplotlib.colormaps["plasma"]`; dropped the now-unused `import matplotlib.cm as cm`.
 
 ## WRS sqrt Sampler Weights
 

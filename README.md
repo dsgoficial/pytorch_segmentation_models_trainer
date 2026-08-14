@@ -106,6 +106,25 @@ Several feature groups are gated behind optional extras to avoid pulling heavy o
 
 > **Note**: `gpu-ml` is intentionally excluded from `all` because `cupy`/`cuml` cannot be installed on CPU-only machines. Install it separately on a CUDA-capable machine.
 
+### CUDA / GPU Compatibility
+
+`torch`/`torchvision` are unpinned, so `uv sync` (or `pip install`) resolves the latest PyTorch release, whose default Linux wheel bundles **CUDA 13.0**. That build requires compute capability **sm_75 or newer** (Turing, Ampere, Ada, Hopper, Blackwell — e.g. RTX 20-series and up, A100, H100).
+
+**Volta-generation GPUs (Tesla V100, sm_70) are not supported by the default install.** CUDA 13.0 dropped offline compilation for Maxwell/Pascal/Volta. If you're on a V100 (or any sm_70 card), install the CUDA 12.6 build explicitly instead:
+
+```bash
+uv sync
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+```
+
+Verify which architectures your installed build actually supports:
+
+```bash
+python -c "import torch; print(torch.cuda.get_arch_list())"
+```
+
+There is no `cu126` extra baked into `pyproject.toml` — uv has no clean way to express "default index normally, override only for one hardware target" without also breaking the default install for everyone else, so this is a manual, documented step for V100 hosts.
+
 ### Dependencies
 
 Core dependencies include:

@@ -8,8 +8,8 @@ title: Installation
 ## Requirements
 
 - Python 3.12+
-- PyTorch 2.0+
-- CUDA 11.8+ (for GPU acceleration)
+- PyTorch 2.0+ (unpinned — `uv sync`/`pip install` pulls the current latest release)
+- CUDA 13.0 (default PyPI build; requires compute capability sm_75+ — Turing or newer). See [CUDA and GPU Compatibility](#cuda-and-gpu-compatibility) below if you're on an older GPU.
 
 ## Quick Install
 
@@ -39,6 +39,25 @@ git clone https://github.com/phborba/pytorch_segmentation_models_trainer.git
 cd pytorch_segmentation_models_trainer
 pip install -e .
 ```
+
+## CUDA and GPU Compatibility
+
+`torch`/`torchvision` are unpinned in this project, so a plain install pulls the latest PyTorch release. On Linux, the default PyPI wheel bundles **CUDA 13.0**, which requires compute capability **sm_75 or newer** — Turing, Ampere, Ada, Hopper, or Blackwell GPUs (RTX 20-series and up, A100, H100, etc.).
+
+**Volta-generation GPUs (Tesla V100, sm_70) are not supported by the default install.** CUDA 13.0 dropped offline compilation for Maxwell/Pascal/Volta architectures. If you're running on a V100 (or any sm_70 card), install the CUDA 12.6 build explicitly after the normal install:
+
+```bash
+uv sync
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+```
+
+Check which architectures your installed build actually supports:
+
+```bash
+python -c "import torch; print(torch.cuda.get_arch_list())"
+```
+
+`pyproject.toml` does not define a `cu126` extra for this — uv has no clean way to express "use the default index normally, but override it only for one hardware target" without breaking the default install for everyone else, so the V100 case is a manual, documented step rather than an automated flag.
 
 ## Verify Installation
 
@@ -106,9 +125,9 @@ hyperparameters:
 AssertionError: Torch not compiled with CUDA support
 ```
 
-**Solution**: Install PyTorch with CUDA:
+**Solution**: Install PyTorch with CUDA (see [CUDA and GPU Compatibility](#cuda-and-gpu-compatibility) above — use `cu126` instead of the default index if you're on a Tesla V100 or other Volta-generation GPU):
 ```bash
-pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu118
+pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu130
 ```
 
 ### Import Errors
