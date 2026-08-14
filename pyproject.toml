@@ -34,7 +34,7 @@ dependencies = [
     "matplotlib",
     "scipy",
     "numpy",
-    "pytorch-toolbelt==0.4.3",
+    "pytorch-toolbelt>=0.8.0",
     "descartes==1.1.0",
     "pyogrio>=0.7.2",
     "psycopg2-binary",
@@ -116,6 +116,30 @@ packages = ["pytorch_segmentation_models_trainer"]
 
 [tool.uv]
 managed = true
+# gpu-ml (RAPIDS: cuml/cucim/cupy) transitively pins the whole CUDA stack to
+# the 12.x line (`cuda-toolkit<13.dev0` via libraft-cu12). torch's default
+# PyPI Linux wheel moved to CUDA 13 as of the 2.11 series, so resolving
+# gpu-ml together with the rest of the project drags torch back down to the
+# last CUDA-12-compatible release (2.4.1). Forking gpu-ml into its own
+# resolution branch lets the main dependency set track current torch freely.
+conflicts = [
+    [
+        { extra = "gpu-ml" },
+        { extra = "tests" },
+    ],
+    [
+        { extra = "gpu-ml" },
+        { extra = "transformers" },
+    ],
+    [
+        { extra = "gpu-ml" },
+        { extra = "gee" },
+    ],
+    [
+        { extra = "gpu-ml" },
+        { extra = "all" },
+    ],
+]
 # Pin gpu-ml packages to versions with pre-built wheels or provide stub metadata
 # so uv can lock them without GPU hardware. Real installation still requires CUDA.
 constraint-dependencies = [
