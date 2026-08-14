@@ -115,3 +115,35 @@ Não espere o usuário pedir cada um separadamente:
   2. [Step] → verify: [check]
   3. [Step] → verify: [check]
   Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+## Release process
+
+To cut a new release `vX.Y.Z`:
+
+1. **Update CHANGELOG.md** — replace `# Unreleased` with `# Version X.Y.Z - YYYY-MM-DD` (match prior version heading format).
+
+2. **Commit** the CHANGELOG change:
+   ```bash
+   git add CHANGELOG.md
+   git commit -m "chore: bump CHANGELOG to vX.Y.Z (YYYY-MM-DD)"
+   ```
+
+3. **Tag and push**:
+   ```bash
+   git tag vX.Y.Z
+   git push origin main
+   git push origin vX.Y.Z
+   ```
+
+4. **Create draft GitHub release** (user approves manually on GitHub):
+   ```bash
+   # Write release body to a temp file first, then:
+   gh release create vX.Y.Z --draft --title "vX.Y.Z" --notes-file /tmp/release_notes.md
+   ```
+   Release body format (match v1.3.0 / v1.4.0):
+   - First line: `## [X.Y.Z] - YYYY-MM-DD`
+   - Then copy the `##` sections from the CHANGELOG verbatim.
+
+5. **Never publish the release directly** — always `--draft`. User approves on GitHub.
