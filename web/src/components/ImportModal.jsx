@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import yaml from 'js-yaml'
+import { load } from 'js-yaml'
 
 export default function ImportModal({ onImport, onClose }) {
   const [text, setText]   = useState('')
@@ -7,7 +7,7 @@ export default function ImportModal({ onImport, onClose }) {
 
   function handleImport() {
     try {
-      const data = yaml.load(text)
+      const data = load(text)
       if (!data || typeof data !== 'object') {
         setError('YAML inválido: o conteúdo não é um objeto.')
         return

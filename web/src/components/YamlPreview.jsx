@@ -1,8 +1,8 @@
-import yaml from 'js-yaml'
+import { dump } from 'js-yaml'
 
 // Recebe o objeto de configuração e exibe como YAML
 export default function YamlPreview({ config }) {
-  const yamlText = yaml.dump(config, { lineWidth: -1, quotingType: '"' })
+  const yamlText = dump(config, { lineWidth: -1, quotingType: '"' })
 
   function handleDownload() {
     const blob = new Blob([yamlText], { type: 'text/yaml' })
