@@ -397,7 +397,7 @@ class TestMBTilesSoftLabelWconfCaching:
 
 
 class TestMBTilesSoftLabelFullCacheHit:
-    """When all caches are warm, rasterio.open is never called."""
+    """When all caches are warm, dataset raster read entry points are never called."""
 
     def test_full_cache_hit_skips_rasterio_open(self, soft_mbtiles_setup, tmp_path):
         import pytorch_segmentation_models_trainer.dataset_loader.mbtiles_soft_label_dataset as mod
@@ -412,9 +412,13 @@ class TestMBTilesSoftLabelFullCacheHit:
         )
         _ = ds[0]  # warm all caches
 
-        with patch.object(mod.rasterio, "open") as mock_open:
+        with patch.object(
+            mod.MBTilesSoftLabelMaskWindowedDataset,
+            "read_source_aligned_to_mask_window",
+            wraps=mod.MBTilesSoftLabelMaskWindowedDataset.read_source_aligned_to_mask_window,
+        ) as mock_read_source:
             _ = ds[0]
-            mock_open.assert_not_called()
+            mock_read_source.assert_not_called()
 
 
 class TestMBTilesSoftLabelSourceWeights:
