@@ -43,7 +43,6 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 
 from pytorch_segmentation_models_trainer.custom_models.edl_wrapper import (
     EvidentialWrapper,
@@ -304,7 +303,7 @@ class EvidentialUncertaintyVisualizationCallback(pl.callbacks.Callback):
         for j, title in enumerate(col_titles):
             axes[0, j].set_title(title, fontsize=10)
 
-        uncertainty_cmap = cm.get_cmap("plasma")
+        uncertainty_cmap = matplotlib.colormaps["plasma"]
 
         for i in range(n):
             # --- Input image ---

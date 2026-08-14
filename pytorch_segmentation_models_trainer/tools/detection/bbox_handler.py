@@ -201,7 +201,11 @@ class BboxTileMerger(TileMerger):
         assert post_process_method in ["union", "nms"], "Invalid post process method."
         self.image_height = image_shape[0]
         self.image_width = image_shape[1]
-        self.device = device
+        # pytorch_toolbelt>=0.8.0's TileMerger defines `device` as a read-only
+        # property derived from `self.image`, which this subclass never sets
+        # (it merges boxes, not pixels). Store under `_device` to avoid the
+        # AttributeError from the inherited property having no setter.
+        self._device = device
         self.dtype = dtype
         self.model_output_list = []
         self.threshold = threshold
