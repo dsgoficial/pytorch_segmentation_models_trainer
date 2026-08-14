@@ -376,7 +376,7 @@ class ExperimentsRunner:
             The :class:`RunResult` with the highest metric value, or ``None``
             when the metric is absent in every run.
         """
-        eligible = [r for r in results if metric_key in self._all_run_metrics(r)]
+        self, trainer: "pytorch_lightning.Trainer"
         if not eligible:
             return None
         return max(eligible, key=lambda r: self._all_run_metrics(r)[metric_key])
