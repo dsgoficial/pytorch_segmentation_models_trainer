@@ -9,6 +9,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   build:
 
@@ -17,9 +20,9 @@ jobs:
         HYDRA_FULL_ERROR: 1
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Install uv
-      uses: astral-sh/setup-uv@v3
+      uses: astral-sh/setup-uv@v10.0.1
       with:
         enable-cache: true
         cache-dependency-glob: "pyproject.toml"
@@ -49,13 +52,13 @@ jobs:
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         uv run flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Cache downloaded models
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       id: cache
       with:
         path: ~/.cache
         key: ${{ runner.os }}-cache
     - name: Cache downloaded models2
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       id: cache2
       with:
         path: ~/work/pytorch_segmentation_models_trainer/pytorch_segmentation_models_trainer/pytorch_segmentation_models_trainer/custom_models/pretrained/
@@ -68,7 +71,7 @@ jobs:
           sleep 2
         done
     - name: Cache test checkpoints
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       id: test-cache
       with:
         path: ~/work/pytorch_segmentation_models_trainer/pytorch_segmentation_models_trainer/tests/testing_data/data/checkpoints/
@@ -101,7 +104,7 @@ jobs:
       run: |
         uv run coverage report
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v7
       if: success()
       # see: https://github.com/actions/toolkit/issues/399
       continue-on-error: true
@@ -126,9 +129,9 @@ jobs:
       HYDRA_FULL_ERROR: 1
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Install uv
-      uses: astral-sh/setup-uv@v3
+      uses: astral-sh/setup-uv@v10.0.1
       with:
         enable-cache: true
         cache-dependency-glob: "pyproject.toml"
@@ -186,7 +189,7 @@ jobs:
         uv run coverage report
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v7
       if: success()
       continue-on-error: true
       with:
@@ -209,9 +212,9 @@ jobs:
       HYDRA_FULL_ERROR: 1
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Install uv
-      uses: astral-sh/setup-uv@v3
+      uses: astral-sh/setup-uv@v10.0.1
       with:
         enable-cache: true
         cache-dependency-glob: "pyproject.toml"
@@ -252,7 +255,7 @@ jobs:
         uv run coverage report
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v7
       if: success()
       continue-on-error: true
       with:
@@ -276,9 +279,9 @@ jobs:
       HYDRA_FULL_ERROR: 1
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Install uv
-      uses: astral-sh/setup-uv@v3
+      uses: astral-sh/setup-uv@v10.0.1
       with:
         enable-cache: true
         cache-dependency-glob: "pyproject.toml"
@@ -330,7 +333,7 @@ jobs:
         uv run coverage report
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v7
       if: success()
       continue-on-error: true
       with:
