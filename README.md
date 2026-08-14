@@ -22,7 +22,7 @@ A comprehensive PyTorch + PyTorch Lightning framework for training semantic segm
 
 ## Config Builder (Web Interface)
 
-**[Open Config Builder](https://dsgoficial.github.io/pytorch_segmentation_models_trainer/)**
+**[Open Config Builder](https://dsgoficial.github.io/pytorch_segmentation_models_trainer/config-builder/)** · **[Documentation](https://dsgoficial.github.io/pytorch_segmentation_models_trainer/)**
 
 A visual web interface hosted on GitHub Pages for building YAML configuration files without editing text by hand. Supports the **Training** and **Predict** workflows.
 
@@ -36,7 +36,7 @@ A visual web interface hosted on GitHub Pages for building YAML configuration fi
 
 ### How the schema stays up to date
 
-A Python script (`scripts/generate_schema.py`) introspects the installed versions of `segmentation_models_pytorch`, `albumentations`, `torchmetrics`, and `torch` at build time, writing `web/src/assets/schema.json`. The GitHub Actions workflow ([`.github/workflows/deploy-config-builder.yml`](.github/workflows/deploy-config-builder.yml)) runs on every push to `main` (when `web/**` or the schema script changes), on manual dispatch, and on a weekly schedule to pick up library updates automatically.
+A Python script (`scripts/generate_schema.py`) introspects the installed versions of `segmentation_models_pytorch`, `albumentations`, `torchmetrics`, and `torch` at build time, writing `web/src/assets/schema.json`. The GitHub Actions workflow ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)) runs on every push to `main` (when `web/**` or the schema script changes), on manual dispatch, and on a weekly schedule to pick up library updates automatically.
 
 ---
 

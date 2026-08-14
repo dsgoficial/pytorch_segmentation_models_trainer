@@ -12,6 +12,12 @@
 
 - `BboxTileMerger.__init__` (`tools/detection/bbox_handler.py`) assigned `self.device`, which broke under `pytorch-toolbelt>=0.8.0`: its `TileMerger` base class now exposes `device` as a read-only property derived from `self.image` (unused by this box-only subclass). Fixed by storing to `self._device` instead.
 - `EvidentialUncertaintyVisualizationCallback._make_figure` (`custom_callbacks/edl_callbacks.py`) called `matplotlib.cm.get_cmap`, removed in the matplotlib version pulled in by the upgrade. Replaced with `matplotlib.colormaps["plasma"]`; dropped the now-unused `import matplotlib.cm as cm`.
+## Bug fixes
+
+- Fixed `README.md`'s "Open Config Builder" link, which pointed at the docs site root instead of the `/config-builder/` subpath where the Config Builder is actually deployed. Added a separate "Documentation" link alongside it.
+- Fixed a stale reference to `.github/workflows/deploy-config-builder.yml` in `README.md`; the deploy workflow was consolidated into `deploy.yml`.
+
+# Version 1.4.0 - 2026-08-13
 
 ## WRS sqrt Sampler Weights
 
@@ -511,6 +517,10 @@
 - Added `--aef-resampling {auto,aggregate,nearest,none}` to `build-soft-labels`.
   The default `auto` mode uses vector-sum aggregation when image pixels are
   coarser than AEF and nearest-neighbor assignment when image pixels are finer.
+- Added optional aligned AEF export via `--save-aef-aligned` and
+  `--aef-aligned-dtype {int8,float32}`. Saved rasters are written to
+  `output_dir/aef_aligned/{tile_id}.tif`, and manifests include
+  `aligned_aef_path` when export is enabled.
 - Updated per-pixel `w_embed` centroid computation to ignore invalid or
   zero-norm embedding vectors and return finite confidence maps.
 - Added user documentation for local AEF embedding conversion, downsampling,

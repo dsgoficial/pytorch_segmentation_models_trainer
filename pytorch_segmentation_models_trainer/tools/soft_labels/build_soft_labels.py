@@ -40,6 +40,7 @@ from pytorch_segmentation_models_trainer.tools.soft_labels.aef_utils import (
     AEFResamplingStrategy,
     aggregate_aef_raster_to_grid,
     normalize_aef_vectors,
+    quantize_aef,
     read_aef_raster,
     resample_aef_raster_to_grid,
     valid_aef_vector_mask,
@@ -637,6 +638,60 @@ def _write_geotiff(
         dst.write(data)
 
 
+def _write_aligned_aef_geotiff(
+    path: Path,
+    embedding: np.ndarray,
+    profile: dict,
+    transform: Affine,
+    crs,
+    dtype: str = "int8",
+) -> None:
+    """Write an aligned AEF embedding array as a multi-band GeoTIFF.
+
+    Args:
+        path: Output GeoTIFF path.
+        embedding: ``(H, W, D)`` float32 embedding array after AEF resampling.
+        profile: Reference raster profile.
+        transform: Target affine transform.
+        crs: Target CRS.
+        dtype: Output dtype, either ``"int8"`` or ``"float32"``.
+
+    Raises:
+        ValueError: If ``dtype`` is not supported.
+    """
+    if embedding.ndim != 3:
+        raise ValueError(f"Expected embedding shape (H, W, D), got {embedding.shape}.")
+    if dtype not in {"int8", "float32"}:
+        raise ValueError("aligned AEF dtype must be 'int8' or 'float32'.")
+
+    data = np.transpose(embedding, (2, 0, 1))
+    nodata = None
+    if dtype == "int8":
+        data = quantize_aef(data)
+        nodata = -128
+    else:
+        data = data.astype(np.float32)
+
+    count, height, width = data.shape
+    out_profile = profile.copy()
+    out_profile.update(
+        driver="GTiff",
+        dtype=dtype,
+        count=count,
+        height=height,
+        width=width,
+        transform=transform,
+        crs=crs,
+        compress="lzw",
+    )
+    if nodata is not None:
+        out_profile["nodata"] = nodata
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with rasterio.open(path, "w", **out_profile) as dst:
+        dst.write(data)
+
+
 # ---------------------------------------------------------------------------
 # Per-tile processing
 # ---------------------------------------------------------------------------
@@ -656,7 +711,9 @@ def process_tile(
     aef_resampling: AEFResamplingStrategy = "auto",
     entropy_norm: str = "max_entropy",
     border_radius: int = 10,
-) -> Tuple[str, str, Path, Path]:
+    save_aligned_aef: bool = False,
+    aligned_aef_dtype: str = "int8",
+) -> Tuple:
     """Build P_soft and W_conf rasters for one tile.
 
     Uses the tile's image as the spatial reference grid.  All LULC sources are
@@ -691,9 +748,15 @@ def process_tile(
         border_radius: Fixed radius *R* in pixels for the ``w_border_carta``
             normalization (default 10, matching the 2.5 m/pixel paper setup).
             Only used when the cartographic source is present.
+        save_aligned_aef: When True, write the aligned/resampled GCS AEF
+                          embedding to ``output_dir/aef_aligned``.
+        aligned_aef_dtype: Output dtype for saved aligned AEF rasters:
+                           ``"int8"`` stores quantized AEF values, ``"float32"``
+                           stores normalized vectors.
 
     Returns:
-        Tuple of (tile_id, image_path, p_soft_path, w_conf_path).
+        Tuple of (tile_id, image_path, p_soft_path, w_conf_path), plus
+        aligned_aef_path when ``save_aligned_aef=True``.
     """
     image_path = rows.iloc[0]["image_path"]
     img_h, img_w, img_transform, img_crs, img_profile = _get_image_grid(image_path)
@@ -722,7 +785,8 @@ def process_tile(
             )
 
     w_embed: Optional[np.ndarray] = None
-    if aef_dir is not None and beta > 0.0:
+    aligned_aef_path: Optional[Path] = None
+    if aef_dir is not None and (beta > 0.0 or save_aligned_aef):
         try:
             embedding = load_aef_embedding(
                 tile_id,
@@ -734,9 +798,20 @@ def process_tile(
                 dst_crs=img_crs,
                 aef_resampling=aef_resampling,
             )
-            w_embed = compute_w_embed(
-                embedding, p_soft, class_centroids=class_centroids
-            )
+            if save_aligned_aef and aef_source == "gcs":
+                aligned_aef_path = output_dir / "aef_aligned" / f"{tile_id}.tif"
+                _write_aligned_aef_geotiff(
+                    aligned_aef_path,
+                    embedding,
+                    img_profile,
+                    img_transform,
+                    img_crs,
+                    dtype=aligned_aef_dtype,
+                )
+            if beta > 0.0:
+                w_embed = compute_w_embed(
+                    embedding, p_soft, class_centroids=class_centroids
+                )
         except FileNotFoundError:
             logger.warning(
                 "AEF embedding not found for tile %s — skipping w_embed", tile_id
@@ -768,6 +843,8 @@ def process_tile(
     _write_geotiff(w_conf_path, w_conf, profile, transform, crs)
 
     logger.info("Tile %s done → p_soft=%s w_conf=%s", tile_id, p_soft_path, w_conf_path)
+    if save_aligned_aef:
+        return tile_id, image_path, p_soft_path, w_conf_path, aligned_aef_path
     return tile_id, image_path, p_soft_path, w_conf_path
 
 
@@ -820,10 +897,15 @@ def expand_manifest_to_patches(
 
     Returns:
         DataFrame with columns:
-        ``tile_id``, ``image_path``, ``p_soft_path``, [``w_conf_path``],
-        ``row_off``, ``col_off``, ``patch_size``.
+        ``tile_id``, ``image_path``, ``p_soft_path``, optional path columns
+        such as ``w_conf_path`` and ``aligned_aef_path``, ``row_off``,
+        ``col_off``, ``patch_size``.
     """
-    has_wconf = "w_conf_path" in manifest.columns
+    optional_path_columns = [
+        column
+        for column in ["w_conf_path", "aligned_aef_path"]
+        if column in manifest.columns
+    ]
     patch_rows = []
     for _, tile in manifest.iterrows():
         with rasterio.open(tile["image_path"]) as src:
@@ -837,8 +919,8 @@ def expand_manifest_to_patches(
                 "col_off": c_off,
                 "patch_size": patch_size,
             }
-            if has_wconf:
-                row["w_conf_path"] = tile["w_conf_path"]
+            for column in optional_path_columns:
+                row[column] = tile[column]
             patch_rows.append(row)
     return pd.DataFrame(patch_rows)
 
@@ -866,6 +948,8 @@ def run(
     mask_key: str = "mask_path",
     lulc_keys: Optional[List[str]] = None,
     border_radius: int = 10,
+    save_aligned_aef: bool = False,
+    aligned_aef_dtype: str = "int8",
 ) -> Path:
     """Build P_soft and W_conf rasters for all tiles in *input_csv*.
 
@@ -895,6 +979,9 @@ def run(
         border_radius: Fixed radius *R* in pixels for ``w_border_carta``
             normalization (default 10). Only used when the cartographic source
             is present.
+        save_aligned_aef: When True, write aligned GCS AEF embeddings and include
+                          ``aligned_aef_path`` in the manifest.
+        aligned_aef_dtype: Output dtype for aligned AEF rasters.
 
     Returns:
         Path to the written manifest CSV.
@@ -940,6 +1027,8 @@ def run(
                 aef_resampling=aef_resampling,
                 entropy_norm=entropy_norm,
                 border_radius=border_radius,
+                save_aligned_aef=save_aligned_aef,
+                aligned_aef_dtype=aligned_aef_dtype,
             ): tile_id
             for tile_id, grp in groups.items()
         }
@@ -950,9 +1039,10 @@ def run(
             except Exception:
                 logger.exception("Tile %s failed", tile_id)
 
-    manifest = pd.DataFrame(
-        results, columns=["tile_id", "image_path", "p_soft_path", "w_conf_path"]
-    )
+    manifest_columns = ["tile_id", "image_path", "p_soft_path", "w_conf_path"]
+    if save_aligned_aef:
+        manifest_columns.append("aligned_aef_path")
+    manifest = pd.DataFrame(results, columns=manifest_columns)
 
     if patch_size is not None:
         _stride = stride if stride is not None else patch_size

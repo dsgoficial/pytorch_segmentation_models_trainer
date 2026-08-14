@@ -44,6 +44,18 @@ if __name__ == "__main__":
         default="auto",
         help="AEF raster alignment strategy for GCS embeddings.",
     )
+    parser.add_argument(
+        "--save-aef-aligned",
+        action="store_true",
+        default=False,
+        help="Write aligned/resampled GCS AEF embeddings to output_dir/aef_aligned/.",
+    )
+    parser.add_argument(
+        "--aef-aligned-dtype",
+        choices=["int8", "float32"],
+        default="int8",
+        help="Output dtype for --save-aef-aligned.",
+    )
     parser.add_argument("--beta", type=float, default=0.0)
     parser.add_argument(
         "--no-border",
@@ -64,6 +76,8 @@ if __name__ == "__main__":
         aef_embeddings_dir=args.aef_embeddings_dir,
         aef_source=args.aef_source,
         aef_resampling=args.aef_resampling,
+        save_aligned_aef=args.save_aef_aligned,
+        aligned_aef_dtype=args.aef_aligned_dtype,
         beta=args.beta,
         use_border=not args.no_border,
     )

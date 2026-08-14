@@ -19,12 +19,18 @@
 #       --beta 0.2 \
 #       --aef-embeddings-dir /data/aef_embeddings \
 #       --aef-source gcs \
-#       --aef-resampling auto
+#       --aef-resampling auto \
+#       --save-aef-aligned \
+#       --aef-aligned-dtype int8
 #
 # AEF resampling modes:
 #   auto      - aggregate when image pixels are coarser than AEF; nearest when finer
 #   aggregate - dequantize -> vector sum -> L2 normalize (downsampling only)
 #   nearest   - nearest-neighbor assignment -> L2 normalize (upsampling-safe)
+#
+# --save-aef-aligned writes /data/soft_labels/aef_aligned/{tile_id}.tif and
+# adds aligned_aef_path to the generated manifest. Use float32 instead of int8
+# when inspecting normalized vectors without quantization loss.
 #
 # Then generate splits:
 #   pytorch-smt-tools generate-training-csv \

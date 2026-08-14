@@ -132,5 +132,44 @@ pytorch-smt-tools build-soft-labels sources.csv \
     --aef-resampling auto
 ```
 
+## Saving aligned embeddings
+
+By default, aligned AEF embeddings are used in memory only to compute
+`w_embed`.  To inspect or cache the aligned embedding raster, add
+`--save-aef-aligned`:
+
+```bash
+pytorch-smt-tools build-soft-labels sources.csv \
+    --output-dir /data/soft_labels \
+    --num-classes 4 \
+    --alpha 0.5 \
+    --beta 0.2 \
+    --aef-embeddings-dir /data/aef_embeddings \
+    --aef-source gcs \
+    --aef-resampling auto \
+    --save-aef-aligned \
+    --aef-aligned-dtype int8
+```
+
+Aligned rasters are written to:
+
+```text
+/data/soft_labels/aef_aligned/{tile_id}.tif
+```
+
+The manifest receives an `aligned_aef_path` column.  Patch manifests generated
+with `--patch-size` also propagate this column to every patch row.
+
+Available output dtypes:
+
+| Dtype | Use case |
+|--|--|
+| `int8` | Compact storage compatible with AEF-style quantized rasters. The pipeline writes normalized vectors through local quantization and uses `-128` as NoData. |
+| `float32` | Inspection/debugging with direct normalized vectors. Larger files, no quantization loss. |
+
+Saved aligned embeddings are already on the training image grid.  For a 2.5 m
+training raster and a coarser AEF source, `--aef-resampling auto` uses nearest
+neighbor, then writes the result using the selected dtype.
+
 Use [soft-label training](./soft-label-training.md) to train with the generated
 `p_soft_path` and `w_conf_path` rasters.

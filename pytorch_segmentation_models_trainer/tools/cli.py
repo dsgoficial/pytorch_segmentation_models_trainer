@@ -397,6 +397,19 @@ def ddoq_vae_cmd(yaml_path, k, checkpoint_path, output_dir, distilled_image_form
     ),
 )
 @click.option(
+    "--save-aef-aligned",
+    is_flag=True,
+    default=False,
+    help="Write aligned/resampled GCS AEF embeddings to output_dir/aef_aligned/.",
+)
+@click.option(
+    "--aef-aligned-dtype",
+    default="int8",
+    show_default=True,
+    type=click.Choice(["int8", "float32"], case_sensitive=False),
+    help="Output dtype for --save-aef-aligned.",
+)
+@click.option(
     "--beta",
     default=0.0,
     show_default=True,
@@ -461,6 +474,8 @@ def build_soft_labels_cmd(
     aef_embeddings_dir,
     aef_source,
     aef_resampling,
+    save_aef_aligned,
+    aef_aligned_dtype,
     beta,
     use_border,
     entropy_norm,
@@ -489,6 +504,8 @@ def build_soft_labels_cmd(
         aef_embeddings_dir=aef_embeddings_dir,
         aef_source=aef_source,
         aef_resampling=aef_resampling,
+        save_aligned_aef=save_aef_aligned,
+        aligned_aef_dtype=aef_aligned_dtype,
         beta=beta,
         use_border=use_border,
         entropy_norm=entropy_norm,
