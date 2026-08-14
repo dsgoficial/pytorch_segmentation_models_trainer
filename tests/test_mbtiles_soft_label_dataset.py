@@ -139,6 +139,8 @@ class TestMBTilesSoftLabelMaskWindowedDataset:
         loss, _ = SoftLabelWeightedCELoss(num_classes=C)(
             model(batch["image"]), batch["mask"]
         )
+        assert torch.isfinite(loss)
+        assert loss.item() >= 0.0
         loss.backward()
 
         assert model.weight.grad is not None
