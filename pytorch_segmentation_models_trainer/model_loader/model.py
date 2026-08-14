@@ -288,7 +288,24 @@ class Model(pl.LightningModule):
 
             # Calculate steps per epoch
             effective_batch_size = batch_size * accumulate_grad_batches * device_count
+            if effective_batch_size <= 0:
+                raise ValueError(
+                    "Invalid effective_batch_size computed: "
+                    f"{effective_batch_size}. Check batch_size ({batch_size}), "
+                    f"accumulate_grad_batches ({accumulate_grad_batches}), and "
+                    f"device_count ({device_count})."
+                )
+
             steps_per_epoch = dataset_size // effective_batch_size
+            if steps_per_epoch < 1:
+                logger.warning(
+                    "Computed steps_per_epoch=%d (dataset_size=%d, effective_batch_size=%d). "
+                    "Clamping steps_per_epoch to 1 to avoid scheduler failures.",
+                    steps_per_epoch,
+                    dataset_size,
+                    effective_batch_size,
+                )
+                steps_per_epoch = 1
 
             logger.info(
                 "AUTO-COMPUTED STEPS_PER_EPOCH: dataset=%s, dataset_size=%d, "
