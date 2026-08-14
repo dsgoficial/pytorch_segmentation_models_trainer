@@ -54,7 +54,9 @@ class TestJMLSCELossSoftTargets(unittest.TestCase):
     def test_autodetect_soft_targets(self):
         """Float (B,C,H,W) targets should be detected as soft."""
         targets_soft = self._make_soft_targets()
-        logits = torch.randn(self.B, self.num_classes, self.H, self.W, requires_grad=True)
+        logits = torch.randn(
+            self.B, self.num_classes, self.H, self.W, requires_grad=True
+        )
         loss = self.loss_fn(logits, targets_soft)
         self.assertFalse(torch.isnan(loss))
         self.assertFalse(torch.isinf(loss))
@@ -63,7 +65,9 @@ class TestJMLSCELossSoftTargets(unittest.TestCase):
     def test_autodetect_hard_targets(self):
         """Long (B,H,W) targets should be detected as hard (backward compat)."""
         targets_hard = torch.randint(0, self.num_classes, (self.B, self.H, self.W))
-        logits = torch.randn(self.B, self.num_classes, self.H, self.W, requires_grad=True)
+        logits = torch.randn(
+            self.B, self.num_classes, self.H, self.W, requires_grad=True
+        )
         loss = self.loss_fn(logits, targets_hard)
         self.assertFalse(torch.isnan(loss))
         self.assertGreater(loss.item(), 0.0)
@@ -87,7 +91,7 @@ class TestJMLSCELossSoftTargets(unittest.TestCase):
         """Pixels with all-zero channels should be ignored."""
         targets = self._make_soft_targets()
         # Set half the pixels to all-zero (ignore)
-        targets[:, :, :self.H // 2, :] = 0.0
+        targets[:, :, : self.H // 2, :] = 0.0
         logits = torch.randn(self.B, self.num_classes, self.H, self.W)
         loss = self.loss_fn(logits, targets)
         self.assertFalse(torch.isnan(loss))
@@ -148,9 +152,7 @@ class TestJMLSCELossSoftTargets(unittest.TestCase):
 
     def test_sce_soft_no_nan_with_small_targets(self):
         """RCE with small target values should not produce NaN."""
-        targets = torch.full(
-            (self.B, self.num_classes, self.H, self.W), 1e-5
-        )
+        targets = torch.full((self.B, self.num_classes, self.H, self.W), 1e-5)
         # Make it sum to ~1
         targets[:, 0, :, :] = 1.0 - 1e-5 * (self.num_classes - 1)
         valid_mask = torch.ones(self.B, self.H, self.W, dtype=torch.bool)
@@ -285,7 +287,7 @@ class TestSoftLabelIntegration(unittest.TestCase):
         self.H, self.W = 64, 64
         self.tmpdir = tempfile.mkdtemp()
 
-    def _create_geotiff(self, path, data, dtype='float32'):
+    def _create_geotiff(self, path, data, dtype="float32"):
         """Create a minimal GeoTIFF for testing."""
         import rasterio
         from rasterio.transform import from_bounds
@@ -298,15 +300,15 @@ class TestSoftLabelIntegration(unittest.TestCase):
 
         transform = from_bounds(0, 0, w, h, w, h)
         profile = {
-            'driver': 'GTiff',
-            'dtype': dtype,
-            'width': w,
-            'height': h,
-            'count': count,
-            'crs': 'EPSG:3857',
-            'transform': transform,
+            "driver": "GTiff",
+            "dtype": dtype,
+            "width": w,
+            "height": h,
+            "count": count,
+            "crs": "EPSG:3857",
+            "transform": transform,
         }
-        with rasterio.open(path, 'w', **profile) as dst:
+        with rasterio.open(path, "w", **profile) as dst:
             if data.ndim == 2:
                 dst.write(data, 1)
             else:
@@ -323,8 +325,8 @@ class TestSoftLabelIntegration(unittest.TestCase):
         soft_data = np.random.rand(self.num_classes, self.H, self.W).astype(np.float32)
         # Normalize to sum to 1
         soft_data /= soft_data.sum(axis=0, keepdims=True)
-        mask_path = os.path.join(self.tmpdir, 'soft_mask.tif')
-        self._create_geotiff(mask_path, soft_data, dtype='float32')
+        mask_path = os.path.join(self.tmpdir, "soft_mask.tif")
+        self._create_geotiff(mask_path, soft_data, dtype="float32")
 
         # Create minimal dataset object
         ds = object.__new__(RandomCropSegmentationDataset)
@@ -342,9 +344,7 @@ class TestSoftLabelIntegration(unittest.TestCase):
         self.assertEqual(crop.dtype, np.float32)
 
         # Verify values are preserved
-        np.testing.assert_allclose(
-            crop[:, :, 0], soft_data[0, :32, :32], atol=1e-6
-        )
+        np.testing.assert_allclose(crop[:, :, 0], soft_data[0, :32, :32], atol=1e-6)
 
         # Cleanup
         ds._file_cache[mask_path].close()
@@ -357,8 +357,8 @@ class TestSoftLabelIntegration(unittest.TestCase):
         )
 
         hard_data = np.random.randint(0, 7, (self.H, self.W)).astype(np.uint8)
-        mask_path = os.path.join(self.tmpdir, 'hard_mask.tif')
-        self._create_geotiff(mask_path, hard_data, dtype='uint8')
+        mask_path = os.path.join(self.tmpdir, "hard_mask.tif")
+        self._create_geotiff(mask_path, hard_data, dtype="uint8")
 
         ds = object.__new__(RandomCropSegmentationDataset)
         ds.soft_labels = False
@@ -375,6 +375,7 @@ class TestSoftLabelIntegration(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
 

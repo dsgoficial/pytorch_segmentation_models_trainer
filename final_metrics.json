@@ -1,0 +1,12 @@
+{
+  "loss/train": 6.7781453132629395,
+  "loss/train_step": 6.7781453132629395,
+  "metrics/train_acc": 0.0,
+  "metrics/train_acc_step": 0.0,
+  "loss/val": 3.9101181030273438,
+  "metrics/val_acc": 0.0555555559694767,
+  "metrics/val_polis": 9.20259952545166,
+  "loss/train_epoch": 6.7781453132629395,
+  "metrics/train_acc_epoch": 0.0,
+  "epoch": 1
+}

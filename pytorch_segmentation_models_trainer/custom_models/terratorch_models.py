@@ -17,6 +17,7 @@
  *                                                                         *
  ****
 """
+
 """
 TerraTorch geospatial foundation model wrappers
 ===============================================
@@ -59,7 +60,9 @@ class _LinearSegHead(nn.Module):
         B, N, C = tokens.shape
         x = tokens.transpose(1, 2).reshape(B, C, H, W)
         x = self.proj(x)
-        return F.interpolate(x, scale_factor=self.patch_size, mode="bilinear", align_corners=False)
+        return F.interpolate(
+            x, scale_factor=self.patch_size, mode="bilinear", align_corners=False
+        )
 
 
 class TerraTorchSegmentationWrapper(nn.Module):
@@ -127,11 +130,13 @@ class TerraTorchSegmentationWrapper(nn.Module):
         self.backbone = factory.build_model(
             task="segmentation",
             backbone=backbone_name,
-            backbone_pretrained_cfg_overlay={
-                "file": pretrained_path,
-            }
-            if pretrained_path
-            else None,
+            backbone_pretrained_cfg_overlay=(
+                {
+                    "file": pretrained_path,
+                }
+                if pretrained_path
+                else None
+            ),
             in_channels=in_channels,
             num_frames=num_frames,
             img_size=img_size,

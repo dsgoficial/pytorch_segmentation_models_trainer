@@ -48,8 +48,14 @@ def _create_geotiff(path, data, count=None, dtype="uint8"):
 
     transform = from_bounds(0, 0, w, h, w, h)
     with rasterio.open(
-        path, "w", driver="GTiff", height=h, width=w,
-        count=bands, dtype=dtype, transform=transform,
+        path,
+        "w",
+        driver="GTiff",
+        height=h,
+        width=w,
+        count=bands,
+        dtype=dtype,
+        transform=transform,
     ) as dst:
         for b in range(bands):
             dst.write(data[b], b + 1)
@@ -207,16 +213,28 @@ class TestGridDeterminism(unittest.TestCase, GridModeTestMixin):
         sample1 = ds[5]
         sample2 = ds[5]
         np.testing.assert_array_equal(
-            sample1["image"] if isinstance(sample1["image"], np.ndarray)
-            else sample1["image"].numpy(),
-            sample2["image"] if isinstance(sample2["image"], np.ndarray)
-            else sample2["image"].numpy(),
+            (
+                sample1["image"]
+                if isinstance(sample1["image"], np.ndarray)
+                else sample1["image"].numpy()
+            ),
+            (
+                sample2["image"]
+                if isinstance(sample2["image"], np.ndarray)
+                else sample2["image"].numpy()
+            ),
         )
         np.testing.assert_array_equal(
-            sample1["mask"] if isinstance(sample1["mask"], np.ndarray)
-            else sample1["mask"].numpy(),
-            sample2["mask"] if isinstance(sample2["mask"], np.ndarray)
-            else sample2["mask"].numpy(),
+            (
+                sample1["mask"]
+                if isinstance(sample1["mask"], np.ndarray)
+                else sample1["mask"].numpy()
+            ),
+            (
+                sample2["mask"]
+                if isinstance(sample2["mask"], np.ndarray)
+                else sample2["mask"].numpy()
+            ),
         )
 
 
@@ -235,7 +253,7 @@ class TestGridInvalidTileFiltering(unittest.TestCase):
         h = w = 64
         img = np.full((3, h, w), 128, dtype=np.uint8)
         mask = np.zeros((h, w), dtype=np.uint8)
-        mask[:, w // 2:] = 255  # right half is ignore
+        mask[:, w // 2 :] = 255  # right half is ignore
 
         img_path = os.path.join(img_dir, "img.tif")
         msk_path = os.path.join(msk_dir, "msk.tif")
@@ -377,8 +395,11 @@ class TestGridBackwardCompat(unittest.TestCase, GridModeTestMixin):
             samples_per_epoch=50,
         )
         self.assertEqual(len(ds), 50)
-        self.assertFalse(hasattr(ds, '_grid_positions') and ds._grid_positions is not None
-                         and len(ds._grid_positions) > 0)
+        self.assertFalse(
+            hasattr(ds, "_grid_positions")
+            and ds._grid_positions is not None
+            and len(ds._grid_positions) > 0
+        )
         sample = ds[0]
         self.assertIn("image", sample)
         self.assertIn("mask", sample)
@@ -483,8 +504,8 @@ class TestGridSoftLabels(unittest.TestCase):
 
             # Soft mask: N_CLASSES bands, float32, probabilities
             soft_mask = np.zeros((self.N_CLASSES, h, w), dtype=np.float32)
-            soft_mask[0, :h // 2, :] = 1.0  # class 0 top half
-            soft_mask[1, h // 2:, :] = 1.0  # class 1 bottom half
+            soft_mask[0, : h // 2, :] = 1.0  # class 0 top half
+            soft_mask[1, h // 2 :, :] = 1.0  # class 1 bottom half
             # Leave some pixels with all-zero (ignore)
             soft_mask[:, -4:, -4:] = 0.0  # bottom-right corner is ignore
 
@@ -519,7 +540,7 @@ class TestGridSoftLabels(unittest.TestCase):
         self.assertGreater(len(ds), 0)
         sample = ds[0]
         mask = sample["mask"]
-        if hasattr(mask, 'numpy'):
+        if hasattr(mask, "numpy"):
             mask = mask.numpy()
         # Soft mask should be (C, H, W) float
         self.assertEqual(mask.ndim, 3)
@@ -541,7 +562,7 @@ class TestGridBinaryClassMask(unittest.TestCase, GridModeTestMixin):
         h = w = 64
         img = np.full((3, h, w), 128, dtype=np.uint8)
         mask = np.zeros((h, w), dtype=np.uint8)
-        mask[h // 2:, :] = 1
+        mask[h // 2 :, :] = 1
 
         img_path = os.path.join(img_dir, "img.tif")
         msk_path = os.path.join(msk_dir, "msk.tif")
@@ -569,7 +590,7 @@ class TestGridBinaryClassMask(unittest.TestCase, GridModeTestMixin):
         )
         sample = ds[0]
         mask = sample["mask"]
-        if hasattr(mask, 'numpy'):
+        if hasattr(mask, "numpy"):
             mask = mask.numpy()
         unique_values = np.unique(mask)
         # Should only contain 0 and/or 1

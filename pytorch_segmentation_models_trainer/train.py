@@ -22,6 +22,7 @@
 import logging
 import re
 
+
 from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
     FinalMetricsCallback,
     FrameFieldComputeWeightNormLossesCallback,
@@ -164,6 +165,16 @@ def train(cfg: DictConfig):
     trainer.fit(model)
     if "test_dataset" in cfg:
         logger.info("test_dataset found in config — running trainer.test()")
+        ckpt_cb = getattr(trainer, "checkpoint_callback", None)
+        best_ckpt = getattr(ckpt_cb, "best_model_path", None) if ckpt_cb else None
+        if isinstance(best_ckpt, str) and best_ckpt:
+            logger.info("Using best checkpoint for test: %s", best_ckpt)
+            model_cls = (
+                Model if "pl_model" not in cfg else import_module_from_cfg(cfg.pl_model)
+            )
+            model = model_cls.load_from_checkpoint(
+                best_ckpt, cfg=cfg, weights_only=False
+            )
         trainer.test(model)
     return trainer
 

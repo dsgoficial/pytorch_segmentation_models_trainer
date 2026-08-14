@@ -193,6 +193,9 @@ class TestInferenceCSVBuilder(unittest.TestCase):
     def test_find_corresponding_mask_strategy_3(self):
         # Strategy 3: Buscar por padrão (glob)
         # Create a mask that doesn't follow exact name or suffix
+        exact_mask = os.path.join(self.masks_dir, "img_0_mask.tif")
+        if os.path.exists(exact_mask):
+            os.remove(exact_mask)
         mask_path = os.path.join(self.masks_dir, "img_0_some_other_thing.tif")
         self._create_dummy_raster(mask_path)
 

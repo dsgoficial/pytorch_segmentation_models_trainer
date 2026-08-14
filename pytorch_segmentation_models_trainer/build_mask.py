@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 import logging
 import os
 from pytorch_segmentation_models_trainer.tools.parallel_processing.process_executor import (

@@ -2,6 +2,7 @@
 """
 Tests for GradientReversalFunction and GradientReversalLayer.
 """
+
 import pytest
 import torch
 import torch.nn as nn
@@ -10,7 +11,6 @@ from pytorch_segmentation_models_trainer.domain_adaptation.methods.gradient_reve
     GradientReversalFunction,
     GradientReversalLayer,
 )
-
 
 # ---------------------------------------------------------------------------
 # GradientReversalFunction

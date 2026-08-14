@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 import itertools
 import json
 import os
@@ -184,9 +185,11 @@ class RasterFile:
         profile["height"] = raster_ds.height
         if output_extension is not None:
             profile["driver"] = suffix_dict.inverse[
-                f".{output_extension}"
-                if not output_extension.startswith(".")
-                else output_extension
+                (
+                    f".{output_extension}"
+                    if not output_extension.startswith(".")
+                    else output_extension
+                )
             ]
         return profile
 
@@ -294,10 +297,10 @@ class RasterFile:
                 polygons, output_shape, transform, line_width=4
             )
         if compute_bbox:
-            return_dict[
-                "bounding_boxes"
-            ] = self.build_image_bb_annotations_from_vector_layer(
-                polygons, transform=transform
+            return_dict["bounding_boxes"] = (
+                self.build_image_bb_annotations_from_vector_layer(
+                    polygons, transform=transform
+                )
             )
         if compute_polygons:
             return_dict["polygon_lists"] = self.build_polygon_list_from_vector_layer(
@@ -389,8 +392,8 @@ class RasterFile:
         Args:
             minx (float): [description]
         """
-        (row1, col1) = rasterio.transform.rowcol(transform, minx, maxy)
-        (row2, col2) = rasterio.transform.rowcol(transform, maxx, miny)
+        row1, col1 = rasterio.transform.rowcol(transform, minx, maxy)
+        row2, col2 = rasterio.transform.rowcol(transform, maxx, miny)
         return [
             int(min(col1, col2)),
             int(min(row1, row2)),

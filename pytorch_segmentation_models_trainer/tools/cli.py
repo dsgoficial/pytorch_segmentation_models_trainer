@@ -424,6 +424,45 @@ def ddoq_vae_cmd(yaml_path, k, checkpoint_path, output_dir, distilled_image_form
     flag_value=False,
     help="Omit the border-distance component (replicates original paper formula).",
 )
+@click.option(
+    "--entropy-norm",
+    default="max_entropy",
+    show_default=True,
+    type=click.Choice(["max_entropy", "minmax"], case_sensitive=False),
+    help=(
+        "Entropy normalisation strategy for w_entropy. "
+        "'max_entropy' (default) normalises by log(C); "
+        "'minmax' applies per-tile min-max normalisation (LaTeX Eq. 9-10, Experiment E4)."
+    ),
+)
+@click.option(
+    "--image-key",
+    default="image_path",
+    show_default=True,
+    help="CSV column containing RGB image paths.",
+)
+@click.option(
+    "--mask-key",
+    default="mask_path",
+    show_default=True,
+    help="CSV column containing the BAGS cartographic mask path.",
+)
+@click.option(
+    "--lulc-key",
+    "lulc_keys",
+    multiple=True,
+    help=(
+        "CSV column containing one external LULC source raster. "
+        "Repeat for each source, e.g. --lulc-key mapbiomas_path --lulc-key esri_path."
+    ),
+)
+@click.option(
+    "--border-radius",
+    default=10,
+    show_default=True,
+    type=int,
+    help="Fixed radius R in pixels for BAGS-based w_border_carta.",
+)
 def build_soft_labels_cmd(
     input_csv,
     output_dir,
@@ -439,10 +478,17 @@ def build_soft_labels_cmd(
     aef_aligned_dtype,
     beta,
     use_border,
+    entropy_norm,
+    image_key,
+    mask_key,
+    lulc_keys,
+    border_radius,
 ):
     """Build P_soft and W_conf rasters from multiple LULC sources in INPUT_CSV.
 
-    INPUT_CSV must have columns: tile_id, image_path, source_name, lulc_path, weight.
+    INPUT_CSV must be a wide CSV with one row per tile. Use --mask-key for
+    the BAGS cartographic mask column and repeat --lulc-key for each external
+    LULC source column.
     """
     from pathlib import Path
     from pytorch_segmentation_models_trainer.tools.soft_labels import build_soft_labels
@@ -462,6 +508,11 @@ def build_soft_labels_cmd(
         aligned_aef_dtype=aef_aligned_dtype,
         beta=beta,
         use_border=use_border,
+        entropy_norm=entropy_norm,
+        image_key=image_key,
+        mask_key=mask_key,
+        lulc_keys=list(lulc_keys),
+        border_radius=border_radius,
     )
     click.echo(f"Manifest written to '{manifest_path}'.")
 
@@ -470,8 +521,11 @@ def build_soft_labels_cmd(
 @click.option(
     "--source",
     required=True,
-    type=click.Choice(["gcs", "hf"], case_sensitive=False),
-    help="Embedding source: 'gcs' for per-pixel GeoTIFFs, 'hf' for HuggingFace.",
+    type=click.Choice(["gcs", "hf", "sourcecoop"], case_sensitive=False),
+    help=(
+        "Embedding source: 'gcs' for GeoTIFFs from GCS, 'hf' for HuggingFace, "
+        "or 'sourcecoop' for cropped COGs from Source Cooperative."
+    ),
 )
 @click.option(
     "--output-dir",
@@ -489,7 +543,24 @@ def build_soft_labels_cmd(
     "--tiles-csv",
     default=None,
     type=click.Path(exists=True, dir_okay=False),
-    help="CSV with tile_id and image_path (required for --source hf).",
+    help="CSV with tile_id and image_path (required for --source hf/sourcecoop).",
+)
+@click.option(
+    "--sourcecoop-index-path",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Optional local Source Cooperative STAC GeoParquet index.",
+)
+@click.option(
+    "--sourcecoop-index-url",
+    default=None,
+    help="Remote Source Cooperative STAC GeoParquet index URL override.",
+)
+@click.option(
+    "--year",
+    default=None,
+    type=int,
+    help="Annual AEF product year override for --source sourcecoop.",
 )
 @click.option(
     "--max-workers",
@@ -499,12 +570,20 @@ def build_soft_labels_cmd(
     help="Reserved for future parallel GCS downloads.",
 )
 def download_aef_embeddings_cmd(
-    source, output_dir, gcs_paths_csv, tiles_csv, max_workers
+    source,
+    output_dir,
+    gcs_paths_csv,
+    tiles_csv,
+    sourcecoop_index_path,
+    sourcecoop_index_url,
+    year,
+    max_workers,
 ):
     """Download AlphaEarth Foundation embeddings for a set of tiles.
 
-    Use --source gcs for per-pixel GeoTIFFs from Google Cloud Storage, or
-    --source hf for patch-level vectors from HuggingFace.
+    Use --source gcs for per-pixel GeoTIFFs from Google Cloud Storage,
+    --source hf for patch-level vectors from HuggingFace, or --source
+    sourcecoop for cropped per-pixel GeoTIFFs from Source Cooperative COGs.
     """
     from pathlib import Path
     from pytorch_segmentation_models_trainer.tools.soft_labels import (
@@ -517,6 +596,11 @@ def download_aef_embeddings_cmd(
             output_dir=Path(output_dir),
             gcs_paths_csv=gcs_paths_csv,
             tiles_csv=tiles_csv,
+            sourcecoop_index_path=sourcecoop_index_path,
+            sourcecoop_index_url=(
+                sourcecoop_index_url or download_aef_embeddings.SOURCECOOP_AEF_INDEX_URL
+            ),
+            year=year,
             max_workers=max_workers,
         )
     except ValueError as exc:
@@ -601,6 +685,1471 @@ def generate_training_csv_cmd(
 
     for name, path in paths.items():
         click.echo(f"  {name}: {path}")
+
+
+@cli.command("scan-mask-colors")
+@click.argument("mask_path", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--bands",
+    default="1,2,3",
+    show_default=True,
+    help=(
+        "Comma-separated 1-based band indices to use as R, G, B.  "
+        "Repeat a band to duplicate it, e.g. '1,1,1' for single-band masks."
+    ),
+)
+@click.option(
+    "--window-size",
+    default=1024,
+    show_default=True,
+    type=int,
+    help="Tile height and width in pixels for each windowed read.",
+)
+@click.option(
+    "--workers",
+    default=None,
+    type=int,
+    help="Thread pool size.  Defaults to min(n_tiles, cpu_count).",
+)
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    default=False,
+    help="Suppress the tqdm progress bar.",
+)
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Optional path to write the JSON report.  Always printed to stdout as well.",
+)
+def scan_mask_colors_cmd(mask_path, bands, window_size, workers, no_progress, output):
+    """Scan MASK_PATH for unique RGB tuples and print a color_map JSON.
+
+    Reads the raster in parallel windows using a ThreadPoolExecutor and
+    reports every unique (R, G, B) colour together with auto-assigned class
+    indices ready to paste into the ``color_map`` field of
+    ``MBTilesPolygonDataset``.
+
+    (0, 0, 0) is treated as background and receives class 0; all other
+    colours are assigned 1, 2, 3 … in sorted order.  Edit the indices before
+    pasting into your training YAML.
+
+    \b
+    Examples:
+
+        # Scan a mask MBTiles
+        pytorch-smt-tools scan-mask-colors masks.mbtiles
+
+        # Single-band mask — duplicate the band for RGB encoding
+        pytorch-smt-tools scan-mask-colors mask.tif --bands 1,1,1
+
+        # Save JSON to a file as well
+        pytorch-smt-tools scan-mask-colors masks.mbtiles -o colors.json
+    """
+    import json as _json
+
+    from pytorch_segmentation_models_trainer.tools.mbtiles.scan_unique_colors import (
+        scan_and_report,
+    )
+
+    try:
+        parsed_bands = [int(b.strip()) for b in bands.split(",")]
+    except ValueError:
+        raise click.UsageError(
+            f"--bands must be comma-separated integers, got '{bands}'."
+        )
+
+    try:
+        report = scan_and_report(
+            raster_path=mask_path,
+            bands=parsed_bands,
+            window_size=window_size,
+            workers=workers,
+            progress=not no_progress,
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    json_str = _json.dumps(report, indent=2)
+    click.echo(json_str)
+
+    if output:
+        from pathlib import Path as _Path
+
+        _Path(output).parent.mkdir(parents=True, exist_ok=True)
+        _Path(output).write_text(json_str)
+        click.echo(f"Report written to '{output}'.", err=True)
+
+
+@cli.command("combine-bands")
+@click.option(
+    "--source-dir",
+    "source_dirs",
+    multiple=True,
+    required=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Source directory to scan for rasters.  Repeat for each directory.",
+)
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Directory where combined GeoTIFFs will be written.",
+)
+@click.option(
+    "--glob",
+    "glob_pattern",
+    default="**/*.vrt",
+    show_default=True,
+    help="Glob pattern used to find files inside each source directory.",
+)
+@click.option(
+    "--name-pattern",
+    default=None,
+    help=(
+        "Optional filename pattern to extract group key, e.g. 'MI_{name}.tif'."
+        "  Must contain the literal '{name}'."
+    ),
+)
+@click.option(
+    "--skip-alpha/--no-skip-alpha",
+    "skip_alpha",
+    default=True,
+    show_default=True,
+    help="Skip last band when source has >3 bands (assumed alpha).",
+)
+@click.option(
+    "--overwrite",
+    is_flag=True,
+    default=False,
+    help="Overwrite existing output files.",
+)
+@click.option(
+    "--workers",
+    default=4,
+    show_default=True,
+    type=int,
+    help="Number of worker threads.",
+)
+def combine_bands_cmd(
+    source_dirs,
+    output_dir,
+    glob_pattern,
+    name_pattern,
+    skip_alpha,
+    overwrite,
+    workers,
+):
+    """Combine bands from rasters with matching names across SOURCE_DIRs.
+
+    Finds files matching GLOB in each SOURCE_DIR, groups them by filename stem
+    (or by NAME_PATTERN capture), and combines all bands into a single GeoTIFF
+    per group.
+    """
+    from pathlib import Path
+
+    from pytorch_segmentation_models_trainer.tools.dataset_builder.band_combiner import (
+        combine_all,
+    )
+
+    result = combine_all(
+        source_dirs=[Path(d) for d in source_dirs],
+        output_dir=Path(output_dir),
+        glob_pattern=glob_pattern,
+        name_pattern=name_pattern,
+        skip_alpha=skip_alpha,
+        overwrite=overwrite,
+        n_workers=workers,
+    )
+    click.echo(f"Combined {len(result)} group(s) into '{output_dir}'.")
+
+
+@cli.command("build-tile-dataset")
+@click.argument("yaml_path", type=click.Path(exists=True, dir_okay=False))
+def build_tile_dataset_cmd(yaml_path):
+    """Build a tile dataset from raster images + vector masks using YAML_PATH.
+
+    YAML_PATH must contain keys matching ``build_tile_dataset()`` parameters:
+    ``image_paths``, ``vector_path``, ``class_attribute``, ``output_dir``,
+    and optionally ``vector_layer``, ``tile_width``, ``tile_height``,
+    ``overlap_x_percent``, ``overlap_y_percent``, ``min_valid_pixel_ratio``,
+    ``skip_empty_tiles``, ``generate_full_size_masks``, ``max_workers``,
+    ``background_value``.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    from pytorch_segmentation_models_trainer.tools.dataset_builder.tile_dataset_builder import (
+        build_tile_dataset,
+    )
+
+    with open(yaml_path) as fh:
+        cfg = yaml.safe_load(fh)
+
+    cfg["image_paths"] = [Path(p) for p in cfg["image_paths"]]
+    cfg["vector_path"] = Path(cfg["vector_path"])
+    cfg["output_dir"] = Path(cfg["output_dir"])
+
+    df = build_tile_dataset(**cfg)
+    click.echo(f"Dataset built: {len(df)} tiles saved to '{cfg['output_dir']}'.")
+
+
+@cli.command("build-sliding-window-dataset")
+@click.argument("input_csv", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Root output directory for patches.",
+)
+@click.option(
+    "--window-size",
+    default=256,
+    show_default=True,
+    type=int,
+    help="Patch size in pixels (square).",
+)
+@click.option(
+    "--overlap",
+    default=0.0,
+    show_default=True,
+    type=float,
+    help="Overlap fraction in [0, 1).",
+)
+@click.option(
+    "--remap",
+    default=None,
+    help="Class remapping in the format '7:5,6:4'.",
+)
+@click.option(
+    "--blacklist",
+    default=None,
+    help="Comma-separated directory name segments to skip.",
+)
+@click.option(
+    "--workers",
+    default=8,
+    show_default=True,
+    type=int,
+    help="Number of worker threads.",
+)
+def build_sliding_window_dataset_cmd(
+    input_csv,
+    output_dir,
+    window_size,
+    overlap,
+    remap,
+    blacklist,
+    workers,
+):
+    """Crop image/mask pairs from INPUT_CSV into sliding-window patches."""
+    from pathlib import Path
+
+    from pytorch_segmentation_models_trainer.tools.dataset_builder.sliding_window_builder import (
+        build_sliding_window_dataset,
+    )
+
+    class_remap = None
+    if remap:
+        try:
+            class_remap = {
+                int(pair.split(":")[0].strip()): int(pair.split(":")[1].strip())
+                for pair in remap.split(",")
+            }
+        except (ValueError, IndexError) as exc:
+            raise click.UsageError(
+                f"--remap must be in the format '7:5,6:4', got '{remap}'."
+            ) from exc
+
+    blacklist_list = [s.strip() for s in blacklist.split(",")] if blacklist else None
+
+    df = build_sliding_window_dataset(
+        input_csv=Path(input_csv),
+        output_dir=Path(output_dir),
+        window_size=window_size,
+        overlap=overlap,
+        class_remap=class_remap,
+        blacklist=blacklist_list,
+        n_workers=workers,
+    )
+    click.echo(f"Generated {len(df)} patch pair(s) in '{output_dir}'.")
+
+
+@cli.command("build-mbtiles-multiclass-masks")
+@click.argument("yaml_path", type=click.Path(exists=True, dir_okay=False))
+def build_mbtiles_multiclass_masks_cmd(yaml_path):
+    """Build multiclass masks from an MBTiles reference grid and vector labels.
+
+    YAML_PATH must contain keys matching
+    ``build_mbtiles_multiclass_masks()`` parameters:
+    ``reference_mbtiles_path``, ``frames_path``, ``vector_path``,
+    ``output_dir``, and optionally ``frame_layer``, ``vector_layer``,
+    ``frame_id_attribute``, ``class_attribute``, ``output_subdir``,
+    ``output_extension``, and ``background_value``.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    from pytorch_segmentation_models_trainer.tools.mbtiles.multiclass_mask_builder import (
+        build_mbtiles_multiclass_masks,
+    )
+
+    with open(yaml_path) as fh:
+        cfg = yaml.safe_load(fh)
+
+    for key in ("reference_mbtiles_path", "frames_path", "vector_path", "output_dir"):
+        cfg[key] = Path(cfg[key])
+
+    df = build_mbtiles_multiclass_masks(**cfg)
+    click.echo(f"Built {len(df)} multiclass masks into '{cfg['output_dir']}/'.")
+
+
+@cli.command("remap-mask-classes")
+@click.option(
+    "--input-dir",
+    required=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Directory tree of mask rasters to remap.",
+)
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Output directory (mirrors the structure of --input-dir).",
+)
+@click.option(
+    "--mapping",
+    required=True,
+    help="Pixel value remapping in the format '7:5,6:4'.",
+)
+@click.option(
+    "--workers",
+    default=None,
+    type=int,
+    help="Number of worker threads.  Defaults to cpu_count.",
+)
+def remap_mask_classes_cmd(input_dir, output_dir, mapping, workers):
+    """Remap pixel class values in all TIFFs under INPUT_DIR.
+
+    OUTPUT_DIR mirrors the subdirectory structure of INPUT_DIR.
+    """
+    from pathlib import Path
+
+    from pytorch_segmentation_models_trainer.tools.raster.tiff_remap import (
+        remap_raster_folder,
+    )
+
+    try:
+        pixel_mapping = {
+            int(pair.split(":")[0].strip()): int(pair.split(":")[1].strip())
+            for pair in mapping.split(",")
+        }
+    except (ValueError, IndexError) as exc:
+        raise click.UsageError(
+            f"--mapping must be in the format '7:5,6:4', got '{mapping}'."
+        ) from exc
+
+    n_success, n_errors = remap_raster_folder(
+        input_dir=Path(input_dir),
+        output_dir=Path(output_dir),
+        pixel_mapping=pixel_mapping,
+        n_workers=workers,
+    )
+    click.echo(f"Remapped {n_success} file(s), {n_errors} error(s).")
+
+
+@cli.command("convert-to-tiff")
+@click.option(
+    "--input-dir",
+    required=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Root directory to scan for matching files.",
+)
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Output directory (mirrors structure of --input-dir).",
+)
+@click.option(
+    "--glob",
+    "glob_pattern",
+    default="**/*.vrt",
+    show_default=True,
+    help="Glob pattern for files to convert.",
+)
+@click.option(
+    "--compression",
+    default="LZW",
+    show_default=True,
+    type=click.Choice(["LZW", "DEFLATE", "NONE", "JPEG"], case_sensitive=False),
+    help="GeoTIFF compression codec.",
+)
+@click.option(
+    "--workers",
+    default=4,
+    show_default=True,
+    type=int,
+    help="Number of worker threads.",
+)
+def convert_to_tiff_cmd(input_dir, output_dir, glob_pattern, compression, workers):
+    """Convert VRT (or any rasterio-readable) files to GeoTIFF.
+
+    Files matching GLOB under INPUT_DIR are converted to compressed GeoTIFFs
+    under OUTPUT_DIR, preserving subdirectory structure.
+    """
+    from pathlib import Path
+
+    from pytorch_segmentation_models_trainer.tools.raster.vrt2tif import convert_folder
+
+    n_success, n_errors = convert_folder(
+        input_dir=Path(input_dir),
+        output_dir=Path(output_dir),
+        glob_pattern=glob_pattern,
+        compression=compression.upper(),
+        n_workers=workers,
+    )
+    click.echo(f"Converted {n_success} file(s), {n_errors} error(s).")
+
+
+@cli.command("visualize-predictions")
+@click.option(
+    "--records-csv",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="CSV with tile_id, mi, and the sort-by column.",
+)
+@click.option(
+    "--gt-dir",
+    required=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Root directory with ground-truth masks.",
+)
+@click.option(
+    "--pred-dir",
+    "pred_dirs",
+    multiple=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Prediction directory.  Repeat for each experiment.",
+)
+@click.option(
+    "--pred-label",
+    "pred_labels",
+    multiple=True,
+    help="Label for each --pred-dir.  Must match the count of --pred-dir.",
+)
+@click.option(
+    "--output",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="Output path for the figure (e.g. grid.png).",
+)
+@click.option(
+    "--sort-by",
+    default="mean_iou",
+    show_default=True,
+    help="Column in --records-csv used for sorting.",
+)
+@click.option(
+    "--n-samples",
+    default=5,
+    show_default=True,
+    type=int,
+    help="Number of sample rows in the grid.",
+)
+@click.option(
+    "--mode",
+    default="best",
+    show_default=True,
+    type=click.Choice(["best", "worst", "random"], case_sensitive=False),
+    help="Sample selection strategy.",
+)
+@click.option(
+    "--image-dir",
+    default=None,
+    type=click.Path(file_okay=False),
+    help="Optional directory with source images (adds an image column).",
+)
+@click.option(
+    "--dpi",
+    default=150,
+    show_default=True,
+    type=int,
+    help="Figure DPI.",
+)
+@click.option(
+    "--color-map",
+    default=None,
+    help=(
+        "JSON string or path to JSON file mapping class IDs to RGB colors. "
+        'Format: \'{"0":[0,0,0],"1":[255,0,0],...}\'.  '
+        "If omitted, a default map is generated from GT raster values."
+    ),
+)
+def visualize_predictions_cmd(
+    records_csv,
+    gt_dir,
+    pred_dirs,
+    pred_labels,
+    output,
+    sort_by,
+    n_samples,
+    mode,
+    image_dir,
+    dpi,
+    color_map,
+):
+    """Build a segmentation comparison grid from predictions vs GT.
+
+    Produces an image with one row per sample showing the source image (if
+    --image-dir is given), the GT mask, and one column per --pred-dir.
+    """
+    import json
+    from pathlib import Path
+
+    import matplotlib
+    import pandas as pd
+
+    matplotlib.use("Agg")
+
+    from pytorch_segmentation_models_trainer.tools.visualization.segmentation_vis import (
+        create_segmentation_grid,
+    )
+
+    records = pd.read_csv(records_csv)
+
+    # Parse color map
+    parsed_color_map = None
+    if color_map is not None:
+        p = Path(color_map)
+        if p.exists():
+            with open(p) as fh:
+                raw = json.load(fh)
+        else:
+            raw = json.loads(color_map)
+        parsed_color_map = {int(k): tuple(v) for k, v in raw.items()}
+
+    if parsed_color_map is None:
+        # Generate a default color map from GT rasters
+        import rasterio
+
+        unique_vals: set = set()
+        gt_path = Path(gt_dir)
+        for tif in list(gt_path.rglob("*.tif"))[:20]:
+            with rasterio.open(tif) as src:
+                data = src.read(1)
+            unique_vals.update(int(v) for v in set(data.ravel()))
+
+        rng = __import__("random").Random(42)
+        parsed_color_map = {}
+        for cls_id in sorted(unique_vals):
+            parsed_color_map[cls_id] = (
+                rng.randint(0, 255),
+                rng.randint(0, 255),
+                rng.randint(0, 255),
+            )
+
+    labels = (
+        list(pred_labels)
+        if pred_labels
+        else [f"pred_{i}" for i in range(len(pred_dirs))]
+    )
+
+    fig = create_segmentation_grid(
+        records=records,
+        gt_dir=Path(gt_dir),
+        pred_dirs=[Path(d) for d in pred_dirs],
+        pred_labels=labels,
+        color_map=parsed_color_map,
+        output_path=Path(output),
+        image_dir=Path(image_dir) if image_dir else None,
+        sort_by=sort_by,
+        n_samples=n_samples,
+        mode=mode,
+        dpi=dpi,
+    )
+    click.echo(f"Figure saved to '{output}'.")
+
+
+@cli.command("download-gee-lulc")
+@click.option(
+    "--source",
+    required=True,
+    type=click.Choice(
+        ["mapbiomas", "dynamic-world", "esri-lulc"], case_sensitive=False
+    ),
+    help="LULC product to download.",
+)
+@click.option(
+    "--year",
+    required=True,
+    type=int,
+    help="Target year for the LULC product.",
+)
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Directory where output GeoTIFFs will be written.",
+)
+@click.option(
+    "--bbox",
+    nargs=4,
+    type=float,
+    default=None,
+    metavar="XMIN YMIN XMAX YMAX",
+    help="Bounding box in WGS84 (xmin ymin xmax ymax). Mutually exclusive with --vector-path.",
+)
+@click.option(
+    "--vector-path",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="GeoPackage or GeoJSON file. Each polygon is downloaded separately.",
+)
+@click.option(
+    "--name-attribute",
+    default=None,
+    help="Vector attribute whose value is used to name each output file.",
+)
+@click.option(
+    "--download-mode",
+    default="direct",
+    show_default=True,
+    type=click.Choice(["direct", "export-drive"], case_sensitive=False),
+    help=(
+        "'direct' uses getDownloadURL (regions up to ~1° × 1°). "
+        "'export-drive' exports to Google Drive for large regions."
+    ),
+)
+@click.option(
+    "--max-workers",
+    default=4,
+    show_default=True,
+    type=int,
+    help="Number of parallel download threads.",
+)
+@click.option(
+    "--scale",
+    default=None,
+    type=int,
+    help="Pixel resolution in metres. Defaults to the product native resolution.",
+)
+@click.option(
+    "--crs",
+    default="EPSG:4326",
+    show_default=True,
+    help="Output coordinate reference system.",
+)
+@click.option(
+    "--drive-folder",
+    default="GEE_Downloads",
+    show_default=True,
+    help="Google Drive folder name (export-drive mode only).",
+)
+@click.option(
+    "--mapbiomas-collection",
+    default="brazil",
+    show_default=True,
+    help=(
+        "MapBiomas region key (e.g. brazil, amazon, atlantic_forest). "
+        "Ignored for other sources."
+    ),
+)
+@click.option(
+    "--mapbiomas-collection-id",
+    default=None,
+    help="Full GEE asset ID override for MapBiomas. Takes precedence over --mapbiomas-collection.",
+)
+@click.option(
+    "--project",
+    default=None,
+    help="GEE Cloud project ID.",
+)
+@click.option(
+    "--service-account-email",
+    default=None,
+    envvar="GEE_SERVICE_ACCOUNT_EMAIL",
+    help=(
+        "Service account email for non-interactive authentication "
+        "(e.g. mybot@my-project.iam.gserviceaccount.com). "
+        "Can also be set via the GEE_SERVICE_ACCOUNT_EMAIL environment variable. "
+        "Recommended for server/CI use."
+    ),
+)
+@click.option(
+    "--service-account-key-file",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    envvar="GEE_SERVICE_ACCOUNT_KEY_FILE",
+    help=(
+        "Path to the service account private key JSON file. "
+        "Can also be set via the GEE_SERVICE_ACCOUNT_KEY_FILE environment variable. "
+        "Recommended for server/CI use."
+    ),
+)
+@click.option(
+    "--proxy-url",
+    default=None,
+    envvar="HTTPS_PROXY",
+    help=(
+        "HTTP proxy URL (e.g. http://user:pass@proxy.corp:8080). "
+        "Applied to both the GEE SDK transport and direct downloads. "
+        "Falls back to the HTTPS_PROXY environment variable."
+    ),
+)
+@click.option(
+    "--ca-bundle",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    envvar="REQUESTS_CA_BUNDLE",
+    help=(
+        "Path to a CA certificate bundle (.crt/.pem) for SSL verification. "
+        "Required when the proxy uses a self-signed certificate. "
+        "Falls back to the REQUESTS_CA_BUNDLE environment variable."
+    ),
+)
+def download_gee_lulc_cmd(
+    source,
+    year,
+    output_dir,
+    bbox,
+    vector_path,
+    name_attribute,
+    download_mode,
+    max_workers,
+    scale,
+    crs,
+    drive_folder,
+    mapbiomas_collection,
+    mapbiomas_collection_id,
+    project,
+    service_account_email,
+    service_account_key_file,
+    proxy_url,
+    ca_bundle,
+):
+    """Download LULC rasters from Google Earth Engine.
+
+    Requires the 'earthengine-api' package: pip install earthengine-api
+
+    Authentication (server/CI — recommended):
+    \b
+        pytorch-smt-tools download-gee-lulc \\
+            --source mapbiomas --year 2022 \\
+            --bbox -48.5 -23.5 -47.5 -22.5 \\
+            --output-dir /data/mapbiomas \\
+            --service-account-email bot@proj.iam.gserviceaccount.com \\
+            --service-account-key-file /secrets/gee_key.json \\
+            --project my-gee-project
+
+    Authentication (interactive OAuth — requires browser access):
+    \b
+        pytorch-smt-tools download-gee-lulc \\
+            --source mapbiomas --year 2022 \\
+            --bbox -48.5 -23.5 -47.5 -22.5 \\
+            --output-dir /data/mapbiomas \\
+            --project my-gee-project
+
+    Per-polygon download from a vector file:
+    \b
+        pytorch-smt-tools download-gee-lulc \\
+            --source dynamic-world --year 2022 \\
+            --vector-path municipalities.gpkg \\
+            --name-attribute cod_ibge \\
+            --output-dir /data/dw \\
+            --service-account-email bot@proj.iam.gserviceaccount.com \\
+            --service-account-key-file /secrets/gee_key.json
+    """
+    from pathlib import Path
+
+    from pytorch_segmentation_models_trainer.tools.gee.gee_downloader import (
+        download_regions,
+        initialize_gee,
+        load_regions,
+    )
+
+    if bbox is None and vector_path is None:
+        raise click.UsageError("Either --bbox or --vector-path must be provided.")
+    if bbox is not None and vector_path is not None:
+        raise click.UsageError("--bbox and --vector-path are mutually exclusive.")
+
+    try:
+        initialize_gee(
+            project=project,
+            service_account_email=service_account_email,
+            service_account_key_file=service_account_key_file,
+            proxy_url=proxy_url,
+            ca_bundle=ca_bundle,
+        )
+    except ImportError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    try:
+        regions = load_regions(
+            bbox=tuple(bbox) if bbox else None,
+            vector_path=vector_path,
+            name_attribute=name_attribute,
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    click.echo(f"Downloading {source} for {len(regions)} region(s) (year={year})…")
+
+    results = download_regions(
+        regions=regions,
+        output_dir=Path(output_dir),
+        source=source,
+        year=year,
+        download_mode=download_mode,
+        max_workers=max_workers,
+        scale=scale,
+        crs=crs,
+        drive_folder=drive_folder,
+        mapbiomas_collection=mapbiomas_collection,
+        mapbiomas_collection_id=mapbiomas_collection_id,
+        proxy_url=proxy_url,
+        ca_bundle=ca_bundle,
+    )
+
+    n_ok = sum(1 for v in results.values() if v)
+    n_fail = len(results) - n_ok
+    click.echo(f"Done: {n_ok} succeeded, {n_fail} failed.")
+
+
+@cli.command("remap-raster-from-json")
+@click.option(
+    "--input",
+    "input_path",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="[Single-file mode] Input raster path.",
+)
+@click.option(
+    "--output",
+    "output_path",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="[Single-file mode] Output raster path.",
+)
+@click.option(
+    "--input-dir",
+    default=None,
+    type=click.Path(file_okay=False),
+    help="[Folder mode] Root directory of input rasters.",
+)
+@click.option(
+    "--output-dir",
+    default=None,
+    type=click.Path(file_okay=False),
+    help="[Folder mode] Root directory for remapped output rasters.",
+)
+@click.option(
+    "--mapping-json",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the DsgTools-compatible JSON mapping file.",
+)
+@click.option(
+    "--n-workers",
+    default=4,
+    show_default=True,
+    type=int,
+    help="Number of parallel threads.",
+)
+@click.option(
+    "--compress",
+    default="lzw",
+    show_default=True,
+    type=click.Choice(["lzw", "deflate", "zstd", "none"], case_sensitive=False),
+    help="GeoTIFF compression codec.",
+)
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    default=False,
+    help="[Folder mode] Suppress the tqdm progress bar.",
+)
+@click.option(
+    "--build-vrt",
+    "create_vrt",
+    is_flag=True,
+    default=False,
+    help=(
+        "[Folder mode] After remapping, build a GDAL VRT mosaic of all "
+        "successfully remapped rasters.  The nodata value from the JSON is "
+        "embedded in the VRT.  See --vrt-path to override the output location."
+    ),
+)
+@click.option(
+    "--vrt-path",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help=(
+        "[Folder mode] Path for the VRT file created by --build-vrt. "
+        "Defaults to <output-dir>/mosaic.vrt."
+    ),
+)
+def remap_raster_from_json_cmd(
+    input_path,
+    output_path,
+    input_dir,
+    output_dir,
+    mapping_json,
+    n_workers,
+    compress,
+    no_progress,
+    create_vrt,
+    vrt_path,
+):
+    """Remap raster pixel values using a DsgTools-compatible JSON mapping file.
+
+    \b
+    Unmapped values and source nodata pixels become the nodata_value defined
+    in the JSON (default 255).  Output dtype is inferred automatically from
+    the range of target values.
+
+    \b
+    SINGLE-FILE MODE
+        Remap one raster.  Requires --input and --output.
+
+            pytorch-smt-tools remap-raster-from-json \\
+                --input  /data/mapbiomas.tif \\
+                --output /data/edgv.tif \\
+                --mapping-json /data/mapbiomas_to_edgv.json
+
+    \b
+    FOLDER MODE
+        Remap every .tif/.tiff found recursively under --input-dir,
+        mirroring the directory tree under --output-dir.
+        Requires --input-dir and --output-dir.
+
+            pytorch-smt-tools remap-raster-from-json \\
+                --input-dir  /data/masks \\
+                --output-dir /data/masks_remapped \\
+                --mapping-json /data/mapbiomas_to_edgv.json \\
+                --n-workers 8
+
+    \b
+    FOLDER MODE + VRT
+        Add --build-vrt to create a mosaic.vrt of all remapped rasters.
+        Use --vrt-path to specify a custom VRT location.
+
+            pytorch-smt-tools remap-raster-from-json \\
+                --input-dir  /data/masks \\
+                --output-dir /data/masks_remapped \\
+                --mapping-json /data/mapbiomas_to_edgv.json \\
+                --build-vrt \\
+                --vrt-path /data/masks_remapped/mosaic.vrt
+
+    \b
+    JSON FORMAT
+        {
+          "description": "MapBiomas -> EDGV",
+          "nodata_value": 255,
+          "mapping": { "3": 1, "15": 2, "33": 0 }
+        }
+    """
+    from pathlib import Path
+
+    from pytorch_segmentation_models_trainer.tools.raster.tiff_remap import (
+        load_remap_json,
+        remap_raster_folder_from_json,
+        remap_raster_windowed,
+    )
+
+    single_mode = input_path is not None or output_path is not None
+    folder_mode = input_dir is not None or output_dir is not None
+
+    if single_mode and folder_mode:
+        raise click.UsageError(
+            "Use either --input/--output (single-file) or "
+            "--input-dir/--output-dir (folder), not both."
+        )
+    if not single_mode and not folder_mode:
+        raise click.UsageError(
+            "Provide --input/--output for single-file mode or "
+            "--input-dir/--output-dir for folder mode."
+        )
+
+    if single_mode:
+        if input_path is None or output_path is None:
+            raise click.UsageError(
+                "Single-file mode requires both --input and --output."
+            )
+        try:
+            mapping, nodata_value, _ = load_remap_json(Path(mapping_json))
+        except (FileNotFoundError, ValueError) as exc:
+            raise click.UsageError(str(exc)) from exc
+        _, success, err = remap_raster_windowed(
+            Path(input_path),
+            Path(output_path),
+            mapping,
+            nodata_value=nodata_value,
+            n_workers=n_workers,
+            compress=compress,
+        )
+        if not success:
+            raise click.ClickException(f"Remap failed: {err}")
+        click.echo(f"Remapped raster written to '{output_path}'.")
+    else:
+        if input_dir is None or output_dir is None:
+            raise click.UsageError(
+                "Folder mode requires both --input-dir and --output-dir."
+            )
+        try:
+            n_success, n_errors = remap_raster_folder_from_json(
+                Path(input_dir),
+                Path(output_dir),
+                Path(mapping_json),
+                n_workers=n_workers,
+                progress=not no_progress,
+                create_vrt=create_vrt,
+                vrt_path=Path(vrt_path) if vrt_path else None,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            raise click.UsageError(str(exc)) from exc
+        suffix = "" if n_success == 1 else "s"
+        click.echo(f"Done: {n_success} raster{suffix} remapped, {n_errors} error(s).")
+        if create_vrt:
+            out_vrt = vrt_path or str(Path(output_dir) / "mosaic.vrt")
+            click.echo(f"VRT written to '{out_vrt}'.")
+
+
+@cli.command("split-manual-patches")
+@click.argument("patches_csv", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Directory where val.csv and test.csv (and optionally train_filtered.csv) are written.",
+)
+@click.option(
+    "--image-col",
+    default="image_path",
+    show_default=True,
+    help="Column in PATCHES_CSV holding GeoTIFF paths.",
+)
+@click.option(
+    "--class-col",
+    default=None,
+    help=(
+        "Column holding class labels. Used to rank candidate splits by class "
+        "distribution balance (LaTeX §5.1.2). Omit to rank by fraction only."
+    ),
+)
+@click.option(
+    "--val-fraction",
+    default=0.20,
+    show_default=True,
+    type=float,
+    help="Target fraction of patches for validation.",
+)
+@click.option(
+    "--h3-resolution",
+    default=7,
+    show_default=True,
+    type=int,
+    help="H3 resolution for cell assignment (0–15).",
+)
+@click.option(
+    "--seed",
+    default=42,
+    show_default=True,
+    type=int,
+    help="Random seed for reproducibility.",
+)
+@click.option(
+    "--n-trials",
+    default=20000,
+    show_default=True,
+    type=int,
+    help="Number of random cell-order shuffles evaluated during the search.",
+)
+@click.option(
+    "--train-csv",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help=(
+        "Optional CSV of weak-training tiles. When provided, tiles overlapping "
+        "the --buffer-m exclusion zone around val/test patches are removed and "
+        "the result is written to train_filtered.csv. Omit to skip this step."
+    ),
+)
+@click.option(
+    "--buffer-m",
+    default=1000.0,
+    show_default=True,
+    type=float,
+    help="Exclusion buffer radius in metres around val/test patches (EPSG:3857).",
+)
+def split_manual_patches_cmd(
+    patches_csv,
+    output_dir,
+    image_col,
+    class_col,
+    val_fraction,
+    h3_resolution,
+    seed,
+    n_trials,
+    train_csv,
+    buffer_m,
+):
+    """Split manually labeled patches into val/test sets using H3 spatial cells.
+
+    PATCHES_CSV must have a column (--image-col) with GeoTIFF paths.
+    Centroids are assigned to H3 cells at --h3-resolution; entire cells are
+    allocated to val (~--val-fraction) or test, keeping cells intact.
+
+    The split that minimises the class-distribution distance from the full set
+    is selected (LaTeX §5.1.2). Pass --class-col to enable class-aware ranking.
+
+    When --train-csv is given, training tiles overlapping a --buffer-m radius
+    around any val/test patch are removed and saved as train_filtered.csv.
+    Omit --train-csv to skip the filtering step entirely.
+
+    \b
+    Examples:
+
+        # Val/test split only (no training filter)
+        pytorch-smt-tools split-manual-patches patches.csv \\
+            --output-dir splits/ --class-col majority_class
+
+        # Val/test split + filter training tiles
+        pytorch-smt-tools split-manual-patches patches.csv \\
+            --output-dir splits/ \\
+            --class-col majority_class \\
+            --train-csv /data/train_tiles.csv \\
+            --buffer-m 1000
+    """
+    from pytorch_segmentation_models_trainer.utils.h3_val_test_split import (
+        run as _run,
+    )
+
+    try:
+        stats = _run(
+            patches_csv=patches_csv,
+            output_dir=output_dir,
+            image_col=image_col,
+            class_col=class_col,
+            val_fraction=val_fraction,
+            h3_resolution=h3_resolution,
+            seed=seed,
+            n_trials=n_trials,
+            train_csv=train_csv,
+            buffer_m=buffer_m,
+        )
+    except (ValueError, ImportError) as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    click.echo(f"val    : {stats['n_val']} patches  ({stats['val_fraction']:.1%})")
+    click.echo(f"test   : {stats['n_test']} patches")
+    click.echo(f"val H3 cells : {stats['val_h3_cells']}")
+    if "n_train_before" in stats:
+        click.echo(
+            f"train  : {stats['n_train_before']} → {stats['n_train_after']} "
+            f"(removed {stats['n_train_before'] - stats['n_train_after']} tiles)"
+        )
+
+
+@cli.command("build-balanced-dataset")
+@click.argument("yaml_path", type=click.Path(exists=True, dir_okay=False))
+def build_balanced_dataset_cmd(yaml_path):
+    """Build a balanced training dataset CSV with sampler weights from YAML_PATH.
+
+    YAML_PATH must contain a ``balanced_dataset`` key whose value matches
+    the ``BalancedDatasetConfig`` dataclass.  The output CSV includes a
+    ``sampler_weight`` column ready for ``torch.utils.data.WeightedRandomSampler``.
+
+    \b
+    Minimal example (masks_only mode):
+
+        balanced_dataset:
+          mode: masks_only
+          sampling_method: rank_max
+          input:
+            patch_records:
+              - image_path: /data/img_0.tif
+                mask_path: /data/msk_0.tif
+                row_off: 0
+                col_off: 0
+                patch_size: 256
+          clustering:
+            k_min: 4
+            k_max: 12
+          output:
+            csv_path: /data/balanced.csv
+
+    \b
+    See conf/examples/balanced_dataset_local.yaml for a full example.
+    """
+    import yaml
+    from pytorch_segmentation_models_trainer.tools.sampling.balanced_dataset_builder import (
+        BalancedDatasetBuilder,
+    )
+    from pytorch_segmentation_models_trainer.tools.sampling.sampling_config import (
+        BalancedDatasetConfig,
+        ClusteringConfig,
+        EmbeddingsConfig,
+        ExclusionConfig,
+        LocalInputConfig,
+        OutputConfig,
+        PostgresConfig,
+        UniquenessConfig,
+        WeightBoostConfig,
+    )
+
+    with open(yaml_path) as fh:
+        raw = yaml.safe_load(fh)
+
+    cfg_dict = raw.get("balanced_dataset", raw)
+
+    def _build_input(d):
+        if "table" in d:
+            return PostgresConfig(**d)
+        return LocalInputConfig(**d)
+
+    def _build_config(d):
+        input_cfg = _build_input(d.pop("input"))
+        clustering = ClusteringConfig(**d.pop("clustering", {}))
+        uniqueness = UniquenessConfig(**d.pop("uniqueness", {}))
+        embeddings = EmbeddingsConfig(**d.pop("embeddings", {}))
+        exclusion = ExclusionConfig(**d.pop("exclusion", {}))
+        boost = WeightBoostConfig(**d.pop("boost", {}))
+        output = OutputConfig(**d.pop("output"))
+        return BalancedDatasetConfig(
+            input=input_cfg,
+            clustering=clustering,
+            uniqueness=uniqueness,
+            embeddings=embeddings,
+            exclusion=exclusion,
+            boost=boost,
+            output=output,
+            **d,
+        )
+
+    try:
+        config = _build_config(cfg_dict)
+    except (TypeError, KeyError) as exc:
+        raise click.UsageError(f"Invalid config in '{yaml_path}': {exc}") from exc
+
+    df = BalancedDatasetBuilder(config).build()
+    click.echo(
+        f"Built balanced dataset: {len(df)} patches → '{config.output.csv_path}'."
+    )
+    if config.output.geojson_path:
+        click.echo(f"GeoJSON written to '{config.output.geojson_path}'.")
+
+
+@cli.command("select-coreset")
+@click.argument("yaml_path", type=click.Path(exists=True, dir_okay=False))
+def select_coreset_cmd(yaml_path):
+    """Select a core-set from a balanced dataset CSV using YAML_PATH config.
+
+    YAML_PATH must contain a ``coreset`` key whose value matches the
+    ``CoreSetConfig`` dataclass.  The input CSV (output of
+    ``build-balanced-dataset``) is read from ``config.input_csv_path``.
+    The output CSV adds ``coreset_score`` and ``coreset_selected`` columns.
+
+    \b
+    Minimal example (LC method — no embeddings needed):
+
+        coreset:
+          method: lc
+          budget: 0.5
+          budget_mode: fraction
+          input_csv_path: /path/to/balanced_dataset.csv
+          output_csv_path: /path/to/coreset.csv
+
+    \b
+    See conf/examples/coreset_local.yaml for a full example.
+    """
+    import pandas as pd
+    import yaml
+
+    from pytorch_segmentation_models_trainer.tools.coreset.coreset_config import (
+        CoreSetConfig,
+    )
+    from pytorch_segmentation_models_trainer.tools.coreset.coreset_scorer import (
+        get_scorer,
+    )
+    from pytorch_segmentation_models_trainer.tools.coreset.coreset_selector import (
+        CoreSetSelector,
+    )
+
+    with open(yaml_path) as fh:
+        raw = yaml.safe_load(fh)
+
+    cfg_dict = raw.get("coreset", raw)
+
+    try:
+        config = CoreSetConfig(**cfg_dict)
+    except TypeError as exc:
+        raise click.UsageError(f"Invalid config in '{yaml_path}': {exc}") from exc
+
+    # Validate method early so the error message is user-friendly
+    try:
+        get_scorer(config.method)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    df = pd.read_csv(config.input_csv_path)
+    result = CoreSetSelector(config).select(df)
+    n_selected = int(result["coreset_selected"].sum())
+    click.echo(
+        f"Selected {n_selected}/{len(result)} patches → '{config.output_csv_path}'."
+    )
+
+
+@cli.command("compute-sampler-weights")
+@click.argument("yaml_path", type=click.Path(exists=True))
+def compute_sampler_weights_cmd(yaml_path):
+    """Compute per-patch sampler weights and write them to the output CSV.
+
+    YAML_PATH must point to a YAML file with the following fields:
+
+    \b
+    Required:
+      input_csv_path      Path to the coreset CSV.
+      output_csv_path     Where to write the result.
+      formula             "sqrt_inverse_freq" or "inverse_freq".
+      source              "topographic_vector_source" (use c0..cN-1 columns)
+                          or "sam" (recompute from mask GeoTIFF windows).
+
+    \b
+    Optional:
+      num_classes         Number of classes (default 6).
+      weight_column       Output column name (default "sampler_weight").
+      excluded_column     Boolean column to exclude patches (default None).
+      mask_dir            Required when source="sam".
+    """
+    import yaml
+
+    import pandas as pd
+
+    from pytorch_segmentation_models_trainer.tools.sampling.weight_calculator import (
+        compute_class_weights_from_proportions,
+    )
+
+    with open(yaml_path) as fh:
+        cfg = yaml.safe_load(fh)
+
+    cfg = cfg.get("compute_sampler_weights", cfg)
+
+    input_csv = cfg["input_csv_path"]
+    output_csv = cfg["output_csv_path"]
+    formula = cfg.get("formula", "sqrt_inverse_freq")
+    source = cfg.get("source", "topographic_vector_source")
+    num_classes = int(cfg.get("num_classes", 6))
+    weight_col = cfg.get("weight_column", "sampler_weight")
+    excluded_col = cfg.get("excluded_column", None)
+
+    df = pd.read_csv(input_csv)
+
+    if excluded_col and excluded_col in df.columns:
+        mask = ~df[excluded_col].astype(bool)
+    else:
+        mask = pd.Series(True, index=df.index)
+
+    if source == "topographic_vector_source":
+        class_cols = [f"c{i}" for i in range(num_classes)]
+        missing = [c for c in class_cols if c not in df.columns]
+        if missing:
+            raise click.UsageError(
+                f"Columns missing from CSV for source='topographic_vector_source': {missing}"
+            )
+        props = df.loc[mask, class_cols].values.astype(float)
+        weights_selected = compute_class_weights_from_proportions(
+            props, formula=formula
+        )
+        df[weight_col] = 0.0
+        df.loc[mask, weight_col] = weights_selected
+    elif source == "sam":
+        raise click.UsageError(
+            "source='sam' requires mask reading (not yet implemented in CLI). "
+            "Use source='topographic_vector_source' for CSV-based weights."
+        )
+    else:
+        raise click.UsageError(
+            f"Unknown source: {source!r}. Valid: 'topographic_vector_source', 'sam'."
+        )
+
+    from pathlib import Path
+
+    Path(output_csv).parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(output_csv, index=False)
+    click.echo(
+        f"Weights written to '{output_csv}' ({int(mask.sum())} patches weighted)."
+    )
+
+
+@cli.command("select-hybrid-coreset")
+@click.argument("yaml_path", type=click.Path(exists=True))
+def select_hybrid_coreset_cmd(yaml_path):
+    """Run hybrid vector+embedding coreset selection from a YAML config.
+
+    YAML_PATH must point to a YAML file with HybridVectorCoresetConfig fields.
+    """
+    import pandas as pd
+    import yaml
+
+    from pytorch_segmentation_models_trainer.tools.coreset.hybrid_coreset_selector import (
+        HybridVectorCoresetConfig,
+        HybridVectorCoresetSelector,
+    )
+
+    with open(yaml_path) as fh:
+        raw = yaml.safe_load(fh)
+
+    cfg_dict = raw.get("hybrid_coreset", raw)
+
+    try:
+        config = HybridVectorCoresetConfig(**cfg_dict)
+    except TypeError as exc:
+        raise click.UsageError(f"Invalid config in '{yaml_path}': {exc}") from exc
+
+    pool_df = pd.read_csv(config.input_csv_path)
+    result = HybridVectorCoresetSelector(config).select(pool_df)
+    n_selected = int(result["coreset_selected"].sum())
+    click.echo(
+        f"Selected {n_selected}/{len(result)} patches → '{config.output_csv_path}'."
+    )
+
+
+@cli.command("build-sam-corrected-masks")
+@click.argument("yaml_path", type=click.Path(exists=True))
+def build_sam_corrected_masks_cmd(yaml_path):
+    """Run SAM-based label correction over a coreset of GeoTIFF masks.
+
+    YAML_PATH must point to a YAML file with SAMLabelCorrectionConfig fields.
+    """
+    import yaml
+
+    from pytorch_segmentation_models_trainer.tools.sam_correction.sam_label_corrector import (
+        SAMLabelCorrectionConfig,
+        SamLabelCorrector,
+    )
+
+    with open(yaml_path) as fh:
+        raw = yaml.safe_load(fh)
+
+    cfg_dict = raw.get("sam_label_correction", raw)
+
+    try:
+        config = SAMLabelCorrectionConfig(**cfg_dict)
+    except TypeError as exc:
+        raise click.UsageError(f"Invalid config in '{yaml_path}': {exc}") from exc
+
+    from pathlib import Path
+
+    if not Path(config.sam_checkpoint).exists():
+        raise click.UsageError(f"SAM checkpoint not found: '{config.sam_checkpoint}'")
+
+    stats = SamLabelCorrector(config).run()
+    click.echo(f"Done. Processed {stats['n_tiles']} tiles in {stats['elapsed_s']}s.")
 
 
 def entry():

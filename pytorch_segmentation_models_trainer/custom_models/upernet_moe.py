@@ -355,7 +355,9 @@ class UPerNetMoE(nn.Module):
         """Return MoE blocks that have stored weight maps from the last forward pass."""
         blocks = []
         for name, module in self.decoder.named_modules():
-            if isinstance(module, MoEConv2dReLU) and hasattr(module, "last_expert_weight_maps"):
+            if isinstance(module, MoEConv2dReLU) and hasattr(
+                module, "last_expert_weight_maps"
+            ):
                 blocks.append((len(blocks), name, module))
         return blocks
 
@@ -427,11 +429,15 @@ class UPerNetMoE(nn.Module):
             E = w.shape[1]
 
             # Resize masks to feature map resolution
-            masks_resized = F.interpolate(
-                hard_masks.unsqueeze(1).float(),
-                size=w.shape[2:],
-                mode="nearest",
-            ).squeeze(1).long()  # (B, H_feat, W_feat)
+            masks_resized = (
+                F.interpolate(
+                    hard_masks.unsqueeze(1).float(),
+                    size=w.shape[2:],
+                    mode="nearest",
+                )
+                .squeeze(1)
+                .long()
+            )  # (B, H_feat, W_feat)
 
             valid = masks_resized != 255
             # Vectorized: compute mean weight per expert per class in one pass
@@ -444,11 +450,13 @@ class UPerNetMoE(nn.Module):
             pixels_per_class = one_hot.sum(dim=(0, 2, 3))  # (C,)
 
             for e in range(E):
-                w_e = w[:, e:e+1]  # (B, 1, H, W)
+                w_e = w[:, e : e + 1]  # (B, 1, H, W)
                 weighted = (w_e * one_hot).sum(dim=(0, 2, 3))  # (C,)
                 for c in range(num_classes):
                     if pixels_per_class[c] > 0:
-                        diagnostics[f"{p}affinity_e{e}_c{c}"] = weighted[c] / pixels_per_class[c]
+                        diagnostics[f"{p}affinity_e{e}_c{c}"] = (
+                            weighted[c] / pixels_per_class[c]
+                        )
                     else:
                         diagnostics[f"{p}affinity_e{e}_c{c}"] = w.new_tensor(0.0)
 

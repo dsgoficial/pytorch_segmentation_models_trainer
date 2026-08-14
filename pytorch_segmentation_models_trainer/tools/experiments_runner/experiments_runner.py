@@ -21,6 +21,7 @@ import csv
 import dataclasses
 import json
 import logging
+import multiprocessing as mp
 import os
 import secrets
 import statistics
@@ -30,12 +31,85 @@ from typing import Dict, List, Optional, Tuple
 
 from omegaconf import DictConfig, OmegaConf
 
-from pytorch_segmentation_models_trainer.train import train
 from pytorch_segmentation_models_trainer.utils.spatial_kfold import SpatialKFoldSplitter
+
+# train is imported inside _seed_subprocess_worker so it runs in the subprocess,
+# not in the parent ER process.  The _collect_metrics method is also unused now
+# (metrics are collected inside the subprocess) but kept for API compatibility.
 
 logger = logging.getLogger(__name__)
 
 _STATE_FILE = "runner_state.json"
+_SEED_RESULT_FILE = "_seed_result.json"
+
+
+def _seed_subprocess_worker(yaml_cfg: str, output_dir: str, result_path: str) -> None:
+    """Subprocess entry point: runs one training seed and writes results to a JSON file.
+
+    Runs in a fresh ``spawn``-ed process so that CUDA contexts, DataLoader
+    worker processes (persistent_workers=True / forkserver), and any other
+    per-seed state are fully isolated between seeds.  The parent ExperimentsRunner
+    process never touches a GPU or a DataLoader — it only reads the JSON result.
+
+    Args:
+        yaml_cfg: OmegaConf YAML string of the per-seed training config.
+        output_dir: Directory for this seed's outputs (created if absent).
+        result_path: Path where this function writes the JSON result dict.
+    """
+    import json as _json
+    import os as _os
+
+    import yaml as _yaml
+    from omegaconf import OmegaConf as _OmegaConf
+    from pytorch_segmentation_models_trainer.train import train as _train
+
+    _os.makedirs(output_dir, exist_ok=True)
+
+    try:
+        cfg = _OmegaConf.create(_yaml.safe_load(yaml_cfg))
+        trainer = _train(cfg)
+
+        all_metrics: Dict[str, float] = {}
+        try:
+            all_metrics = {k: float(v) for k, v in trainer.callback_metrics.items()}
+        except Exception:
+            pass
+
+        train_m = {
+            k: v
+            for k, v in all_metrics.items()
+            if k.startswith("train/")
+            or k.endswith("/train")
+            or k.endswith("/train_epoch")
+        }
+        val_m = {
+            k: v
+            for k, v in all_metrics.items()
+            if k.startswith("val/") or k.endswith("/val")
+        }
+        test_m = {
+            k: v
+            for k, v in all_metrics.items()
+            if k.startswith("test/") or k.endswith("/test")
+        }
+
+        ckpt_cb = getattr(trainer, "checkpoint_callback", None)
+        best_ckpt = (getattr(ckpt_cb, "best_model_path", "") or "") if ckpt_cb else ""
+        epochs = trainer.current_epoch + 1
+
+        result = {
+            "ok": True,
+            "train_metrics": train_m,
+            "val_metrics": val_m,
+            "test_metrics": test_m,
+            "best_checkpoint_path": best_ckpt,
+            "epochs_trained": epochs,
+        }
+    except Exception as exc:
+        result = {"ok": False, "error": repr(exc)}
+
+    with open(result_path, "w") as _f:
+        _json.dump(result, _f)
 
 
 @dataclass
@@ -54,6 +128,12 @@ class RunResult:
             Empty when no test dataset is configured.
         output_dir: Absolute path to the per-run output directory
             (``<output_base_dir>/run_<run_idx:02d>_seed<seed>``).
+        fold_idx: Zero-based fold index when in k-fold mode; ``None`` otherwise.
+        epochs_trained: Number of epochs actually completed, including early
+            stopping.  ``None`` when not yet populated.
+        best_checkpoint_path: Absolute path to the best checkpoint saved by
+            ``ModelCheckpoint`` for this run.  Empty string when no checkpoint
+            callback is configured.  ``None`` when not yet populated.
     """
 
     run_idx: int
@@ -64,6 +144,8 @@ class RunResult:
     test_metrics: Dict[str, float]
     output_dir: str
     fold_idx: Optional[int] = None
+    epochs_trained: Optional[int] = None
+    best_checkpoint_path: Optional[str] = None
 
 
 class ExperimentsRunner:
@@ -105,6 +187,10 @@ class ExperimentsRunner:
     # ------------------------------------------------------------------
 
     def _validate(self) -> None:
+        # Optuna mode manages its own n_trials; seeds/n_runs are optional.
+        if self.runner_cfg.get("optuna_search", None) is not None:
+            return
+
         seeds = self.runner_cfg.get("seeds", None)
         n_runs = self.runner_cfg.get("n_runs", None)
 
@@ -237,6 +323,64 @@ class ExperimentsRunner:
                 run_cfg, "logger.name", f"{current_name}_{run_tag}", merge=True
             )
 
+    def _all_run_metrics(self, r: RunResult) -> Dict[str, float]:
+        """Merge train, val and test metrics into a single dict."""
+        return {**r.train_metrics, **r.val_metrics, **r.test_metrics}
+
+    def _resolve_representative_metric(self, results: List[RunResult]) -> Optional[str]:
+        """Return the metric key used for representative / best-run selection.
+
+        Uses ``experiments_runner.representative_metric`` when set; otherwise
+        falls back to the first val metric key found (alphabetical order).
+        Returns ``None`` when no val metrics exist across all results.
+        """
+        metric_from_cfg = self.runner_cfg.get("representative_metric", None)
+        if metric_from_cfg:
+            return metric_from_cfg
+        all_val_keys = sorted({k for r in results for k in r.val_metrics})
+        return all_val_keys[0] if all_val_keys else None
+
+    def _select_representative_run(
+        self, results: List[RunResult], metric_key: str
+    ) -> Optional[RunResult]:
+        """Return the run whose metric value is closest to the mean (representative).
+
+        Args:
+            results: All completed runs.
+            metric_key: Metric to compare (searched across train/val/test).
+
+        Returns:
+            The :class:`RunResult` closest to the mean, or ``None`` when the
+            metric is absent in every run.
+        """
+        eligible = [r for r in results if metric_key in self._all_run_metrics(r)]
+        if not eligible:
+            return None
+        mean_val = statistics.mean(
+            self._all_run_metrics(r)[metric_key] for r in eligible
+        )
+        return min(
+            eligible, key=lambda r: abs(self._all_run_metrics(r)[metric_key] - mean_val)
+        )
+
+    def _select_best_run(
+        self, results: List[RunResult], metric_key: str
+    ) -> Optional[RunResult]:
+        """Return the run with the highest value of ``metric_key``.
+
+        Args:
+            results: All completed runs.
+            metric_key: Metric to maximise (searched across train/val/test).
+
+        Returns:
+            The :class:`RunResult` with the highest metric value, or ``None``
+            when the metric is absent in every run.
+        """
+        eligible = [r for r in results if metric_key in self._all_run_metrics(r)]
+        if not eligible:
+            return None
+        return max(eligible, key=lambda r: self._all_run_metrics(r)[metric_key])
+
     def _collect_metrics(
         self, trainer
     ) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float]]:
@@ -249,9 +393,21 @@ class ExperimentsRunner:
             Tuple of (train_metrics, val_metrics, test_metrics).
         """
         all_metrics = {k: float(v) for k, v in trainer.callback_metrics.items()}
-        train_metrics = {k: v for k, v in all_metrics.items() if k.startswith("train/")}
-        val_metrics = {k: v for k, v in all_metrics.items() if k.startswith("val/")}
-        test_metrics = {k: v for k, v in all_metrics.items() if k.startswith("test/")}
+        train_metrics = {
+            k: v
+            for k, v in all_metrics.items()
+            if k.startswith("train/") or k.endswith("/train")
+        }
+        val_metrics = {
+            k: v
+            for k, v in all_metrics.items()
+            if k.startswith("val/") or k.endswith("/val")
+        }
+        test_metrics = {
+            k: v
+            for k, v in all_metrics.items()
+            if k.startswith("test/") or k.endswith("/test")
+        }
         return train_metrics, val_metrics, test_metrics
 
     # ------------------------------------------------------------------
@@ -262,16 +418,38 @@ class ExperimentsRunner:
         return os.path.join(self.runner_cfg.output_base_dir, _STATE_FILE)
 
     def _save_state(self, all_seeds: List[int], results: List[RunResult]) -> None:
-        """Persist seed list and completed runs to ``runner_state.json``.
+        """Persist seed list, completed runs, and selection info to ``runner_state.json``.
 
         Args:
             all_seeds: Full ordered seed list for the experiment sequence.
             results: Completed :class:`RunResult` objects so far.
         """
         os.makedirs(self.runner_cfg.output_base_dir, exist_ok=True)
+        metric_key = self._resolve_representative_metric(results)
+        rep_run = (
+            self._select_representative_run(results, metric_key) if metric_key else None
+        )
+        best_run = self._select_best_run(results, metric_key) if metric_key else None
+
         state = {
             "all_seeds": all_seeds,
             "completed_runs": [dataclasses.asdict(r) for r in results],
+            "representative": (
+                {
+                    "run_idx": rep_run.run_idx,
+                    "checkpoint_path": rep_run.best_checkpoint_path or "",
+                }
+                if rep_run
+                else None
+            ),
+            "best_run": (
+                {
+                    "run_idx": best_run.run_idx,
+                    "checkpoint_path": best_run.best_checkpoint_path or "",
+                }
+                if best_run
+                else None
+            ),
         }
         with open(self._state_path(), "w") as f:
             json.dump(state, f, indent=2)
@@ -291,8 +469,15 @@ class ExperimentsRunner:
         seed: int,
         fold_idx: Optional[int] = None,
         fold_paths: Optional[Tuple] = None,
+        run_cfg: Optional[DictConfig] = None,
+        output_dir: Optional[str] = None,
     ) -> RunResult:
-        """Execute one training run and return its result.
+        """Execute one training run in an isolated subprocess and return its result.
+
+        Each seed is run inside a freshly ``spawn``-ed process so that CUDA
+        contexts and DataLoader worker processes (``persistent_workers=True`` /
+        ``forkserver``) are fully torn down between seeds, preventing the
+        inter-seed crash that plagued the original in-process approach.
 
         Args:
             run_idx: Zero-based index of this run.
@@ -302,10 +487,16 @@ class ExperimentsRunner:
 
         Returns:
             :class:`RunResult` with timing and metrics.
+
+        Raises:
+            RuntimeError: If the subprocess exits with a non-zero code or if
+                the worker reports an internal exception.
         """
-        run_cfg, output_dir = self._build_run_cfg(
-            run_idx, seed, fold_idx=fold_idx, fold_paths=fold_paths
-        )
+        if run_cfg is None or output_dir is None:
+            run_cfg, output_dir = self._build_run_cfg(
+                run_idx, seed, fold_idx=fold_idx, fold_paths=fold_paths
+            )
+        os.makedirs(output_dir, exist_ok=True)
 
         logger.info(
             "ExperimentsRunner — starting run %d | seed=%d%s | output=%s",
@@ -315,16 +506,45 @@ class ExperimentsRunner:
             output_dir,
         )
 
+        yaml_cfg = OmegaConf.to_yaml(run_cfg)
+        result_path = os.path.join(output_dir, _SEED_RESULT_FILE)
+
         start = time.perf_counter()
-        trainer = train(run_cfg)
+        ctx = mp.get_context("spawn")
+        p = ctx.Process(
+            target=_seed_subprocess_worker,
+            args=(yaml_cfg, output_dir, result_path),
+        )
+        p.start()
+        p.join()
         elapsed = time.perf_counter() - start
 
-        train_metrics, val_metrics, test_metrics = self._collect_metrics(trainer)
+        if p.exitcode != 0:
+            raise RuntimeError(
+                f"ExperimentsRunner: run {run_idx} (seed={seed}) subprocess "
+                f"exited with code {p.exitcode}. Check logs in {output_dir}."
+            )
+
+        with open(result_path) as f:
+            data = json.load(f)
+
+        if not data.get("ok"):
+            raise RuntimeError(
+                f"ExperimentsRunner: run {run_idx} (seed={seed}) failed — "
+                f"{data.get('error', 'unknown error')}"
+            )
+
+        train_metrics = data["train_metrics"]
+        val_metrics = data["val_metrics"]
+        test_metrics = data["test_metrics"]
+        epochs_trained = data["epochs_trained"]
+        best_checkpoint_path = data["best_checkpoint_path"]
 
         logger.info(
-            "ExperimentsRunner — run %d done in %.1fs | val: %s",
+            "ExperimentsRunner — run %d done in %.1fs | epochs=%d | val: %s",
             run_idx + 1,
             elapsed,
+            epochs_trained,
             val_metrics,
         )
 
@@ -337,18 +557,28 @@ class ExperimentsRunner:
             test_metrics=test_metrics,
             output_dir=output_dir,
             fold_idx=fold_idx,
+            epochs_trained=epochs_trained,
+            best_checkpoint_path=best_checkpoint_path,
         )
 
-    def run(self) -> List[RunResult]:
-        """Run all experiments in series, with optional resume and k-fold support.
+    def run(self):
+        """Run all experiments, dispatching to the appropriate loop.
 
-        When ``experiments_runner.kfold`` is present, iterates over all
-        ``seed × fold`` combinations (total = ``len(seeds) × n_splits`` runs).
-        Otherwise uses the original seed-only loop.
+        Priority order:
+        1. ``experiments_runner.optuna_search`` → :class:`OptunaRunner`
+        2. ``experiments_runner.kfold`` → :meth:`_run_kfold_loop`
+        3. Default → :meth:`_run_seed_loop`
 
         Returns:
-            List of :class:`RunResult`, one per run, ordered by ``run_idx``.
+            - When Optuna: tuple of ``(study, seed_results)``.
+            - Otherwise: list of :class:`RunResult` ordered by ``run_idx``.
         """
+        if self.runner_cfg.get("optuna_search", None) is not None:
+            from pytorch_segmentation_models_trainer.tools.experiments_runner.optuna_runner import (
+                OptunaRunner,
+            )
+
+            return OptunaRunner(self).run()
         kfold_cfg = self.runner_cfg.get("kfold", None)
         if kfold_cfg is not None:
             return self._run_kfold_loop(kfold_cfg)
@@ -478,6 +708,13 @@ class ExperimentsRunner:
     def _save_summary(self, results: List[RunResult]) -> None:
         """Write ``summary.csv`` with per-run metrics and mean ± std rows.
 
+        Columns included beyond the metric keys:
+
+        * ``epochs_trained`` — actual epoch count (early-stop aware).
+        * ``best_checkpoint_path`` — path to the best checkpoint for that run.
+        * ``representative`` — ``"*"`` for the run closest to the mean metric.
+        * ``best_run`` — ``"*"`` for the run with the highest metric value.
+
         When any result has a non-``None`` ``fold_idx``, a ``fold_idx`` column
         is included between ``run`` and ``seed``.
 
@@ -489,31 +726,58 @@ class ExperimentsRunner:
         summary_path = os.path.join(output_base_dir, "summary.csv")
 
         has_fold = any(r.fold_idx is not None for r in results)
-        all_metric_keys = sorted(
-            {
-                k
-                for r in results
-                for k in {**r.train_metrics, **r.val_metrics, **r.test_metrics}
-            }
-        )
-        if has_fold:
-            fieldnames = ["run", "fold_idx", "seed", "duration_s"] + all_metric_keys
-        else:
-            fieldnames = ["run", "seed", "duration_s"] + all_metric_keys
+        all_metric_keys = sorted({k for r in results for k in self._all_run_metrics(r)})
 
-        def _all_metrics(r: RunResult) -> Dict[str, float]:
-            return {**r.train_metrics, **r.val_metrics, **r.test_metrics}
+        base_cols = [
+            "run",
+            "seed",
+            "duration_s",
+            "epochs_trained",
+            "best_checkpoint_path",
+        ]
+        if has_fold:
+            base_cols = [
+                "run",
+                "fold_idx",
+                "seed",
+                "duration_s",
+                "epochs_trained",
+                "best_checkpoint_path",
+            ]
+        fieldnames = base_cols + all_metric_keys + ["representative", "best_run"]
 
         def _fmt(v) -> str:
             return f"{v:.6f}"
 
+        metric_key = self._resolve_representative_metric(results)
+        rep_run = (
+            self._select_representative_run(results, metric_key) if metric_key else None
+        )
+        best_run_sel = (
+            self._select_best_run(results, metric_key) if metric_key else None
+        )
+
         rows = []
         for r in results:
-            m = _all_metrics(r)
+            m = self._all_run_metrics(r)
             row: Dict = {
                 "run": r.run_idx,
                 "seed": r.seed,
                 "duration_s": f"{r.training_time_seconds:.2f}",
+                "epochs_trained": (
+                    str(r.epochs_trained) if r.epochs_trained is not None else ""
+                ),
+                "best_checkpoint_path": r.best_checkpoint_path or "",
+                "representative": (
+                    "*"
+                    if (rep_run is not None and r.run_idx == rep_run.run_idx)
+                    else ""
+                ),
+                "best_run": (
+                    "*"
+                    if (best_run_sel is not None and r.run_idx == best_run_sel.run_idx)
+                    else ""
+                ),
             }
             if has_fold:
                 row["fold_idx"] = r.fold_idx if r.fold_idx is not None else ""
@@ -522,10 +786,20 @@ class ExperimentsRunner:
             rows.append(row)
 
         durations = [r.training_time_seconds for r in results]
+        epochs_list = [
+            r.epochs_trained for r in results if r.epochs_trained is not None
+        ]
+
         mean_row: Dict = {
             "run": "mean",
             "seed": "-",
             "duration_s": _fmt(statistics.mean(durations)),
+            "epochs_trained": (
+                f"{statistics.mean(epochs_list):.2f}" if epochs_list else ""
+            ),
+            "best_checkpoint_path": "",
+            "representative": "",
+            "best_run": "",
         }
         std_row: Dict = {
             "run": "std",
@@ -533,13 +807,25 @@ class ExperimentsRunner:
             "duration_s": (
                 _fmt(statistics.stdev(durations)) if len(durations) >= 2 else "0.000000"
             ),
+            "epochs_trained": (
+                f"{statistics.stdev(epochs_list):.2f}"
+                if len(epochs_list) >= 2
+                else ("0.00" if epochs_list else "")
+            ),
+            "best_checkpoint_path": "",
+            "representative": "",
+            "best_run": "",
         }
         if has_fold:
             mean_row["fold_idx"] = ""
             std_row["fold_idx"] = ""
 
         for k in all_metric_keys:
-            vals = [_all_metrics(r)[k] for r in results if k in _all_metrics(r)]
+            vals = [
+                self._all_run_metrics(r)[k]
+                for r in results
+                if k in self._all_run_metrics(r)
+            ]
             mean_row[k] = _fmt(statistics.mean(vals)) if vals else ""
             std_row[k] = (
                 _fmt(statistics.stdev(vals))

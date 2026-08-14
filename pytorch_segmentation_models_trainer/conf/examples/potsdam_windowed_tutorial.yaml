@@ -1,0 +1,37 @@
+defaults:
+  - raster_patch_segmentation
+  - _self_
+
+hyperparameters:
+  model_name: unet_resnet34_potsdam_tutorial
+  backbone: resnet34
+  batch_size: 4
+  epochs: 2
+  max_lr: 1e-4
+  classes: 6
+
+train_dataset:
+  image_dir: /data/potsdam/windowed_subset/images
+  mask_dir: /data/potsdam/windowed_subset/masks
+  patch_size: ${backbone.input_width}
+  stride: ${backbone.input_width}
+  image_dtype: uint8
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 2
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  image_dir: /data/potsdam/windowed_subset/images
+  mask_dir: /data/potsdam/windowed_subset/masks
+  patch_size: ${backbone.input_width}
+  stride: ${backbone.input_width}
+  image_dtype: uint8
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 2
+    shuffle: false
+    pin_memory: true
+    drop_last: false

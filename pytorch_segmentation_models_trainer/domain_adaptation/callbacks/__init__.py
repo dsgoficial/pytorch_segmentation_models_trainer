@@ -2,6 +2,7 @@
 """
 PyTorch Lightning callbacks for domain adaptation training monitoring.
 """
+
 from pytorch_segmentation_models_trainer.domain_adaptation.callbacks.monitor_callback import (
     DomainAdaptationMonitorCallback,
 )

@@ -1,4 +1,490 @@
-# Unreleased
+# Version 1.4.0 - 2026-08-13
+
+## WRS sqrt Sampler Weights
+
+- Added `compute_class_weights_from_proportions(props, formula)` to `tools/sampling/weight_calculator.py`. Supports two formulas: `sqrt_inverse_freq` (article-validated, smoother rare-class upweighting) and `inverse_freq` (linear). Zero-frequency classes are handled gracefully (treated as infinite frequency → zero contribution).
+- New CLI command `compute-sampler-weights <yaml_path>` with `source: topographic_vector_source` mode (reads `c0..c{N-1}` columns from the coreset CSV).
+- Example config at `conf/examples/compute_sampler_weights.yaml`.
+- 100% test coverage (`tests/test_weight_calculator.py`).
+
+## Hybrid Coreset Selection
+
+- Added `tools/coreset/vector_selector.py` with five stateless selection primitives: `compute_intersection_areas`, `select_by_vector_intersection`, `fd_embedding_select` (K-Means round-robin FD), `lc_fd_select` (top-entropy LC + FD), `entropy_sweep_select`.
+- Added `tools/coreset/hybrid_coreset_selector.py` with `HybridVectorCoresetConfig`, `VectorSelectionStep`, `EmbeddingSelectionStep` dataclasses and `HybridVectorCoresetSelector.select()` orchestrator. Selection proceeds in three phases: spatial vector intersection → embedding FD/LC-FD → entropy sweep. Each selected patch is tagged with its `selection_step`.
+- New CLI command `select-hybrid-coreset <yaml_path>` registered in `cli.py`.
+- Example config added at `conf/examples/hybrid_coreset.yaml`.
+- Exports added to `tools/coreset/__init__.py`.
+- 100% test coverage (`tests/test_vector_selector.py` + `tests/test_hybrid_coreset_selector.py`, 41 tests).
+
+## SAM Label Correction
+
+- Added `pytorch_segmentation_models_trainer/tools/sam_correction/` package with `SAMLabelCorrectionConfig`, `SAMSegmentCache`, `SamLabelCorrector`, and `apply_sam_correction`.
+- `apply_sam_correction`: pure-function majority vote within each SAM AMG segment across the original topographic vector source and optional auxiliary LULC rasters. Non-target pixels are never modified. Masks processed ascending by `(predicted_iou, area)` so higher-confidence segments overwrite.
+- `SAMSegmentCache`: NPZ-based segment cache keyed by tile/window coordinates. Disabled when `cache_dir=""`. Old-format files (missing `iou_N` arrays) are rejected gracefully.
+- `SamLabelCorrector.run()`: orchestrates tile-level processing with `tqdm` progress, parallel target output directories, and optional chunk-level caching for multi-run experiments. Supports `start_idx`/`end_idx` for multi-GPU splits.
+- New CLI command `build-sam-corrected-masks <yaml_path>` (registered in `cli.py`). Validates SAM checkpoint presence before starting.
+- Example config added at `conf/examples/sam_label_correction.yaml`.
+- 100% test coverage across all new modules (`tests/test_sam_label_corrector.py`, 37 tests).
+
+## Optuna Hyperparameter Search
+
+- Added `OptunaRunner` (`tools/experiments_runner/optuna_runner.py`): integrates [Optuna](https://optuna.org/) HPO into the `ExperimentsRunner` pipeline. Configure via `experiments_runner.optuna_search` in any training YAML.
+- Supports four search param types: `float` (with optional log-scale), `int` (with optional step), `categorical`, and `config_block` — the last allows swapping entire config subtrees (loss function, scheduler, optimizer) where different choices have heterogeneous parameters.
+- Five samplers available: `TPE` (default, Bayesian), `GP` (Gaussian Process), `CmaES`, `Random`, and `Grid`.
+- Study persistence and automatic resume via SQLite (`storage: sqlite:///study.db`). Pointing to an existing database with the same `study_name` resumes from where it left off.
+- After each trial, an incremental `trial_summary.csv` is written. At study end: `best_trial_config.yaml` (full config with best HPs), `param_importances.json` (fANOVA scores), and four Plotly HTML visualisation files under `plots/`.
+- Mode B: when `seeds` or `n_runs` is also set in the runner block, a standard seed-loop run is automatically executed with the best trial's config after HPO completes.
+- `ExperimentsRunner._run_single` now accepts optional `run_cfg` and `output_dir` parameters to bypass `_build_run_cfg` — enables `OptunaRunner` to inject trial-specific configs without mutating the parent config.
+- `ExperimentsRunner._validate` no longer requires `seeds`/`n_runs` when `optuna_search` is present (Optuna manages its own `n_trials`).
+- Added `config_definitions/optuna_config.py` with `OptunaSearchConfig` and `SearchParamConfig` dataclasses.
+- New dependencies: `optuna>=3.0.0`, `plotly>=5.0.0`.
+- Example config: `conf/examples/optuna_search.yaml`.
+- Docs: `website/docs/user-guide/optuna-search.md`.
+
+## Bug fixes
+
+- Fixed CI failure introduced by the Optuna integration: `optuna` and `plotly` were only added to `requirements.txt`, not to `pyproject.toml`'s `dependencies` (the source `uv sync --frozen` actually installs from), so `tests/test_optuna_runner.py` failed to collect with `ModuleNotFoundError: No module named 'optuna'`. Added both packages to `pyproject.toml` and regenerated `uv.lock`.
+
+## Model
+
+- `Model.get_model()` now supports `zero_init_extra_input_channels: true` as a top-level config key. When set, the weights of input channels beyond the first 3 in the first `Conv2d` are zeroed after instantiation. This ensures that models extended with extra input channels (e.g. one-hot LULC bands appended to RGB) behave identically to the 3-channel RGB baseline at epoch 0, instead of inheriting the cyclic-averaging initialization that `segmentation_models_pytorch` applies by default when `in_channels > 3`. See `conf/examples/multichannel_zero_init_segmentation.yaml` for a full working example.
+
+## MBTiles Mask Dataset
+
+- `MBTilesMaskWindowedDataset` now accepts `mask_base_path` parameter: when set,
+  relative mask paths stored in `window_index_cache` are resolved against this
+  base directory. Absolute paths in the CSV are left unchanged, so existing
+  configurations continue to work without modification.
+- `MBTilesMaskWindowedDataset` now accepts `window_index_cache` CSV/Parquet files
+  with a square `patch_size` column instead of requiring `width` and `height`,
+  allowing coreset/sampling window CSVs to be used directly while preserving the
+  existing `width,height` cache format.
+- `MBTilesMaskWindowedDataset` can also load `window_index_cache` rows expressed
+  as world-coordinate bounds (`minx`, `miny`, `maxx`, `maxy`) in the mask CRS,
+  converting them to rasterio windows. The `tile_minx/tile_miny/tile_maxx/
+  tile_maxy` naming used by sampling outputs is accepted as a bounds alias, and
+  `window_index_mask_path_key` supports CSVs whose mask path column is not named
+  `mask_path`.
+- Added `MBTilesSoftLabelMaskWindowedDataset`, which reads RGB from MBTiles,
+  aligns BAGS/LULC sources to each mask-referenced window, and computes
+  `P_soft`/`W_conf` on the fly for E3-E5-style soft-label experiments without
+  pre-exporting RGB or materializing soft-label GeoTIFFs.
+
+## LULC Input Dataset
+
+- Added `MBTilesLulcInputMaskWindowedDataset`, which reads RGB from MBTiles,
+  aligns external LULC rasters/VRTs to each mask-referenced window, one-hot
+  encodes them, and concatenates them with RGB for E2-style experiments without
+  pre-exporting RGB tiles.
+
+## Experiments Runner
+
+- `ExperimentsRunner` now collects Lightning metric keys logged with the current
+  suffix convention (`loss/val`, `JaccardIndex/val`, etc.) in addition to the
+  legacy prefix convention (`val/loss`), so `summary.csv` includes the metrics
+  emitted by `Model.log_dict`.
+- `Model._compute_loss()` now unwraps direct loss functions that return
+  `(loss, extra_info)`, matching the framework `Loss` base class contract used
+  by `SoftLabelWeightedCELoss`.
+
+## CoreSet Selection — Sampler Weight Integration
+
+- `CoreSetSelector.compute_sampler_weights(df, cap=0.25, class_dist_column="class_dist_json", weight_column="sampler_weight")` added: computes per-patch inverse-class-frequency weights for `WeightedRandomSampler`, measured over the selected coreset subset. Non-selected patches get weight 0.0; selected patches are capped at `cap` to prevent rare-class dominance. Implements the `sampler_weight_v3` recipe used in the coreset experiments — previously only available in external scripts.
+
+## CoreSet Selection — Feature Activation
+
+- `score_fa` now follows the paper's gamma-based FA formula:
+  `gamma_i = -(1 - mu_i) * log(sigma_i + eps)` and
+  `s_i^FA = 1 - minmax(gamma_i)`, replacing the previous
+  `mu_scaled * sigma_scaled` approximation and matching the reference
+  implementation's raw mean/std gamma calculation.
+
+## Embedding Extraction
+
+- `extract_embeddings` now wraps the DataLoader inference loop with a `tqdm` progress bar (per-batch, with total count) so extraction progress is always visible for large pools.
+
+## CoreSet Selection — GPU Acceleration
+
+- `CoreSetConfig` gains `device: Optional[str] = None`; `None` auto-selects
+  CUDA when available, `"cpu"` forces CPU, `"cuda"` forces GPU.
+- `score_cb` dispatches to `_score_cb_gpu` (torch float32 tensors, full greedy
+  loop on device) or `_score_cb_cpu` (numpy float64) based on resolved device.
+  GPU path is equivalent to CPU but uses float32 — minor tie-breaking differences
+  at identical entropy values are expected.
+- `score_fd` uses the framework's `MiniBatchKMeans` (GPU-accelerated, batched
+  K-Means++) instead of sklearn when device resolves to CUDA; elbow search and
+  final clustering both run on GPU.
+- `tqdm` progress bars added to `score_cb` (per-patch) and `score_fd` (per-k
+  elbow search) for visibility on large pools.
+
+## CoreSet Selection — Spatial Diversity & Pool Filtering
+
+- `CoreSetConfig` gains `fd_use_spatial: bool = False`: when `True`, `score_fa`
+  and `score_fd` append normalised `(lat_norm, lon_norm)` from the tile centroid
+  to the embedding matrix before FA scoring and FD K-Means clustering.
+  `score_lc_fd` and `score_fa_cb` inherit the flag automatically because they
+  delegate to `score_fd` / `score_fa` internally.
+- `CoreSetConfig` gains `cb_use_spatial: bool = False`: when `True`, `score_cb`
+  appends normalised `(lat_norm, lon_norm)` derived from tile centroid
+  (`tile_minx/maxx/miny/maxy`) to the class-frequency vector before greedy
+  entropy maximisation, enforcing geographic spread alongside class balance.
+- `CoreSetConfig` gains `exclude_low_entropy: bool = True`: when `False`,
+  patches with `has_low_entropy=True` are kept in the pool, recovering
+  homogeneous patches (e.g. solid built-up areas) previously discarded by the
+  entropy threshold. Hard exclusion of `has_mask_border_nodata`,
+  `has_image_black_border`, and `has_high_nodata` is always applied.
+- `CoreSetSelector.select()` now applies exclusion filters internally before
+  scoring, so callers pass the full `balanced_dataset.csv` and control
+  filtering via config instead of pre-filtering externally.
+
+## CoreSet Selection — Embedding Sources
+
+- `CoreSetConfig` gains `parquet_path: Optional[str]`; when set and
+  `embedding_column` is absent from the input DataFrame, `CoreSetSelector`
+  auto-merges embeddings from the Parquet file (join on `image_path`,
+  `row_off`, `col_off`) before scoring — no manual merge needed for FA/FD
+  methods when coming from the local pipeline.
+- `PostgresConfig` gains `fetch_embeddings: bool = False`; when `True`,
+  `PostgresReader` includes the embedding column in the SELECT query and parses
+  pgvector values (list, ndarray, or `"[…]"` string) to `float32` numpy arrays.
+
+## CoreSet Selection
+
+- Added `tools/coreset/` module implementing 6 model-agnostic core-set selection
+  methods from Nogueira et al. 2026 (IEEE Access, DOI 10.1109/ACCESS.2026.3659734):
+  LC, CB, FA, FD, LC/FD hybrid, FA/CB hybrid.
+- `CoreSetSelector` takes `balanced_dataset.csv` as input and outputs a CSV with
+  `coreset_score` and `coreset_selected` columns for hard-budget selection of the
+  most informative training patches.
+- `CoreSetConfig` dataclass controls method, budget (fraction or count), embedding
+  column, FD K-selection strategy, and hybrid mixing coefficients.
+- New CLI command `select-coreset <yaml_path>` for YAML-driven pipeline integration.
+- `vendi_score.py`: optional Vendi-score-based K selection for the FD method
+  (default is elbow, matching the existing `class_freq_clustering` module).
+- LC and CB methods operate on pre-computed `class_entropy`/`class_dist_json`
+  columns (no mask I/O — runs in seconds on 100k+ patches).
+- FA and FD methods consume pre-computed embeddings column (e.g. DINOv2 output
+  from `embedding_extractor.py`); raise `ValueError` loudly when not provided.
+- Added `conf/examples/coreset_local.yaml` reference config.
+
+## Balanced Dataset Sampling
+
+- Added `num_workers` field to `BalancedDatasetConfig` (default 8) to control thread parallelism for
+  mask-stats and exclusion loops.
+- Replaced serial `iterrows` loops in `_compute_mask_stats` and `_apply_exclusions` with
+  `ThreadPoolExecutor.map`, giving ~2–3× throughput improvement on I/O-bound raster reads.
+- Added `tqdm` progress bars to all three parallel loops (`mask stats`, `border nodata`,
+  `black border`) so long runs show live throughput and ETA.
+
+## Tutorials and notebooks
+
+- Added a new `website/docs/tutorials/` section that indexes notebook-based
+  walkthroughs alongside the existing user guide and examples.
+- Added starter notebooks under `notebooks/` for quickstart, Potsdam
+  windowed segmentation, and tiled inference/export, so users can follow a
+  practical path from data preparation to prediction.
+- Linked the tutorials section from the docs introduction so the notebook
+  path is discoverable from the main documentation entry point.
+
+## H3 Spatial Val/Test Split
+
+- Added `pytorch_segmentation_models_trainer/utils/h3_val_test_split.py` implementing
+  the §5.1.2 Dataset Partitions protocol: assigns GeoTIFF patch centroids to H3
+  resolution-7 cells (≈1.4 km edge), then uses 20 000-trial random search with
+  frozenset deduplication to find the H3-cell-intact split whose validation class
+  distribution is closest to the full set (target val ≈ 20%).
+- Added `filter_weak_training_tiles` to exclude training tiles within a 1 km
+  buffer of any val/test patch via geopandas spatial join.
+- `train_csv` parameter is optional in `run()`; omit to skip training filtering entirely.
+- Added `split-manual-patches` CLI command (via `pytorch-smt-tools`) with options
+  for `--val-fraction`, `--class-col`, `--h3-resolution`, `--seed`, `--n-trials`,
+  `--train-csv`, `--buffer-m`.
+- Added `h3>=3.7.0,<5` to `requirements.txt` and `pyproject.toml` dependencies.
+- 45 unit/integration tests in `tests/test_h3_val_test_split.py`; 100% coverage on
+  new module.
+
+## Soft Labels - BAGS border confidence for Experiment E5
+
+- Added BAGS-based `w_border_carta` support to soft-label confidence maps:
+  `compute_w_conf` now accepts `bags_mask` and `border_radius` and computes
+  `min(1, d_carta / R)` from the 3x3 morphological boundary of the BAGS mask.
+  The legacy argmax-based border remains the default when no BAGS mask is
+  provided.
+- Added `--image-key`, `--mask-key`, repeatable `--lulc-key`, and
+  `--border-radius` to the `build-soft-labels` CLI. The source CSV is now a
+  wide one-row-per-tile file; the soft label is an equal vote over `mask_key`
+  plus the listed `lulc_keys`.
+- Added `mask_key`, `lulc_keys`, and `border_radius` to
+  `SoftLabelCachedDataset` and `SoftLabelCachedDatasetConfig`, so lazy
+  full-tile and windowed reads can use the same E5 confidence formula without
+  rebuilding the P_soft cache.
+- Updated `conf/examples/soft_label_cached.yaml` and the soft-label training
+  guide with functional Experiment E5 examples.
+
+## Soft Labels — SoftLabelCachedDataset with windowed read
+
+- Added `SoftLabelCachedDataset` in `dataset_loader/soft_label_cached_dataset.py`:
+  accepts the same wide `sources_csv` format as `build-soft-labels`
+  (`tile_id, image_path, mask_path, <lulc columns...>`), computes P_soft
+  lazily on first access (atomic `.tmp → rename` write, safe for multi-worker
+  DataLoaders), and reads from the GeoTIFF cache on subsequent accesses.
+  W_conf is recomputed on every access from the cached P_soft so that `alpha`,
+  `entropy_norm`, and `use_border` can be changed without invalidating the cache.
+- Added windowed read mode (two strategies):
+  1. `patch_size` / `patch_stride` — enumerates a regular grid of non-overlapping
+     (or strided) patches across every tile.
+  2. `windows_csv` — reads an explicit list of windows from a CSV, taking priority
+     over `patch_size` when both are given.  `windows_coord_type="image"` reads
+     pixel row/col offsets (`row_off, col_off, patch_h, patch_w`); `"world"` reads
+     geographic bounding boxes (`minx, miny, maxx, maxy`) with an optional `crs`
+     column — when `crs` differs from the tile's CRS,
+     `rasterio.warp.transform_bounds` reprojects the bounds automatically.
+     In both modes only the requested window is loaded into memory; the full-tile
+     P_soft cache is still stored as a single GeoTIFF.
+- Added `SoftLabelCachedDatasetConfig` dataclass in
+  `config_definitions/dataset_config.py` for Hydra integration.
+- Added `conf/examples/soft_label_cached.yaml` with full-tile and windowed
+  config examples.
+- 100% test coverage (39 tests in `tests/test_soft_label_cached_dataset.py`).
+
+## Soft Labels — entropy_norm parameter (Experiment E4)
+
+- Added `entropy_norm: str = "max_entropy"` parameter to `compute_w_conf`,
+  `process_tile`, and `run` in `tools/soft_labels/build_soft_labels.py`.
+  When `entropy_norm="minmax"`, applies per-tile min-max normalisation to the
+  uncertainty map before computing `w_entropy` (LaTeX Eq. 9–10):
+  `U_norm(i) = (U(i) - min U) / (max U - min U)`, `w_entropy(i) = 1 - U_norm(i)`.
+  Default `"max_entropy"` preserves the previous behaviour `1 - H/log(C)`.
+  When all pixels share the same entropy (degenerate case), `w_entropy=1.0` for all.
+- Added `--entropy-norm` CLI option to `build-soft-labels` command with choices
+  `max_entropy` (default) and `minmax`.  Use `--entropy-norm minmax` for Experiments E4/E5.
+
+## LULC Input Dataset
+
+- Added `LulcInputDataset` in `dataset_loader/lulc_input_dataset.py`: reads an
+  RGB image and an arbitrary number of single-band LULC rasters, one-hot
+  encodes each raster, and concatenates the result with the RGB channels to
+  produce a `(3 + N × num_classes, H, W)` input tensor.  The training target
+  is a hard integer mask.
+- Added `LulcInputWindowedDataset` subclass: same output format, but reads
+  fixed-size patches on-the-fly from full-scene rasters using
+  `rasterio.windows.Window`.  Each CSV row specifies a patch via
+  `row_off` / `col_off` / `patch_size` columns.
+- One-hot encoding helper `_one_hot_chw` treats `ignore_lulc_index` (default
+  `255`) and out-of-range values as "no valid class", producing all-zero vectors.
+- Geometric augmentations (flip, rotate, …) are applied consistently to the
+  RGB image, the training mask, and all LULC rasters via albumentations
+  `additional_targets`; `Normalize` affects only the `image` target.
+- Added `LulcInputDatasetConfig` and `LulcInputWindowedDatasetConfig` dataclasses
+  in `config_definitions/dataset_config.py` for Hydra integration.
+- Added `conf/examples/lulc_input_dataset.yaml` with tile-based and windowed
+  config examples.
+- Added `website/docs/user-guide/lulc-input-dataset.md` with full documentation,
+  CSV format reference, parameter tables, and Python API examples.
+- 100% test coverage (19 tests in `tests/test_lulc_input_dataset.py`).
+
+## JSON Raster Remapper + VRT Builder
+
+- Added `build_vrt(raster_paths, output_path, nodata_value)` to
+  `tools/raster/tiff_remap.py`: builds a GDAL VRT mosaic from any list of
+  co-registered rasters using only `xml.etree.ElementTree` + rasterio (no
+  `osgeo.gdal` dependency).  Validates that all inputs share the same CRS,
+  pixel resolution, and band count; raises `ValueError` with a descriptive
+  message on mismatch.  Source paths inside the VRT are written as relative
+  paths when possible, falling back to absolute otherwise.
+- Extended `remap_raster_folder_from_json` with `create_vrt=False` and
+  `vrt_path=None` keyword arguments.  When `create_vrt=True`, a mosaic VRT
+  is built from all successfully remapped rasters after the thread pool
+  finishes, using the `nodata_value` from the JSON file.
+- Extended `pytorch-smt-tools remap-raster-from-json` CLI with `--build-vrt`
+  flag and `--vrt-path` option (folder mode only).
+
+## JSON Raster Remapper
+
+- Added `load_remap_json` to `tools/raster/tiff_remap.py`: loads and validates
+  a DsgTools-compatible JSON mapping file (`description`, `nodata_value`,
+  `mapping` fields).  Non-integer entries are skipped with a `UserWarning`;
+  `nodata_value` defaults to 255 when absent.
+- Added `infer_output_dtype`: selects the smallest numpy dtype (uint8 → uint16
+  → int16 → int32 → float32) that represents all target values and the nodata
+  value.
+- Added `remap_raster_windowed`: single-file remap with concurrent windowed I/O.
+  Reads are parallelised (one rasterio handle per thread via
+  `ThreadPoolExecutor`); writes are serialised with a `threading.Lock`.
+  Unmapped pixels become `nodata_value` (DsgTools semantics, unlike the
+  existing `remap_raster` which keeps unmapped values unchanged).  Input nodata
+  pixels are also forced to `nodata_value` after the mapping loop.
+- Added `remap_raster_folder_from_json`: batch version — loads the JSON once
+  and processes all matching rasters in a directory tree with file-level thread
+  parallelism.
+- Exposed as `pytorch-smt-tools remap-raster-from-json` CLI command supporting
+  single-file (`--input`/`--output`) and folder (`--input-dir`/`--output-dir`)
+  modes in a single command with mutual-exclusivity validation.
+- Added `conf/examples/remap_raster_from_json.yaml` with folder-mode example.
+- Updated `website/docs/user-guide/raster-tools.md` with full documentation,
+  JSON format reference, CLI usage, and Python API examples.
+- 100% test coverage (35 tests in `tests/test_tiff_remap.py`).
+
+## GEE LULC Downloader
+
+- Added `pytorch_segmentation_models_trainer/tools/gee/gee_downloader.py` with
+  support for downloading MapBiomas, Dynamic World, and ESRI LULC rasters from
+  Google Earth Engine for any set of regions.
+- Input accepts either a bounding box (`xmin ymin xmax ymax`) or a vector file
+  (GeoPackage/GeoJSON); each polygon is downloaded and saved individually, named
+  by a configurable attribute.
+- Two download modes: `direct` (via `getDownloadURL`, suitable for regions up to
+  ~1° × 1°) and `export-drive` (via `Export.image.toDrive` for large areas).
+- Downloads run in parallel via `ThreadPoolExecutor` with configurable
+  `max_workers`.
+- MapBiomas supports 14 regional collections (Brazil default) plus a full asset
+  ID override for custom collections.
+- Authentication via service account JSON key (recommended for server/CI use,
+  readable from `GEE_SERVICE_ACCOUNT_EMAIL` / `GEE_SERVICE_ACCOUNT_KEY_FILE`
+  environment variables) or OAuth2 interactive flow as fallback.
+- Exposed as `pytorch-smt-tools download-gee-lulc` CLI command.
+- 100% test coverage with mocked GEE API calls (no network access required).
+- Added `conf/examples/download_gee_lulc.yaml` with usage examples.
+- Added `website/docs/user-guide/gee-downloader.md` documentation.
+
+## Test coverage
+
+- Restored 100% test coverage for all modules introduced in the dataset-builder /
+  raster-tools / visualization / multiclass-mask merge: `band_combiner.py`,
+  `sliding_window_builder.py`, `tile_dataset_builder.py`, `tiff_remap.py`,
+  `vrt2tif.py`, `segmentation_vis.py`, and `multiclass_mask_builder.py`.
+- Fixed `test_build_mbtiles_multiclass_masks_bounds_pending_futures` which was
+  failing with `pandas.errors.LossySetitemError` on Python 3.14 due to an
+  implicit int32 → Python int assignment (`[12]` → `np.array([12], dtype=np.int32)`).
+
+## MBTiles multiclass masks
+
+- Added `build-mbtiles-multiclass-masks` tooling for generating multi-class
+  GeoTIFF masks from a GeoJSON frame set, a GeoPackage of labeled polygons, and
+  an MBTiles reference grid at the source's maximum available zoom.
+- Parallelized `build-mbtiles-multiclass-masks` per frame with
+  `ThreadPoolExecutor` and added a `tqdm` progress bar so large mask-build jobs
+  report progress without changing output structure.
+- Switched `build-mbtiles-multiclass-masks` to a streaming job generator with a
+  bounded futures window, preventing linear memory growth from prebuilding all
+  frame jobs and keeping only a small number of tasks in flight.
+- Reduced per-frame allocations inside the multiclass mask worker by writing
+  raster outputs in-place and avoiding an extra `np.where` copy for the final
+  mask image.
+- Declared the multiclass mask GeoTIFF `nodata` tag as `255` so the on-disk
+  metadata matches the background value written into empty pixels.
+- Removed the `gpd.clip` dependency from the multiclass mask builder and now
+  rasterize all intersecting features after repairing invalid geometries with
+  `shapely.validation.make_valid`, preventing `TopologyException` crashes on
+  self-intersecting or otherwise invalid polygons.
+- Added `conf/examples/mbtiles_multiclass_mask_builder.yaml` plus
+  `website/docs/user-guide/mbtiles-multiclass-mask-builder.md` so the new
+  workflow is documented and runnable through the CLI.
+
+## Dataset Builder
+
+- Added `background_value` to `build_tile_dataset` and the `build-tile-dataset`
+  YAML workflow so multi-class masks can use a configurable nodata/background
+  index instead of hardcoding `0`. Default is `255`, and `skip_empty_tiles`
+  now treats tiles filled with the selected background value as empty.
+
+## Dataset Builder & Raster Tools
+
+- Added `tools/raster/tiff_remap.py` with `remap_raster` (single-file pixel-value remapping)
+  and `remap_raster_folder` (recursive directory remapping via `ThreadPoolExecutor`).
+  Returns `(output_path, success, error_message)` and `(n_success, n_errors)` respectively.
+- Added `tools/raster/vrt2tif.py` with `convert_to_geotiff` (single VRT/raster to tiled
+  compressed GeoTIFF) and `convert_folder` (batch conversion matching a glob pattern).
+  Preserves band descriptions; supports LZW, DEFLATE, JPEG, NONE compression.
+- Added `tools/dataset_builder/band_combiner.py` with `find_file_groups` (intersects
+  filenames across N source directories, optionally with a named capture pattern),
+  `combine_sources_to_tiff` (concatenates selected bands from multiple sources), and
+  `combine_all` (parallel batch combiner using `ThreadPoolExecutor`).
+- Added `tools/dataset_builder/tile_dataset_builder.py` with `compute_tile_windows`
+  (fixed-size window generator with edge adjustment) and `build_tile_dataset`
+  (rasterizes GeoPackage/vector polygon masks onto each tile, parallelised per image,
+  saves `dataset.csv` and optionally a full-resolution `mask_full.tif`).
+- Added `tools/dataset_builder/sliding_window_builder.py` with `compute_sliding_windows`
+  and `build_sliding_window_dataset` (crops existing image/mask CSV pairs into
+  sliding-window patches; preserves geo-referencing; supports class remapping and
+  directory-segment blacklist).
+- Added `tools/visualization/segmentation_vis.py` with `colorize_mask`, `prepare_image_for_display`,
+  and `create_segmentation_grid` (multi-column GT vs. prediction comparison figure with
+  optional class legend, best/worst/random sample selection, and reprojection alignment).
+- Parallelized `create_segmentation_grid` raster loading with `ThreadPoolExecutor` so
+  image, GT, and prediction tiles for each sampled row are loaded concurrently before
+  rendering the comparison grid.
+- Added 6 new CLI commands to `pytorch-smt-tools`:
+  - `combine-bands` — multi-directory band combiner
+  - `build-tile-dataset` — tile dataset from YAML config
+  - `build-sliding-window-dataset` — patch generator from image/mask CSV
+  - `remap-mask-classes` — pixel class remapper across directory tree
+  - `convert-to-tiff` — batch VRT→GeoTIFF converter
+  - `visualize-predictions` — segmentation comparison grid figure
+- Added YAML config examples: `conf/examples/build_tile_dataset.yaml`,
+  `conf/examples/build_sliding_window_dataset.yaml`, `conf/examples/remap_mask_classes.yaml`.
+- Added user documentation: `website/docs/user-guide/dataset-builder.md`,
+  `website/docs/user-guide/raster-tools.md`,
+  `website/docs/user-guide/segmentation-visualization.md`.
+
+## MBTiles tools
+
+- Added `scan-mask-colors` CLI command (`pytorch-smt-tools scan-mask-colors MASK_PATH`)
+  that scans a mask raster for every unique RGB triplet using parallel windowed reads
+  (`ThreadPoolExecutor` + rasterio, tqdm progress bar) and prints a ready-to-paste
+  `color_map` JSON for `MBTilesPolygonDataset`.  `(0,0,0)` is automatically assigned
+  class 0 (background); all other colours are assigned 1, 2, 3 … in sorted order.
+  Supports `--bands`, `--window-size`, `--workers`, `--output` options.
+- Added `tools/mbtiles/scan_unique_colors.py` with the underlying
+  `scan_unique_colors`, `build_color_map`, and `scan_and_report` functions.
+- Fixed OOM crashes on large MBTiles: `scan_unique_colors` now queries the
+  SQLite `tiles` table (via `_get_mbtiles_tile_windows`) to build 256×256
+  tile-aligned windows for **only the tiles that exist** in the database,
+  skipping empty/nodata areas of the raster bbox entirely.  Non-MBTiles
+  sources fall back to the previous grid scan.
+- Fixed unbounded memory growth in `scan_unique_colors`: task submission is
+  now **bounded** — at most `2 × workers` futures are in flight simultaneously
+  (chunked `islice` loop), preventing all windows from queuing at once
+  regardless of raster size.
+- Reduced peak memory per window in `_unique_colors_in_window` by ~40%:
+  the R/G/B-to-uint32 packing now uses in-place operations (`*=`, `+=`, `del`)
+  so at most two H×W uint32 arrays exist simultaneously instead of four.
+
+## MBTiles Polygon Dataset
+
+- Added `MBTilesPolygonDataset` for training segmentation models from paired
+  image and mask MBTiles rasters (read via rasterio at native/maximum
+  resolution) filtered by vector polygon regions.
+- Sliding-window patches are generated over the image raster and filtered so
+  that only patches **fully contained** within the input polygon union are
+  indexed — border-touching patches are excluded to eliminate partial-label
+  noise at annotation edges.
+- Mask rasters (RGB/RGBA color-coded) are warped onto each image-window grid
+  via WarpedVRT so that image and mask are always spatially aligned regardless
+  of original projections.
+- Added RGB/RGBA color-map decoding: the `color_map` parameter maps each
+  `[R, G, B]` triplet to an integer class index; unmatched pixels default to
+  class `0`.  When `color_map` is `None`, the first mask band is used directly
+  as integer class indices.
+- Replaced the global grid scan in `_build_window_index` with a
+  **polygon-first** approach: for each polygon only the stride-aligned
+  positions inside its pixel bounding box are visited, reducing index-build
+  time from O(raster area) to O(sum of polygon areas).
+- Added `index_build_workers` parameter to parallelize per-polygon index
+  building via `ThreadPoolExecutor`; defaults to `min(n_polygons, cpu_count)`.
+  Threading is safe because all threads complete inside `__init__` before any
+  DataLoader workers are spawned.  Containment checks against individual
+  polygon geometries (not the global union) — windows spanning multiple
+  polygons are excluded, which is the conservative correct behavior.
+  Results across polygons are deduplicated and sorted in row-major order for
+  deterministic output.
+- Added support for `MultiPolygon` geometries in region files.
+- Added optional CSV/Parquet `window_index_cache` to skip the polygon-
+  containment pass on repeated training runs.
+- Added `conf/examples/mbtiles_polygon_dataset.yaml` with a complete train/val
+  YAML example.
+- Added user documentation at
+  `website/docs/user-guide/mbtiles-polygon-dataset.md`.
 
 ## AlphaEarth Foundation (AEF) Embedding Resampling
 
@@ -41,6 +527,17 @@
 - Added optional CSV/Parquet window-index caching to
   `MBTilesMaskWindowedDataset` so repeated training runs can skip mask scanning
   and sliding-window index construction.
+
+## AlphaEarth Foundation Embedding Downloads
+
+- Added `--source sourcecoop` to `download-aef-embeddings`, using the public
+  Source Cooperative AEF STAC GeoParquet index to select intersecting annual
+  COGs and save cropped 64-band per-pixel GeoTIFF embeddings for each tile.
+- Added Source Cooperative year selection from `--year`, a per-row `year`
+  column, or the first year found in `image_path`, avoiding full HuggingFace
+  dataset downloads when only regional AEF crops are needed.
+- Documented the Source Cooperative download workflow in the AEF and soft-label
+  guides, and added `conf/examples/soft_label_aef_sourcecoop.yaml`.
 
 ## Soft-Label: optional border-distance component in W_conf
 

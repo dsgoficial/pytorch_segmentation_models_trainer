@@ -55,6 +55,7 @@ class _TinyModel(nn.Module):
 # A. _lovasz_grad
 # ----------------------------------------------------------------------
 
+
 class TestLovaszGrad(unittest.TestCase):
 
     def setUp(self):
@@ -92,7 +93,7 @@ class TestLovaszGrad(unittest.TestCase):
         expected = torch.tensor([0.5, 0.5, 0.0, 0.0])
         self.assertTrue(
             torch.allclose(grad, expected, atol=1e-5),
-            f"Expected {expected}, got {grad}"
+            f"Expected {expected}, got {grad}",
         )
 
     def test_output_length_matches_input(self):
@@ -105,6 +106,7 @@ class TestLovaszGrad(unittest.TestCase):
 # ----------------------------------------------------------------------
 # B. _lovasz_softmax_flat
 # ----------------------------------------------------------------------
+
 
 class TestLovaszSoftmaxFlat(unittest.TestCase):
 
@@ -182,6 +184,7 @@ class TestLovaszSoftmaxFlat(unittest.TestCase):
 # ----------------------------------------------------------------------
 # C. WeightedLovaszSCELoss
 # ----------------------------------------------------------------------
+
 
 class TestWeightedLovaszSCELoss(unittest.TestCase):
 
@@ -263,7 +266,9 @@ class TestWeightedLovaszSCELoss(unittest.TestCase):
         """With lovasz_weight=0, loss should be pure SCE."""
         pred = torch.randn(2, self.num_classes, 16, 16)
         target = torch.randint(0, self.num_classes, (2, 16, 16))
-        loss_no_lovasz = self._make_loss(lovasz_weight=0.0, sce_weight=1.0)(pred, target)
+        loss_no_lovasz = self._make_loss(lovasz_weight=0.0, sce_weight=1.0)(
+            pred, target
+        )
         loss_full = self._make_loss(lovasz_weight=0.25, sce_weight=0.75)(pred, target)
         # Both should be valid scalars; no-lovasz should differ from full
         self.assertGreater(loss_no_lovasz.item(), 0)
@@ -281,12 +286,10 @@ class TestWeightedLovaszSCELoss(unittest.TestCase):
         pred = torch.randn(2, self.num_classes, 16, 16)
         target = torch.randint(0, self.num_classes, (2, 16, 16))
         loss_high_rce = self._make_loss(
-            lovasz_weight=0.0, sce_weight=1.0,
-            sce_alpha=0.0, sce_beta=1.0
+            lovasz_weight=0.0, sce_weight=1.0, sce_alpha=0.0, sce_beta=1.0
         )(pred, target)
         loss_high_ce = self._make_loss(
-            lovasz_weight=0.0, sce_weight=1.0,
-            sce_alpha=1.0, sce_beta=0.0
+            lovasz_weight=0.0, sce_weight=1.0, sce_alpha=1.0, sce_beta=0.0
         )(pred, target)
         self.assertGreater(loss_high_rce.item(), 0)
         self.assertGreater(loss_high_ce.item(), 0)
@@ -320,6 +323,7 @@ class TestWeightedLovaszSCELoss(unittest.TestCase):
 # ----------------------------------------------------------------------
 # C2. WeightedJMLSCELoss
 # ----------------------------------------------------------------------
+
 
 class TestWeightedJMLSCELoss(unittest.TestCase):
 
@@ -434,8 +438,12 @@ class TestWeightedJMLSCELoss(unittest.TestCase):
         """Different smooth values should produce different JML losses."""
         pred = torch.randn(2, self.num_classes, 16, 16)
         target = torch.randint(0, self.num_classes, (2, 16, 16))
-        loss_small = self._make_loss(smooth=1e-6, jml_weight=1.0, sce_weight=0.0)(pred, target)
-        loss_large = self._make_loss(smooth=1.0, jml_weight=1.0, sce_weight=0.0)(pred, target)
+        loss_small = self._make_loss(smooth=1e-6, jml_weight=1.0, sce_weight=0.0)(
+            pred, target
+        )
+        loss_large = self._make_loss(smooth=1.0, jml_weight=1.0, sce_weight=0.0)(
+            pred, target
+        )
         # Large smooth biases IoU toward 1, giving lower loss
         self.assertGreater(loss_small.item(), loss_large.item())
 
@@ -443,6 +451,7 @@ class TestWeightedJMLSCELoss(unittest.TestCase):
 # ----------------------------------------------------------------------
 # D. WeightedDiceCrossEntropyLoss
 # ----------------------------------------------------------------------
+
 
 class TestWeightedDiceCrossEntropyLoss(unittest.TestCase):
 
@@ -536,6 +545,7 @@ class TestWeightedDiceCrossEntropyLoss(unittest.TestCase):
 # E. EMACallback
 # ----------------------------------------------------------------------
 
+
 class TestEMACallback(unittest.TestCase):
 
     def setUp(self):
@@ -558,10 +568,7 @@ class TestEMACallback(unittest.TestCase):
     def test_on_fit_start_initializes_shadow(self):
         ema = EMACallback(decay=0.999)
         ema.on_fit_start(self.trainer, self.model)
-        grad_params = {
-            n for n, p in self.model.named_parameters()
-            if p.requires_grad
-        }
+        grad_params = {n for n, p in self.model.named_parameters() if p.requires_grad}
         self.assertEqual(set(ema._shadow.keys()), grad_params)
 
     def test_on_fit_start_shadow_equals_params(self):
@@ -571,7 +578,7 @@ class TestEMACallback(unittest.TestCase):
             if param.requires_grad:
                 self.assertTrue(
                     torch.equal(ema._shadow[name], param.data),
-                    f"Shadow for {name} should equal param at init"
+                    f"Shadow for {name} should equal param at init",
                 )
 
     def test_on_train_batch_end_updates_shadow(self):
@@ -596,7 +603,7 @@ class TestEMACallback(unittest.TestCase):
                 expected = 0.9 * old_shadow[name] + 0.1 * param.data
                 self.assertTrue(
                     torch.allclose(ema._shadow[name], expected, atol=1e-6),
-                    f"Shadow update incorrect for {name}"
+                    f"Shadow update incorrect for {name}",
                 )
 
     def test_shadow_converges_to_params(self):
@@ -619,7 +626,7 @@ class TestEMACallback(unittest.TestCase):
             if param.requires_grad:
                 self.assertTrue(
                     torch.allclose(ema._shadow[name], param.data, atol=1e-4),
-                    f"Shadow for {name} should converge to param"
+                    f"Shadow for {name} should converge to param",
                 )
 
     def test_validation_swap_uses_shadow(self):
@@ -638,7 +645,7 @@ class TestEMACallback(unittest.TestCase):
             if name in ema._shadow:
                 self.assertTrue(
                     torch.allclose(param.data, torch.tensor(99.0)),
-                    f"After swap, {name} should equal shadow"
+                    f"After swap, {name} should equal shadow",
                 )
 
     def test_validation_restore_uses_original(self):
@@ -665,7 +672,7 @@ class TestEMACallback(unittest.TestCase):
             if name in original:
                 self.assertTrue(
                     torch.equal(param.data, original[name]),
-                    f"After restore, {name} should equal original"
+                    f"After restore, {name} should equal original",
                 )
 
     def test_state_dict_roundtrip(self):
@@ -686,7 +693,7 @@ class TestEMACallback(unittest.TestCase):
         for name in ema._shadow:
             self.assertTrue(
                 torch.equal(ema2._shadow[name], ema._shadow[name]),
-                f"State dict roundtrip failed for {name}"
+                f"State dict roundtrip failed for {name}",
             )
 
     def test_frozen_params_excluded(self):
@@ -697,8 +704,9 @@ class TestEMACallback(unittest.TestCase):
 
         # Shadow should only have decoder params
         for name in ema._shadow:
-            self.assertIn("decoder", name,
-                          f"Frozen encoder param {name} should not be in shadow")
+            self.assertIn(
+                "decoder", name, f"Frozen encoder param {name} should not be in shadow"
+            )
 
     def test_ema_warmup_early_steps(self):
         """Early steps should use lower effective decay than target."""
@@ -716,10 +724,13 @@ class TestEMACallback(unittest.TestCase):
         effective_decay = min(0.999, 1 / 10)  # 0.1
         for name, param in self.model.named_parameters():
             if param.requires_grad and name in old_shadow:
-                expected = effective_decay * old_shadow[name] + (1 - effective_decay) * param.data
+                expected = (
+                    effective_decay * old_shadow[name]
+                    + (1 - effective_decay) * param.data
+                )
                 self.assertTrue(
                     torch.allclose(ema._shadow[name], expected, atol=1e-6),
-                    f"EMA warmup at step 0 incorrect for {name}"
+                    f"EMA warmup at step 0 incorrect for {name}",
                 )
 
     def test_ema_warmup_converges_to_target_decay(self):
@@ -738,8 +749,9 @@ class TestEMACallback(unittest.TestCase):
         prev = 0.0
         for step in range(100):
             eff = min(decay, (step + 1) / (step + 10))
-            self.assertGreaterEqual(eff, prev,
-                                    f"Effective decay decreased at step {step}")
+            self.assertGreaterEqual(
+                eff, prev, f"Effective decay decreased at step {step}"
+            )
             prev = eff
 
 
@@ -747,20 +759,25 @@ class TestEMACallback(unittest.TestCase):
 # E2. LLRD (Layer-wise LR Decay)
 # ----------------------------------------------------------------------
 
+
 class _ConvNeXtLikeModel(nn.Module):
     """Mimics a ConvNeXt encoder with stages for LLRD testing."""
 
     def __init__(self):
         super().__init__()
-        self.encoder = nn.ModuleDict({
-            'stem': nn.Linear(4, 8),
-            'stages': nn.ModuleList([
-                nn.Linear(8, 8),   # stage 0
-                nn.Linear(8, 8),   # stage 1
-                nn.Linear(8, 8),   # stage 2
-                nn.Linear(8, 8),   # stage 3
-            ]),
-        })
+        self.encoder = nn.ModuleDict(
+            {
+                "stem": nn.Linear(4, 8),
+                "stages": nn.ModuleList(
+                    [
+                        nn.Linear(8, 8),  # stage 0
+                        nn.Linear(8, 8),  # stage 1
+                        nn.Linear(8, 8),  # stage 2
+                        nn.Linear(8, 8),  # stage 3
+                    ]
+                ),
+            }
+        )
         self.decoder = nn.Linear(8, 2)
 
     def set_encoder_trainable(self, trainable=True):
@@ -781,6 +798,7 @@ class TestLLRD(unittest.TestCase):
         # Call the static method directly by creating a mock Model instance
         # We'll test the function directly instead
         import re
+
         base_lr = 1e-4
         layer_decay = 0.9
         weight_decay = 0.05
@@ -788,8 +806,8 @@ class TestLLRD(unittest.TestCase):
         # Detect stages
         max_stage = -1
         for name, _ in model.named_parameters():
-            if 'encoder' in name:
-                match = re.search(r'stages\.(\d+)', name)
+            if "encoder" in name:
+                match = re.search(r"stages\.(\d+)", name)
                 if match:
                     max_stage = max(max_stage, int(match.group(1)))
         num_stages = max_stage + 1
@@ -800,37 +818,40 @@ class TestLLRD(unittest.TestCase):
         for name, param in model.named_parameters():
             if not param.requires_grad:
                 continue
-            if 'encoder' not in name:
+            if "encoder" not in name:
                 group_lr = base_lr
             else:
-                match = re.search(r'stages\.(\d+)', name)
+                match = re.search(r"stages\.(\d+)", name)
                 if match:
                     stage_id = int(match.group(1))
                     depth = num_stages - stage_id
-                    group_lr = base_lr * (layer_decay ** depth)
+                    group_lr = base_lr * (layer_decay**depth)
                 else:
                     group_lr = base_lr * (layer_decay ** (num_stages + 1))
             param_wd = 0.0 if param.ndim <= 1 else weight_decay
-            param_groups.append({
-                'params': [param],
-                'lr': group_lr,
-                'weight_decay': param_wd,
-                'name': name,
-            })
+            param_groups.append(
+                {
+                    "params": [param],
+                    "lr": group_lr,
+                    "weight_decay": param_wd,
+                    "name": name,
+                }
+            )
 
         # Verify ordering: decoder > stage 3 > stage 2 > stage 1 > stage 0 > stem
-        lrs_by_name = {g['name']: g['lr'] for g in param_groups}
+        lrs_by_name = {g["name"]: g["lr"] for g in param_groups}
 
         # Decoder should have full LR
         for name, lr in lrs_by_name.items():
-            if 'decoder' in name:
-                self.assertAlmostEqual(lr, base_lr, places=8,
-                                       msg=f"Decoder {name} should have base_lr")
+            if "decoder" in name:
+                self.assertAlmostEqual(
+                    lr, base_lr, places=8, msg=f"Decoder {name} should have base_lr"
+                )
 
         # Higher stages should have higher LR
         stage_lrs = {}
         for name, lr in lrs_by_name.items():
-            match = re.search(r'stages\.(\d+)', name)
+            match = re.search(r"stages\.(\d+)", name)
             if match:
                 stage_id = int(match.group(1))
                 stage_lrs.setdefault(stage_id, []).append(lr)
@@ -838,21 +859,29 @@ class TestLLRD(unittest.TestCase):
         for stage_id in range(num_stages - 1):
             lr_this = stage_lrs[stage_id][0]
             lr_next = stage_lrs[stage_id + 1][0]
-            self.assertLess(lr_this, lr_next,
-                            f"Stage {stage_id} LR should be < stage {stage_id+1} LR")
+            self.assertLess(
+                lr_this,
+                lr_next,
+                f"Stage {stage_id} LR should be < stage {stage_id+1} LR",
+            )
 
         # Stem should have lowest LR
-        stem_lrs = [lr for name, lr in lrs_by_name.items()
-                    if 'encoder' in name and 'stages' not in name]
+        stem_lrs = [
+            lr
+            for name, lr in lrs_by_name.items()
+            if "encoder" in name and "stages" not in name
+        ]
         if stem_lrs:
             min_stage_lr = min(stage_lrs[0])
-            self.assertLess(stem_lrs[0], min_stage_lr,
-                            "Stem LR should be lower than stage 0 LR")
+            self.assertLess(
+                stem_lrs[0], min_stage_lr, "Stem LR should be lower than stage 0 LR"
+            )
 
     def test_no_weight_decay_for_1d_params(self):
         """Bias and normalization parameters (1-D) should have weight_decay=0."""
         model = _ConvNeXtLikeModel()
         import re
+
         base_lr = 1e-4
         layer_decay = 0.9
         weight_decay = 0.05
@@ -862,11 +891,13 @@ class TestLLRD(unittest.TestCase):
                 continue
             param_wd = 0.0 if param.ndim <= 1 else weight_decay
             if param.ndim <= 1:
-                self.assertEqual(param_wd, 0.0,
-                                 f"1-D param {name} should have wd=0")
+                self.assertEqual(param_wd, 0.0, f"1-D param {name} should have wd=0")
             else:
-                self.assertEqual(param_wd, weight_decay,
-                                 f"Multi-D param {name} should have wd={weight_decay}")
+                self.assertEqual(
+                    param_wd,
+                    weight_decay,
+                    f"Multi-D param {name} should have wd={weight_decay}",
+                )
 
     def test_layer_decay_formula(self):
         """Verify exact LR values for known layer_decay=0.9 with 4 stages."""
@@ -885,6 +916,7 @@ class TestLLRD(unittest.TestCase):
 # ----------------------------------------------------------------------
 # F. WarmupCallback
 # ----------------------------------------------------------------------
+
 
 class TestWarmupCallback(unittest.TestCase):
 
@@ -938,10 +970,7 @@ class TestWarmupCallback(unittest.TestCase):
         self.trainer.current_epoch = 5
 
         # Should not change anything
-        original_grads = {
-            n: p.requires_grad
-            for n, p in self.model.named_parameters()
-        }
+        original_grads = {n: p.requires_grad for n, p in self.model.named_parameters()}
         cb.on_train_epoch_start(self.trainer, self.model)
         for n, p in self.model.named_parameters():
             self.assertEqual(p.requires_grad, original_grads[n])
@@ -955,6 +984,7 @@ class TestWarmupCallback(unittest.TestCase):
 # G. TTA Transforms
 # ----------------------------------------------------------------------
 
+
 class TestTTATransforms(unittest.TestCase):
 
     def setUp(self):
@@ -966,24 +996,18 @@ class TestTTATransforms(unittest.TestCase):
         self.t[0, 0, 1, 0] = 3.0  # second-row-left
 
     def test_apply_identity(self):
-        result = MultiClassInferenceProcessor._apply_transform(
-            self.t.clone(), 0, False
-        )
+        result = MultiClassInferenceProcessor._apply_transform(self.t.clone(), 0, False)
         self.assertTrue(torch.equal(result, self.t))
 
     def test_apply_hflip(self):
-        result = MultiClassInferenceProcessor._apply_transform(
-            self.t.clone(), 0, True
-        )
+        result = MultiClassInferenceProcessor._apply_transform(self.t.clone(), 0, True)
         # Horizontal flip: (0,0)→(0,3), (0,1)→(0,2)
         self.assertEqual(result[0, 0, 0, 3].item(), 1.0)
         self.assertEqual(result[0, 0, 0, 2].item(), 2.0)
         self.assertEqual(result[0, 0, 1, 3].item(), 3.0)
 
     def test_apply_rot90(self):
-        result = MultiClassInferenceProcessor._apply_transform(
-            self.t.clone(), 1, False
-        )
+        result = MultiClassInferenceProcessor._apply_transform(self.t.clone(), 1, False)
         # rot90 CCW k=1: (r,c) → (W-1-c, r)
         # (0,0)→(3,0), (0,1)→(2,0), (1,0)→(3,1)
         self.assertEqual(result[0, 0, 3, 0].item(), 1.0)
@@ -991,18 +1015,14 @@ class TestTTATransforms(unittest.TestCase):
         self.assertEqual(result[0, 0, 3, 1].item(), 3.0)
 
     def test_apply_rot180(self):
-        result = MultiClassInferenceProcessor._apply_transform(
-            self.t.clone(), 2, False
-        )
+        result = MultiClassInferenceProcessor._apply_transform(self.t.clone(), 2, False)
         # rot180: (0,0)→(3,3), (0,1)→(3,2), (1,0)→(2,3)
         self.assertEqual(result[0, 0, 3, 3].item(), 1.0)
         self.assertEqual(result[0, 0, 3, 2].item(), 2.0)
         self.assertEqual(result[0, 0, 2, 3].item(), 3.0)
 
     def test_apply_rot270(self):
-        result = MultiClassInferenceProcessor._apply_transform(
-            self.t.clone(), 3, False
-        )
+        result = MultiClassInferenceProcessor._apply_transform(self.t.clone(), 3, False)
         # rot270 CCW (k=3) = rot90 CW: (r,c) → (c, H-1-r)
         # (0,0)→(0,3), (0,1)→(1,3), (1,0)→(0,2)
         self.assertEqual(result[0, 0, 0, 3].item(), 1.0)
@@ -1010,9 +1030,7 @@ class TestTTATransforms(unittest.TestCase):
         self.assertEqual(result[0, 0, 0, 2].item(), 3.0)
 
     def test_apply_rot90_hflip(self):
-        result = MultiClassInferenceProcessor._apply_transform(
-            self.t.clone(), 1, True
-        )
+        result = MultiClassInferenceProcessor._apply_transform(self.t.clone(), 1, True)
         # First flip(dim=-1), then rot90 CCW
         # Should produce a valid tensor with rearranged markers
         self.assertEqual(result.shape, self.t.shape)
@@ -1033,7 +1051,7 @@ class TestTTATransforms(unittest.TestCase):
                     )
                     self.assertTrue(
                         torch.allclose(restored, original, atol=1e-6),
-                        f"Roundtrip failed for rot={rot}, flip={flip}"
+                        f"Roundtrip failed for rot={rot}, flip={flip}",
                     )
 
     def test_d4_all_8_transforms_invertible(self):
@@ -1084,6 +1102,7 @@ class TestTTATransforms(unittest.TestCase):
 # H. TTA Inference (integration-like)
 # ----------------------------------------------------------------------
 
+
 class TestTTAInference(unittest.TestCase):
 
     def setUp(self):
@@ -1091,14 +1110,17 @@ class TestTTAInference(unittest.TestCase):
 
     def _make_constant_model(self, num_classes=4):
         """Model that always returns the same logits regardless of input."""
+
         class ConstantModel:
             def __call__(self, x):
                 B, C_in, H, W = x.shape
                 return torch.ones(B, num_classes, H, W)
+
         return ConstantModel()
 
     def _make_position_aware_model(self, num_classes=4):
         """Model whose output depends on spatial position (not equivariant)."""
+
         class PositionModel:
             def __init__(self):
                 self.n_calls = 0
@@ -1111,6 +1133,7 @@ class TestTTAInference(unittest.TestCase):
                 for w in range(W):
                     out[:, 0, :, w] = float(w) / W
                 return out
+
         return PositionModel()
 
     def test_tta_d4_equivariant_model(self):
@@ -1138,7 +1161,7 @@ class TestTTAInference(unittest.TestCase):
         # Should be identical for constant model
         self.assertTrue(
             torch.allclose(tta_result, no_tta, atol=1e-5),
-            "TTA with constant model should match no-TTA"
+            "TTA with constant model should match no-TTA",
         )
 
     def test_tta_d4_averages_predictions(self):
@@ -1163,7 +1186,7 @@ class TestTTAInference(unittest.TestCase):
         # Should differ from no-TTA
         self.assertFalse(
             torch.allclose(tta_result, no_tta, atol=1e-5),
-            "TTA with position-aware model should differ from no-TTA"
+            "TTA with position-aware model should differ from no-TTA",
         )
 
     def test_tta_flip_produces_4_passes(self):
@@ -1281,7 +1304,11 @@ class TestComputeConfidenceMaps(unittest.TestCase):
         proc.confidence_export_strategy = None
 
         C, H, W = 7, 4, 4
-        probs = np.random.dirichlet(np.ones(C), size=(H, W)).transpose(2, 0, 1).astype(np.float32)
+        probs = (
+            np.random.dirichlet(np.ones(C), size=(H, W))
+            .transpose(2, 0, 1)
+            .astype(np.float32)
+        )
         maps = proc._compute_confidence_maps(probs)
 
         # _compute_confidence_maps always returns all 3,

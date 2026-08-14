@@ -18,6 +18,7 @@
  *                                                                         *
  ****
 """
+
 from typing import Dict, List, Tuple, Union
 import numpy as np
 from pytorch_toolbelt.inference.tiles import TileMerger

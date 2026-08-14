@@ -1,0 +1,54 @@
+# Balanced dataset sampling — local filesystem backend
+#
+# Usage:
+#   pytorch-smt-tools build-balanced-dataset conf/examples/balanced_dataset_local.yaml
+#
+# The output CSV has a `sampler_weight` column ready for
+# torch.utils.data.WeightedRandomSampler.
+
+balanced_dataset:
+  # Operating mode:
+  #   masks_only   — skip DINOv2 embeddings, use semantic clustering only
+  #   embeddings   — full pipeline: clustering + visual uniqueness via DINOv2
+  mode: masks_only
+
+  # Weighting method (rank_max | rank_multiply | rank_add |
+  #                   multiplicative | composition_only | uniqueness_only)
+  sampling_method: rank_max
+
+  input:
+    # List of patch records. Each entry must have:
+    #   image_path, mask_path, row_off, col_off, patch_size
+    patch_records:
+      - image_path: /data/images/tile_001.tif
+        mask_path: /data/masks/tile_001.tif
+        row_off: 0
+        col_off: 0
+        patch_size: 256
+      - image_path: /data/images/tile_002.tif
+        mask_path: /data/masks/tile_002.tif
+        row_off: 256
+        col_off: 0
+        patch_size: 256
+
+  clustering:
+    # KMeans over CLR-transformed class-frequency vectors
+    k_min: 4         # minimum k to test during elbow search
+    k_max: 16        # maximum k to test during elbow search
+    k_selection: elbow   # elbow | fixed
+    # k: 8           # used when k_selection is "fixed"
+    random_state: 42
+
+  exclusion:
+    # Skip patches with nodata borders or black borders in the imagery
+    exclude_border_nodata: true
+    exclude_black_border: true
+    nodata_class: 0          # mask class treated as nodata
+    black_tolerance: 10      # max pixel value considered "black" in image
+
+  output:
+    csv_path: /data/balanced.csv
+    # Optional GeoJSON with patch footprints for QGIS inspection.
+    # Requires shapely to be installed.
+    # geojson_path: /data/balanced_patches.geojson
+    # geojson_crs: EPSG:4326

@@ -134,6 +134,31 @@ python -m pytorch_segmentation_models_trainer.evaluate_experiments \
     --config-dir configs/evaluation --config-name pipeline_config
 ```
 
+## Tutorials (Jupyter Notebooks)
+
+Interactive step-by-step notebooks are available in the [`notebooks/`](notebooks/) folder.
+They use the [Potsdam ISPRS dataset](https://drive.google.com/drive/folders/1n61JMwXup86z9d9tfcp7ymNaYyN6qceG?usp=share_link) (pre-split, single-band masks, 6 classes) and cover the full workflow from raw data to evaluated predictions.
+
+| Notebook | Description |
+|---|---|
+| [`00_quickstart.ipynb`](notebooks/00_quickstart.ipynb) | Verify the environment, check dependencies, sanity-test core APIs |
+| [`01_potsdam_windowed_segmentation.ipynb`](notebooks/01_potsdam_windowed_segmentation.ipynb) | Download data → explore images and masks → build CSV manifests → generate 256×256 sliding-window patches → launch UNet training |
+| [`02_inference_and_export.ipynb`](notebooks/02_inference_and_export.ipynb) | Load a trained checkpoint → single-patch sanity check → full-scene inference with `MultiClassInferenceProcessor` → per-class IoU → GeoTIFF export |
+
+### Running the notebooks
+
+```bash
+# Install Jupyter if needed
+uv run pip install jupyter
+
+# Launch
+uv run jupyter notebook notebooks/
+```
+
+Start with `00_quickstart.ipynb` to verify the installation, then follow `01` → `02` for the full tutorial.
+
+---
+
 ## Configuration Examples
 
 ### 1. Basic Training Configuration

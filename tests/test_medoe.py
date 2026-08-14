@@ -166,7 +166,7 @@ class TestMaskedTarget(unittest.TestCase):
         masked = self.model._make_masked_target(target, 1)  # BODY
         self.assertEqual(masked[0, 0].item(), 255)  # was already 255
         self.assertEqual(masked[0, 1].item(), 255)  # class 4 not in BODY
-        self.assertEqual(masked[0, 2].item(), 2)    # class 2 in BODY
+        self.assertEqual(masked[0, 2].item(), 2)  # class 2 in BODY
 
     def test_all_ignore_input(self):
         target = torch.full((1, 4), 255, dtype=torch.long)
@@ -197,9 +197,7 @@ class TestExpertLoss(unittest.TestCase):
         x = torch.randn(2, 3, 128, 128)
         _ = self.model(x)
         target = torch.randint(0, 6, (2, 128, 128))
-        loss = self.model.compute_expert_loss(
-            self.model.last_expert_outputs, target
-        )
+        loss = self.model.compute_expert_loss(self.model.last_expert_outputs, target)
         self.assertGreater(loss.item(), 0)
 
     def test_all_ignore_ce_zero_suppression_nonzero(self):
@@ -208,9 +206,7 @@ class TestExpertLoss(unittest.TestCase):
         x = torch.randn(2, 3, 128, 128)
         _ = self.model(x)
         target = torch.full((2, 128, 128), 255, dtype=torch.long)
-        loss = self.model.compute_expert_loss(
-            self.model.last_expert_outputs, target
-        )
+        loss = self.model.compute_expert_loss(self.model.last_expert_outputs, target)
         # Loss can be >0 due to L2 suppression on non-assigned class logits
         self.assertGreaterEqual(loss.item(), 0.0)
 
@@ -221,9 +217,7 @@ class TestExpertLoss(unittest.TestCase):
         _ = self.model(x)
         target = torch.full((2, 128, 128), 255, dtype=torch.long)
         target[:, :32, :] = 2  # only terreno_exposto
-        loss = self.model.compute_expert_loss(
-            self.model.last_expert_outputs, target
-        )
+        loss = self.model.compute_expert_loss(self.model.last_expert_outputs, target)
         self.assertGreater(loss.item(), 0)
 
     def test_suppression_loss_nonzero_for_tail(self):
@@ -252,9 +246,7 @@ class TestExpertLoss(unittest.TestCase):
         x = torch.randn(2, 3, 128, 128)
         _ = self.model(x)
         target = torch.randint(0, 6, (2, 128, 128))
-        loss = self.model.compute_expert_loss(
-            self.model.last_expert_outputs, target
-        )
+        loss = self.model.compute_expert_loss(self.model.last_expert_outputs, target)
         loss.backward()
         # Expert branch should have grads
         has_grad = False

@@ -1,0 +1,138 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: Multi-channel encoder with zero-initialized extra input channels
+# ──────────────────────────────────────────────────────────────────────────────
+# Use case: extend a 3-channel ImageNet encoder with additional binary input
+# channels (e.g. one-hot LULC maps) while preserving the pre-trained RGB
+# baseline at epoch 0.
+#
+# Problem without this flag:
+#   segmentation_models_pytorch fills extra channels by cycling the 3 RGB
+#   filter weights (scaled by 3/in_channels). For binary one-hot channels
+#   in {0,1} this creates a domain mismatch: the model starts applying
+#   RGB-trained feature detectors to binary inputs from the very first step.
+#
+# Solution: zero_init_extra_input_channels: true
+#   After instantiation, Model zeroes weight[:, 3:, :, :] in the first Conv2d.
+#   The model behaves identically to the 3-channel baseline at t=0 and learns
+#   the extra channels from scratch, additively on top of the RGB features.
+#
+# IMPORTANT: zero_init_extra_input_channels must be a top-level key.
+#            Do NOT place it inside the model: block — Hydra would pass it
+#            to the SMP constructor and raise an unexpected-keyword error.
+#
+# Input layout (21 channels):
+#   ch 1–3  : RGB (Sentinel-2 B4/B3/B2, normalized with ImageNet mean/std)
+#   ch 4–9  : one-hot LULC source A (6 classes, values in {0, 1})
+#   ch 10–15: one-hot LULC source B (6 classes, values in {0, 1})
+#   ch 16–21: one-hot LULC source C (6 classes, values in {0, 1})
+#
+# Note: albumentations Normalize applies only to the first 3 channels (the
+# "image" target). LULC one-hot channels remain in {0, 1} and must NOT be
+# normalized — they are binary indicators, not continuous reflectance values.
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+# ── Zero-init flag (top-level, NOT inside model:) ─────────────────────────────
+zero_init_extra_input_channels: true
+
+# ── Hyperparameters ───────────────────────────────────────────────────────────
+hyperparameters:
+  batch_size: 16
+  epochs: 50
+  max_lr: 4.0e-4
+  num_classes: 6
+
+# ── Architecture ──────────────────────────────────────────────────────────────
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet50
+  encoder_weights: imagenet
+  in_channels: 21       # 3 RGB + 3×6 one-hot LULC
+  classes: ${hyperparameters.num_classes}
+
+# ── Loss ──────────────────────────────────────────────────────────────────────
+loss:
+  _target_: torch.nn.CrossEntropyLoss
+  ignore_index: 255
+
+# ── Optimizer ─────────────────────────────────────────────────────────────────
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1.0e-4
+
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: ${hyperparameters.epochs}
+      eta_min: 1.0e-7
+    interval: epoch
+    frequency: 1
+
+# ── Trainer ───────────────────────────────────────────────────────────────────
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+  precision: "16-mixed"
+
+# ── Datasets ──────────────────────────────────────────────────────────────────
+# Replace with the appropriate dataset class for your project.
+# The dataset must return a dict with:
+#   "image": float tensor of shape (21, H, W) — RGB + LULC channels concatenated
+#   "mask" : long tensor of shape (H, W)      — class labels in [0, num_classes)
+#
+# Albumentations Normalize target must cover only the first 3 channels (RGB).
+# LULC channels should be appended after normalization or handled separately.
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedSegmentationDataset
+  input_csv_path: /data/train_patches.csv
+  image_dtype: uint8
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.VerticalFlip
+      p: 0.5
+    - _target_: albumentations.RandomRotate90
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedSegmentationDataset
+  input_csv_path: /data/val_patches.csv
+  image_dtype: uint8
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
+# ── Metrics ───────────────────────────────────────────────────────────────────
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${hyperparameters.num_classes}
+    ignore_index: 255
+  - _target_: torchmetrics.F1Score
+    task: multiclass
+    num_classes: ${hyperparameters.num_classes}
+    ignore_index: 255

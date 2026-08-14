@@ -26,7 +26,7 @@ import torch
 import torch.nn as nn
 from hydra.utils import instantiate
 
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from typing import Any, List, Optional, Union, Dict, Tuple
 from pytorch_segmentation_models_trainer.utils.model_utils import replace_activation
@@ -323,7 +323,29 @@ class Model(pl.LightningModule):
             replace_activation(model, old_activation, new_activation)
         if "fine_tuning" in self.cfg:
             model = apply_fine_tuning_strategy(model, self.cfg.fine_tuning)
+        if self.cfg.get("zero_init_extra_input_channels", False):
+            self._zero_init_extra_input_channels(model)
         return model
+
+    @staticmethod
+    def _zero_init_extra_input_channels(model, n_base: int = 3) -> None:
+        """Zero-initialize input channels beyond n_base in the first Conv2d.
+
+        Preserves pre-trained weights for the first n_base channels and zeros
+        the remainder. Required when extending a 3-channel ImageNet encoder with
+        extra input channels (e.g. one-hot LULC bands) so that at t=0 the model
+        behaves identically to the 3-channel baseline.
+        """
+        for module in model.modules():
+            if isinstance(module, nn.Conv2d) and module.in_channels > n_base:
+                with torch.no_grad():
+                    module.weight[:, n_base:, :, :].zero_()
+                logger.info(
+                    "Zero-initialized extra input channels %d:%d in first Conv2d",
+                    n_base,
+                    module.in_channels,
+                )
+                break
 
     def get_gpu_augmentations(self, augmentation_list):
         return torch.nn.Sequential(
@@ -663,30 +685,64 @@ class Model(pl.LightningModule):
         g.manual_seed(int(seed) % (2**32))
         return g
 
+    def _make_weighted_sampler(self, dl_cfg) -> Optional[WeightedRandomSampler]:
+        """Build a WeightedRandomSampler from the dataset's sampler_weight column.
+
+        Activated when ``data_loader.weighted_sampler: true`` is set in the YAML.
+        The dataset's underlying DataFrame must contain a ``sampler_weight`` column,
+        which is produced by ``pytorch-smt-tools build-balanced-dataset``.
+
+        Args:
+            dl_cfg: The ``data_loader`` config node for the relevant dataset split.
+
+        Returns:
+            A WeightedRandomSampler, or None when weighted sampling is disabled.
+
+        Raises:
+            ValueError: when weighted_sampler is enabled but the dataset has no
+                ``sampler_weight`` column.
+        """
+        if not dl_cfg.get("weighted_sampler", False):
+            return None
+        df = getattr(self.train_ds, "df", None)
+        if df is None or "sampler_weight" not in df.columns:
+            raise ValueError(
+                "weighted_sampler requires the training dataset to have a "
+                "'sampler_weight' column. Run 'pytorch-smt-tools build-balanced-dataset' "
+                "to generate the balanced CSV and use it as input_csv_path."
+            )
+        weights = torch.tensor(df["sampler_weight"].to_numpy(), dtype=torch.double)
+        num_samples = int(dl_cfg.get("weighted_sampler_num_samples", len(df)))
+        replacement = bool(dl_cfg.get("weighted_sampler_replacement", True))
+        return WeightedRandomSampler(
+            weights=weights,
+            num_samples=num_samples,
+            replacement=replacement,
+            generator=self._make_dataloader_generator(),
+        )
+
     def train_dataloader(self):
         num_workers = self.cfg.train_dataset.data_loader.num_workers
+        dl_cfg = self.cfg.train_dataset.data_loader
+        sampler = self._make_weighted_sampler(dl_cfg)
+        # WeightedRandomSampler is mutually exclusive with shuffle=True in PyTorch
+        shuffle = dl_cfg.shuffle if sampler is None else False
         return DataLoader(
             self.train_ds,
             batch_size=self.cfg.hyperparameters.batch_size,
-            shuffle=self.cfg.train_dataset.data_loader.shuffle,
+            shuffle=shuffle,
+            sampler=sampler,
             num_workers=num_workers,
-            pin_memory=(
-                self.cfg.train_dataset.data_loader.pin_memory
-                if "pin_memory" in self.cfg.train_dataset.data_loader
-                else True
-            ),
-            drop_last=(
-                self.cfg.train_dataset.data_loader.drop_last
-                if "drop_last" in self.cfg.train_dataset.data_loader
-                else True
-            ),
-            prefetch_factor=self._prefetch_factor(
-                self.cfg.train_dataset.data_loader, num_workers
-            ),
+            pin_memory=(dl_cfg.pin_memory if "pin_memory" in dl_cfg else True),
+            drop_last=(dl_cfg.drop_last if "drop_last" in dl_cfg else True),
+            prefetch_factor=self._prefetch_factor(dl_cfg, num_workers),
             persistent_workers=(
-                self.cfg.train_dataset.data_loader.persistent_workers
-                if "persistent_workers" in self.cfg.train_dataset.data_loader
-                else False
+                dl_cfg.persistent_workers if "persistent_workers" in dl_cfg else False
+            ),
+            multiprocessing_context=(
+                dl_cfg.multiprocessing_context
+                if "multiprocessing_context" in dl_cfg
+                else None
             ),
             worker_init_fn=_worker_init_fn,
             generator=self._make_dataloader_generator(),
@@ -803,8 +859,16 @@ class Model(pl.LightningModule):
             )
         else:
             # Simple loss just returns scalar
-            loss = self.loss_function(predicted_masks, masks)
-            return loss, {}, {}
+            loss_output = self.loss_function(predicted_masks, masks)
+            if isinstance(loss_output, tuple):
+                loss = loss_output[0]
+                extra_info = (
+                    loss_output[1]
+                    if len(loss_output) > 1 and isinstance(loss_output[1], dict)
+                    else {}
+                )
+                return loss, {}, extra_info
+            return loss_output, {}, {}
 
     def _unpack_batch(self, batch):
         """Extract (images, masks) from a batch dict or tuple."""
@@ -1152,7 +1216,11 @@ class Model(pl.LightningModule):
         images, masks = self._unpack_batch(batch)
         if self.gpu_test_transform is not None:
             images = self.gpu_test_transform(images)
-        masks = masks.long()
+        if masks.is_floating_point():
+            hard_masks = self._soft_to_hard_masks(masks)
+        else:
+            masks = masks.long()
+            hard_masks = masks
         tta_augmentations = self._get_tta_augmentations()
         if tta_augmentations is not None:
             predicted_masks = self._predict_with_tta(images)
@@ -1194,7 +1262,7 @@ class Model(pl.LightningModule):
         if hasattr(self, "test_metrics"):
             preds_for_metrics = self._prepare_preds_for_metrics(predicted_masks)
             if preds_for_metrics is not None:
-                metrics = self.test_metrics(preds_for_metrics, masks)
+                metrics = self.test_metrics(preds_for_metrics, hard_masks)
                 self.log_dict(
                     metrics,
                     on_step=False,
@@ -1226,7 +1294,11 @@ class Model(pl.LightningModule):
         images, masks = self._unpack_batch(batch)
         if self.gpu_test_transform is not None:
             images = self.gpu_test_transform(images)
-        masks = masks.long()
+        if masks.is_floating_point():
+            hard_masks = self._soft_to_hard_masks(masks)
+        else:
+            masks = masks.long()
+            hard_masks = masks
 
         image_paths = (
             list(batch.get("image_path", [])) if isinstance(batch, dict) else []
@@ -1238,7 +1310,8 @@ class Model(pl.LightningModule):
         for i in range(images.shape[0]):
             sw_output = sw_core.predict(images[i])  # [1, C, H, W]
             predicted_masks = sw_output.prediction  # [1, C, H, W]
-            mask_i = masks[i].unsqueeze(0)  # [1, H, W]
+            mask_i = masks[i].unsqueeze(0)  # [1, H, W] or [1, C, H, W] for soft
+            hard_mask_i = hard_masks[i].unsqueeze(0)  # [1, H, W]
 
             loss, _, _ = self._compute_loss(predicted_masks, mask_i)
             total_loss = total_loss + loss
@@ -1246,7 +1319,7 @@ class Model(pl.LightningModule):
             if hasattr(self, "test_metrics"):
                 preds_for_metrics = self._prepare_preds_for_metrics(predicted_masks)
                 if preds_for_metrics is not None:
-                    self.test_metrics.update(preds_for_metrics, mask_i)
+                    self.test_metrics.update(preds_for_metrics, hard_mask_i)
 
             if i < len(image_paths) and image_paths[i] is not None:
                 self._save_test_prediction(sw_output, image_paths[i])

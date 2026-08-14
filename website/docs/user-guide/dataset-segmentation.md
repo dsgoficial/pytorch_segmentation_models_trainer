@@ -477,5 +477,9 @@ except ValueError as e:
 | **Custom image-only patches in CSV (windowed read)** | [`CSVWindowedImageDataset`](./dataset-csv-windowed-image.md) |
 | MBTiles imagery with GeoTIFF masks for training | [`MBTilesMaskWindowedDataset`](./dataset-mbtiles-mask.md) |
 | MBTiles imagery with GeoTIFF masks, visual QA before training | [`export-mbtiles-mask-aligned`](./export-mbtiles-mask-aligned-images.md) |
+
+### Tutorial notebook
+
+The [Notebook Tutorials](../tutorials/notebooks.md) page shows a practical Potsdam-based example that uses the dataset builders and then trains a small segmentation model.
 | Large full-scene images, on-the-fly random cropping | [`RandomCropSegmentationDataset`](../advanced/random-crop-dataset.md) |
 | Systematic sliding-window evaluation | `RasterPatchDataset` |

@@ -18,6 +18,7 @@
 
 Unit tests for the TTA module.
 """
+
 import pytest
 import torch
 
@@ -59,8 +60,10 @@ def identity_model():
 @pytest.fixture
 def constant_model():
     """Model that always returns a fixed constant tensor (all ones)."""
+
     def _model(x):
         return torch.ones_like(x)
+
     return _model
 
 
@@ -120,6 +123,7 @@ class TestApplyTTABasic:
 
     def test_output_shape_preserved_dict(self, batch):
         """Dict-output model: each value shape must be preserved."""
+
         def dict_model(x):
             return {"seg": x, "extra": x * 2}
 
@@ -140,19 +144,24 @@ class TestApplyTTABasic:
 
 
 class TestApplyTTAConstantModel:
-    @pytest.mark.parametrize("augmentations", [
-        ROTATION_AUGMENTATIONS,
-        D4_AUGMENTATIONS,
-        [ROT90, ROT180],
-        [FLIP_H, FLIP_V],
-    ])
-    def test_constant_model_is_unaffected_by_tta(self, batch, constant_model, augmentations):
+    @pytest.mark.parametrize(
+        "augmentations",
+        [
+            ROTATION_AUGMENTATIONS,
+            D4_AUGMENTATIONS,
+            [ROT90, ROT180],
+            [FLIP_H, FLIP_V],
+        ],
+    )
+    def test_constant_model_is_unaffected_by_tta(
+        self, batch, constant_model, augmentations
+    ):
         """A model that always returns ones should give ones regardless of TTA."""
         result = apply_tta(constant_model, batch, augmentations=augmentations)
         expected = constant_model(batch)
-        assert torch.allclose(result, expected), (
-            f"TTA changed the output of a constant model with {augmentations}"
-        )
+        assert torch.allclose(
+            result, expected
+        ), f"TTA changed the output of a constant model with {augmentations}"
 
 
 # ---------------------------------------------------------------------------
@@ -161,12 +170,15 @@ class TestApplyTTAConstantModel:
 
 
 class TestApplyTTAIdentityModel:
-    @pytest.mark.parametrize("augmentations", [
-        ROTATION_AUGMENTATIONS,
-        D4_AUGMENTATIONS,
-        [ROT90, ROT270],          # subset: two rotations that cancel
-        [FLIP_H],                  # single flip
-    ])
+    @pytest.mark.parametrize(
+        "augmentations",
+        [
+            ROTATION_AUGMENTATIONS,
+            D4_AUGMENTATIONS,
+            [ROT90, ROT270],  # subset: two rotations that cancel
+            [FLIP_H],  # single flip
+        ],
+    )
     def test_identity_model_returns_input(self, batch, identity_model, augmentations):
         """With an identity model, averaging de-augmented preds gives back input."""
         result = apply_tta(identity_model, batch, augmentations=augmentations)
@@ -200,12 +212,13 @@ class TestApplyTTASkipKeys:
 
         # crossfield must be the raw output of the rot0 pass (x * 10 for batch)
         expected_crossfield = batch * 10
-        assert torch.allclose(result["crossfield"], expected_crossfield, atol=1e-6), (
-            "crossfield should equal the identity-pass output (batch * 10)"
-        )
+        assert torch.allclose(
+            result["crossfield"], expected_crossfield, atol=1e-6
+        ), "crossfield should equal the identity-pass output (batch * 10)"
 
     def test_non_skipped_key_is_averaged(self, batch, identity_model):
         """Non-skipped dict keys must still be properly de-augmented and averaged."""
+
         def dict_model(x):
             return {"seg": x, "crossfield": x * 0}
 
@@ -245,13 +258,16 @@ class TestApplyTTASkipKeys:
 
 
 class TestApplyTTASubsets:
-    @pytest.mark.parametrize("augmentations", [
-        [ROT0, ROT180],
-        [FLIP_H, FLIP_V],
-        [ROT90, ROT270],
-        [ROT0, FLIP_H],
-        [ROT0, ROT90, ROT180, ROT270, FLIP_H, FLIP_V],
-    ])
+    @pytest.mark.parametrize(
+        "augmentations",
+        [
+            [ROT0, ROT180],
+            [FLIP_H, FLIP_V],
+            [ROT90, ROT270],
+            [ROT0, FLIP_H],
+            [ROT0, ROT90, ROT180, ROT270, FLIP_H, FLIP_V],
+        ],
+    )
     def test_subset_preserves_shape(self, batch, identity_model, augmentations):
         result = apply_tta(identity_model, batch, augmentations=augmentations)
         assert result.shape == batch.shape
@@ -269,6 +285,6 @@ class TestApplyTTASubsets:
             augmented = _augment(batch, aug)
             expected = _deaugment(linear_model(augmented), aug)
             result = apply_tta(linear_model, batch, augmentations=[aug])
-            assert torch.allclose(result, expected, atol=1e-5), (
-                f"Single-aug TTA mismatch for '{aug}'"
-            )
+            assert torch.allclose(
+                result, expected, atol=1e-5
+            ), f"Single-aug TTA mismatch for '{aug}'"

@@ -19,6 +19,7 @@
  *                                                                         *
  ****
 """
+
 import os
 import subprocess
 import unittest
@@ -52,7 +53,9 @@ detection_root_dir = os.path.join(
 
 
 class Test_DetectionModel(CustomTestCase):
-    @pytest.mark.skip(reason="Known segfault and high resource usage. Needs refactoring with mocks.")
+    @pytest.mark.skip(
+        reason="Known segfault and high resource usage. Needs refactoring with mocks."
+    )
     @parameterized.expand(
         [
             ("experiment_object_detection.yaml",),
@@ -73,7 +76,9 @@ class Test_DetectionModel(CustomTestCase):
             )
             trainer = train(cfg)
 
-    @pytest.mark.skip(reason="Known segfault and high resource usage. Needs refactoring with mocks.")
+    @pytest.mark.skip(
+        reason="Known segfault and high resource usage. Needs refactoring with mocks."
+    )
     def test_train_instance_segmentation_model(self) -> None:
         csv_path = os.path.join(detection_root_dir, "dsg_dataset.csv")
         with initialize(config_path="./test_configs"):

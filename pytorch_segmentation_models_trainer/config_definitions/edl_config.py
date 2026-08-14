@@ -56,7 +56,9 @@ class EvidentialWrapperConfig:
             classes: 5
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.custom_models.edl_wrapper.EvidentialWrapper"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_models.edl_wrapper.EvidentialWrapper"
+    )
     freeze_encoder: bool = False
     model: Any = MISSING
 
@@ -110,7 +112,9 @@ class EvidentialWarmupCallbackConfig:
     ``freeze_encoder`` should match the value in EvidentialWrapperConfig.
     """
 
-    _target_: str = "pytorch_segmentation_models_trainer.custom_callbacks.edl_callbacks.EvidentialWarmupCallback"
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_callbacks.edl_callbacks.EvidentialWarmupCallback"
+    )
     warmup_epochs: int = 5
     freeze_encoder: bool = False
     partial_unfreeze_epoch: int = 10

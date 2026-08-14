@@ -5,6 +5,7 @@ Tests for the hardened training loop (Phase 6).
 Validates batch unpacking, configurable keys, extra key tolerance,
 and end-to-end training/validation steps with a lightweight SMP model.
 """
+
 import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -16,33 +17,34 @@ from omegaconf import OmegaConf
 
 from pytorch_segmentation_models_trainer.model_loader.model import Model
 
-
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 B, H, W, CLASSES = 2, 64, 64, 2
 
 
 def _make_cfg(image_key="image", mask_key="mask", **extra):
-    cfg = OmegaConf.create({
-        "model": {
-            "_target_": "segmentation_models_pytorch.Unet",
-            "encoder_name": "resnet18",
-            "encoder_weights": None,
-            "in_channels": 3,
-            "classes": CLASSES,
-        },
-        "loss": {
-            "_target_": "torch.nn.CrossEntropyLoss",
-        },
-        "image_key": image_key,
-        "mask_key": mask_key,
-        "hyperparameters": {
-            "batch_size": B,
-            "devices": 1,
-            "accelerator": "cpu",
-        },
-        **extra,
-    })
+    cfg = OmegaConf.create(
+        {
+            "model": {
+                "_target_": "segmentation_models_pytorch.Unet",
+                "encoder_name": "resnet18",
+                "encoder_weights": None,
+                "in_channels": 3,
+                "classes": CLASSES,
+            },
+            "loss": {
+                "_target_": "torch.nn.CrossEntropyLoss",
+            },
+            "image_key": image_key,
+            "mask_key": mask_key,
+            "hyperparameters": {
+                "batch_size": B,
+                "devices": 1,
+                "accelerator": "cpu",
+            },
+            **extra,
+        }
+    )
     return cfg
 
 
@@ -63,6 +65,7 @@ def _make_batch(image_key="image", mask_key="mask", extra_keys=None):
 
 
 # ─── Tests: _unpack_batch ─────────────────────────────────────────────────────
+
 
 class TestUnpackBatch:
     def test_default_keys(self):
@@ -102,6 +105,7 @@ class TestUnpackBatch:
 
 # ─── Tests: _prepare_preds_for_metrics ────────────────────────────────────────
 
+
 class TestPreparePreds:
     def test_squeezes_binary(self):
         model = _make_model()
@@ -118,12 +122,15 @@ class TestPreparePreds:
     def test_non_tensor_returns_none(self, caplog):
         model = _make_model()
         with caplog.at_level(logging.WARNING):
-            result = model._prepare_preds_for_metrics({"logits": torch.randn(B, CLASSES, H, W)})
+            result = model._prepare_preds_for_metrics(
+                {"logits": torch.randn(B, CLASSES, H, W)}
+            )
         assert result is None
         assert "not a torch.tensor" in caplog.text.lower()
 
 
 # ─── Tests: training_step / validation_step end-to-end ───────────────────────
+
 
 class TestTrainingStepEndToEnd:
     def test_training_step_returns_scalar_loss(self):
@@ -176,6 +183,7 @@ class TestTrainingStepEndToEnd:
 
 # ─── Tests: set_encoder_trainable ─────────────────────────────────────────────
 
+
 class TestSetEncoderTrainable:
     def test_smp_model_encoder_can_be_frozen(self):
         model = _make_model()
@@ -200,6 +208,7 @@ class TestSetEncoderTrainable:
 
 
 # ─── Tests: guard behaviour when val/test_dataset absent ─────────────────────
+
 
 class TestDatasetAbsenceGuards:
     """Verify Model does not crash when val_dataset or test_dataset are absent."""

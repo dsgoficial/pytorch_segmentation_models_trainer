@@ -16,6 +16,10 @@ After training a model, you can run inference on new images using either of two 
 | `predict` | `predict.py` | Large images, sliding-window tiling, one-by-one processing |
 | `predict-from-batch` | `predict_from_batch.py` | Batch inference with PyTorch Lightning, CSV-driven datasets |
 
+### Tutorial notebook
+
+See [Notebook Tutorials](../tutorials/notebooks.md) for a step-by-step inference walkthrough that follows the Potsdam training notebook.
+
 ---
 
 ## `predict` Mode

@@ -1,0 +1,21 @@
+# Compute per-patch sampler weights example
+# Usage: pytorch-smt-tools compute-sampler-weights conf/examples/compute_sampler_weights.yaml
+
+input_csv_path: /data/coreset.csv
+output_csv_path: /data/coreset_weighted.csv
+
+# Formula for weight computation:
+#   sqrt_inverse_freq: ω_i = Σ_c sqrt(p_{i,c} / f_c)  [recommended, smoother upweighting]
+#   inverse_freq:      ω_i = Σ_c p_{i,c} / f_c         [stronger rare-class emphasis]
+formula: sqrt_inverse_freq
+
+# Source of class proportions:
+#   topographic_vector_source: reads c0..c{num_classes-1} columns from CSV
+#   sam:                       (not yet implemented in CLI)
+source: topographic_vector_source
+
+num_classes: 6
+weight_column: sampler_weight
+
+# Optional: column name for exclusion flag (patches with True are excluded)
+# excluded_column: excluded

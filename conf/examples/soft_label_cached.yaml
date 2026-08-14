@@ -1,0 +1,150 @@
+# Soft-label training with lazy P_soft computation and atomic disk cache.
+# Uses SoftLabelCachedDataset: P_soft is computed from sources_csv on first
+# access and cached as a full-tile GeoTIFF.  No separate build-soft-labels
+# step is required before training.
+#
+# W_conf is recomputed on every access; alpha, entropy_norm, and use_border
+# can be changed between runs without clearing the cache.
+#
+# Two variants shown below:
+#   (A) Full-tile mode - one dataset item per tile
+#   (B) Windowed mode - one dataset item per patch (uncomment to use)
+#
+# Prerequisites - only a sources.csv is needed:
+#   tile_id,image_path,mask_path,mapbiomas_path,esri_path,dw_path
+#   tile_0,/data/images/tile_0.tif,/data/lulc/bags_0.tif,/data/lulc/mapbiomas_0.tif,/data/lulc/esri_0.tif,/data/lulc/dw_0.tif
+
+_target_: pytorch_segmentation_models_trainer.model_loader.soft_label_model.SoftLabelModel
+
+hyperparameters:
+  num_epochs: 50
+  batch_size: 16
+  learning_rate: 5.0e-5
+  num_classes: 6
+
+# ---------------------------------------------------------------------------
+# (A) Full-tile mode
+# ---------------------------------------------------------------------------
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_cached_dataset.SoftLabelCachedDataset
+  sources_csv: /data/sources_train.csv
+  cache_dir: /data/cache/p_soft
+  num_classes: ${hyperparameters.num_classes}
+  alpha: 0.6
+  use_border: true
+  entropy_norm: max_entropy    # use "minmax" for Experiments E4/E5
+  image_key: image_path
+  mask_key: mask_path          # BAGS cartographic mask
+  lulc_keys:
+    - mapbiomas_path
+    - esri_path
+    - dw_path
+  border_radius: 10            # fixed R in pixels for w_border_carta
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.VerticalFlip
+      p: 0.5
+    - _target_: albumentations.RandomRotate90
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: true
+    pin_memory: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_cached_dataset.SoftLabelCachedDataset
+  sources_csv: /data/sources_val.csv
+  cache_dir: /data/cache/p_soft    # same cache; workers share it safely
+  num_classes: ${hyperparameters.num_classes}
+  alpha: 0.6
+  use_border: true
+  entropy_norm: max_entropy
+  image_key: image_path
+  mask_key: mask_path
+  lulc_keys:
+    - mapbiomas_path
+    - esri_path
+    - dw_path
+  border_radius: 10
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 4
+    shuffle: false
+    pin_memory: true
+    drop_last: false
+
+# ---------------------------------------------------------------------------
+# (B) Windowed mode - uncomment and replace the datasets above
+# ---------------------------------------------------------------------------
+# train_dataset:
+#   _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_cached_dataset.SoftLabelCachedDataset
+#   sources_csv: /data/sources_train.csv
+#   cache_dir: /data/cache/p_soft
+#   num_classes: ${hyperparameters.num_classes}
+#   alpha: 0.6
+#   use_border: true
+#   entropy_norm: minmax
+#   image_key: image_path
+#   mask_key: mask_path
+#   lulc_keys: [mapbiomas_path, esri_path, dw_path]
+#   border_radius: 10
+#   patch_size: [256, 256]
+#   patch_stride: [256, 256]     # use [128, 128] for 50% overlap
+#   augmentation_list:
+#     - _target_: albumentations.HorizontalFlip
+#       p: 0.5
+#     - _target_: albumentations.Normalize
+#       mean: [0.485, 0.456, 0.406]
+#       std: [0.229, 0.224, 0.225]
+#     - _target_: albumentations.pytorch.ToTensorV2
+#   data_loader:
+#     batch_size: 8
+#     num_workers: 8
+#     shuffle: true
+#     pin_memory: true
+#     drop_last: true
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.soft_label_loss.SoftLabelWeightedCELoss
+  name: soft_label_ce
+  num_classes: ${hyperparameters.num_classes}
+  mask_key: mask
+  weight_key: w_conf
+
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet50
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: ${hyperparameters.num_classes}
+
+class_definitions:
+  names: [background, building, road, vegetation, water, forest]
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.learning_rate}
+  weight_decay: 1.0e-4
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  T_max: ${hyperparameters.num_epochs}
+
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${hyperparameters.num_classes}
+    average: macro

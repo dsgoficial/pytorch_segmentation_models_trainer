@@ -10,6 +10,7 @@ Covers:
 - Parameter group isolation (discriminator vs. encoder)
 - Integration with DomainAdaptationModel.training_step
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -33,7 +34,6 @@ from pytorch_segmentation_models_trainer.domain_adaptation.methods.gradient_reve
 from pytorch_segmentation_models_trainer.model_loader.domain_adaptation_model import (
     DomainAdaptationModel,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

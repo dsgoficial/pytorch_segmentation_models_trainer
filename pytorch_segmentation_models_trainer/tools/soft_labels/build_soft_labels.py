@@ -1,18 +1,19 @@
 # -*- coding: utf-8 -*-
 """Build P_soft and W_conf rasters from multiple LULC source products.
 
-Pipeline (Xiao et al. 2026, JSTARS):
+Pipeline for the E3-E5 ablation:
 
-1. Load M source LULC rasters and reproject each to the image grid.
-2. Apply temporal weight w_t for each source (derived from acquisition date).
-3. Compute P_soft(i, c) = Σ_t w_t · 1[source_t(i) == c] / Σ_t w_t
+1. Load the BAGS cartographic mask and external LULC rasters for each tile.
+2. Reproject every source to the image grid.
+3. Compute equal-vote P_soft(i, c) over the valid source labels.
 4. Compute entropy-based uncertainty:
      H(i) = -Σ_c P_soft(i,c) · log(P_soft(i,c))
      w_entropy(i) = 1 - H(i) / log(C)
 5. Compute border distance weight:
-     argmax_map = argmax(P_soft, axis=0)
-     border mask = morphological boundary of argmax_map
-     w_border(i) = distance_transform_edt(~border)(i) / max_dist
+     if the BAGS cartographic mask is available:
+         w_border_carta(i) = min(1, d_carta(i) / R)
+     otherwise:
+         w_border(i) = distance_transform_edt(~argmax_border)(i) / max_dist
 6. Combine: W_conf = alpha * w_entropy + (1 - alpha) * w_border
 7. Write P_soft and W_conf as GeoTIFF rasters aligned to the image grid.
 
@@ -47,6 +48,8 @@ from pytorch_segmentation_models_trainer.tools.soft_labels.aef_utils import (
 
 logger = logging.getLogger(__name__)
 
+_CARTOGRAPHIC_SOURCE_NAME = "bags"
+
 
 # ---------------------------------------------------------------------------
 # Core computation
@@ -57,6 +60,105 @@ def _get_image_grid(image_path: str):
     """Return (height, width, transform, crs, profile) of the reference image."""
     with rasterio.open(image_path) as src:
         return src.height, src.width, src.transform, src.crs, src.profile
+
+
+def _tile_id_from_image_path(image_path: str, row_index: int) -> str:
+    """Return a stable tile id when a wide CSV does not provide one."""
+    stem = Path(str(image_path)).stem
+    return stem if stem else f"tile_{row_index}"
+
+
+def _normalize_sources_dataframe(
+    df: pd.DataFrame,
+    image_key: str = "image_path",
+    mask_key: str = "mask_path",
+    lulc_keys: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Normalize the wide source CSV to internal equal-vote source rows.
+
+    The CSV has one row per tile, for example:
+    ``tile_id,image_path,mask_path,mapbiomas_path,esri_path,dw_path``.
+    ``tile_id`` is optional; when absent it is derived from ``image_key``.
+    LULC source columns are listed explicitly via ``lulc_keys``.
+
+    Args:
+        df: Raw CSV dataframe.
+        image_key: CSV column with image paths.
+        mask_key: CSV column with the cartographic mask path.
+        lulc_keys: CSV columns with external LULC source paths.
+
+    Returns:
+        Dataframe with ``tile_id, image_path, source_name, lulc_path``.
+
+    Raises:
+        ValueError: If the CSV does not match the supported wide format.
+    """
+    if image_key not in df.columns:
+        raise ValueError(f"Soft-label source CSV must contain image_key '{image_key}'.")
+    if mask_key not in df.columns:
+        raise ValueError(
+            f"Soft-label source CSV must contain mask_key '{mask_key}' "
+            "for the BAGS cartographic mask."
+        )
+
+    source_columns = [(_CARTOGRAPHIC_SOURCE_NAME, mask_key)]
+    for key in list(lulc_keys) if lulc_keys else []:
+        if key not in df.columns:
+            raise ValueError(
+                f"Soft-label source CSV is missing LULC key '{key}'. "
+                f"Available columns: {list(df.columns)}"
+            )
+        source_columns.append((key, key))
+
+    rows = []
+    for row_index, row in df.iterrows():
+        image_path = row[image_key]
+        tile_id = (
+            str(row["tile_id"])
+            if "tile_id" in df.columns and pd.notna(row["tile_id"])
+            else _tile_id_from_image_path(image_path, row_index)
+        )
+        for source_name, column in source_columns:
+            lulc_path = row[column]
+            if pd.isna(lulc_path) or str(lulc_path).strip() == "":
+                continue
+            rows.append(
+                {
+                    "tile_id": tile_id,
+                    "image_path": image_path,
+                    "source_name": source_name,
+                    "lulc_path": lulc_path,
+                }
+            )
+
+    if not rows:
+        raise ValueError("Soft-label source CSV contains no valid LULC source paths.")
+    return pd.DataFrame(rows)
+
+
+def _detect_boundary(mask: np.ndarray) -> np.ndarray:
+    """Return a bool border mask using an 8-connected 3x3 neighborhood.
+
+    A pixel is on the boundary if any of its 8 neighbors has a different integer
+    class value. This matches the "3x3 morphological filter" described in LaTeX
+    Eq. 13 for the w_border_carta computation (Experiment E5).
+
+    Args:
+        mask: (H, W) integer array of class labels.
+
+    Returns:
+        (H, W) bool array; True where the pixel is on a class boundary.
+    """
+    border = np.zeros(mask.shape, dtype=bool)
+    border[:-1, :] |= mask[:-1, :] != mask[1:, :]
+    border[1:, :] |= mask[1:, :] != mask[:-1, :]
+    border[:, :-1] |= mask[:, :-1] != mask[:, 1:]
+    border[:, 1:] |= mask[:, 1:] != mask[:, :-1]
+    border[:-1, :-1] |= mask[:-1, :-1] != mask[1:, 1:]
+    border[1:, 1:] |= mask[1:, 1:] != mask[:-1, :-1]
+    border[:-1, 1:] |= mask[:-1, 1:] != mask[1:, :-1]
+    border[1:, :-1] |= mask[1:, :-1] != mask[:-1, 1:]
+    return border
 
 
 def _reproject_lulc_to_image_grid(
@@ -97,28 +199,35 @@ def _reproject_lulc_to_image_grid(
 
 def compute_p_soft(
     lulc_maps: List[np.ndarray],
-    weights: List[float],
     num_classes: int,
+    source_weights: Optional[List[float]] = None,
 ) -> np.ndarray:
-    """Compute P_soft from weighted LULC maps.
+    """Compute weighted-vote P_soft from LULC maps.
 
     Args:
         lulc_maps: List of (H, W) integer arrays, one per source.
-        weights: Scalar weight for each source (temporal or reliability-based).
         num_classes: Number of land-cover classes (0-indexed).
+        source_weights: Per-source vote weights. ``None`` gives equal vote.
 
     Returns:
         p_soft: (C, H, W) float32 array summing to 1 along axis 0.
     """
     h, w = lulc_maps[0].shape
     p_soft = np.zeros((num_classes, h, w), dtype=np.float32)
-    total_weight = sum(weights)
 
-    for lulc, wt in zip(lulc_maps, weights):
+    weights = source_weights if source_weights is not None else [1.0] * len(lulc_maps)
+    if len(weights) != len(lulc_maps):
+        raise ValueError(
+            f"source_weights length ({len(weights)}) must match "
+            f"lulc_maps length ({len(lulc_maps)})"
+        )
+    total = sum(weights)
+
+    for lulc, weight in zip(lulc_maps, weights):
         for c in range(num_classes):
-            p_soft[c] += wt * (lulc == c)
+            p_soft[c] += weight * (lulc == c)
 
-    p_soft /= total_weight
+    p_soft /= total
     return p_soft
 
 
@@ -128,6 +237,9 @@ def compute_w_conf(
     w_embed: Optional[np.ndarray] = None,
     beta: float = 0.0,
     use_border: bool = True,
+    entropy_norm: str = "max_entropy",
+    bags_mask: Optional[np.ndarray] = None,
+    border_radius: int = 10,
 ) -> np.ndarray:
     """Compute W_conf confidence weight map.
 
@@ -137,50 +249,105 @@ def compute_w_conf(
       ``W_conf = alpha·w_entropy + (1-alpha-beta)·w_border + beta·w_embed``
       Constraint: ``alpha + beta <= 1.0``.
 
-    * ``use_border=False`` (original paper formula — no border component):
+    * ``use_border=False`` (original paper formula, no border component):
       ``W_conf = (alpha·w_entropy + beta·w_embed) / (alpha + beta_eff)``
       where ``beta_eff = beta`` when *w_embed* is provided, else 0.
       No constraint on ``alpha + beta``.
+
+    Two entropy normalization modes are available, controlled by *entropy_norm*:
+
+    * ``"max_entropy"`` (default): ``w_entropy = 1 - H(P_soft) / log(C)``
+      where ``log(C)`` is the theoretical maximum entropy for *C* classes.
+
+    * ``"minmax"``: per-tile min-max normalization following LaTeX Eq. 9-10:
+      ``U_norm(i) = (U(i) - min U) / (max U - min U)``
+      ``w_entropy(i) = 1 - U_norm(i)``
+      When all pixels share the same entropy (zero range), ``w_entropy=1`` for all.
+
+    When *bags_mask* is provided and ``use_border=True``, the border-distance
+    component follows LaTeX Eq. 13 (Experiment E5):
+
+    * Boundary pixels are detected on *bags_mask* with an 8-connected
+      3x3 morphological filter using :func:`_detect_boundary`.
+    * ``d_carta(i)`` is the Euclidean distance from pixel *i* to the nearest
+      boundary pixel.
+    * ``w_border_carta(i) = min(1, d_carta(i) / R)`` where *R* is
+      *border_radius* (default 10 pixels at 2.5 m/pixel).
+
+    When *bags_mask* is ``None`` and ``use_border=True``, the original
+    argmax-based border is used with ``w_border = dist / max_dist`` (no fixed
+    radius).
+
+    When ``use_border=False``, *bags_mask* is ignored entirely.
 
     Args:
         p_soft: (C, H, W) float32 probability distribution.
         alpha: Entropy component weight (default 0.6).
         w_embed: (1, H, W) float32 embedding similarity weight, or None.
         beta: Embedding component weight (default 0.0, ignored when w_embed is None).
-        use_border: When True (default) include the border-distance component,
-            which is the user's contribution beyond the original paper.
+        use_border: When True (default) include the border-distance component.
             Set to False to replicate the original paper formula.
+        entropy_norm: Entropy normalization strategy. ``"max_entropy"`` (default)
+            normalizes by the theoretical maximum ``log(C)``; ``"minmax"``
+            applies per-tile min-max normalization (LaTeX Eq. 9-10, Experiment E4).
+        bags_mask: Optional (H, W) integer array of the BAGS cartographic mask.
+            When provided and ``use_border=True``, the boundary is detected on
+            *bags_mask* and ``w_border_carta`` is computed via LaTeX Eq. 13.
+            Ignored when ``use_border=False``.
+        border_radius: Fixed radius *R* in pixels for the ``w_border_carta``
+            normalization (default 10). Only used when *bags_mask* is provided.
 
     Returns:
         w_conf: (1, H, W) float32 array with values in [0, 1].
 
     Raises:
-        ValueError: if ``use_border=True`` and ``alpha + beta > 1.0``.
+        ValueError: if ``use_border=True`` and ``alpha + beta > 1.0``, or if
+            ``entropy_norm`` is not ``"max_entropy"`` or ``"minmax"``.
     """
     if use_border and alpha + beta > 1.0 + 1e-8:
         raise ValueError(
             f"alpha + beta must be <= 1.0, got alpha={alpha}, beta={beta}."
         )
+    if use_border and bags_mask is not None and border_radius <= 0:
+        raise ValueError(f"border_radius must be > 0, got {border_radius}.")
 
     num_classes = p_soft.shape[0]
     eps = 1e-8
 
     log_p = np.log(np.clip(p_soft, eps, 1.0))
     entropy = -(p_soft * log_p).sum(axis=0)  # (H, W)
-    max_entropy = np.log(num_classes)
-    w_entropy = 1.0 - entropy / max_entropy  # (H, W)
+
+    if entropy_norm == "max_entropy":
+        w_entropy = 1.0 - entropy / np.log(num_classes)  # (H, W)
+    elif entropy_norm == "minmax":
+        e_min, e_max = entropy.min(), entropy.max()
+        denom = e_max - e_min
+        u_norm = (entropy - e_min) / denom if denom > 0.0 else np.zeros_like(entropy)
+        w_entropy = 1.0 - u_norm  # (H, W)
+    else:
+        raise ValueError(
+            f"Unknown entropy_norm: '{entropy_norm}'. "
+            "Must be 'max_entropy' or 'minmax'."
+        )
 
     if use_border:
-        argmax_map = p_soft.argmax(axis=0)
-        border = np.zeros_like(argmax_map, dtype=bool)
-        border[:-1, :] |= argmax_map[:-1, :] != argmax_map[1:, :]
-        border[1:, :] |= argmax_map[1:, :] != argmax_map[:-1, :]
-        border[:, :-1] |= argmax_map[:, :-1] != argmax_map[:, 1:]
-        border[:, 1:] |= argmax_map[:, 1:] != argmax_map[:, :-1]
-
-        dist = distance_transform_edt(~border).astype(np.float32)
-        max_dist = dist.max() if dist.max() > 0 else 1.0
-        w_border = dist / max_dist  # (H, W)
+        if bags_mask is not None:
+            border = _detect_boundary(bags_mask)
+            if border.any():
+                dist = distance_transform_edt(~border).astype(np.float32)
+                w_border = np.minimum(1.0, dist / border_radius)  # (H, W)
+            else:
+                w_border = np.ones(bags_mask.shape, dtype=np.float32)
+        else:
+            argmax_map = p_soft.argmax(axis=0)
+            border = np.zeros_like(argmax_map, dtype=bool)
+            border[:-1, :] |= argmax_map[:-1, :] != argmax_map[1:, :]
+            border[1:, :] |= argmax_map[1:, :] != argmax_map[:-1, :]
+            border[:, :-1] |= argmax_map[:, :-1] != argmax_map[:, 1:]
+            border[:, 1:] |= argmax_map[:, 1:] != argmax_map[:, :-1]
+            dist = distance_transform_edt(~border).astype(np.float32)
+            max_dist = dist.max() if dist.max() > 0 else 1.0
+            w_border = dist / max_dist  # (H, W)
 
         border_weight = 1.0 - alpha - beta
         w_conf = alpha * w_entropy + border_weight * w_border  # (H, W)
@@ -542,6 +709,8 @@ def process_tile(
     class_centroids: Optional[np.ndarray] = None,
     use_border: bool = True,
     aef_resampling: AEFResamplingStrategy = "auto",
+    entropy_norm: str = "max_entropy",
+    border_radius: int = 10,
     save_aligned_aef: bool = False,
     aligned_aef_dtype: str = "int8",
 ) -> Tuple:
@@ -553,8 +722,8 @@ def process_tile(
 
     Args:
         tile_id: Tile identifier (used to name output files).
-        rows: DataFrame rows for this tile.
-              Required columns: image_path, lulc_path, weight.
+        rows: Normalized dataframe rows for this tile.
+              Required columns: image_path, source_name, lulc_path.
               All rows for the same tile_id must share the same image_path.
         output_dir: Root output directory.
         num_classes: Number of land-cover classes (0-indexed).
@@ -572,6 +741,13 @@ def process_tile(
         aef_resampling: AEF raster alignment strategy for GCS mode. ``"auto"``
                         aggregates when target pixels are coarser than AEF and
                         uses nearest-neighbor when target pixels are finer.
+        entropy_norm: Entropy normalization strategy passed to ``compute_w_conf``.
+                      ``"max_entropy"`` (default) or ``"minmax"``.
+        The cartographic boundary source is taken from the CSV's ``mask_path``,
+            ``cartographic_path``, or ``bags_path`` column.
+        border_radius: Fixed radius *R* in pixels for the ``w_border_carta``
+            normalization (default 10, matching the 2.5 m/pixel paper setup).
+            Only used when the cartographic source is present.
         save_aligned_aef: When True, write the aligned/resampled GCS AEF
                           embedding to ``output_dir/aef_aligned``.
         aligned_aef_dtype: Output dtype for saved aligned AEF rasters:
@@ -585,15 +761,28 @@ def process_tile(
     image_path = rows.iloc[0]["image_path"]
     img_h, img_w, img_transform, img_crs, img_profile = _get_image_grid(image_path)
 
-    lulc_maps, weights = [], []
+    lulc_maps = []
     for _, row in rows.iterrows():
         lulc = _reproject_lulc_to_image_grid(
             row["lulc_path"], img_h, img_w, img_transform, img_crs
         )
         lulc_maps.append(lulc)
-        weights.append(float(row["weight"]))
 
-    p_soft = compute_p_soft(lulc_maps, weights, num_classes)
+    p_soft = compute_p_soft(lulc_maps, num_classes)
+
+    bags_mask: Optional[np.ndarray] = None
+    if use_border:
+        bags_rows = rows[rows["source_name"] == _CARTOGRAPHIC_SOURCE_NAME]
+        if not bags_rows.empty:
+            bags_mask = _reproject_lulc_to_image_grid(
+                bags_rows.iloc[0]["lulc_path"], img_h, img_w, img_transform, img_crs
+            )
+        else:
+            logger.warning(
+                "cartographic mask source not found in tile %s; "
+                "falling back to argmax-based border",
+                tile_id,
+            )
 
     w_embed: Optional[np.ndarray] = None
     aligned_aef_path: Optional[Path] = None
@@ -635,7 +824,14 @@ def process_tile(
             )
 
     w_conf = compute_w_conf(
-        p_soft, alpha=alpha, w_embed=w_embed, beta=beta, use_border=use_border
+        p_soft,
+        alpha=alpha,
+        w_embed=w_embed,
+        beta=beta,
+        use_border=use_border,
+        entropy_norm=entropy_norm,
+        bags_mask=bags_mask,
+        border_radius=border_radius,
     )
 
     transform, crs, profile = img_transform, img_crs, img_profile
@@ -747,13 +943,18 @@ def run(
     beta: float = 0.0,
     use_border: bool = True,
     aef_resampling: AEFResamplingStrategy = "auto",
+    entropy_norm: str = "max_entropy",
+    image_key: str = "image_path",
+    mask_key: str = "mask_path",
+    lulc_keys: Optional[List[str]] = None,
+    border_radius: int = 10,
     save_aligned_aef: bool = False,
     aligned_aef_dtype: str = "int8",
 ) -> Path:
     """Build P_soft and W_conf rasters for all tiles in *input_csv*.
 
     Args:
-        input_csv: CSV with columns tile_id, image_path, source_name, lulc_path, weight.
+        input_csv: CSV in wide format with one row per tile.
         output_dir: Root directory for output p_soft/ and w_conf/ sub-directories.
         num_classes: Number of land-cover classes (0-indexed).
         alpha: Entropy/border blend weight for W_conf.
@@ -768,6 +969,16 @@ def run(
         use_border: When True (default), include the border-distance component in
                     W_conf. Set to False to replicate the original paper formula.
         aef_resampling: AEF raster alignment strategy for GCS mode.
+        entropy_norm: Entropy normalization strategy. ``"max_entropy"`` (default)
+                      normalizes by ``log(C)``; ``"minmax"`` applies per-tile
+                      min-max normalization (LaTeX Eq. 9-10, Experiment E4).
+        image_key: CSV column with image paths.
+        mask_key: CSV column with BAGS cartographic mask paths.
+        lulc_keys: CSV columns with external LULC source paths. The soft label
+                   is an equal vote over ``mask_key`` plus these columns.
+        border_radius: Fixed radius *R* in pixels for ``w_border_carta``
+            normalization (default 10). Only used when the cartographic source
+            is present.
         save_aligned_aef: When True, write aligned GCS AEF embeddings and include
                           ``aligned_aef_path`` in the manifest.
         aligned_aef_dtype: Output dtype for aligned AEF rasters.
@@ -775,7 +986,12 @@ def run(
     Returns:
         Path to the written manifest CSV.
     """
-    df = pd.read_csv(input_csv)
+    df = _normalize_sources_dataframe(
+        pd.read_csv(input_csv),
+        image_key=image_key,
+        mask_key=mask_key,
+        lulc_keys=lulc_keys,
+    )
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -809,6 +1025,8 @@ def run(
                 class_centroids=class_centroids,
                 use_border=use_border,
                 aef_resampling=aef_resampling,
+                entropy_norm=entropy_norm,
+                border_radius=border_radius,
                 save_aligned_aef=save_aligned_aef,
                 aligned_aef_dtype=aligned_aef_dtype,
             ): tile_id

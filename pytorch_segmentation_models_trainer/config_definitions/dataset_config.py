@@ -267,6 +267,69 @@ class MBTilesMaskWindowedDatasetConfig:
     data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
     return_metadata: bool = True
     window_index_cache: Optional[str] = None
+    window_index_mask_path_key: str = "mask_path"
+    window_index_coordinate_mode: str = "auto"
+
+
+@dataclass
+class MBTilesLulcInputMaskWindowedDatasetConfig(MBTilesMaskWindowedDatasetConfig):
+    """Configuration for ``MBTilesLulcInputMaskWindowedDataset``.
+
+    Example YAML:
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.lulc_input_dataset.MBTilesLulcInputMaskWindowedDataset
+          mbtiles_path: /data/tiles.mbtiles
+          mask_dir: /data/masks
+          window_index_cache: /data/coreset_windows.csv
+          lulc_paths:
+            - /data/mapbiomas.vrt
+            - /data/esri.vrt
+            - /data/dynamic_world.vrt
+          num_classes: 6
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".lulc_input_dataset.MBTilesLulcInputMaskWindowedDataset"
+    )
+    lulc_paths: List[str] = field(default_factory=list)
+    num_classes: int = 6
+    ignore_lulc_index: int = 255
+    lulc_resampling: str = "nearest"
+
+
+@dataclass
+class MBTilesSoftLabelMaskWindowedDatasetConfig(MBTilesMaskWindowedDatasetConfig):
+    """Configuration for ``MBTilesSoftLabelMaskWindowedDataset``.
+
+    Example YAML:
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_soft_label_dataset.MBTilesSoftLabelMaskWindowedDataset
+          mbtiles_path: /data/tiles.mbtiles
+          mask_dir: /data/masks
+          window_index_cache: /data/coreset_windows.csv
+          lulc_paths:
+            - /data/mapbiomas.vrt
+            - /data/esri.vrt
+            - /data/dynamic_world.vrt
+          num_classes: 6
+          return_w_conf: true
+          alpha: 0.6
+          use_border: true
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".mbtiles_soft_label_dataset.MBTilesSoftLabelMaskWindowedDataset"
+    )
+    lulc_paths: List[str] = field(default_factory=list)
+    num_classes: int = 6
+    lulc_resampling: str = "nearest"
+    return_w_conf: bool = True
+    alpha: float = 0.6
+    use_border: bool = True
+    entropy_norm: str = "max_entropy"
+    border_radius: int = 10
 
 
 @dataclass
@@ -413,3 +476,200 @@ class SoftLabelWindowedDatasetConfig:
     patch_size_key: str = "patch_size"
     n_first_rows_to_read: Optional[int] = None
     seed: Optional[int] = None
+
+
+@dataclass
+class SoftLabelCachedDatasetConfig:
+    """Configuration for ``SoftLabelCachedDataset``.
+
+    Accepts the same wide ``sources_csv`` format as ``build-soft-labels``:
+    one row per tile with ``image_key``, ``mask_key``, and the columns listed
+    in ``lulc_keys``. P_soft is computed lazily on first access and cached to
+    ``cache_dir``; W_conf is recomputed each epoch from ``alpha``,
+    ``entropy_norm``, ``use_border``, and ``border_radius``.
+
+    When ``patch_size`` is set the dataset operates in windowed mode: it
+    enumerates a regular grid of patches over every tile and each access reads
+    only that patch from the image and cache.
+
+    Example YAML:
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.soft_label_cached_dataset.SoftLabelCachedDataset
+          sources_csv: /data/sources.csv
+          cache_dir: /data/cache/p_soft
+          num_classes: 6
+          alpha: 0.6
+          use_border: true
+          entropy_norm: minmax
+          image_key: image_path
+          mask_key: mask_path
+          lulc_keys: [mapbiomas_path, esri_path, dw_path]
+          border_radius: 10
+          patch_size: [256, 256]
+          patch_stride: [256, 256]
+          augmentation_list:
+            - _target_: albumentations.HorizontalFlip
+              p: 0.5
+            - _target_: albumentations.Normalize
+              mean: [0.485, 0.456, 0.406]
+              std: [0.229, 0.224, 0.225]
+            - _target_: albumentations.pytorch.ToTensorV2
+          data_loader:
+            batch_size: 16
+            num_workers: 8
+            shuffle: true
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".soft_label_cached_dataset.SoftLabelCachedDataset"
+    )
+    sources_csv: Optional[str] = None
+    cache_dir: Optional[str] = None
+    num_classes: int = 6
+    alpha: float = 0.6
+    use_border: bool = True
+    entropy_norm: str = "max_entropy"
+    border_radius: int = 10
+    image_key: str = "image_path"
+    mask_key: str = "mask_path"
+    lulc_keys: List[str] = field(default_factory=list)
+    augmentation_list: List = field(default_factory=list)
+    data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+    n_first_rows_to_read: Optional[int] = None
+    patch_size: Optional[List[int]] = None
+    patch_stride: Optional[List[int]] = None
+    windows_csv: Optional[str] = None
+    windows_coord_type: str = "image"
+    seed: Optional[int] = None
+
+
+@dataclass
+class LulcInputDatasetConfig:
+    """Configuration for ``LulcInputDataset``.
+
+    Example YAML:
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.lulc_input_dataset.LulcInputDataset
+          input_csv_path: /data/splits/train.csv
+          image_key: image_path
+          mask_key: mask_path
+          lulc_keys:
+            - mapbiomas_path
+            - esri_path
+            - dw_path
+          num_classes: 6
+          augmentation_list:
+            - _target_: albumentations.HorizontalFlip
+              p: 0.5
+            - _target_: albumentations.Normalize
+              mean: [0.485, 0.456, 0.406]
+              std: [0.229, 0.224, 0.225]
+            - _target_: albumentations.pytorch.ToTensorV2
+          data_loader:
+            batch_size: 16
+            num_workers: 8
+            shuffle: true
+            pin_memory: true
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".lulc_input_dataset.LulcInputDataset"
+    )
+    input_csv_path: Optional[str] = None
+    root_dir: Optional[str] = None
+    lulc_keys: List[str] = field(default_factory=list)
+    num_classes: int = 6
+    ignore_lulc_index: int = 255
+    image_key: str = "image_path"
+    mask_key: str = "mask_path"
+    augmentation_list: List = field(default_factory=list)
+    data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+    n_first_rows_to_read: Optional[int] = None
+    seed: Optional[int] = None
+
+
+@dataclass
+class LulcInputWindowedDatasetConfig(LulcInputDatasetConfig):
+    """Configuration for ``LulcInputWindowedDataset``.
+
+    Example YAML:
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.lulc_input_dataset.LulcInputWindowedDataset
+          input_csv_path: /data/splits/train.csv
+          lulc_keys: [mapbiomas_path, esri_path, dw_path]
+          num_classes: 6
+          row_off_key: row_off
+          col_off_key: col_off
+          patch_size_key: patch_size
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".lulc_input_dataset.LulcInputWindowedDataset"
+    )
+    row_off_key: str = "row_off"
+    col_off_key: str = "col_off"
+    patch_size_key: str = "patch_size"
+
+
+@dataclass
+class MBTilesCropsGeoTifMaskDatasetConfig:
+    """Configuration for ``MBTilesCropsGeoTifMaskDataset``.
+
+    Loads pre-selected crop windows (from a CSV/Parquet file or a vector file)
+    and pairs each window with a spatially-aligned mask patch read from any
+    rasterio-readable source (VRT, GeoTIFF, MBTile, …).  Mask resampling is
+    always nearest-neighbour to preserve class-index integrity.
+
+    Example YAML (CSV windows, VRT mask)::
+
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_crops_dataset.MBTilesCropsGeoTifMaskDataset
+          image_mbtiles_path: /data/imagery.mbtiles
+          mask_path: /data/masks/mask.vrt
+          crops_path: /data/crops.csv
+          patch_size: 256
+          color_map:
+            - [255, 0, 0, 1]
+            - [0, 255, 0, 2]
+          augmentation_list:
+            - _target_: albumentations.HorizontalFlip
+              p: 0.5
+            - _target_: albumentations.Normalize
+              mean: [0.485, 0.456, 0.406]
+              std: [0.229, 0.224, 0.225]
+            - _target_: albumentations.pytorch.ToTensorV2
+
+    Example YAML (vector windows, single-band GeoTIFF mask)::
+
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_crops_dataset.MBTilesCropsGeoTifMaskDataset
+          image_mbtiles_path: /data/imagery.mbtiles
+          mask_path: /data/masks/mask.tif
+          crops_path: /data/crops.gpkg
+          patch_size: 256
+          n_classes: 2
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.dataset_loader"
+        ".mbtiles_crops_dataset.MBTilesCropsGeoTifMaskDataset"
+    )
+    image_mbtiles_path: str = MISSING
+    mask_path: str = MISSING
+    crops_path: str = MISSING
+    patch_size: int = 256
+    color_map: Optional[List] = None
+    n_classes: int = 2
+    selected_bands: Optional[List[int]] = None
+    image_dtype: str = "uint8"
+    image_resampling: str = "bilinear"
+    crops_layer: Optional[str] = None
+    col_off_key: str = "col_off"
+    row_off_key: str = "row_off"
+    augmentation_list: List = field(default_factory=list)
+    data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
+    return_metadata: bool = False
+    window_index_cache: Optional[str] = None

@@ -26,6 +26,8 @@ ambiguity is highest.  See [W_conf formula](#w_conf-formula) for details.
 |-----------|-------|---------|
 | Dataset | `SoftLabelDataset` | Reads P_soft and W_conf GeoTIFFs, returns `batch["mask"]` as a dict |
 | Windowed Dataset | `SoftLabelWindowedDataset` | Reads patches on-the-fly from full-scene rasters via row/col offsets |
+| Cached Dataset | `SoftLabelCachedDataset` | Computes P_soft lazily from `sources_csv`, caches to disk; supports windowed read |
+| MBTiles Dataset | `MBTilesSoftLabelMaskWindowedDataset` | Reads RGB from MBTiles and computes P_soft/W_conf on mask-referenced windows |
 | Loss | `SoftLabelWeightedCELoss` | Pixel-wise soft cross-entropy weighted by W_conf |
 | Model | `SoftLabelModel` | Subclass of `Model` that passes W_conf through the loss pipeline |
 | Preprocessing | `build_soft_labels.py` | Computes P_soft and W_conf from multiple LULC sources; optionally blends AEF embeddings |
@@ -43,6 +45,10 @@ pytorch-smt-tools build-soft-labels sources.csv \
     --output-dir /data/soft_labels \
     --num-classes 4 \
     --alpha 0.6 \
+    --mask-key mask_path \
+    --lulc-key mapbiomas_path \
+    --lulc-key esri_path \
+    --lulc-key dw_path \
     --max-workers 8
 ```
 
@@ -52,11 +58,8 @@ pytorch-smt-tools build-soft-labels sources.csv \
 **sources.csv format:**
 
 ```csv
-tile_id,image_path,source_name,lulc_path,weight
-tile_0,/data/images/tile_0.tif,mapbiomas,/data/mapbiomas/tile_0.tif,0.8
-tile_0,/data/images/tile_0.tif,esri_lulc,/data/esri/tile_0.tif,0.6
-tile_0,/data/images/tile_0.tif,dw,/data/dw/tile_0.tif,0.5
-tile_0,/data/images/tile_0.tif,carta25k,/data/carta/tile_0.tif,1.0
+tile_id,image_path,mask_path,mapbiomas_path,esri_path,dw_path
+tile_0,/data/images/tile_0.tif,/data/carta/tile_0.tif,/data/mapbiomas/tile_0.tif,/data/esri/tile_0.tif,/data/dw/tile_0.tif
 ```
 
 All LULC rasters are automatically reprojected to the image's CRS, resolution,
@@ -82,7 +85,7 @@ W_conf = alpha · w_entropy + (1 - alpha - beta) · w_border + beta · w_embed
 
 | Term | Description |
 |------|-------------|
-| `w_entropy` | `1 - H(P_soft) / log(C)` — high when the class distribution is peaked |
+| `w_entropy` | Entropy-based confidence (see [Entropy normalisation](#entropy-normalisation)) |
 | `w_border` | Distance transform from class boundaries, normalised to [0, 1] — high far from borders |
 | `w_embed` | AEF cosine similarity to class centroid — high when the pixel matches its class in embedding space |
 
@@ -101,6 +104,63 @@ W_conf = (alpha · w_entropy + beta · w_embed) / (alpha + beta)   (with AEF)
 ```
 
 When `--no-border` is set, the `alpha + beta ≤ 1.0` constraint is relaxed.
+
+### Entropy normalisation
+
+The `--entropy-norm` option controls how `w_entropy` is computed from the
+Shannon entropy `H(P_soft)`.  Two modes are available:
+
+| Mode | Formula | Use case |
+|------|---------|----------|
+| `max_entropy` (default) | `w_entropy = 1 - H / log(C)` | Standard normalisation; scale is absolute |
+| `minmax` | `w_entropy = 1 - (H - min H) / (max H - min H)` | Per-tile relative normalisation; matches LaTeX Eq. 9–10 (Experiments E4/E5) |
+
+With `minmax`, the pixel with the lowest entropy in a tile always gets
+`w_entropy = 1` and the pixel with the highest entropy gets `w_entropy = 0`,
+regardless of the absolute entropy range.  When all pixels share the same
+entropy (degenerate tile), `w_entropy = 1` for all pixels.
+
+```bash
+# Experiment E4 / E5 — per-tile min-max entropy normalisation
+pytorch-smt-tools build-soft-labels sources.csv \
+    --output-dir /data/soft_labels_e4 \
+    --num-classes 6 --alpha 1.0 --no-border \
+    --entropy-norm minmax
+```
+
+### BAGS border distance for Experiment E5
+
+Experiment E5 uses the cartographic BAGS mask, not `argmax(P_soft)`, to compute
+the border-distance component:
+
+```text
+w_border_carta(i) = min(1, d_carta(i) / R)
+```
+
+`d_carta(i)` is the Euclidean distance from pixel `i` to the nearest 3x3
+morphological boundary pixel in the BAGS mask. The default radius is `R=10`
+pixels.
+
+The source CSV must contain the BAGS cartographic mask column selected by
+`--mask-key`, plus any external LULC columns listed with `--lulc-key`:
+
+```csv
+tile_id,image_path,mask_path,mapbiomas_path,esri_path,dw_path
+tile_0,/data/images/tile_0.tif,/data/lulc/bags_0.tif,/data/lulc/mapbiomas_0.tif,/data/lulc/esri_0.tif,/data/lulc/dw_0.tif
+```
+
+```bash
+pytorch-smt-tools build-soft-labels sources.csv \
+    --output-dir /data/soft_labels_e5 \
+    --num-classes 6 \
+    --alpha 0.6 \
+    --entropy-norm minmax \
+    --mask-key mask_path \
+    --lulc-key mapbiomas_path \
+    --lulc-key esri_path \
+    --lulc-key dw_path \
+    --border-radius 10
+```
 
 :::tip Ablation study
 
@@ -184,6 +244,44 @@ uniformly to all pixels:
 
 ```
 w_embed(i) = (cos_sim(emb_tile, centroid(dominant_class)) + 1) / 2
+```
+
+### Source Cooperative mode — cropped per-pixel COG embeddings
+
+Downloads 64-band per-pixel AEF embedding crops from the public
+[Source Cooperative AEF annual COG collection](https://source.coop/tge-labs/aef/v1/annual).
+This mode reads the STAC GeoParquet index, selects the annual COG intersecting
+each tile footprint, and writes only the crop needed by the tile as
+`{tile_id}.tif`.
+
+```bash
+pytorch-smt-tools download-aef-embeddings \
+    --source sourcecoop \
+    --tiles-csv tiles.csv \
+    --output-dir /data/aef_sourcecoop_embeddings \
+    --year 2025
+```
+
+When `--year` is omitted, the downloader uses a `year` column in `tiles.csv` or
+the first 4-digit year found in `image_path`.
+
+```csv
+tile_id,image_path,year
+tile_0,/data/images/tile_20250625_20260106.tif,2025
+tile_1,/data/images/tile_20240101.tif,2024
+```
+
+The resulting files are per-pixel GeoTIFF embeddings, so use them in the build
+step with `--aef-source gcs`:
+
+```bash
+pytorch-smt-tools build-soft-labels sources.csv \
+    --output-dir /data/soft_labels \
+    --num-classes 4 \
+    --alpha 0.5 \
+    --beta 0.2 \
+    --aef-embeddings-dir /data/aef_sourcecoop_embeddings \
+    --aef-source gcs
 ```
 
 **Comparison of AEF modes:**
@@ -469,6 +567,98 @@ sample = ds[0]
 # sample["mask"]["w_conf"] — (1, patch_size, patch_size) float32 (when present)
 ```
 
+### `SoftLabelCachedDataset`
+
+Computes P_soft lazily from a `sources_csv` file (same format as `build-soft-labels`),
+writes the result as a full-tile GeoTIFF cache on first access, and reads from the cache
+on subsequent accesses.  W_conf is recomputed on every access so that `alpha`,
+`entropy_norm`, and `use_border` can be changed without invalidating the cache.
+
+When `patch_size` is given the dataset operates in **windowed mode**: it enumerates
+all `(patch_size, patch_stride)` patches across every tile and each `__getitem__`
+call reads only that window from the image and cache via rasterio windowed reads.
+
+```python
+from pytorch_segmentation_models_trainer.dataset_loader.soft_label_cached_dataset import (
+    SoftLabelCachedDataset,
+)
+
+# Full-tile mode (one item per tile)
+ds = SoftLabelCachedDataset(
+    sources_csv="sources.csv",
+    cache_dir="/data/cache/p_soft",
+    num_classes=6,
+    alpha=0.6,
+    use_border=True,
+    entropy_norm="minmax",  # Experiment E5
+    mask_key="mask_path",
+    lulc_keys=["mapbiomas_path", "esri_path", "dw_path"],
+    border_radius=10,
+)
+
+# Windowed mode (one item per patch)
+ds_win = SoftLabelCachedDataset(
+    sources_csv="sources.csv",
+    cache_dir="/data/cache/p_soft",   # same cache — no rebuild needed
+    num_classes=6,
+    alpha=0.6,
+    use_border=True,
+    mask_key="mask_path",
+    lulc_keys=["mapbiomas_path", "esri_path", "dw_path"],
+    border_radius=10,
+    patch_size=(256, 256),
+    patch_stride=(256, 256),          # no overlap; use (128, 128) for 50% overlap
+)
+
+sample = ds[0]
+# sample["image"]          — (3, H, W) float32 in [0, 1]
+# sample["mask"]["mask"]   — (C, H, W) float32, sums to 1 per pixel
+# sample["mask"]["w_conf"] — (1, H, W) float32 in [0, 1]
+# sample["path"]           — image file path
+```
+
+**Caching contract:**
+
+- The full-tile P_soft is cached once in `cache_dir/{tile_id}.tif` regardless of
+  whether you use full-tile or windowed mode.
+- `alpha`, `entropy_norm`, `use_border`, `mask_key`, `lulc_keys`, and `border_radius`
+  do **not** affect the cache key —
+  change them between runs without clearing the cache.
+- Writes are atomic (`{tile_id}.tif.tmp` → rename) so concurrent DataLoader workers
+  (multi-process) cannot corrupt a partial write.
+- Stale `.tmp` files left by crashed workers are overwritten on the next access.
+
+### `MBTilesSoftLabelMaskWindowedDataset`
+
+Use this dataset when RGB imagery lives in MBTiles and mask GeoTIFFs define the
+training grid. The soft label is computed per sampled window as an equal vote
+over the BAGS mask window and each LULC raster/VRT listed in `lulc_paths`.
+
+```yaml
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_soft_label_dataset.MBTilesSoftLabelMaskWindowedDataset
+  mbtiles_path: /data/tiles.mbtiles
+  mask_dir: /data/masks
+  window_index_cache: /data/coreset_windows.csv
+  patch_size: 256
+  selected_bands: [1, 2, 3]
+  lulc_paths:
+    - /data/mapbiomas_edgv_2_5m.vrt
+    - /data/esri_edgv_2_5m.vrt
+    - /data/dynamic_world_edgv_2_5m.vrt
+  num_classes: 6
+  return_w_conf: true
+  alpha: 0.6
+  use_border: true
+  entropy_norm: minmax
+  border_radius: 10
+```
+
+Set `return_w_conf: false` for uniform-weight soft-label training (E3). Use
+`return_w_conf: true`, `use_border: false`, and `alpha: 1.0` for entropy-only
+weighting (E4). Use `use_border: true` and `alpha: 0.6` for entropy plus BAGS
+border weighting (E5).
+
 ### `SoftLabelModel`
 
 Drop-in replacement for `Model`.  All other `Model` behaviour
@@ -490,8 +680,8 @@ _target_: pytorch_segmentation_models_trainer.model_loader.soft_label_model.Soft
 | E2-NB | `alpha·w_entropy` | `--alpha 0.6 --no-border` | `soft_label_no_border.yaml` |
 | E2 | `alpha·w_entropy + (1-alpha)·w_border` | `--alpha 0.6` | `soft_label_unet.yaml` |
 | E3 | `alpha·w_e + beta·w_embed + (1-a-b)·w_border` | `--alpha 0.5 --beta 0.2 --aef-source hf` | `soft_label_unet.yaml` |
-| E4 | `alpha·w_e + beta·w_embed + (1-a-b)·w_border` | `--alpha 0.5 --beta 0.2 --aef-source gcs` | `soft_label_aef_gcs.yaml` |
-| E5 | same as E4, patch manifest | `--patch-size 512` | `soft_label_windowed_unet.yaml` |
+| E4 | `alpha·w_entropy` with min-max entropy | `--alpha 1.0 --no-border --entropy-norm minmax` | `soft_label_no_border.yaml` |
+| E5 | `alpha·w_entropy + (1-alpha)·w_border_carta` | `--alpha 0.6 --entropy-norm minmax --mask-key mask_path --lulc-key mapbiomas_path --lulc-key esri_path --lulc-key dw_path --border-radius 10` | `soft_label_cached.yaml` |
 
 > **E2-NB** ("no border") is the formula from the original paper.
 > **E2** adds the border-distance component — a framework contribution not in the paper.

@@ -305,12 +305,8 @@ def get_spatial_gradient_kernel2d(
             "mode should be either sobel, diff or scharr. Got {}".format(mode)
         )
     if order not in [1, 2]:
-        raise TypeError(
-            "order should be either 1 or 2\
-                         Got {}".format(
-                order
-            )
-        )
+        raise TypeError("order should be either 1 or 2\
+                         Got {}".format(order))
     if mode == "sobel" and order == 1:
         kernel: torch.Tensor = get_sobel_kernel2d()
     elif mode == "sobel" and order == 2:

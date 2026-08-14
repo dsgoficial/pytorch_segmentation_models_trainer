@@ -44,6 +44,8 @@ train_dataset:
   image_dtype: uint8
   image_resampling: bilinear
   n_classes: ${hyperparameters.classes}
+  # Existing caches may use pixel windows (row_off/col_off + width/height or
+  # patch_size) or bounds (minx/miny/maxx/maxy in the mask CRS).
   window_index_cache: /data/cache/train_mbtiles_mask_windows.parquet
   augmentation_list:
     - _target_: albumentations.HorizontalFlip

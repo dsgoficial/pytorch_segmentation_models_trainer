@@ -25,9 +25,7 @@ if _pkg_root not in sys.path:
 # Windows DLL fix: must run before `import torch`
 if sys.platform == "win32":
     os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-    _torch_lib = os.path.join(
-        sys.prefix, "Lib", "site-packages", "torch", "lib"
-    )
+    _torch_lib = os.path.join(sys.prefix, "Lib", "site-packages", "torch", "lib")
     if os.path.isdir(_torch_lib):
         if hasattr(os, "add_dll_directory"):
             os.add_dll_directory(_torch_lib)
@@ -49,10 +47,10 @@ from pytorch_segmentation_models_trainer.custom_models.upernet_dual_head import 
     UPerNetDualHead,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_fake_encoder_features(batch_size=2, spatial=64):
     """Create fake multi-scale features mimicking ConvNeXtV2-Tiny encoder."""
@@ -100,6 +98,7 @@ class _MiniDualHead(nn.Module):
 # ---------------------------------------------------------------------------
 # UPerNetDualHead tests
 # ---------------------------------------------------------------------------
+
 
 class TestUPerNetDualHead(unittest.TestCase):
     """Test the UPerNetDualHead model structure."""
@@ -155,6 +154,7 @@ class TestUPerNetDualHead(unittest.TestCase):
 # DualHeadKendallLoss tests
 # ---------------------------------------------------------------------------
 
+
 class TestDualHeadKendallLoss(unittest.TestCase):
     """Test DualHeadKendallLoss."""
 
@@ -187,9 +187,7 @@ class TestDualHeadKendallLoss(unittest.TestCase):
 
     def test_consistency_warmup_zero_at_epoch_0(self):
         """At epoch 0, consistency term should not contribute."""
-        loss_fn = DualHeadKendallLoss(
-            num_classes=self.C, consistency_warmup_epochs=10
-        )
+        loss_fn = DualHeadKendallLoss(num_classes=self.C, consistency_warmup_epochs=10)
         loss_fn.set_model(self.model)
 
         features = _make_fake_encoder_features(self.B, self.H)
@@ -214,9 +212,7 @@ class TestDualHeadKendallLoss(unittest.TestCase):
         loss.backward()
         for name, p in self.loss_fn.named_parameters():
             if p.requires_grad:
-                self.assertIsNotNone(
-                    p.grad, f"Parameter {name} has no gradient"
-                )
+                self.assertIsNotNone(p.grad, f"Parameter {name} has no gradient")
 
     def test_backward_model_params_have_grad(self):
         """Model decoder params should receive gradients."""
@@ -227,8 +223,11 @@ class TestDualHeadKendallLoss(unittest.TestCase):
 
     def test_three_learnable_sigmas(self):
         """Should have exactly 3 learnable sigma parameters."""
-        sigmas = [self.loss_fn.log_sigma_hard, self.loss_fn.log_sigma_soft,
-                  self.loss_fn.log_sigma_consist]
+        sigmas = [
+            self.loss_fn.log_sigma_hard,
+            self.loss_fn.log_sigma_soft,
+            self.loss_fn.log_sigma_consist,
+        ]
         for s in sigmas:
             self.assertTrue(s.requires_grad)
             self.assertEqual(s.shape, ())
@@ -258,6 +257,7 @@ class TestDualHeadKendallLoss(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Symmetric KL tests
 # ---------------------------------------------------------------------------
+
 
 class TestSymmetricKL(unittest.TestCase):
     """Test _symmetric_kl helper."""
@@ -297,6 +297,7 @@ class TestSymmetricKL(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Dataset return_hard_mask tests
 # ---------------------------------------------------------------------------
+
 
 class TestDatasetReturnHardMask(unittest.TestCase):
     """Test return_hard_mask in RandomCropSegmentationDataset."""
@@ -347,6 +348,7 @@ class TestDatasetReturnHardMask(unittest.TestCase):
 
         # CSVs
         import pandas as pd
+
         self.soft_csv = os.path.join(self.tmpdir, "soft.csv")
         pd.DataFrame({"image": [self.img_path], "mask": [self.soft_path]}).to_csv(
             self.soft_csv, index=False
@@ -360,6 +362,7 @@ class TestDatasetReturnHardMask(unittest.TestCase):
         from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
             RandomCropSegmentationDataset,
         )
+
         return RandomCropSegmentationDataset(
             input_csv_path=self.soft_csv,
             crop_size=[crop_size, crop_size],
@@ -398,6 +401,7 @@ class TestDatasetReturnHardMask(unittest.TestCase):
         from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
             RandomCropSegmentationDataset,
         )
+
         arr = np.array([[0, 1, 2], [3, 255, 5]], dtype=np.uint8)
         result = RandomCropSegmentationDataset._to_hard_mask_tensor(arr)
         self.assertEqual(result.dtype, torch.long)
@@ -408,6 +412,7 @@ class TestDatasetReturnHardMask(unittest.TestCase):
         from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
             RandomCropSegmentationDataset,
         )
+
         t = torch.tensor([[0, 1], [2, 3]], dtype=torch.float32)
         result = RandomCropSegmentationDataset._to_hard_mask_tensor(t)
         self.assertEqual(result.dtype, torch.long)
@@ -416,6 +421,7 @@ class TestDatasetReturnHardMask(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Kendall weighting math tests
 # ---------------------------------------------------------------------------
+
 
 class TestKendallWeighting(unittest.TestCase):
     """Test the mathematical properties of Kendall uncertainty weighting."""

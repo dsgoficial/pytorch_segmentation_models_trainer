@@ -1,0 +1,117 @@
+# Optuna hyperparameter search example.
+#
+# Mode A (HPO only): set n_trials, do NOT set seeds/n_runs.
+# Mode B (HPO then seed loop): set n_trials AND seeds/n_runs.
+#
+# Run with:
+#   pytorch-smt-tools train --config-path conf/examples --config-name optuna_search
+
+experiments_runner:
+  output_base_dir: outputs/hpo_unet
+  # Mode B: after HPO, run 3 seeds with the best config.
+  seeds: [42, 101, 28]
+  save_summary: true
+  representative_metric: val/JaccardIndex
+
+  optuna_search:
+    n_trials: 50
+    metric: val/JaccardIndex
+    direction: maximize
+    sampler: TPE            # TPE | GP | CmaES | Random | Grid
+    storage: sqlite:///outputs/hpo_unet/study.db   # enables resume
+    study_name: unet_hpo
+    save_visualizations: true
+    save_param_importances: true
+
+    search_space:
+      # --- scalar float ---
+      - key: optimizer.lr
+        type: float
+        low: 1.0e-5
+        high: 1.0e-2
+        log: true
+
+      # --- scalar int ---
+      - key: train_dataset.batch_size
+        type: int
+        low: 8
+        high: 64
+        step: 8
+
+      # --- categorical (string) ---
+      - key: model.encoder_name
+        type: categorical
+        choices:
+          - resnet34
+          - resnet50
+          - efficientnet-b0
+          - efficientnet-b2
+
+      # --- config_block: swap entire loss subtree ---
+      - key: loss
+        type: config_block
+        choices:
+          - name: cross_entropy
+            values:
+              _target_: torch.nn.CrossEntropyLoss
+              weight: null
+
+          - name: focal
+            values:
+              _target_: kornia.losses.FocalLoss
+              alpha: 0.5
+              gamma: 2.0
+              reduction: mean
+
+          - name: soft_label
+            values:
+              _target_: pytorch_segmentation_models_trainer.custom_losses.soft_label_loss.SoftLabelWeightedCELoss
+
+      # --- config_block: swap scheduler ---
+      - key: scheduler
+        type: config_block
+        choices:
+          - name: cosine
+            values:
+              _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+              T_max: 100
+              eta_min: 1.0e-6
+
+          - name: plateau
+            values:
+              _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+              patience: 5
+              factor: 0.5
+              mode: max
+
+# Base training config (used as starting point for every trial).
+seed: 42
+
+model:
+  encoder_name: resnet34       # overridden per trial if in search_space
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: 6
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1.0e-3                   # overridden per trial if in search_space
+  weight_decay: 1.0e-4
+
+loss:
+  _target_: torch.nn.CrossEntropyLoss   # overridden per trial if in search_space
+
+pl_trainer:
+  max_epochs: 50
+  accelerator: gpu
+  devices: 1
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.CSVWindowedImageDataset
+  input_csv_path: data/train.csv
+  batch_size: 16              # overridden per trial if in search_space
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.image_dataset.CSVWindowedImageDataset
+  input_csv_path: data/val.csv
+  batch_size: 16

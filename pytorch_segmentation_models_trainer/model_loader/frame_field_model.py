@@ -20,6 +20,7 @@
  *   https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning/     *
  ****
 """
+
 import copy
 from collections import OrderedDict
 from pytorch_toolbelt.inference.tiles import TileMerger
@@ -125,18 +126,24 @@ class FrameFieldModel(nn.Module):
                 kernel_size=3,
                 padding=1,
             ),
-            torch.nn.BatchNorm2d(self.backbone_output)
-            if self.use_batchnorm
-            else nn.Identity(),
-            torch.nn.ELU()
-            if self.module_activation is None
-            else instantiate(self.module_activation, _recursive_=False),
+            (
+                torch.nn.BatchNorm2d(self.backbone_output)
+                if self.use_batchnorm
+                else nn.Identity()
+            ),
+            (
+                torch.nn.ELU()
+                if self.module_activation is None
+                else instantiate(self.module_activation, _recursive_=False)
+            ),
             torch.nn.Conv2d(
                 self.backbone_output, self.crossfield_channels, kernel_size=1
             ),
-            torch.nn.Tanh()
-            if self.frame_field_activation is None
-            else instantiate(self.frame_field_activation, _recursive_=False),
+            (
+                torch.nn.Tanh()
+                if self.frame_field_activation is None
+                else instantiate(self.frame_field_activation, _recursive_=False)
+            ),
         )
 
     def get_output(self, x):

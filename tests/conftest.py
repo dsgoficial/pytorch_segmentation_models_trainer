@@ -5,9 +5,7 @@ import sys
 
 if sys.platform == "win32":
     os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-    _torch_lib = os.path.join(
-        sys.prefix, "Lib", "site-packages", "torch", "lib"
-    )
+    _torch_lib = os.path.join(sys.prefix, "Lib", "site-packages", "torch", "lib")
     if os.path.isdir(_torch_lib):
         if hasattr(os, "add_dll_directory"):
             os.add_dll_directory(_torch_lib)
@@ -47,19 +45,21 @@ def mock_simple_model():
 @pytest.fixture
 def basic_cfg():
     """Minimal OmegaConf config without disk I/O."""
-    return OmegaConf.create({
-        "model": {
-            "_target_": "segmentation_models_pytorch.Unet",
-            "encoder_name": "resnet18",
-            "in_channels": 3,
-            "classes": 1,
-        },
-        "loss": {
-            "_target_": "torch.nn.BCEWithLogitsLoss",
-        },
-        "hyperparameters": {
-            "batch_size": 4,
-            "devices": 1,
-            "accelerator": "cpu",
-        },
-    })
+    return OmegaConf.create(
+        {
+            "model": {
+                "_target_": "segmentation_models_pytorch.Unet",
+                "encoder_name": "resnet18",
+                "in_channels": 3,
+                "classes": 1,
+            },
+            "loss": {
+                "_target_": "torch.nn.BCEWithLogitsLoss",
+            },
+            "hyperparameters": {
+                "batch_size": 4,
+                "devices": 1,
+                "accelerator": "cpu",
+            },
+        }
+    )

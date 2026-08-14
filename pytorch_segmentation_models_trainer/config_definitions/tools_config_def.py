@@ -201,6 +201,44 @@ class MBTilesMaskAlignedExportConfig:
     n_classes: int = 2
 
 
+@dataclass
+class MBTilesMulticlassMaskBuilderConfig:
+    """Configuration for building multiclass masks from an MBTiles reference grid.
+
+    Example YAML::
+
+        mbtiles_multiclass_mask:
+          _target_: pytorch_segmentation_models_trainer.tools.mbtiles.multiclass_mask_builder.build_mbtiles_multiclass_masks
+          reference_mbtiles_path: /data/tiles.mbtiles
+          frames_path: /data/locais_mascaras.geojson
+          vector_path: /data/dsg_masks.gpkg
+          output_dir: /data/output
+          frame_layer: locais_mascaras
+          vector_layer: dsg_masks
+          frame_id_attribute: rect_id
+          class_attribute: tipo
+          background_value: 255
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.tools.mbtiles"
+        ".multiclass_mask_builder.build_mbtiles_multiclass_masks"
+    )
+    reference_mbtiles_path: str = MISSING
+    frames_path: str = MISSING
+    vector_path: str = MISSING
+    output_dir: str = MISSING
+    frame_layer: Optional[str] = None
+    vector_layer: Optional[str] = None
+    frame_id_attribute: str = "rect_id"
+    class_attribute: str = "tipo"
+    output_subdir: str = "masks"
+    output_extension: str = "tif"
+    background_value: int = 255
+    n_workers: int = 8
+    progress: bool = True
+
+
 # ============================================================================
 # DATA HANDLERS - DATA WRITERS
 # ============================================================================
@@ -538,6 +576,11 @@ cs.store(
     group="mbtiles_export",
     name="mask_aligned",
     node=MBTilesMaskAlignedExportConfig,
+)
+cs.store(
+    group="mbtiles_multiclass_mask",
+    name="default",
+    node=MBTilesMulticlassMaskBuilderConfig,
 )
 
 # Data Writers
