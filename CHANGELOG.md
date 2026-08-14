@@ -1,3 +1,10 @@
+# Unreleased
+
+## Bug fixes
+
+- Fixed `README.md`'s "Open Config Builder" link, which pointed at the docs site root instead of the `/config-builder/` subpath where the Config Builder is actually deployed. Added a separate "Documentation" link alongside it.
+- Fixed a stale reference to `.github/workflows/deploy-config-builder.yml` in `README.md`; the deploy workflow was consolidated into `deploy.yml`.
+
 # Version 1.4.0 - 2026-08-13
 
 ## WRS sqrt Sampler Weights
