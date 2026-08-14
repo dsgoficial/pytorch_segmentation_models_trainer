@@ -655,7 +655,7 @@ class Model(pl.LightningModule):
                     )
                     dict_item["scheduler"] = combined
                     logger.info(
-                        "LR warmup: %d epochs linear (1%% -> 100%% of base lr), "
+                        "LR warmup: %d epochs linear (1%% -> 100%% of base LR), "
                         "then main scheduler",
                         warmup_epochs,
                     )
