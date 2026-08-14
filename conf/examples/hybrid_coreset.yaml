@@ -1,0 +1,41 @@
+# Hybrid vector+embedding coreset selection example
+# Usage: pytorch-smt-tools select-hybrid-coreset conf/examples/hybrid_coreset.yaml
+
+input_csv_path: /data/pool.csv
+embeddings_parquet: /data/embeddings.parquet
+vectors_gpkg: /data/reference.gpkg
+output_csv_path: /data/coreset_hybrid.csv
+
+pool_fraction: 0.30
+
+# Phase 1: spatial intersection with reference vector layers (for rare classes)
+vector_steps:
+  - gpkg_layer: grassland_polygons
+    class_indices: [c3]
+    min_intersect_area_m2: 1000.0
+  - gpkg_layer: cropland_polygons
+    class_indices: [c5]
+    min_intersect_area_m2: 1000.0
+
+# Phase 2: embedding-based diversity selection (for common classes)
+embedding_steps:
+  - class_filter:
+      c4: [">", 0.50]   # patches with >50% forest probability
+    budget: 500
+    k: 10
+    method: lc_fd
+    lc_fraction: 0.40
+  - class_filter:
+      c1: [">", 0.30]   # patches with >30% water probability
+    budget: 200
+    k: 5
+    method: fd
+
+# Phase 3: entropy sweep fills remaining budget
+entropy_sweep: true
+
+crs: EPSG:3857
+bbox_columns: [tile_minx, tile_miny, tile_maxx, tile_maxy]
+embedding_col: embedding
+entropy_col: class_entropy
+random_state: 42

@@ -1,5 +1,31 @@
 # Unreleased
 
+## WRS sqrt Sampler Weights
+
+- Added `compute_class_weights_from_proportions(props, formula)` to `tools/sampling/weight_calculator.py`. Supports two formulas: `sqrt_inverse_freq` (article-validated, smoother rare-class upweighting) and `inverse_freq` (linear). Zero-frequency classes are handled gracefully (treated as infinite frequency → zero contribution).
+- New CLI command `compute-sampler-weights <yaml_path>` with `source: topographic_vector_source` mode (reads `c0..c{N-1}` columns from the coreset CSV).
+- Example config at `conf/examples/compute_sampler_weights.yaml`.
+- 100% test coverage (`tests/test_weight_calculator.py`).
+
+## Hybrid Coreset Selection
+
+- Added `tools/coreset/vector_selector.py` with five stateless selection primitives: `compute_intersection_areas`, `select_by_vector_intersection`, `fd_embedding_select` (K-Means round-robin FD), `lc_fd_select` (top-entropy LC + FD), `entropy_sweep_select`.
+- Added `tools/coreset/hybrid_coreset_selector.py` with `HybridVectorCoresetConfig`, `VectorSelectionStep`, `EmbeddingSelectionStep` dataclasses and `HybridVectorCoresetSelector.select()` orchestrator. Selection proceeds in three phases: spatial vector intersection → embedding FD/LC-FD → entropy sweep. Each selected patch is tagged with its `selection_step`.
+- New CLI command `select-hybrid-coreset <yaml_path>` registered in `cli.py`.
+- Example config added at `conf/examples/hybrid_coreset.yaml`.
+- Exports added to `tools/coreset/__init__.py`.
+- 100% test coverage (`tests/test_vector_selector.py` + `tests/test_hybrid_coreset_selector.py`, 41 tests).
+
+## SAM Label Correction
+
+- Added `pytorch_segmentation_models_trainer/tools/sam_correction/` package with `SAMLabelCorrectionConfig`, `SAMSegmentCache`, `SamLabelCorrector`, and `apply_sam_correction`.
+- `apply_sam_correction`: pure-function majority vote within each SAM AMG segment across the original topographic vector source and optional auxiliary LULC rasters. Non-target pixels are never modified. Masks processed ascending by `(predicted_iou, area)` so higher-confidence segments overwrite.
+- `SAMSegmentCache`: NPZ-based segment cache keyed by tile/window coordinates. Disabled when `cache_dir=""`. Old-format files (missing `iou_N` arrays) are rejected gracefully.
+- `SamLabelCorrector.run()`: orchestrates tile-level processing with `tqdm` progress, parallel target output directories, and optional chunk-level caching for multi-run experiments. Supports `start_idx`/`end_idx` for multi-GPU splits.
+- New CLI command `build-sam-corrected-masks <yaml_path>` (registered in `cli.py`). Validates SAM checkpoint presence before starting.
+- Example config added at `conf/examples/sam_label_correction.yaml`.
+- 100% test coverage across all new modules (`tests/test_sam_label_corrector.py`, 37 tests).
+
 ## Optuna Hyperparameter Search
 
 - Added `OptunaRunner` (`tools/experiments_runner/optuna_runner.py`): integrates [Optuna](https://optuna.org/) HPO into the `ExperimentsRunner` pipeline. Configure via `experiments_runner.optuna_search` in any training YAML.

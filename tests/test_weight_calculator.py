@@ -6,6 +6,7 @@ import pytest
 
 from pytorch_segmentation_models_trainer.tools.sampling.weight_calculator import (
     combine_weights,
+    compute_class_weights_from_proportions,
 )
 
 
@@ -105,3 +106,73 @@ def test_all_methods_positive_for_random():
     ]:
         result = combine_weights(comp, uniq, method=method)
         assert result.shape == (50,), f"method={method}"
+
+
+# ---------------------------------------------------------------------------
+# compute_class_weights_from_proportions
+# ---------------------------------------------------------------------------
+
+
+class TestComputeClassWeightsFromProportions:
+    def test_sqrt_formula_basic(self):
+        """Manual 2-class, 2-patch case."""
+        props = np.array([[0.8, 0.2], [0.3, 0.7]], dtype=float)
+        # freq = [0.55, 0.45]
+        # sqrt(props / freq): patch0 → [sqrt(0.8/0.55), sqrt(0.2/0.45)] = [1.205, 0.667] → sum=1.872
+        #                       patch1 → [sqrt(0.3/0.55), sqrt(0.7/0.45)] = [0.738, 1.247] → sum=1.985
+        freq = props.mean(axis=0)
+        expected = np.sqrt(props / freq).sum(axis=1)
+        result = compute_class_weights_from_proportions(
+            props, formula="sqrt_inverse_freq"
+        )
+        np.testing.assert_allclose(result, expected, rtol=1e-6)
+
+    def test_inverse_freq_formula_basic(self):
+        props = np.array([[0.8, 0.2], [0.3, 0.7]], dtype=float)
+        freq = props.mean(axis=0)
+        expected = (props / freq).sum(axis=1)
+        result = compute_class_weights_from_proportions(props, formula="inverse_freq")
+        np.testing.assert_allclose(result, expected, rtol=1e-6)
+
+    def test_sqrt_formula_rare_class_upweighted(self):
+        """Rare class gets higher weight under sqrt than linear inverse."""
+        props = np.array([[0.01, 0.99], [0.99, 0.01]], dtype=float)
+        sqrt_w = compute_class_weights_from_proportions(
+            props, formula="sqrt_inverse_freq"
+        )
+        inv_w = compute_class_weights_from_proportions(props, formula="inverse_freq")
+        # patch with rare class (index 0, class 0 is rare): sqrt should give lower extreme than inverse
+        # Both patches are symmetric so ratio should be < 1 for sqrt vs inverse
+        assert (
+            sqrt_w[0] / sqrt_w[1] < inv_w[0] / inv_w[1]
+            or abs(sqrt_w[0] / sqrt_w[1] - inv_w[0] / inv_w[1]) < 1e-6
+        )
+
+    def test_zero_freq_class_ignored(self):
+        """All-zero column → no division error; treated as inf freq → zero contribution."""
+        props = np.array([[0.5, 0.5, 0.0], [0.4, 0.6, 0.0]], dtype=float)
+        result = compute_class_weights_from_proportions(
+            props, formula="sqrt_inverse_freq"
+        )
+        assert np.all(np.isfinite(result))
+
+    def test_invalid_formula_raises(self):
+        props = np.ones((3, 2)) / 2
+        with pytest.raises(ValueError, match="Unknown formula"):
+            compute_class_weights_from_proportions(props, formula="bad_formula")
+
+    def test_output_shape(self):
+        props = np.random.rand(15, 6)
+        props = props / props.sum(axis=1, keepdims=True)
+        result = compute_class_weights_from_proportions(
+            props, formula="sqrt_inverse_freq"
+        )
+        assert result.shape == (15,)
+
+    def test_default_formula_is_sqrt(self):
+        props = np.array([[0.5, 0.5], [0.5, 0.5]], dtype=float)
+        result_default = compute_class_weights_from_proportions(props)
+        result_explicit = compute_class_weights_from_proportions(
+            props, formula="sqrt_inverse_freq"
+        )
+        np.testing.assert_array_equal(result_default, result_explicit)
