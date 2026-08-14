@@ -390,7 +390,9 @@ class ExperimentsRunner:
             trainer: A fitted :class:`pytorch_lightning.Trainer` instance.
 
         Returns:
-            Tuple of (train_metrics, val_metrics, test_metrics).
+            if k.startswith("train/")
+            or k.endswith("/train")
+            or k.endswith("/train_epoch")
         """
         all_metrics = {k: float(v) for k, v in trainer.callback_metrics.items()}
         train_metrics = {
