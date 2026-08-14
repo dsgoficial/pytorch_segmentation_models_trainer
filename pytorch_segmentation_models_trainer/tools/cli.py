@@ -1987,6 +1987,154 @@ def select_coreset_cmd(yaml_path):
     )
 
 
+@cli.command("compute-sampler-weights")
+@click.argument("yaml_path", type=click.Path(exists=True))
+def compute_sampler_weights_cmd(yaml_path):
+    """Compute per-patch sampler weights and write them to the output CSV.
+
+    YAML_PATH must point to a YAML file with the following fields:
+
+    \b
+    Required:
+      input_csv_path      Path to the coreset CSV.
+      output_csv_path     Where to write the result.
+      formula             "sqrt_inverse_freq" or "inverse_freq".
+      source              "topographic_vector_source" (use c0..cN-1 columns)
+                          or "sam" (recompute from mask GeoTIFF windows).
+
+    \b
+    Optional:
+      num_classes         Number of classes (default 6).
+      weight_column       Output column name (default "sampler_weight").
+      excluded_column     Boolean column to exclude patches (default None).
+      mask_dir            Required when source="sam".
+    """
+    import yaml
+
+    import pandas as pd
+
+    from pytorch_segmentation_models_trainer.tools.sampling.weight_calculator import (
+        compute_class_weights_from_proportions,
+    )
+
+    with open(yaml_path) as fh:
+        cfg = yaml.safe_load(fh)
+
+    cfg = cfg.get("compute_sampler_weights", cfg)
+
+    input_csv = cfg["input_csv_path"]
+    output_csv = cfg["output_csv_path"]
+    formula = cfg.get("formula", "sqrt_inverse_freq")
+    source = cfg.get("source", "topographic_vector_source")
+    num_classes = int(cfg.get("num_classes", 6))
+    weight_col = cfg.get("weight_column", "sampler_weight")
+    excluded_col = cfg.get("excluded_column", None)
+
+    df = pd.read_csv(input_csv)
+
+    if excluded_col and excluded_col in df.columns:
+        mask = ~df[excluded_col].astype(bool)
+    else:
+        mask = pd.Series(True, index=df.index)
+
+    if source == "topographic_vector_source":
+        class_cols = [f"c{i}" for i in range(num_classes)]
+        missing = [c for c in class_cols if c not in df.columns]
+        if missing:
+            raise click.UsageError(
+                f"Columns missing from CSV for source='topographic_vector_source': {missing}"
+            )
+        props = df.loc[mask, class_cols].values.astype(float)
+        weights_selected = compute_class_weights_from_proportions(
+            props, formula=formula
+        )
+        df[weight_col] = 0.0
+        df.loc[mask, weight_col] = weights_selected
+    elif source == "sam":
+        raise click.UsageError(
+            "source='sam' requires mask reading (not yet implemented in CLI). "
+            "Use source='topographic_vector_source' for CSV-based weights."
+        )
+    else:
+        raise click.UsageError(
+            f"Unknown source: {source!r}. Valid: 'topographic_vector_source', 'sam'."
+        )
+
+    from pathlib import Path
+
+    Path(output_csv).parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(output_csv, index=False)
+    click.echo(
+        f"Weights written to '{output_csv}' ({int(mask.sum())} patches weighted)."
+    )
+
+
+@cli.command("select-hybrid-coreset")
+@click.argument("yaml_path", type=click.Path(exists=True))
+def select_hybrid_coreset_cmd(yaml_path):
+    """Run hybrid vector+embedding coreset selection from a YAML config.
+
+    YAML_PATH must point to a YAML file with HybridVectorCoresetConfig fields.
+    """
+    import pandas as pd
+    import yaml
+
+    from pytorch_segmentation_models_trainer.tools.coreset.hybrid_coreset_selector import (
+        HybridVectorCoresetConfig,
+        HybridVectorCoresetSelector,
+    )
+
+    with open(yaml_path) as fh:
+        raw = yaml.safe_load(fh)
+
+    cfg_dict = raw.get("hybrid_coreset", raw)
+
+    try:
+        config = HybridVectorCoresetConfig(**cfg_dict)
+    except TypeError as exc:
+        raise click.UsageError(f"Invalid config in '{yaml_path}': {exc}") from exc
+
+    pool_df = pd.read_csv(config.input_csv_path)
+    result = HybridVectorCoresetSelector(config).select(pool_df)
+    n_selected = int(result["coreset_selected"].sum())
+    click.echo(
+        f"Selected {n_selected}/{len(result)} patches → '{config.output_csv_path}'."
+    )
+
+
+@cli.command("build-sam-corrected-masks")
+@click.argument("yaml_path", type=click.Path(exists=True))
+def build_sam_corrected_masks_cmd(yaml_path):
+    """Run SAM-based label correction over a coreset of GeoTIFF masks.
+
+    YAML_PATH must point to a YAML file with SAMLabelCorrectionConfig fields.
+    """
+    import yaml
+
+    from pytorch_segmentation_models_trainer.tools.sam_correction.sam_label_corrector import (
+        SAMLabelCorrectionConfig,
+        SamLabelCorrector,
+    )
+
+    with open(yaml_path) as fh:
+        raw = yaml.safe_load(fh)
+
+    cfg_dict = raw.get("sam_label_correction", raw)
+
+    try:
+        config = SAMLabelCorrectionConfig(**cfg_dict)
+    except TypeError as exc:
+        raise click.UsageError(f"Invalid config in '{yaml_path}': {exc}") from exc
+
+    from pathlib import Path
+
+    if not Path(config.sam_checkpoint).exists():
+        raise click.UsageError(f"SAM checkpoint not found: '{config.sam_checkpoint}'")
+
+    stats = SamLabelCorrector(config).run()
+    click.echo(f"Done. Processed {stats['n_tiles']} tiles in {stats['elapsed_s']}s.")
+
+
 def entry():
     """Entry point registered in pyproject.toml."""
     cli()

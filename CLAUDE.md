@@ -115,3 +115,37 @@ Não espere o usuário pedir cada um separadamente:
   2. [Step] → verify: [check]
   3. [Step] → verify: [check]
   Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+## Release process
+
+To cut a new release `vX.Y.Z`:
+
+1. **Bump version in `pyproject.toml`** — update `version = "X.Y.Z"` on line 3.
+
+2. **Update CHANGELOG.md** — replace `# Unreleased` with `# Version X.Y.Z - YYYY-MM-DD` (match prior version heading format).
+
+3. **Commit** both files:
+   ```bash
+   git add pyproject.toml CHANGELOG.md
+   git commit -m "chore: bump version to X.Y.Z"
+   ```
+
+4. **Tag and push**:
+   ```bash
+   git tag vX.Y.Z
+   git push origin main
+   git push origin vX.Y.Z
+   ```
+
+5. **Create and publish GitHub release** (triggers PyPI publish automatically):
+   ```bash
+   # Write release body to a temp file first, then:
+   gh release create vX.Y.Z --title "vX.Y.Z" --notes-file /tmp/release_notes.md --latest
+   ```
+   Release body format (match v1.4.0):
+   - First line: `## [X.Y.Z] - YYYY-MM-DD`
+   - Then copy the `##` sections from the CHANGELOG verbatim.
+
+   The `python-publish.yml` workflow fires on `release: types: [published]` and uploads to PyPI automatically.

@@ -11,5 +11,30 @@ from pytorch_segmentation_models_trainer.tools.coreset.coreset_config import (
 from pytorch_segmentation_models_trainer.tools.coreset.coreset_selector import (
     CoreSetSelector,
 )
+from pytorch_segmentation_models_trainer.tools.coreset.hybrid_coreset_selector import (
+    EmbeddingSelectionStep,
+    HybridVectorCoresetConfig,
+    HybridVectorCoresetSelector,
+    VectorSelectionStep,
+)
+from pytorch_segmentation_models_trainer.tools.coreset.vector_selector import (
+    compute_intersection_areas,
+    entropy_sweep_select,
+    fd_embedding_select,
+    lc_fd_select,
+    select_by_vector_intersection,
+)
 
-__all__ = ["CoreSetConfig", "CoreSetSelector"]
+__all__ = [
+    "CoreSetConfig",
+    "CoreSetSelector",
+    "HybridVectorCoresetConfig",
+    "HybridVectorCoresetSelector",
+    "VectorSelectionStep",
+    "EmbeddingSelectionStep",
+    "compute_intersection_areas",
+    "select_by_vector_intersection",
+    "fd_embedding_select",
+    "lc_fd_select",
+    "entropy_sweep_select",
+]

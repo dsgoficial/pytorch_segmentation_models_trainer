@@ -1,0 +1,34 @@
+# SAM-based label correction example
+# Usage: pytorch-smt-tools build-sam-corrected-masks conf/examples/sam_label_correction.yaml
+
+coreset_csv: /data/coreset.csv
+masks_dir: /data/masks
+
+targets:
+  - classes: [3, 5]          # grassland + cropland
+    output_dir: /data/masks_sam_gc
+  - classes: [1, 3, 5]       # forest + grassland + cropland
+    output_dir: /data/masks_sam_gcf
+
+sam_checkpoint: /models/sam_vit_b_01ec64.pth
+mbtiles_path: /data/imagery/tiles.mbtiles
+
+# Optional auxiliary LULC rasters for consensus vote
+lulc_paths:
+  - /data/lulc/mapbiomas.vrt
+  - /data/lulc/esri.vrt
+  - /data/lulc/dynamic_world.vrt
+
+include_bags: true            # include original mask in majority vote
+sam_model_type: vit_b
+device: cuda:0
+num_classes: 6
+nodata_val: 255
+chunk_size: 1024
+points_per_side: 32
+pred_iou_thresh: 0.80
+stability_score_thresh: 0.90
+min_mask_region_area: 200
+cache_dir: /data/sam_cache    # leave empty ("") to disable caching
+start_idx: 0
+end_idx: 999999
