@@ -376,7 +376,7 @@ class ExperimentsRunner:
             The :class:`RunResult` with the highest metric value, or ``None``
             when the metric is absent in every run.
         """
-        self, trainer: "pytorch_lightning.Trainer"
+        eligible = [r for r in results if metric_key in self._all_run_metrics(r)]
         if not eligible:
             return None
         return max(eligible, key=lambda r: self._all_run_metrics(r)[metric_key])
@@ -390,9 +390,7 @@ class ExperimentsRunner:
             trainer: A fitted :class:`pytorch_lightning.Trainer` instance.
 
         Returns:
-            if k.startswith("train/")
-            or k.endswith("/train")
-            or k.endswith("/train_epoch")
+            Tuple of (train_metrics, val_metrics, test_metrics).
         """
         all_metrics = {k: float(v) for k, v in trainer.callback_metrics.items()}
         train_metrics = {
