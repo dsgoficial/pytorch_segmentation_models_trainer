@@ -288,7 +288,24 @@ class Model(pl.LightningModule):
 
             # Calculate steps per epoch
             effective_batch_size = batch_size * accumulate_grad_batches * device_count
+            if effective_batch_size <= 0:
+                raise ValueError(
+                    "Invalid effective_batch_size computed: "
+                    f"{effective_batch_size}. Check batch_size ({batch_size}), "
+                    f"accumulate_grad_batches ({accumulate_grad_batches}), and "
+                    f"device_count ({device_count})."
+                )
+
             steps_per_epoch = dataset_size // effective_batch_size
+            if steps_per_epoch < 1:
+                logger.warning(
+                    "Computed steps_per_epoch=%d (dataset_size=%d, effective_batch_size=%d). "
+                    "Clamping steps_per_epoch to 1 to avoid scheduler failures.",
+                    steps_per_epoch,
+                    dataset_size,
+                    effective_batch_size,
+                )
+                steps_per_epoch = 1
 
             logger.info(
                 "AUTO-COMPUTED STEPS_PER_EPOCH: dataset=%s, dataset_size=%d, "
@@ -655,7 +672,7 @@ class Model(pl.LightningModule):
                     )
                     dict_item["scheduler"] = combined
                     logger.info(
-                        "LR warmup: %d epochs linear (1%% -> 100%% of base lr), "
+                        "LR warmup: %d epochs linear (1%% -> 100%% of base LR), "
                         "then main scheduler",
                         warmup_epochs,
                     )
@@ -890,7 +907,7 @@ class Model(pl.LightningModule):
         Pixels where all class channels are zero (ignore regions) are mapped
         to ``ignore_value`` instead of class 0 (which argmax would return).
         """
-        valid_mask = masks.sum(dim=1) > 0  # (B, H, W)
+        valid_mask = masks.any(dim=1)  # (B, H, W)
         hard_masks = masks.argmax(dim=1)  # (B, H, W)
         hard_masks[~valid_mask] = ignore_value
         return hard_masks
@@ -1142,7 +1159,7 @@ class Model(pl.LightningModule):
 
         Checks ``cfg.tta_mode`` first (MultiClassInferenceProcessor-style
         interface), then falls back to ``cfg.use_tta`` + ``cfg.tta_augmentations``
-        (SingleImageInfereceProcessor-style interface).
+        (SingleImageInferenceProcessor-style interface).
 
         ``tta_mode`` values:
             - ``"d4"``   — all 8 dihedral symmetries (4 rotations × 2 flips)

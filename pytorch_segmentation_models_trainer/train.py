@@ -37,7 +37,6 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Trainer
 
-from pytorch_segmentation_models_trainer.model_loader.model import Model
 from pytorch_segmentation_models_trainer.utils.os_utils import import_module_from_cfg
 from pytorch_segmentation_models_trainer.utils.seed_utils import set_training_seed
 
@@ -158,14 +157,27 @@ def train(cfg: DictConfig):
         if not any(isinstance(cb, FinalMetricsCallback) for cb in callback_list):
             callback_list.append(FinalMetricsCallback())
     model.setup("fit")
-    pl_trainer_cfg = dict(cfg.pl_trainer)
+    pl_trainer_cfg = OmegaConf.to_container(cfg.pl_trainer, resolve=True)
     if deterministic_cudnn:
         pl_trainer_cfg.setdefault("deterministic", True)
     trainer = Trainer(**pl_trainer_cfg, logger=trainer_logger, callbacks=callback_list)
     trainer.fit(model)
     if "test_dataset" in cfg:
         logger.info("test_dataset found in config — running trainer.test()")
-        ckpt_cb = getattr(trainer, "checkpoint_callback", None)
+        checkpoint_callbacks = getattr(trainer, "checkpoint_callbacks", None)
+        if checkpoint_callbacks is None:
+            checkpoint_callbacks = [
+                cb for cb in getattr(trainer, "callbacks", []) if hasattr(cb, "best_model_path")
+            ]
+        ckpt_cb = next(
+            (
+                cb
+                for cb in checkpoint_callbacks
+                if isinstance(getattr(cb, "best_model_path", None), str)
+                and getattr(cb, "best_model_path")
+            ),
+            checkpoint_callbacks[0] if checkpoint_callbacks else None,
+        )
         best_ckpt = getattr(ckpt_cb, "best_model_path", None) if ckpt_cb else None
         if isinstance(best_ckpt, str) and best_ckpt:
             logger.info("Using best checkpoint for test: %s", best_ckpt)
