@@ -30,7 +30,7 @@ def _p_soft():
     return (raw / raw.sum(dim=1, keepdim=True)).detach()
 
 
-def _w_conf():
+def _mock_confidence_weights():
     return torch.rand(B, 1, H, W).detach()
 
 
@@ -148,7 +148,7 @@ class TestCoTeachingModelTrainingStep:
     def _batch(self):
         return {
             "image": torch.randn(B, 3, H, W),
-            "mask": {"mask": _p_soft(), "w_conf": _w_conf()},
+            "mask": {"mask": _p_soft(), "w_conf": _mock_confidence_weights()},
         }
 
     def test_training_step_returns_scalar(self):
@@ -372,7 +372,7 @@ class TestCoTeachingModelNeighborhoodReg:
     def _batch(self):
         return {
             "image": torch.randn(B, 3, H, W),
-            "mask": {"mask": _p_soft(), "w_conf": _w_conf()},
+            "mask": {"mask": _p_soft(), "w_conf": _mock_confidence_weights()},
         }
 
     def test_training_step_with_lambda_reg(self):
