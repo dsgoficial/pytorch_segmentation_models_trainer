@@ -218,7 +218,9 @@ class TestMBTilesSoftLabelCaching:
         _ = ds[0]
         assert len(list(cache_dir.glob("*.npy"))) == 1
 
-    def test_different_windows_get_different_cache_files(self, soft_mbtiles_setup, tmp_path):
+    def test_different_windows_get_different_cache_files(
+        self, soft_mbtiles_setup, tmp_path
+    ):
         cache_dir = tmp_path / "cache"
         ds = _make_dataset(soft_mbtiles_setup, cache_dir=cache_dir)
         _ = ds[0]
@@ -335,12 +337,18 @@ class TestMBTilesSoftLabelWconfCaching:
 
     def test_wconf_cache_dir_created_automatically(self, soft_mbtiles_setup, tmp_path):
         wconf_cache_dir = tmp_path / "new" / "wconf"
-        _make_dataset(soft_mbtiles_setup, return_w_conf=True, wconf_cache_dir=wconf_cache_dir)
+        _make_dataset(
+            soft_mbtiles_setup, return_w_conf=True, wconf_cache_dir=wconf_cache_dir
+        )
         assert wconf_cache_dir.exists()
 
-    def test_wconf_cache_file_created_on_first_access(self, soft_mbtiles_setup, tmp_path):
+    def test_wconf_cache_file_created_on_first_access(
+        self, soft_mbtiles_setup, tmp_path
+    ):
         wconf_cache_dir = tmp_path / "wconf"
-        ds = _make_dataset(soft_mbtiles_setup, return_w_conf=True, wconf_cache_dir=wconf_cache_dir)
+        ds = _make_dataset(
+            soft_mbtiles_setup, return_w_conf=True, wconf_cache_dir=wconf_cache_dir
+        )
         _ = ds[0]
         assert len(list(wconf_cache_dir.glob("*.npy"))) == 1
 
@@ -399,7 +407,7 @@ class TestMBTilesSoftLabelWconfCaching:
 
 
 class TestMBTilesSoftLabelFullCacheHit:
-    """When all caches are warm, dataset raster read entry points are never called."""
+    """When all caches are warm, rasterio.open is never called."""
 
     def test_full_cache_hit_skips_rasterio_open(self, soft_mbtiles_setup, tmp_path):
         import pytorch_segmentation_models_trainer.dataset_loader.mbtiles_soft_label_dataset as mod
@@ -414,13 +422,9 @@ class TestMBTilesSoftLabelFullCacheHit:
         )
         _ = ds[0]  # warm all caches
 
-        with patch.object(
-            mod.MBTilesSoftLabelMaskWindowedDataset,
-            "read_source_aligned_to_mask_window",
-            wraps=mod.MBTilesSoftLabelMaskWindowedDataset.read_source_aligned_to_mask_window,
-        ) as mock_read_source:
+        with patch.object(mod.rasterio, "open") as mock_open:
             _ = ds[0]
-            mock_read_source.assert_not_called()
+            mock_open.assert_not_called()
 
 
 class TestMBTilesSoftLabelSourceWeights:
@@ -432,17 +436,13 @@ class TestMBTilesSoftLabelSourceWeights:
 
     def test_source_weights_changes_p_soft(self, soft_mbtiles_setup):
         ds_equal = _make_dataset(soft_mbtiles_setup, source_weights=None)
-        ds_weighted = _make_dataset(
-            soft_mbtiles_setup, source_weights=[2.0, 1.0, 1.0]
-        )
+        ds_weighted = _make_dataset(soft_mbtiles_setup, source_weights=[2.0, 1.0, 1.0])
         p_equal = ds_equal[0]["mask"]["mask"]
         p_weighted = ds_weighted[0]["mask"]["mask"]
         assert not torch.allclose(p_equal, p_weighted)
 
     def test_source_weights_p_soft_sums_to_one(self, soft_mbtiles_setup):
-        ds = _make_dataset(
-            soft_mbtiles_setup, source_weights=[2.0, 1.0, 1.0]
-        )
+        ds = _make_dataset(soft_mbtiles_setup, source_weights=[2.0, 1.0, 1.0])
         p = ds[0]["mask"]["mask"]
         torch.testing.assert_close(
             p.sum(dim=0),
@@ -468,9 +468,7 @@ class TestMBTilesSoftLabelSourceWeights:
     def test_source_weights_none_matches_equal_vote(self, soft_mbtiles_setup):
         """source_weights=None must produce the same P_soft as [1, 1, 1]."""
         ds_none = _make_dataset(soft_mbtiles_setup, source_weights=None)
-        ds_ones = _make_dataset(
-            soft_mbtiles_setup, source_weights=[1.0, 1.0, 1.0]
-        )
+        ds_ones = _make_dataset(soft_mbtiles_setup, source_weights=[1.0, 1.0, 1.0])
         torch.testing.assert_close(
             ds_none[0]["mask"]["mask"],
             ds_ones[0]["mask"]["mask"],
