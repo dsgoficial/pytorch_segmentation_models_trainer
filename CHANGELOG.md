@@ -17,6 +17,11 @@
 - Fixed `README.md`'s "Open Config Builder" link, which pointed at the docs site root instead of the `/config-builder/` subpath where the Config Builder is actually deployed. Added a separate "Documentation" link alongside it.
 - Fixed a stale reference to `.github/workflows/deploy-config-builder.yml` in `README.md`; the deploy workflow was consolidated into `deploy.yml`.
 
+## CI
+
+- Bumped pinned GitHub Actions across all workflows (`codeql-analysis.yml`, `python-app.yml`, `python-publish.yml`, `deploy.yml`, `web-tests.yml`) to their latest major versions, clearing the "Node.js 20 is deprecated" run warnings (actions were being force-run on Node 24 despite targeting Node 20). Also unified `github/codeql-action` init/autobuild/analyze on the same major (`v4`), fixing a separate "steps use different action versions" warning, and got ahead of the `codeql-action` v3 deprecation (December 2026).
+- Added an explicit `permissions: contents: read` block to `python-app.yml`, `python-publish.yml`, and `web-tests.yml`, resolving 6 open `actions/missing-workflow-permissions` findings under Security → Code quality (none of the three needs write access to the default `GITHUB_TOKEN`). `deploy.yml` and `codeql-analysis.yml` already declared their own scoped permissions.
+
 # Version 1.4.0 - 2026-08-13
 
 ## WRS sqrt Sampler Weights
