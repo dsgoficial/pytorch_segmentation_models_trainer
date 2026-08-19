@@ -163,6 +163,55 @@ class TestComputeStepsFromConfig:
         # 100 samples / 4 batch / 1 device / 1 grad_accum = 25
         assert result == 25
 
+    def test_zero_effective_batch_size_raises_value_error(self, tmp_path):
+        import pandas as pd
+
+        csv_path = tmp_path / "train.csv"
+        pd.DataFrame({"image": range(100), "mask": range(100)}).to_csv(
+            csv_path, index=False
+        )
+
+        model = _make_model()
+        model.cfg = OmegaConf.merge(
+            model.cfg,
+            OmegaConf.create(
+                {
+                    "train_dataset": {
+                        "input_csv_path": str(csv_path),
+                        "data_loader": {"batch_size": 0},
+                    },
+                }
+            ),
+        )
+        # The ValueError is caught internally and logged, so the method
+        # returns None instead of propagating.
+        result = model._compute_steps_from_config()
+        assert result is None
+
+    def test_small_dataset_clamps_steps_per_epoch_to_one(self, tmp_path):
+        import pandas as pd
+
+        csv_path = tmp_path / "train.csv"
+        pd.DataFrame({"image": range(2), "mask": range(2)}).to_csv(
+            csv_path, index=False
+        )
+
+        model = _make_model()
+        model.cfg = OmegaConf.merge(
+            model.cfg,
+            OmegaConf.create(
+                {
+                    "train_dataset": {
+                        "input_csv_path": str(csv_path),
+                        "data_loader": {"batch_size": 4},
+                    },
+                }
+            ),
+        )
+        # 2 samples / effective_batch_size 4 -> 0, clamped to 1
+        result = model._compute_steps_from_config()
+        assert result == 1
+
 
 # ---------------------------------------------------------------------------
 # get_loss_function
