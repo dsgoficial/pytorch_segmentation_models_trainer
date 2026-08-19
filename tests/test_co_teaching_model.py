@@ -372,7 +372,7 @@ class TestCoTeachingModelNeighborhoodReg:
     def _batch(self):
         return {
             "image": torch.randn(B, 3, H, W),
-            "mask": {"mask": _p_soft(), "w_conf": _w_conf()},
+            "mask": {"mask": _p_soft(), "w_conf": _mock_confidence_weights()},
         }
 
     def test_training_step_with_lambda_reg(self):
