@@ -106,6 +106,38 @@ class Test_Train(CustomTestCase):
 
     @patch("pytorch_segmentation_models_trainer.train.Trainer")
     @patch.object(Model, "setup")
+    def test_trainer_test_uses_callbacks_fallback_when_checkpoint_callbacks_absent(
+        self, mock_setup, MockTrainer
+    ) -> None:
+        """When trainer.checkpoint_callbacks is None, fall back to scanning
+        trainer.callbacks for a checkpoint-like object exposing
+        best_model_path."""
+        mock_trainer_instance = MagicMock(spec=pl.Trainer)
+        MockTrainer.return_value = mock_trainer_instance
+        mock_trainer_instance.checkpoint_callbacks = None
+
+        mock_ckpt_cb = MagicMock()
+        mock_ckpt_cb.best_model_path = "/tmp/best.ckpt"
+        mock_trainer_instance.callbacks = [mock_ckpt_cb]
+
+        with initialize(config_path="./test_configs"):
+            cfg = compose(
+                config_name="experiment_with_test.yaml",
+                overrides=[
+                    "train_dataset.input_csv_path=" + self.csv_ds_file,
+                    "val_dataset.input_csv_path=" + self.csv_ds_file,
+                    "test_dataset.input_csv_path=" + self.csv_ds_file,
+                ],
+            )
+            with patch.object(Model, "load_from_checkpoint") as mock_load:
+                mock_load.return_value = MagicMock(spec=Model)
+                train(cfg)
+
+        mock_load.assert_called_once()
+        self.assertEqual(mock_load.call_args[0][0], "/tmp/best.ckpt")
+
+    @patch("pytorch_segmentation_models_trainer.train.Trainer")
+    @patch.object(Model, "setup")
     def test_final_metrics_callback_added_by_default(
         self, mock_setup, MockTrainer
     ) -> None:
