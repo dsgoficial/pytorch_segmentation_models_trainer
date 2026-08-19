@@ -25,9 +25,6 @@ from pytorch_segmentation_models_trainer.custom_models.timm_models import (
 from pytorch_segmentation_models_trainer.custom_models.transformer_adapters import (
     ModelOutputAdapter,
 )
-from pytorch_segmentation_models_trainer.custom_models.terratorch_models import (
-    TerraTorchSegmentationWrapper,
-)
 from pytorch_segmentation_models_trainer.custom_models.unet import UNetBackbone
 from pytorch_segmentation_models_trainer.custom_models.unet_resnet import (
     UNetResNetBackbone,

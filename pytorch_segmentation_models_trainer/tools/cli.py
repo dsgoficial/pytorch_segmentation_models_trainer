@@ -12,7 +12,6 @@ import click
 @click.group()
 def cli():
     """Command-line utilities for pytorch_segmentation_models_trainer."""
-    pass
 
 
 @cli.command("compute-stats")

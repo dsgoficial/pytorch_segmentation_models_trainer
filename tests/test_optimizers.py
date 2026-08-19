@@ -20,9 +20,6 @@
  ****
 """
 
-import os
-import subprocess
-
 import pytorch_lightning as pl
 from hydra import compose, initialize
 from parameterized import parameterized

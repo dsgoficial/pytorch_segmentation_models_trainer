@@ -555,7 +555,6 @@ class TestZeroInitExtraInputChannels:
 
     def test_get_model_applies_zero_init_when_flag_set(self):
         """get_model() with zero_init_extra_input_channels=true zeroes extra channels."""
-        import segmentation_models_pytorch as smp
         from omegaconf import OmegaConf
         from pytorch_segmentation_models_trainer.model_loader.model import Model
 

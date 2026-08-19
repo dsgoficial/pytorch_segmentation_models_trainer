@@ -552,8 +552,6 @@ def test_frame_identifier_missing_attribute_returns_index_default():
         == "frame_00003"
     )
 
-    import math
-
     frame_nan = pd.Series({"rect_id": float("nan")})
     assert (
         multiclass_mask_builder._frame_identifier(frame_nan, "rect_id", 5)
@@ -778,7 +776,6 @@ def test_build_mbtiles_raises_when_reference_has_no_crs(tmp_path, monkeypatch):
     reference_path, frames_path, vector_path = _build_fixture_data(tmp_path)
 
     import rasterio as _rasterio
-    from unittest.mock import MagicMock
 
     orig_open = _rasterio.open
     _open_calls = []

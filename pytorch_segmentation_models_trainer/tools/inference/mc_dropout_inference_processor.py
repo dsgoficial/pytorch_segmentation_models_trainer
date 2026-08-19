@@ -59,7 +59,6 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 from pytorch_toolbelt.inference.tiles import ImageSlicer, TileMerger
-from pytorch_toolbelt.utils.torch_utils import to_numpy
 from torch.cuda.amp import autocast
 from torch.utils.data import DataLoader
 

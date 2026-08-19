@@ -24,11 +24,8 @@ import unittest
 import warnings
 
 import hydra
-import numpy as np
-import segmentation_models_pytorch as smp
 import torch
 from hydra import compose, initialize
-from hydra.utils import instantiate
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.custom_models import models
 

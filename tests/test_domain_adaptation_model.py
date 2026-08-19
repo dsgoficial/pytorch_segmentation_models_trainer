@@ -13,16 +13,12 @@ Covers:
 
 from __future__ import annotations
 
-import os
-import tempfile
-import unittest
 from unittest.mock import MagicMock, PropertyMock, patch
 
-import pytest
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
-from torch.utils.data import Dataset, TensorDataset
+from torch.utils.data import Dataset
 
 from pytorch_segmentation_models_trainer.domain_adaptation.base_method import (
     BaseDomainAdaptationMethod,

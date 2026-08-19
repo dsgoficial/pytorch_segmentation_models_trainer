@@ -29,7 +29,7 @@ Usage via Hydra YAML:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from segmentation_models_pytorch.base import SegmentationHead
 from segmentation_models_pytorch.base import initialization as init

@@ -23,9 +23,8 @@
 import unittest
 import torch
 import numpy as np
-import json
 import shapely.wkt
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon
 
 from pytorch_segmentation_models_trainer.custom_metrics import metrics
 

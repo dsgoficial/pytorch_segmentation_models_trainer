@@ -8,8 +8,6 @@ and that is_peft_model / merge_lora_weights behave correctly.
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-import torch
 import torch.nn as nn
 
 from pytorch_segmentation_models_trainer.fine_tuning.lora_utils import (

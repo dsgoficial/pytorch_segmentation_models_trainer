@@ -21,7 +21,7 @@
 
 from dataclasses import dataclass, field
 import logging
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional
 
 import hydra
 from hydra.core.config_store import ConfigStore

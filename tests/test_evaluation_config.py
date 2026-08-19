@@ -11,10 +11,7 @@ from pytorch_segmentation_models_trainer.config_definitions.evaluation_config im
     EvaluationDatasetConfig,
     MetricsConfig,
     OutputConfig,
-    ComparisonPlotsConfig,
     VisualizationConfig,
-    ParallelInferenceConfig,
-    LoadPredictionsConfig,
     PipelineOptionsConfig,
     EvaluationPipelineConfig,
 )

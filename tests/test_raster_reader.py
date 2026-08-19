@@ -21,8 +21,6 @@
 """
 
 import os
-import unittest
-import warnings
 
 import numpy as np
 import geopandas as gpd
@@ -37,14 +35,10 @@ from pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader impor
     SingleImageReaderProcessor,
     save_with_rasterio,
 )
-from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import (
-    GeomTypeEnum,
-)
 from shapely.geometry import box
 from pytorch_segmentation_models_trainer.utils.os_utils import (
     create_folder,
     hash_file,
-    remove_folder,
 )
 
 current_dir = os.path.dirname(__file__)

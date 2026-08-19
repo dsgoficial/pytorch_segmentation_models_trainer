@@ -83,9 +83,7 @@ def _process_image(
     import numpy as np
     import rasterio
     from rasterio.features import rasterize
-    from rasterio.transform import from_bounds
-    from rasterio.warp import transform_geom
-    from shapely.geometry import box, mapping
+    from shapely.geometry import mapping
 
     if not 0 <= background_value <= 255:
         raise ValueError("background_value must be in the uint8 range [0, 255]")

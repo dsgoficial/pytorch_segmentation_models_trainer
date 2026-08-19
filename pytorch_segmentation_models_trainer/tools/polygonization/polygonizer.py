@@ -55,7 +55,6 @@ class TemplatePolygonizerProcessor(ABC):
         """Must be reimplemented in each child.
         self.polygonize_method must be set.
         """
-        pass
 
     def process(
         self,

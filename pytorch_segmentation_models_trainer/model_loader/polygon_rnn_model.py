@@ -105,7 +105,6 @@ class PolygonRNNPLModel(Model):
         """Aggregate IoU across the validation epoch"""
         # Note: In Lightning 2.0+, you can use self.trainer.callback_metrics
         # or implement custom aggregation if needed
-        pass
 
     def evaluate_batch(self, batch, result):
         gt_polygon_list = polygonrnn_utils.get_vertex_list_from_batch_tensors(

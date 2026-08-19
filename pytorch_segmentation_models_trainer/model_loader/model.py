@@ -34,7 +34,6 @@ from pytorch_segmentation_models_trainer.utils.seed_utils import set_training_se
 from pytorch_segmentation_models_trainer.custom_losses.base_loss import MultiLoss
 from pytorch_segmentation_models_trainer.fine_tuning.lora_utils import (
     apply_fine_tuning_strategy,
-    is_peft_model,
 )
 from pytorch_segmentation_models_trainer.tools.tta.tta import (
     ROTATION_AUGMENTATIONS as _DEFAULT_TTA_AUGMENTATIONS,

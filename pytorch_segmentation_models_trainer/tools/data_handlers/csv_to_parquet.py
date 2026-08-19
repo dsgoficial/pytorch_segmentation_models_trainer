@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import argparse
-import os
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm

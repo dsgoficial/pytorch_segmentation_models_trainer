@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
 import unittest
-from pathlib import Path
 from tempfile import TemporaryDirectory
 from pytorch_segmentation_models_trainer.utils.os_utils import (
     remove_folder,

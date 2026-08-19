@@ -494,7 +494,6 @@ class TestVectorCrops:
         """Vector file in EPSG:3857 is reprojected to image CRS."""
         import geopandas as gpd
         from shapely.geometry import box as shapely_box
-        from rasterio.crs import CRS as RioCRS
 
         img, mask = raster_pair
         # Build box in EPSG:3857 at Q0 centre

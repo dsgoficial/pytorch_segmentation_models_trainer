@@ -40,7 +40,7 @@ Requires ``terratorch`` to be installed::
     pip install terratorch
 """
 
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn

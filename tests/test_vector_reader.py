@@ -25,7 +25,7 @@ import runpy
 import unittest
 from pathlib import Path
 import warnings
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import geopandas
 from geopandas.testing import geom_equals, geom_almost_equals

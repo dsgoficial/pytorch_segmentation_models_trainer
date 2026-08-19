@@ -5,7 +5,6 @@ Tests for fine_tuning_config dataclasses.
 
 from dataclasses import asdict
 
-import pytest
 from omegaconf import OmegaConf
 from pytorch_segmentation_models_trainer.config_definitions.fine_tuning_config import (
     LoraAdapterConfig,

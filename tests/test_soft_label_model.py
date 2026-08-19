@@ -1,17 +1,12 @@
 # -*- coding: utf-8 -*-
 """Tests for SoftLabelModel._shared_step dict-unwrap and _compute_loss re-wrap."""
 
-import pytest
 import torch
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 from pytorch_segmentation_models_trainer.model_loader.soft_label_model import (
     SoftLabelModel,
 )
-from pytorch_segmentation_models_trainer.custom_losses.soft_label_loss import (
-    SoftLabelWeightedCELoss,
-)
-from pytorch_segmentation_models_trainer.custom_losses.base_loss import MultiLoss
 
 B, C, H, W = 2, 4, 8, 8
 

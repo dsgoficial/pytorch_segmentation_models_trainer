@@ -5,7 +5,7 @@ Tests for loss_config_definition dataclasses.
 
 import pytest
 from omegaconf import OmegaConf, MissingMandatoryValue
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from pytorch_segmentation_models_trainer.config_definitions.loss_config_definition import (
     SegParamsConfig,
     BaseLossConfig,

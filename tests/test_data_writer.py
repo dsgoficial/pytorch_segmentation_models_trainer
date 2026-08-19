@@ -21,20 +21,14 @@
 """
 
 import os
-import unittest
 from unittest.mock import MagicMock, patch
-from pathlib import Path
-import warnings
 
 import geopandas
 import numpy as np
-import psycopg2
 import pyproj
 import rasterio
 from affine import Affine
-from geopandas.testing import geom_almost_equals, geom_equals
 from numpy.testing import assert_array_equal
-from parameterized import parameterized
 from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import (
     AbstractDataWriter,
     BatchVectorFileDataWriter,
@@ -42,10 +36,6 @@ from pytorch_segmentation_models_trainer.tools.data_handlers.data_writer import 
     RasterDataWriter,
     VectorDatabaseDataWriter,
     VectorFileDataWriter,
-)
-from pytorch_segmentation_models_trainer.utils.os_utils import (
-    create_folder,
-    remove_folder,
 )
 from rasterio.plot import reshape_as_raster
 from shapely.geometry import Polygon

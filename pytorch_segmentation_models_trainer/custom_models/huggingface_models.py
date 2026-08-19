@@ -18,11 +18,10 @@
  ****
 """
 
-from typing import Optional, Tuple, Union
+from typing import Tuple, Union
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from pytorch_segmentation_models_trainer.custom_models.transformer_adapters import (
     ModelOutputAdapter,

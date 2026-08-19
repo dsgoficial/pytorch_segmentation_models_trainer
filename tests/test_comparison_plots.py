@@ -8,7 +8,6 @@ import os
 import shutil
 import tempfile
 import pandas as pd
-import numpy as np
 from omegaconf import OmegaConf
 
 from pytorch_segmentation_models_trainer.tools.visualization.comparison_plots import (

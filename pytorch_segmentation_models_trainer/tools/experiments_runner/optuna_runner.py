@@ -22,7 +22,7 @@ import json
 import logging
 import os
 import secrets
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import optuna
 from omegaconf import DictConfig, OmegaConf

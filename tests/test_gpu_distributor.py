@@ -6,7 +6,6 @@ Unit tests for gpu_distributor.py
 import unittest
 from unittest.mock import MagicMock, patch
 from omegaconf import OmegaConf
-import torch
 
 from pytorch_segmentation_models_trainer.tools.evaluation.gpu_distributor import (
     GPUDistributor,

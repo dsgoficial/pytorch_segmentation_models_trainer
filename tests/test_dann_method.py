@@ -656,9 +656,6 @@ class TestDANNMethodStepMode:
 
     def test_get_lambda_da_reads_current_lambda_in_batch_mode(self):
         """DomainAdaptationModel._get_lambda_da must use _current_lambda."""
-        from pytorch_segmentation_models_trainer.domain_adaptation.schedulers import (
-            DANNScheduler,
-        )
 
         cfg = _make_da_cfg()
         model = DomainAdaptationModel(cfg)

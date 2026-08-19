@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
 import pandas as pd
-import pytest
-from pathlib import Path
 from pytorch_segmentation_models_trainer.utils.dataframe_utils import read_dataframe
 
 

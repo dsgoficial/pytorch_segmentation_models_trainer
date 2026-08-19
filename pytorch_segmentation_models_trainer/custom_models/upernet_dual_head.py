@@ -23,7 +23,7 @@ Usage via Hydra YAML:
 
 import torch
 import torch.nn as nn
-from typing import Any, Callable, Dict, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Optional, Union
 
 from segmentation_models_pytorch.base import (
     SegmentationHead,

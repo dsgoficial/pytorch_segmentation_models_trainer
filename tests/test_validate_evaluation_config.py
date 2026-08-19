@@ -5,7 +5,7 @@ Unit tests for validate_evaluation_config.py
 
 import unittest
 from unittest.mock import MagicMock, patch
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 import runpy
 import sys
 import types

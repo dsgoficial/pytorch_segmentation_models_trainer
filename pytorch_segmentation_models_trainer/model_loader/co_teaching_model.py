@@ -8,7 +8,7 @@ other network considers low-loss (class-balanced selection).
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import torch
 from hydra.utils import instantiate

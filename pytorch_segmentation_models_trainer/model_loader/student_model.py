@@ -5,7 +5,6 @@ Inherits from the base Model class to maintain consistency with the framework.
 """
 
 import logging
-import torch
 import torch.nn.functional as F
 from pytorch_segmentation_models_trainer.model_loader.model import Model
 

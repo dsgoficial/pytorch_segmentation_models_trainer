@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
-import os
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-import torch
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     CSVWindowedSegmentationDataset,
 )

@@ -32,7 +32,6 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from segmentation_models_pytorch.base import (
     SegmentationHead,
-    ClassificationHead,
 )
 from segmentation_models_pytorch.base import initialization as init
 from segmentation_models_pytorch.base import modules as md

@@ -26,7 +26,7 @@ directly in YAML files via the ``_target_`` mechanism.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional
 
 from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING

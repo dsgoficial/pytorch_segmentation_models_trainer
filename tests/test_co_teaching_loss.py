@@ -3,7 +3,6 @@
 
 import pytest
 import torch
-import torch.nn.functional as F
 
 from pytorch_segmentation_models_trainer.custom_losses.co_teaching_loss import (
     CoTeachingLoss,

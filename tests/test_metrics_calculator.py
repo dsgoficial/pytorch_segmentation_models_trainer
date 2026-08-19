@@ -4,15 +4,14 @@ Unit tests for metrics_calculator.py
 """
 
 import unittest
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 import torch
 import rasterio
 from rasterio.transform import Affine
 from rasterio.windows import Window
-from omegaconf import OmegaConf, DictConfig
-import json
+from omegaconf import OmegaConf
 import os
 from pathlib import Path
 
@@ -22,9 +21,6 @@ from pytorch_segmentation_models_trainer.tools.evaluation.metrics_calculator imp
 )
 from pytorch_segmentation_models_trainer.tools.evaluation.image_processing_worker import (
     process_single_image_worker,
-)
-from pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader import (
-    RasterFile,
 )
 
 

@@ -3,7 +3,6 @@
 Tests for experiments_runner_config dataclasses.
 """
 
-import pytest
 from omegaconf import OmegaConf
 from pytorch_segmentation_models_trainer.config_definitions.experiments_runner_config import (
     ExperimentsRunnerConfig,

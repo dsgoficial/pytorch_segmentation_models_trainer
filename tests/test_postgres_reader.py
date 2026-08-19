@@ -169,7 +169,6 @@ def test_read_tiles_class_dist_already_dict():
 
 def _raw_df_with_embedding() -> pd.DataFrame:
     """Raw DataFrame with embedding column as list (psycopg2 + pgvector adapter)."""
-    import numpy as np
 
     df = _raw_df()
     df["embedding"] = [

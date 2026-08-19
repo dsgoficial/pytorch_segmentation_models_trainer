@@ -19,7 +19,6 @@
  ****
 """
 
-import os
 import warnings
 from pathlib import Path
 
@@ -547,8 +546,6 @@ class TestRasterPatchDataset(BasicTestCase):
 
     def test_reset_augmentation_function_returns_valid_output(self):
         """reset_augmentation_function=True still returns correctly shaped tensors."""
-        import albumentations as A
-        from albumentations.pytorch import ToTensorV2
 
         aug = [
             {"_target_": "albumentations.HorizontalFlip", "p": 0.0},

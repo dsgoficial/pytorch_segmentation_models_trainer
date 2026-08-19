@@ -21,35 +21,17 @@
 """
 
 import os
-import subprocess
 from typing import Dict, Optional
 import unittest
-from importlib import import_module
 
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
-import hydra
 import numpy as np
-from pytorch_lightning import Trainer
-import segmentation_models_pytorch as smp
 import torch
-from hydra import compose, initialize
 from parameterized import parameterized
-from pytorch_segmentation_models_trainer.custom_models import models as pytorch_smt_cm
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
-    ModPolyMapperDataset,
     ObjectDetectionDataset,
     PolygonRNNDataset,
-)
-from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
-    FrameFieldModel,
-    FrameFieldSegmentationPLModel,
-)
-from pytorch_segmentation_models_trainer.model_loader.mod_polymapper import (
-    GenericPolyMapperPLModel,
-)
-from pytorch_segmentation_models_trainer.model_loader.polygon_rnn_model import (
-    PolygonRNN,
 )
 from pytorch_segmentation_models_trainer.custom_models.mod_polymapper.modpolymapper import (
     ModPolyMapper,
@@ -57,9 +39,7 @@ from pytorch_segmentation_models_trainer.custom_models.mod_polymapper.modpolymap
 from pytorch_segmentation_models_trainer.train import train
 from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 
-from tests.utils import BasicTestCase, CustomTestCase, get_config_from_hydra
-
-from unittest.mock import MagicMock, Mock, patch
+from tests.utils import BasicTestCase, get_config_from_hydra
 
 current_dir = os.path.dirname(__file__)
 detection_root_dir = os.path.join(

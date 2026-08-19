@@ -7,7 +7,6 @@ import numpy as np
 import rasterio
 from rasterio.transform import from_origin
 from rasterio.windows import Window
-import torch
 from unittest.mock import MagicMock, patch
 
 from pytorch_segmentation_models_trainer.tools.evaluation.image_processing_worker import (

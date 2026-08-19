@@ -22,13 +22,9 @@
 
 import os
 import subprocess
-from typing import List
 
 import pytest
-import pytorch_lightning as pl
 from parameterized import parameterized
-from hydra import compose, initialize
-from pytorch_segmentation_models_trainer.train import train
 
 from tests.utils import CustomTestCase
 

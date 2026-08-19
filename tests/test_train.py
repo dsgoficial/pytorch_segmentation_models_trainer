@@ -6,7 +6,6 @@ Refactored to mock Trainer.fit() and Model.setup() so tests don't run
 actual training pipelines (I/O, GPU, etc.).
 """
 
-import os
 import unittest
 from unittest.mock import MagicMock, patch
 

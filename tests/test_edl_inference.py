@@ -14,7 +14,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest
 import rasterio
 import rasterio.transform
 import torch
@@ -162,7 +161,7 @@ class TestSaveUncertaintyRaster:
 
 class TestIntegrateBatch:
     def test_dict_output_integrated(self):
-        from pytorch_toolbelt.inference.tiles import ImageSlicer, TileMerger
+        from pytorch_toolbelt.inference.tiles import ImageSlicer
 
         proc = _make_processor(num_classes=K)
         tiler = ImageSlicer(
@@ -182,7 +181,7 @@ class TestIntegrateBatch:
 
     def test_plain_tensor_fallback(self):
         """When a plain tensor is passed, probs merger is used, unc is zeros."""
-        from pytorch_toolbelt.inference.tiles import ImageSlicer, TileMerger
+        from pytorch_toolbelt.inference.tiles import ImageSlicer
 
         proc = _make_processor(num_classes=K)
         tiler = ImageSlicer(

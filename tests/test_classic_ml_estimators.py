@@ -5,7 +5,6 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest
 import torch
 
 from pytorch_segmentation_models_trainer.classic_ml.estimators import (

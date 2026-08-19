@@ -8,14 +8,12 @@ All tests run on CPU with minimal dummy models and synthetic tensors.
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
 import warnings
 
 import numpy as np
 import pytest
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from pytorch_segmentation_models_trainer.tools.inference.sliding_window import (
     SlidingWindowCore,

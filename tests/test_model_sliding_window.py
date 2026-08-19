@@ -10,8 +10,7 @@ Tests for sliding-window test-phase methods added to Model:
 """
 
 import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch

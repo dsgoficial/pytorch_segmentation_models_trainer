@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for SoftLabelWeightedCELoss."""
 
-import pytest
 import torch
 
 from pytorch_segmentation_models_trainer.custom_losses.soft_label_loss import (

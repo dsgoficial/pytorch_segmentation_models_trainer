@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import torch
 import torch.nn as nn
 import unittest
 from pytorch_segmentation_models_trainer.utils.model_utils import (

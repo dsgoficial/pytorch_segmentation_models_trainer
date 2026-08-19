@@ -5,10 +5,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest
 
-import pytorch_segmentation_models_trainer.classic_ml as classic_ml_pkg
-import pytorch_segmentation_models_trainer.classic_ml.feature_engineering as fe
 from pytorch_segmentation_models_trainer.classic_ml.feature_engineering import (
     FeatureEngineeringPipeline,
     GaborFilterExtractor,

@@ -38,7 +38,7 @@ that is *not* registered as an SMP encoder, or when you want fine-grained
 control over the decoder architecture.
 """
 
-from typing import List, Optional
+from typing import List
 
 import torch
 import torch.nn as nn

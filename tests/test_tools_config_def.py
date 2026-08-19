@@ -23,16 +23,9 @@ from pytorch_segmentation_models_trainer.config_definitions.tools_config_def imp
     VectorFileExportInferenceStrategyConfig,
     VectorDatabaseExportInferenceStrategyConfig,
     ObjectDetectionExportInferenceStrategyConfig,
-    InnerPolylinesParamsConfig,
-    SimplePolConfigConfig,
     SimplePolygonizerProcessorConfig,
-    ACMConfigConfig,
     ACMPolygonizerProcessorConfig,
-    LossParamsCoefsConfig,
-    LossParamsConfig,
-    ASMConfigConfig,
     ASMPolygonizerProcessorConfig,
-    PolygonRNNConfigConfig,
     PolygonRNNPolygonizerProcessorConfig,
 )
 

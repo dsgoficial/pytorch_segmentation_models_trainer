@@ -10,12 +10,9 @@ Covers:
   - test_step() loss value, logging keys, compound loss, metrics
 """
 
-import logging
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock
 
-import pytest
 import torch
-import torch.nn as nn
 from omegaconf import OmegaConf
 from torch.utils.data import TensorDataset
 
