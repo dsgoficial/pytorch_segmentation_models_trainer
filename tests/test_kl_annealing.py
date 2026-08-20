@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import math
 from unittest.mock import MagicMock
 
 import pytest

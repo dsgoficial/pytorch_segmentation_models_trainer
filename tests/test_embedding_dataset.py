@@ -4,10 +4,8 @@ import tempfile
 import json
 import shutil
 from pathlib import Path
-from unittest.mock import patch
 import pandas as pd
 import torch
-import pytest
 from shapely.geometry import Point
 from pytorch_segmentation_models_trainer.dataset_loader.embedding_dataset import (
     EmbeddingDataset,

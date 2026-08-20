@@ -31,9 +31,6 @@ from typing import Dict, Tuple
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
-from pytorch_segmentation_models_trainer.tools.evaluation.csv_builder import (
-    DatasetCSVBuilder,
-)
 from pytorch_segmentation_models_trainer.tools.evaluation.gpu_distributor import (
     GPUDistributor,
 )

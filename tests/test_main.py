@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from omegaconf import OmegaConf
 from pytorch_segmentation_models_trainer.main import main
 

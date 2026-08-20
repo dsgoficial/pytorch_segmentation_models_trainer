@@ -4,9 +4,7 @@ Tests for train_config dataclasses.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
 from omegaconf import OmegaConf, MissingMandatoryValue
-import dataclasses
 
 from pytorch_segmentation_models_trainer.config_definitions.train_config import (
     BackboneConfig,

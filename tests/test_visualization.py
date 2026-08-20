@@ -21,7 +21,6 @@
 """
 
 import os
-import warnings
 
 import hydra
 import matplotlib.pyplot as plt

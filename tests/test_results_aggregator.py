@@ -8,7 +8,7 @@ import os
 import json
 import pandas as pd
 import numpy as np
-from omegaconf import OmegaConf, DictConfig
+from omegaconf import OmegaConf
 import shutil
 
 from pytorch_segmentation_models_trainer.tools.evaluation.results_aggregator import (

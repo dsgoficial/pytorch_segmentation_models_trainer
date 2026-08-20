@@ -4,7 +4,7 @@ Unit tests for evaluate_data.py
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from shapely.geometry import Polygon, Point
 
 from pytorch_segmentation_models_trainer.tools.evaluation.evaluate_data import (

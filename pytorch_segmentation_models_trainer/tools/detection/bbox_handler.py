@@ -27,7 +27,6 @@ import torch
 import copy
 from sahi.postprocess.combine import NMSPostprocess
 from sahi.postprocess.legacy.combine import PostprocessPredictions
-from sahi.annotation import BoundingBox, Category
 from sahi.postprocess.utils import calculate_box_union
 from sahi.prediction import ObjectPrediction
 

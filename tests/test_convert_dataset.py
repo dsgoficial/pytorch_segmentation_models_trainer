@@ -22,25 +22,17 @@
 
 import os
 import json
-import unittest
-import warnings
 from hydra import compose, initialize
-import hydra
 
 import pandas as pd
 from PIL import Image
 from parameterized import parameterized
-from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
-    InstanceSegmentationDataset,
-)
 from pytorch_segmentation_models_trainer.tools.dataset_handlers.convert_dataset import (
     AbstractConversionStrategy,
-    ConversionProcessor,
     PolygonRNNDatasetConversionStrategy,
 )
 from pytorch_segmentation_models_trainer.utils.os_utils import (
     create_folder,
-    remove_folder,
 )
 from pytorch_segmentation_models_trainer.convert_ds import convert_dataset
 

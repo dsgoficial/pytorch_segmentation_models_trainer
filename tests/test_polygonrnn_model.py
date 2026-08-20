@@ -21,24 +21,12 @@
 """
 
 import os
-import subprocess
-import unittest
-from importlib import import_module
 
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
-import hydra
-import numpy as np
-import segmentation_models_pytorch as smp
 import torch
 from hydra import compose, initialize
-from parameterized import parameterized
-from pytorch_segmentation_models_trainer.custom_models import models as pytorch_smt_cm
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import PolygonRNNDataset
-from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
-    FrameFieldModel,
-    FrameFieldSegmentationPLModel,
-)
 from pytorch_segmentation_models_trainer.model_loader.polygon_rnn_model import (
     PolygonRNN,
 )

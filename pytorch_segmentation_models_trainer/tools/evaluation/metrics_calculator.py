@@ -2,8 +2,7 @@ import os
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, List, Optional, Any
-from datetime import datetime
+from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -11,8 +10,7 @@ import torch
 import rasterio
 from rasterio.windows import Window, from_bounds
 from rasterio.coords import BoundingBox
-from tqdm import tqdm
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from hydra.utils import instantiate
 
 import logging

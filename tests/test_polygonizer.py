@@ -21,8 +21,6 @@
 """
 
 import os
-import unittest
-import warnings
 from dataclasses import dataclass, field
 from unittest.mock import MagicMock
 
@@ -30,9 +28,7 @@ import geopandas
 import hydra
 import rasterio
 import torch
-import numpy as np
 from shapely.geometry import Polygon
-from geopandas.testing import geom_almost_equals as _geom_almost_equals
 
 
 def geom_almost_equals(this, that, tolerance=0.01):
@@ -92,10 +88,6 @@ from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import
     SimplePolygonizerProcessor,
 )
 from pytorch_segmentation_models_trainer.utils import frame_field_utils, seed_utils
-from pytorch_segmentation_models_trainer.utils.os_utils import (
-    create_folder,
-    remove_folder,
-)
 
 current_dir = os.path.dirname(__file__)
 root_dir = os.path.join(current_dir, "testing_data")

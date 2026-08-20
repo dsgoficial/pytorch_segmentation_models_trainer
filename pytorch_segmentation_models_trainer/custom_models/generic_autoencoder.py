@@ -3,7 +3,7 @@
 Generic Autoencoder combining SMP and Transformers.
 """
 
-from typing import Optional, Union, Tuple, List
+from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

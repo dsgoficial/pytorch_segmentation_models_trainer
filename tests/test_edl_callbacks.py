@@ -305,7 +305,6 @@ class TestEvidentialUncertaintyVisualizationCallback(unittest.TestCase):
         fig.canvas.get_width_height.return_value = (100, 100)
 
         # Mock sys.modules for wandb
-        import sys
 
         mock_wandb = MagicMock()
         with patch.dict("sys.modules", {"wandb": mock_wandb}):
@@ -327,8 +326,6 @@ class TestEvidentialUncertaintyVisualizationCallback(unittest.TestCase):
             (100 * 100 * 3,), dtype=np.uint8
         ).tobytes()
         fig.canvas.get_width_height.return_value = (100, 100)
-
-        import sys
 
         mock_wandb = MagicMock()
         with patch.dict("sys.modules", {"wandb": mock_wandb}):

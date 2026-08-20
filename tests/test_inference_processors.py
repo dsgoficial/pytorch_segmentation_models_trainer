@@ -4,7 +4,7 @@ Unit tests for inference_processors.py
 """
 
 import unittest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 import numpy as np
 import torch
 import rasterio
@@ -13,7 +13,6 @@ import albumentations as A
 from collections import defaultdict
 import os
 import shutil
-from pathlib import Path
 
 from pytorch_segmentation_models_trainer.tools.inference.inference_processors import (
     AbstractInferenceProcessor,
@@ -26,11 +25,6 @@ from pytorch_segmentation_models_trainer.tools.polygonization.polygonizer import
 from pytorch_segmentation_models_trainer.tools.inference.export_inference import (
     RasterExportInferenceStrategy,
 )
-from pytorch_toolbelt.utils.torch_utils import (
-    image_to_tensor,
-    to_numpy,
-)
-from torch.utils.data import DataLoader
 from pytorch_toolbelt.inference.tiles import ImageSlicer, TileMerger
 
 

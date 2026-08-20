@@ -6,9 +6,6 @@ import unittest
 from unittest.mock import MagicMock, patch
 import torch
 import torch.nn as nn
-import numpy as np
-import pytorch_lightning as pl
-from pathlib import Path
 
 from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
     WarmupCallback,

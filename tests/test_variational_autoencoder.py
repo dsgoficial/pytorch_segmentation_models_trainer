@@ -909,7 +909,7 @@ def test_vae_logvar_clamp_default_is_none():
 
 
 def test_variational_autoencoder_model_computes_metrics_when_configured():
-    import torchmetrics
+    pass
 
     cfg = OmegaConf.create(
         {

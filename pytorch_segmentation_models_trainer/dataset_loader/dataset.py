@@ -24,7 +24,6 @@ import hashlib
 import itertools
 import json
 import logging
-import math
 import os
 import rasterio
 from collections import OrderedDict
@@ -49,9 +48,6 @@ from pytorch_segmentation_models_trainer.utils.object_detection_utils import (
 )
 from pytorch_segmentation_models_trainer.utils.dataframe_utils import read_dataframe
 from torch.utils.data import Dataset
-
-import gc
-import kornia as K
 
 try:
     import fcntl
@@ -154,7 +150,6 @@ class AbstractDataset(Dataset):
         Returns:
             Dict[str, Any]: Loaded item.
         """
-        pass
 
     def get_path(self, idx: int, key: str = None, add_root_dir: bool = True):
         key = self.image_key if key is None else key

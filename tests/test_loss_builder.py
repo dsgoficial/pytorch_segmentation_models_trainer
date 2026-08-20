@@ -4,7 +4,7 @@ Unit tests for loss_builder.py
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import torch
 import torch.nn as nn

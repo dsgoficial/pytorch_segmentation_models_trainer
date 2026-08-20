@@ -21,16 +21,10 @@
 """
 
 import os
-import warnings
 
 import numpy as np
-import skan
 import torch
-import matplotlib.pyplot as plt
-from matplotlib.testing.compare import compare_images
-from parameterized.parameterized import parameterized
 from pytorch_segmentation_models_trainer.utils.tensor_utils import (
-    TensorPoly,
     polygons_to_tensorpoly,
     tensorpoly_pad,
     SpatialGradient,

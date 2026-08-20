@@ -20,7 +20,7 @@ import pytorch_segmentation_models_trainer  # noqa: F401
 
 import torch
 import torch.nn as nn
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock
 
 from pytorch_segmentation_models_trainer.custom_losses.loss import (
     _lovasz_grad,
@@ -792,7 +792,6 @@ class TestLLRD(unittest.TestCase):
 
     def test_param_groups_have_correct_lr_ordering(self):
         """Decoder LR > stage 3 LR > stage 2 LR > ... > stem LR."""
-        from pytorch_segmentation_models_trainer.model_loader.model import Model
 
         model = _ConvNeXtLikeModel()
         # Call the static method directly by creating a mock Model instance
@@ -880,7 +879,6 @@ class TestLLRD(unittest.TestCase):
     def test_no_weight_decay_for_1d_params(self):
         """Bias and normalization parameters (1-D) should have weight_decay=0."""
         model = _ConvNeXtLikeModel()
-        import re
 
         base_lr = 1e-4
         layer_decay = 0.9

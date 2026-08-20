@@ -14,7 +14,6 @@ from shapely.geometry import (
     Polygon,
     MultiPolygon,
 )
-import rasterio
 from rasterio.transform import Affine
 import matplotlib.pyplot as plt
 import torch

@@ -2,7 +2,7 @@
 """Tests for pytorch_segmentation_models_trainer.classic_ml.postprocessing."""
 
 import sys
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest

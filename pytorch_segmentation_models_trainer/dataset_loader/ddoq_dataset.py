@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple
 import torch
 from torch.utils.data import Dataset
 

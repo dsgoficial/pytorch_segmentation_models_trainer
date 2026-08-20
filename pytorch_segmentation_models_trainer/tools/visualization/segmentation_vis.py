@@ -210,9 +210,6 @@ def create_segmentation_grid(
         """Resize pred to match gt shape if needed (simple nearest-neighbor)."""
         if pred_arr.shape == gt_arr.shape:
             return pred_arr
-        from rasterio.enums import Resampling
-        from rasterio.transform import from_bounds
-        import rasterio.warp as warp
 
         # Simple resize via zoom
         from scipy.ndimage import zoom

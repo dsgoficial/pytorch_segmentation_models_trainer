@@ -12,7 +12,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-import torch
 import torch.nn as nn
 
 from pytorch_segmentation_models_trainer.fine_tuning.lora_utils import (

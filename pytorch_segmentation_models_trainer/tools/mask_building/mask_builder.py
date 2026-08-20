@@ -31,7 +31,6 @@ from typing import Any, List
 from omegaconf import MISSING, DictConfig
 from pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader import (
     DatasetEntry,
-    MaskOutputType,
     RasterFile,
 )
 from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import (

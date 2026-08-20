@@ -22,21 +22,14 @@
 
 from collections import OrderedDict
 import os
-from pathlib import Path
 from unittest.mock import Mock
-import warnings
 
 # from unittest import IsolatedAsyncioTestCase
 
-import albumentations as A
 import hydra
-import numpy as np
-import rasterio
-import segmentation_models_pytorch as smp
 import torch
 from fastapi.testclient import TestClient
 from hydra import compose, initialize
-from hydra.utils import instantiate
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
     FrameFieldSegmentationPLModel,

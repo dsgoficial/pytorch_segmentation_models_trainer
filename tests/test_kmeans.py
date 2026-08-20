@@ -4,7 +4,6 @@ import torch
 import numpy as np
 import tempfile
 from unittest.mock import patch
-from sklearn.cluster import MiniBatchKMeans as SklearnMiniBatchKMeans
 from sklearn.metrics import adjusted_rand_score
 from torch.utils.data import Dataset, DataLoader
 from pytorch_segmentation_models_trainer.tools.kmeans.kmeans_calculator import (

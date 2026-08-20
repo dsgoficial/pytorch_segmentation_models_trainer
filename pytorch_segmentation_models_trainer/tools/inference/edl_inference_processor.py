@@ -41,20 +41,15 @@ Typical CLI usage (``predict.py`` detects EDL automatically)::
 """
 
 import logging
-import math
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Dict, Optional, Union
 
-import albumentations as A
-import cv2
 import numpy as np
 import rasterio
 import rasterio.transform
 import torch
 from pytorch_toolbelt.inference.tiles import ImageSlicer, TileMerger
-from pytorch_toolbelt.utils.torch_utils import image_to_tensor, to_numpy
-from torch.cuda.amp import autocast
-from torch.utils.data import DataLoader
+from pytorch_toolbelt.utils.torch_utils import to_numpy
 
 from pytorch_segmentation_models_trainer.tools.inference.inference_processors import (
     SingleImageInfereceProcessor,

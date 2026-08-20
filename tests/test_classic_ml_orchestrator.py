@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
 """Tests for pytorch_segmentation_models_trainer.classic_ml.orchestrator."""
 
-import pickle
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 from pytorch_segmentation_models_trainer.classic_ml.orchestrator import (
     ClassicMLOrchestrator,

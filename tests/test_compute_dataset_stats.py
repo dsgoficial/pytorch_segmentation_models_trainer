@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import math
 import textwrap
 import unittest
 from pathlib import Path

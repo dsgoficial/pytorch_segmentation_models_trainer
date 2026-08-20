@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tests for ClusterCentersWarmStartCallback."""
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock
 
 import pytest
 import torch

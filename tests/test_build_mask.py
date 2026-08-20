@@ -22,36 +22,20 @@
 
 import ast
 import os
-import unittest
 from unittest.mock import MagicMock, patch
 import warnings
 
-import hydra
 import numpy as np
 import pandas as pd
 from hydra import compose, initialize
-from parameterized import parameterized
-from sqlalchemy import create_engine
-import psycopg2
 from pytorch_segmentation_models_trainer.build_mask import build_masks
-from pytorch_segmentation_models_trainer.tools.data_handlers.raster_reader import (
-    MaskOutputTypeEnum,
-    RasterFile,
-)
 from pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader import (
     FileGeoDF,
-    GeomTypeEnum,
 )
 from pytorch_segmentation_models_trainer.tools.mask_building.mask_builder import (
-    MaskBuilder,
     TemplateMaskBuilder,
     build_destination_dirs,
     merge_csv_datasets,
-)
-from pytorch_segmentation_models_trainer.utils.os_utils import (
-    create_folder,
-    hash_file,
-    remove_folder,
 )
 
 current_dir = os.path.dirname(__file__)

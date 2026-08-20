@@ -6,12 +6,10 @@ Run with:
     python -m pytest tests/test_spatial_kfold.py -v --tb=short
 """
 
-import os
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytest
 import rasterio
 from rasterio.transform import from_bounds
 

@@ -70,7 +70,6 @@ def _process_pair(
     mi: Optional[str],
 ) -> List[dict]:
     """Crop a single image/mask pair into sliding-window patches."""
-    import numpy as np
     import rasterio
     from rasterio.windows import Window, transform as window_transform
 

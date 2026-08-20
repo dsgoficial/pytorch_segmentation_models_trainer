@@ -10,7 +10,7 @@ with:  pip install pytorch_segmentation_models_trainer[transformers]
 """
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import torch

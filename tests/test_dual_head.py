@@ -41,7 +41,6 @@ from segmentation_models_pytorch.base import SegmentationHead, initialization as
 
 from pytorch_segmentation_models_trainer.custom_losses.loss import (
     DualHeadKendallLoss,
-    WeightedJMLSCEGCBLLoss,
 )
 from pytorch_segmentation_models_trainer.custom_models.upernet_dual_head import (
     UPerNetDualHead,

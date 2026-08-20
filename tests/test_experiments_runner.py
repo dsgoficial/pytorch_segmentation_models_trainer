@@ -8,10 +8,7 @@ Run with:
 
 import json
 import os
-import shutil
-import tempfile
-import unittest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytorch_lightning as pl
 from omegaconf import OmegaConf

@@ -24,7 +24,6 @@
 from typing import Dict
 import numpy as np
 import torch
-import kornia
 from kornia.filters.kernels import (
     get_diff_kernel2d,
     get_diff_kernel2d_2nd_order,

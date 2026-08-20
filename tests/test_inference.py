@@ -23,7 +23,6 @@
 import json
 import os
 from pathlib import Path
-import warnings
 
 import albumentations as A
 import geopandas
@@ -34,7 +33,6 @@ import segmentation_models_pytorch as smp
 import torch
 from collections import OrderedDict
 from hydra import compose, initialize
-from hydra.utils import instantiate
 from parameterized import parameterized
 from pytorch_segmentation_models_trainer.custom_models.models import (
     ObjectDetectionModel,

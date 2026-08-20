@@ -6,7 +6,6 @@ All tests run on CPU and use a minimal segmentation model (2-layer CNN)
 to avoid any SMP / HuggingFace dependencies.
 """
 
-import pytest
 import torch
 import torch.nn as nn
 

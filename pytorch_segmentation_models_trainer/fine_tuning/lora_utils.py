@@ -45,9 +45,8 @@ All strategies log a parameter count summary via Python's ``logging`` module.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-import torch
 import torch.nn as nn
 
 logger = logging.getLogger(__name__)

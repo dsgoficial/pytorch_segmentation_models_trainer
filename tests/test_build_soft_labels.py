@@ -1640,7 +1640,6 @@ class TestRun:
         from pytorch_segmentation_models_trainer.tools.soft_labels.build_soft_labels import (
             run,
         )
-        import pandas as pd
 
         img_path, path_a, path_b, _, _ = same_res_setup
         csv_path = self._sources_csv(tmp_path, img_path, path_a, path_b)

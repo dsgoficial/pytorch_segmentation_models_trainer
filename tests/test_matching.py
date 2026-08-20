@@ -21,13 +21,9 @@
 """
 
 import os
-from typing import Any, Callable, List, Tuple
+from typing import Callable, List, Tuple
 import unittest
-from shapely.geometry.base import BaseGeometry
-import torch
-import geopandas
 import json
-import numpy as np
 from shapely.geometry import Polygon, Point
 from parameterized import parameterized
 

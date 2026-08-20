@@ -10,7 +10,6 @@ import torch
 import os
 import shutil
 import tempfile
-from pathlib import Path
 
 from pytorch_segmentation_models_trainer.custom_callbacks.metrics_callbacks import (
     ConfusionMatrixCallback,

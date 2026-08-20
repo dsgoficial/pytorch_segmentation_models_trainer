@@ -25,9 +25,7 @@ import torch
 from pytorch_segmentation_models_trainer.tools.tta.tta import (
     D4_AUGMENTATIONS,
     FLIP_H,
-    FLIP_H_ROT90,
     FLIP_V,
-    FLIP_V_ROT90,
     ROT0,
     ROT180,
     ROT270,

@@ -7,12 +7,10 @@ and end-to-end training/validation steps with a lightweight SMP model.
 """
 
 import logging
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import torch
-import torch.nn as nn
 from omegaconf import OmegaConf
 
 from pytorch_segmentation_models_trainer.model_loader.model import Model

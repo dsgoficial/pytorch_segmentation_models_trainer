@@ -20,7 +20,6 @@
 """
 
 from collections import defaultdict
-from concurrent.futures.thread import ThreadPoolExecutor
 import logging
 import os
 import math
@@ -203,7 +202,6 @@ class AbstractInferenceProcessor(ABC):
         Returns:
             torch.Tensor: model inference
         """
-        pass
 
 
 class SingleImageInfereceProcessor(AbstractInferenceProcessor):

@@ -6,7 +6,6 @@ TerraTorch is mocked so these tests run without installing terratorch.
 The _prepare_input helper and head wiring are tested with a fake backbone.
 """
 
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest

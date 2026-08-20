@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import torch
 import pytest
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import TensorDataset
 from pytorch_segmentation_models_trainer.dataset_loader.ddoq_dataset import (
     DDOQDistilledDataset,
 )

@@ -23,7 +23,6 @@ from pytorch_segmentation_models_trainer.tools.soft_labels.build_soft_labels imp
 
 if __name__ == "__main__":
     import argparse
-    import sys
     from pathlib import Path
 
     parser = argparse.ArgumentParser(

@@ -37,7 +37,6 @@ from pytorch_segmentation_models_trainer.optimizers.poly_optimizers import (
 from pytorch_segmentation_models_trainer.utils.math_utils import compute_crossfield_uv
 from pytorch_segmentation_models_trainer.utils import (
     frame_field_utils,
-    math_utils,
     tensor_utils,
 )
 from pytorch_segmentation_models_trainer.tools.polygonization.skeletonize_tensor_tools import (

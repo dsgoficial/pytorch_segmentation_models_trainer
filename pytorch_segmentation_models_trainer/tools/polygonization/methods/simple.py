@@ -25,7 +25,6 @@ from functools import partial
 
 import shapely.geometry
 import shapely.ops
-import skimage.io
 from pytorch_segmentation_models_trainer.tools.polygonization import polygonize_utils
 
 

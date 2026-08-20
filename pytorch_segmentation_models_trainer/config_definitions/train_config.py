@@ -22,12 +22,10 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Any
 
-import torch
 from omegaconf import MISSING
 from pytorch_segmentation_models_trainer.config_definitions.loss_config_definition import (
     LossParamsConfig,
 )
-from pytorch_segmentation_models_trainer.model_loader.model import Model
 from pytorch_segmentation_models_trainer.config_definitions.dataset_config import (
     DatasetConfig,
 )

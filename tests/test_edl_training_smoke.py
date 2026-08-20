@@ -15,9 +15,6 @@ import torch
 from omegaconf import OmegaConf
 from unittest.mock import MagicMock
 
-from pytorch_segmentation_models_trainer.custom_models.edl_wrapper import (
-    EvidentialWrapper,
-)
 from pytorch_segmentation_models_trainer.custom_callbacks.edl_callbacks import (
     EvidentialWarmupCallback,
 )

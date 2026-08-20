@@ -3,7 +3,7 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import albumentations as A
 import numpy as np
@@ -13,7 +13,6 @@ import torch
 
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     AbstractDataset,
-    load_augmentation_object,
 )
 
 logger = logging.getLogger(__name__)

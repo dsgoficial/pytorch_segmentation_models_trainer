@@ -61,7 +61,7 @@ YAML example (Model config)::
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple, Union
 
 import numpy as np
@@ -69,7 +69,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from pytorch_toolbelt.inference.tiles import ImageSlicer, TileMerger
-from pytorch_toolbelt.utils.torch_utils import image_to_tensor, to_numpy
+from pytorch_toolbelt.utils.torch_utils import image_to_tensor
 from torch.utils.data import DataLoader
 
 from pytorch_segmentation_models_trainer.tools.tta.tta import (

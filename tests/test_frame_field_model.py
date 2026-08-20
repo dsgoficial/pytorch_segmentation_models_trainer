@@ -7,12 +7,10 @@ Tests for FrameFieldModel / FrameFieldSegmentationPLModel.
 """
 
 import os
-import unittest
 from importlib import import_module
 from unittest.mock import MagicMock, patch
 
 import hydra
-import numpy as np
 import pytorch_lightning as pl
 import segmentation_models_pytorch as smp
 import torch

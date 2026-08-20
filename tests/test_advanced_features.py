@@ -28,7 +28,7 @@ import rasterio
 from rasterio.transform import from_bounds
 import torch
 import torch.nn as nn
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock
 
 from pytorch_segmentation_models_trainer.custom_losses.loss import (
     GCBLLoss,

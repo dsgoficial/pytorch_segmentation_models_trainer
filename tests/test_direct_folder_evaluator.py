@@ -4,7 +4,6 @@ from unittest.mock import MagicMock, patch
 import os
 import shutil
 import tempfile
-import pandas as pd
 import numpy as np
 import rasterio
 from pathlib import Path
