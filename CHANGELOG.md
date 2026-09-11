@@ -1,5 +1,21 @@
 # Unreleased
 
+## SLICO Label Correction
+
+- Added `pytorch_segmentation_models_trainer/tools/slico_correction/` package with `SLICOLabelCorrectionConfig` and `SlicoLabelCorrector`. Region-generation ablation of SAM label correction: majority-vote consensus and per-class eligibility rule are unchanged (both now call the shared `apply_region_correction`), only the region partition source differs — SLICO (zero-parameter SLIC superpixels, `skimage.segmentation.slic`) instead of SAM AMG.
+- `n_segments` (default 1000 per 256×256 patch, ~65 px/segment) is a density anchor scaled to the actual chunk area processed, so superpixel granularity stays constant regardless of `chunk_size` — a deliberately fine, fixed oversegmentation independent of how many masks SAM produces for the same patch, keeping the two region generators comparable without one depending on the other having run.
+- Optional `match_sam_cache_dir`: reuses an existing SAM segment cache's mask count as `n_segments` per chunk, for secondary granularity-matched sensitivity analysis (falls back to the density default when no cached SAM entry exists for that chunk).
+- New CLI command `build-slico-corrected-masks <yaml_path>`, registered alongside `build-sam-corrected-masks`.
+- Example config at `conf/examples/slico_label_correction.yaml`.
+- 100% test coverage (`tests/test_slico_label_corrector.py`).
+
+## Region Correction Refactor
+
+- Extracted the majority-vote correction core shared by SAM and SLICO into `pytorch_segmentation_models_trainer/tools/region_correction/`: `apply_region_correction` (generator-agnostic — accepts either a SAM-style list of possibly-overlapping mask dicts, processed exactly as before, or a dense SLIC-style integer label map via a new vectorized path, since a non-overlapping partition needs no per-region ordering), `parse_correction_targets`, and `chunk_cache_key`.
+- Added `LabelMapCache` (NPZ cache for a single dense label map) alongside a renamed `SegmentListCache` (the former `SAMSegmentCache`, unchanged format) — a superpixel partition is one array of the mask's shape, not a per-region list, so it needs its own cache format.
+- `tools.sam_correction`: `apply_sam_correction` and `SAMSegmentCache` keep their public names/signatures and behavior — they now delegate to the shared core internally. No behavior change; existing tests (`tests/test_sam_label_corrector.py`) pass unmodified.
+- 100% test coverage on the new shared core (`tests/test_region_correction.py`).
+
 ## PyTorch upgrade to 2.13
 
 - Unpinned `torch`/`torchvision` (already unpinned) now resolve to **2.13.0 / 0.28.0** — the default PyPI Linux wheel bundles CUDA 13.0 (`+cu130`), which requires compute capability sm_75+ (Turing or newer). Tesla V100 (Volta, sm_70) is **not** supported by this default build.

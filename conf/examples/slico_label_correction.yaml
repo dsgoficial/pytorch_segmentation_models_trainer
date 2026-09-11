@@ -1,0 +1,41 @@
+# SLICO-based label correction example
+# Usage: pytorch-smt-tools build-slico-corrected-masks conf/examples/slico_label_correction.yaml
+#
+# Region-generation ablation of sam_label_correction.yaml: same coreset,
+# same majority-vote consensus, same eligibility rule — only the region
+# generator changes (SLICO superpixels instead of SAM AMG).
+
+coreset_csv: /data/coreset.csv
+masks_dir: /data/masks
+
+targets:
+  - classes: [3, 5]          # grassland + cropland
+    output_dir: /data/masks_slico_gc
+  - classes: [1, 3, 5]       # forest + grassland + cropland
+    output_dir: /data/masks_slico_gcf
+
+mbtiles_path: /data/imagery/tiles.mbtiles
+
+# Optional auxiliary LULC rasters for consensus vote
+lulc_paths:
+  - /data/lulc/mapbiomas.vrt
+  - /data/lulc/esri.vrt
+  - /data/lulc/dynamic_world.vrt
+
+include_bags: true            # include original mask in majority vote
+num_classes: 6
+nodata_val: 255
+chunk_size: 1024
+
+# Target superpixels per 256x256 patch (density anchor, scaled to chunk_size;
+# default 1000 = ~65 px/segment, deliberate oversegmentation — see docs).
+n_segments: 1000
+
+# Optional secondary analysis: match SAM's per-chunk mask count instead of
+# the density default. Leave empty ("") for the primary, SAM-independent
+# comparison.
+match_sam_cache_dir: ""
+
+cache_dir: /data/slico_cache  # leave empty ("") to disable caching
+start_idx: 0
+end_idx: 999999

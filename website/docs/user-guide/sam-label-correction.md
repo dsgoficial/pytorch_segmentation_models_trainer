@@ -188,3 +188,15 @@ corrected = apply_sam_correction(
     include_bags=True,
 )
 ```
+
+It is a thin wrapper over the generator-agnostic
+`pytorch_segmentation_models_trainer.tools.region_correction.apply_region_correction`,
+shared with [SLICO Label Correction](slico-label-correction.md) — the same majority-vote
+consensus and eligibility rule, applied to a different region generator's output.
+
+---
+
+## See also
+
+- [SLICO Label Correction](slico-label-correction.md) — same correction rule with
+  SLICO superpixels instead of SAM AMG; useful as a region-generation ablation.

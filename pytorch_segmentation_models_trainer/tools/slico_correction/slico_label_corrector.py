@@ -1,9 +1,20 @@
 # -*- coding: utf-8 -*-
-"""SAM-based label correction for noisy segmentation masks.
+"""SLICO-based label correction for noisy segmentation masks.
 
-Pre-processing tool that corrects noisy GeoTIFF masks using SAM AMG
-(Automatic Mask Generation) + majority vote within SAM segments across
-the original topographic vector source and optional LULC auxiliary maps.
+Pre-processing tool that corrects noisy GeoTIFF masks using SLICO
+(zero-parameter SLIC superpixels, Achanta & Susstrunk 2012) + majority vote
+within each superpixel across the original topographic vector source and
+optional LULC auxiliary maps.
+
+This is a region-generation ablation of ``tools.sam_correction``: stages 2/3
+(majority-vote consensus, per-class eligibility rule) are identical — both
+call :func:`apply_region_correction` — only stage 1 (region partition) differs.
+SLICO produces a strict, non-overlapping label map instead of SAM AMG's
+possibly-overlapping mask list, so it is generated with a deliberately fine,
+fixed oversegmentation (``n_segments`` superpixels per 256x256 patch, default
+1000, ~65 px/segment) rather than tuned to match SAM's region count — this
+keeps the two region generators independent and comparable without one
+depending on the other having already run.
 """
 
 import shutil
@@ -22,37 +33,44 @@ from pytorch_segmentation_models_trainer.tools.region_correction.correction impo
     parse_correction_targets,
 )
 from pytorch_segmentation_models_trainer.tools.region_correction.segment_cache import (
-    SegmentListCache as SAMSegmentCache,
+    LabelMapCache,
+    SegmentListCache,
 )
+
+_PATCH_AREA_PX = 256 * 256
 
 
 @dataclass
-class SAMLabelCorrectionConfig:
-    """Configuration for SAM-based label correction.
+class SLICOLabelCorrectionConfig:
+    """Configuration for SLICO-based label correction.
 
     Args:
         coreset_csv: Path to CSV with columns mask_path, row_off, col_off, patch_size.
         masks_dir: Directory containing original GeoTIFF mask files.
         targets: List of dicts with keys ``classes`` (list of int) and
             ``output_dir`` (str). Each target produces a separate output directory
-            with SAM-corrected masks for the specified class set.
-        sam_checkpoint: Path to SAM ViT checkpoint (.pth).
-        mbtiles_path: Path to MBTiles file used as RGB source imagery for SAM.
+            with SLICO-corrected masks for the specified class set.
+        mbtiles_path: Path to MBTiles file used as RGB source imagery for SLICO.
         lulc_paths: Paths to auxiliary LULC rasters/VRTs included in the
             majority vote alongside the topographic vector source.
         include_bags: Whether to include the original topographic vector source
             mask in the majority vote (default True).
-        sam_model_type: SAM model registry key (default ``"vit_b"``).
-        device: Torch device string (default ``"cuda:0"``).
         num_classes: Number of valid semantic classes (default 6).
         nodata_val: Pixel value treated as nodata/invalid (default 255).
         chunk_size: Tile processing chunk size in pixels (default 1024).
-        points_per_side: SAM AMG grid density (default 32).
-        pred_iou_thresh: SAM AMG predicted-IoU threshold (default 0.80).
-        stability_score_thresh: SAM AMG stability-score threshold (default 0.90).
-        min_mask_region_area: Minimum SAM segment area in pixels (default 200).
-        cache_dir: Directory for NPZ segment cache. Empty string disables cache.
-        start_idx: First tile index to process (inclusive, for multi-GPU splits).
+        n_segments: Target superpixel count per 256x256 patch (default 1000,
+            ~65 px/segment — deliberate oversegmentation, see module docstring).
+            Scaled proportionally to the actual chunk area processed, so the
+            per-pixel superpixel density stays constant regardless of
+            ``chunk_size``.
+        match_sam_cache_dir: Optional path to an existing SAM segment NPZ cache
+            (``tools.sam_correction`` ``cache_dir``). When a chunk has a cached
+            SAM entry, its mask count is used as ``n_segments`` for that chunk
+            instead of the density-based default — secondary sensitivity
+            analysis only (see module docstring); leave empty for the primary,
+            SAM-independent comparison.
+        cache_dir: Directory for NPZ label-map cache. Empty string disables cache.
+        start_idx: First tile index to process (inclusive, for multi-worker splits).
         end_idx: Last tile index to process (exclusive).
 
     Example YAML:
@@ -63,106 +81,64 @@ class SAMLabelCorrectionConfig:
         masks_dir: /data/masks
         targets:
           - classes: [3, 5]
-            output_dir: /data/masks_sam_gc
-        sam_checkpoint: /models/sam_vit_b_01ec64.pth
+            output_dir: /data/masks_slico_gc
         mbtiles_path: /data/images/tiles.mbtiles
         lulc_paths:
           - /data/lulc/mapbiomas.vrt
           - /data/lulc/esri.vrt
-        cache_dir: /data/sam_cache
+        n_segments: 1000
+        cache_dir: /data/slico_cache
     """
 
     coreset_csv: str
     masks_dir: str
     targets: list
-    sam_checkpoint: str
     mbtiles_path: str
     lulc_paths: list = field(default_factory=list)
     include_bags: bool = True
-    sam_model_type: str = "vit_b"
-    device: str = "cuda:0"
     num_classes: int = 6
     nodata_val: int = 255
     chunk_size: int = 1024
-    points_per_side: int = 32
-    pred_iou_thresh: float = 0.80
-    stability_score_thresh: float = 0.90
-    min_mask_region_area: int = 200
+    n_segments: int = 1000
+    match_sam_cache_dir: str = ""
     cache_dir: str = ""
     start_idx: int = 0
     end_idx: int = 999999
 
 
-def apply_sam_correction(
-    bags_raw: np.ndarray,
-    sam_masks: List[Dict],
-    lulc_maps: List[np.ndarray],
-    classes_to_correct: FrozenSet[int],
-    num_classes: int = 6,
-    include_bags: bool = True,
-) -> np.ndarray:
-    """Apply SAM-based majority-vote correction to a mask array.
+class SlicoLabelCorrector:
+    """Orchestrates SLICO-based label correction across a coreset of tiles.
 
-    For each SAM segment that contains at least one pixel from
-    ``classes_to_correct``, the winning class is determined by majority vote
-    across all sources (optionally the original mask + each LULC map). The
-    winner is written to every pixel in the segment. Non-target class pixels
-    are always restored from the original mask after processing.
-
-    SAM masks are processed in ascending (predicted_iou, area) order so that
-    higher-confidence, larger segments overwrite smaller/less-confident ones in
-    overlapping regions.
+    Loads the coreset CSV and processes tiles in order. For each tile, chunks
+    are processed; SLICO is run once per chunk (or loaded from cache) and the
+    result is applied to every registered target. Mirrors
+    :class:`pytorch_segmentation_models_trainer.tools.sam_correction.SamLabelCorrector`
+    structurally — see that class and the module docstring for how the two relate.
 
     Args:
-        bags_raw: Original mask array (H, W) uint8 — topographic vector source.
-        sam_masks: List of SAM segment dicts with keys ``segmentation``
-            (bool H×W), ``predicted_iou`` (float), ``area`` (int).
-        lulc_maps: List of auxiliary class arrays (H, W) uint8 used as extra
-            votes alongside ``bags_raw``.
-        classes_to_correct: Set of class indices eligible for correction.
-        num_classes: Number of valid class indices (values >= num_classes ignored).
-        include_bags: If True, ``bags_raw`` is counted as one vote source.
-
-    Returns:
-        Corrected mask array (H, W) uint8, same shape as ``bags_raw``.
-    """
-    return apply_region_correction(
-        bags_raw=bags_raw,
-        segments=sam_masks,
-        lulc_maps=lulc_maps,
-        classes_to_correct=classes_to_correct,
-        num_classes=num_classes,
-        include_bags=include_bags,
-    )
-
-
-class SamLabelCorrector:
-    """Orchestrates SAM-based label correction across a coreset of tiles.
-
-    Loads the coreset CSV, initialises SAM, and processes tiles in order.
-    For each tile, chunks are processed; SAM is run once per chunk (or
-    loaded from cache) and the result is applied to every registered target.
-
-    Args:
-        config: :class:`SAMLabelCorrectionConfig` instance.
+        config: :class:`SLICOLabelCorrectionConfig` instance.
 
     Example::
 
-        config = SAMLabelCorrectionConfig(
+        config = SLICOLabelCorrectionConfig(
             coreset_csv="/data/coreset.csv",
             masks_dir="/data/masks",
             targets=[{"classes": [3, 5], "output_dir": "/data/out"}],
-            sam_checkpoint="/models/sam_vit_b.pth",
             mbtiles_path="/data/tiles.mbtiles",
         )
-        corrector = SamLabelCorrector(config)
+        corrector = SlicoLabelCorrector(config)
         stats = corrector.run()
     """
 
-    def __init__(self, config: SAMLabelCorrectionConfig) -> None:
+    def __init__(self, config: SLICOLabelCorrectionConfig) -> None:
         self._cfg = config
-        self._cache = SAMSegmentCache(config.cache_dir)
-        self._targets = self._parse_targets(config.targets)
+        self._cache = LabelMapCache(config.cache_dir)
+        self._sam_cache = (
+            SegmentListCache(config.match_sam_cache_dir)
+            if config.match_sam_cache_dir
+            else None
+        )
+        self._targets = parse_correction_targets(config.targets)
         self._lulc_paths = [Path(p) for p in config.lulc_paths]
         self._masks_dir = Path(config.masks_dir)
         self._mbtiles = Path(config.mbtiles_path)
@@ -172,14 +148,12 @@ class SamLabelCorrector:
     # ------------------------------------------------------------------
 
     def run(self) -> Dict:
-        """Run SAM correction over all tiles in the coreset CSV.
+        """Run SLICO correction over all tiles in the coreset CSV.
 
         Returns:
             Summary dict with keys ``n_tiles``, ``elapsed_s``, and per-target
             ``total_changed`` / ``total_target`` counters.
         """
-        mask_generator = self._load_sam()
-
         df = pd.read_csv(self._cfg.coreset_csv, low_memory=False)
         if "patch_size" not in df.columns:
             df["patch_size"] = 256
@@ -195,7 +169,7 @@ class SamLabelCorrector:
 
         for tile_name in tqdm(tiles, desc="Tiles", unit="tile"):
             patch_rows = df[df["mask_path"] == tile_name].copy()
-            stats = self._process_tile(tile_name, patch_rows, mask_generator)
+            stats = self._process_tile(tile_name, patch_rows)
             results.append(stats)
 
         elapsed = time.time() - t_start
@@ -205,37 +179,19 @@ class SamLabelCorrector:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _parse_targets(raw: list) -> List[Tuple[FrozenSet[int], Path]]:
-        return parse_correction_targets(raw)
+    def _chunk_cache_key(self, tile_name: str, window, n_segments: int) -> str:
+        return f"{chunk_cache_key(tile_name, window)}_n{n_segments}"
 
-    def _load_sam(self):
-        try:
-            from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
-        except ImportError as exc:
-            raise ImportError(
-                "segment_anything is required for SAM label correction. "
-                "Install it with: pip install segment-anything"
-            ) from exc
+    def _resolve_n_segments(self, tile_name: str, window) -> int:
+        if self._sam_cache is not None:
+            sam_masks = self._sam_cache.get(chunk_cache_key(tile_name, window))
+            if sam_masks:
+                return len(sam_masks)
+        density = self._cfg.n_segments / _PATCH_AREA_PX
+        area = window.height * window.width
+        return max(1, round(density * area))
 
-        sam = sam_model_registry[self._cfg.sam_model_type](
-            checkpoint=self._cfg.sam_checkpoint
-        )
-        sam.to(self._cfg.device)
-        return SamAutomaticMaskGenerator(
-            model=sam,
-            points_per_side=self._cfg.points_per_side,
-            pred_iou_thresh=self._cfg.pred_iou_thresh,
-            stability_score_thresh=self._cfg.stability_score_thresh,
-            min_mask_region_area=self._cfg.min_mask_region_area,
-        )
-
-    def _chunk_cache_key(self, tile_name: str, window) -> str:
-        return chunk_cache_key(tile_name, window)
-
-    def _process_tile(
-        self, tile_name: str, patch_rows: pd.DataFrame, mask_generator
-    ) -> Dict:
+    def _process_tile(self, tile_name: str, patch_rows: pd.DataFrame) -> Dict:
         import rasterio
         from rasterio.windows import Window
 
@@ -270,9 +226,7 @@ class SamLabelCorrector:
                     if r1 <= r0 or c1 <= c0:
                         continue
                     window = Window(c0, r0, c1 - c0, r1 - r0)
-                    chunk_results = self._process_chunk(
-                        mask_src, chunk_targets, window, mask_generator
-                    )
+                    chunk_results = self._process_chunk(mask_src, chunk_targets, window)
                     n_chunks += 1
                     if all(t == 0 for _, t in chunk_results):
                         n_skipped += 1
@@ -303,10 +257,9 @@ class SamLabelCorrector:
         mask_src,
         chunk_targets: List[Tuple[FrozenSet[int], Path]],
         window,
-        mask_generator,
     ) -> List[Tuple[int, int]]:
         import rasterio
-        import torch
+        from skimage.segmentation import slic
 
         from pytorch_segmentation_models_trainer.tools.mbtiles.alignment import (
             read_source_aligned_to_mask_window,
@@ -343,12 +296,18 @@ class SamLabelCorrector:
 
         image_hwc = np.ascontiguousarray(image_chw.transpose(1, 2, 0))
 
-        cache_key = self._chunk_cache_key(mask_src.name, window)
-        sam_masks = self._cache.get(cache_key)
-        if sam_masks is None:
-            with torch.no_grad():
-                sam_masks = mask_generator.generate(image_hwc)
-            self._cache.put(cache_key, sam_masks)
+        n_segments = self._resolve_n_segments(mask_src.name, window)
+        cache_key = self._chunk_cache_key(mask_src.name, window, n_segments)
+        label_map = self._cache.get(cache_key)
+        if label_map is None:
+            label_map = slic(
+                image_hwc,
+                n_segments=n_segments,
+                slic_zero=True,
+                channel_axis=-1,
+                start_label=0,
+            ).astype(np.int32)
+            self._cache.put(cache_key, label_map)
 
         results = []
         for classes_to_correct, corrected_path in chunk_targets:
@@ -356,9 +315,9 @@ class SamLabelCorrector:
                 results.append((0, 0))
                 continue
 
-            corrected = apply_sam_correction(
+            corrected = apply_region_correction(
                 bags_raw=bags_raw,
-                sam_masks=sam_masks,
+                segments=label_map,
                 lulc_maps=lulc_maps,
                 classes_to_correct=classes_to_correct,
                 num_classes=self._cfg.num_classes,

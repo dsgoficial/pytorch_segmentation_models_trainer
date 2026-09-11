@@ -2151,6 +2151,34 @@ def build_sam_corrected_masks_cmd(yaml_path):
     click.echo(f"Done. Processed {stats['n_tiles']} tiles in {stats['elapsed_s']}s.")
 
 
+@cli.command("build-slico-corrected-masks")
+@click.argument("yaml_path", type=click.Path(exists=True))
+def build_slico_corrected_masks_cmd(yaml_path):
+    """Run SLICO-based label correction over a coreset of GeoTIFF masks.
+
+    YAML_PATH must point to a YAML file with SLICOLabelCorrectionConfig fields.
+    """
+    import yaml
+
+    from pytorch_segmentation_models_trainer.tools.slico_correction.slico_label_corrector import (
+        SLICOLabelCorrectionConfig,
+        SlicoLabelCorrector,
+    )
+
+    with open(yaml_path) as fh:
+        raw = yaml.safe_load(fh)
+
+    cfg_dict = raw.get("slico_label_correction", raw)
+
+    try:
+        config = SLICOLabelCorrectionConfig(**cfg_dict)
+    except TypeError as exc:
+        raise click.UsageError(f"Invalid config in '{yaml_path}': {exc}") from exc
+
+    stats = SlicoLabelCorrector(config).run()
+    click.echo(f"Done. Processed {stats['n_tiles']} tiles in {stats['elapsed_s']}s.")
+
+
 def entry():
     """Entry point registered in pyproject.toml."""
     cli()

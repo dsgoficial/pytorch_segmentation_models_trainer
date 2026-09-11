@@ -440,3 +440,4 @@ result_fd = CoreSetSelector(cfg_fd).select(df)
 - [Hybrid Coreset Selection](hybrid-coreset-selection.md) — spatial vector intersection + FD/LC-FD for rare-class guarantee
 - [Sampler Weights](sampler-weights.md) — compute per-patch WRS weights from `c0..c5` columns
 - [SAM Label Correction](sam-label-correction.md) — correct noisy masks before coreset selection
+- [SLICO Label Correction](slico-label-correction.md) — same correction rule, superpixel region generator instead of SAM
