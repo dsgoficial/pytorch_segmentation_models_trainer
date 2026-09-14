@@ -208,6 +208,27 @@ class SoftLabelWeightedCELossConfig:
     weight_key: str = "w_conf"
 
 
+@dataclass
+class BoundaryLabelRelaxationLossConfig:
+    """Configuration for ``BoundaryLabelRelaxationLoss`` (Zhu et al., CVPR 2019).
+
+    Example YAML:
+        loss:
+          _target_: pytorch_segmentation_models_trainer.custom_losses.boundary_relaxation_loss.BoundaryLabelRelaxationLoss
+          name: boundary_relaxation
+          num_classes: 6
+          ignore_index: 255
+    """
+
+    _target_: str = (
+        "pytorch_segmentation_models_trainer.custom_losses.boundary_relaxation_loss.BoundaryLabelRelaxationLoss"
+    )
+    name: str = "boundary_relaxation"
+    num_classes: int = MISSING
+    ignore_index: Optional[int] = None
+    mask_key: str = "mask"
+
+
 # ============================================================================
 # Individual Loss Configurations
 # ============================================================================
@@ -426,6 +447,11 @@ cs.store(
 )
 cs.store(
     group="loss", name="soft_label_weighted_ce_loss", node=SoftLabelWeightedCELossConfig
+)
+cs.store(
+    group="loss",
+    name="boundary_relaxation_loss",
+    node=BoundaryLabelRelaxationLossConfig,
 )
 
 
