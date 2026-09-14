@@ -1,0 +1,109 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: Mean-Teacher + ACT + O2C (AIO2, Liu et al., TGRS 2024)
+# ──────────────────────────────────────────────────────────────────────────────
+# This config alone runs PHASE 1 (warm-up) only: `train.py` (or your own
+# driver script) will train on the noisy label as-is, track the teacher's
+# training IoU, and stop automatically (`trainer.should_stop = True`) once
+# ACT detects the trigger epoch (`model.resume_epoch`).
+#
+# PHASE 2 (correction) needs a driver script that reloads the nearest
+# warm-up checkpoint, flips `model.o2c_active = True`, and calls
+# `Trainer.fit()` again — this is NOT automatic from a single `train.py`
+# invocation on this file, by design (mirrors the official reference
+# implementation's two separate CLI invocations). See the full example in
+# MeanTeacherModel's docstring and website/docs/user-guide/mean-teacher-aio2.md.
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.mean_teacher_model.MeanTeacherModel
+
+hyperparameters:
+  batch_size: 8
+  epochs: 200 # warm-up upper bound; ACT usually stops training well before this
+  max_lr: 4e-4
+  classes: 6
+
+# ── Mean-teacher / ACT / O2C ──────────────────────────────────────────────────
+alpha: 0.999 # EMA decay (student -> teacher)
+correct_model: teacher # or: student — which model's predictions drive O2C
+correct_base: iter # or: epoch — "iter" recomputes every batch (true "online"
+# O2C); "epoch" freezes a snapshot once per epoch, amortizing forward+CC cost
+# across all batches that epoch at the price of a slightly stale correction —
+# switch only if a pilot shows "iter"'s per-batch cost is the real bottleneck
+classes_to_correct: [1, 2] # ordered — see online_object_correction docstring
+# for conflict_resolution semantics ("priority_order" uses this list's order)
+conflict_resolution: priority_order # or: teacher_confidence — pilot both before
+# committing to one for the full run matrix (see the article repo's decision log)
+o2c_filter_size: -1 # odd int > 0 to enable boundary erosion; -1 = hard labels only
+act_window_sizes: [10, 20, 30, 40] # official reference implementation's example
+checkpoint_every_n_epochs: 5
+act_checkpoint_dir: /data/outputs/mean_teacher_aio2/warmup_checkpoints
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet50
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: ${hyperparameters.classes}
+
+# ── Loss ─────────────────────────────────────────────────────────────────────
+# CE + Dice — reused as-is, no new loss class for this baseline.
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.loss.WeightedDiceCrossEntropyLoss
+  num_classes: ${hyperparameters.classes}
+  ignore_index: 255
+
+# ── Optimizer ────────────────────────────────────────────────────────────────
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1e-4
+
+# ── PyTorch Lightning Trainer ─────────────────────────────────────────────────
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+  precision: "16-mixed"
+
+# ── Datasets ─────────────────────────────────────────────────────────────────
+# Hard-label masks (B, H, W) long — ACT/O2C both require a hard target, not
+# a soft-label distribution.
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/train.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/val.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: false
+
+# ── Metrics ───────────────────────────────────────────────────────────────────
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${hyperparameters.classes}
+    ignore_index: 255

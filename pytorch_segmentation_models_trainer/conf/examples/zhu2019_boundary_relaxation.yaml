@@ -1,0 +1,96 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Example: Zhu et al. 2019 — Boundary Label Relaxation
+# ──────────────────────────────────────────────────────────────────────────────
+# Drop-in loss swap for training against noisy hard labels where the noise is
+# concentrated at class boundaries (e.g. geometric misalignment between a
+# cartographic label and true object contours). No model or dataset changes
+# needed — swap `loss:` and train exactly as you would with plain
+# cross-entropy. See website/docs/user-guide/boundary-label-relaxation.md.
+# ──────────────────────────────────────────────────────────────────────────────
+
+defaults:
+  - _self_
+
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.model.Model
+
+hyperparameters:
+  batch_size: 8
+  epochs: 50
+  max_lr: 4e-4
+  classes: 6
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet50
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: ${hyperparameters.classes}
+
+# ── Loss ─────────────────────────────────────────────────────────────────────
+# The whole point of this example: only this block differs from a plain
+# cross-entropy baseline run on the same hard-label data.
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.boundary_relaxation_loss.BoundaryLabelRelaxationLoss
+  name: boundary_relaxation
+  num_classes: ${hyperparameters.classes}
+  ignore_index: 255
+
+# ── Optimizer ────────────────────────────────────────────────────────────────
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1e-4
+
+# ── Scheduler ────────────────────────────────────────────────────────────────
+scheduler_list:
+  - scheduler:
+      _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+      T_max: ${hyperparameters.epochs}
+    interval: epoch
+    frequency: 1
+
+# ── PyTorch Lightning Trainer ─────────────────────────────────────────────────
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: auto
+  devices: 1
+  precision: "16-mixed"
+
+# ── Datasets ─────────────────────────────────────────────────────────────────
+# Hard-label masks (B, H, W) long — same format as a plain CE baseline.
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/train.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/val.csv
+  root_dir: /data
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: false
+
+# ── Metrics ───────────────────────────────────────────────────────────────────
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${hyperparameters.classes}
+    ignore_index: 255
