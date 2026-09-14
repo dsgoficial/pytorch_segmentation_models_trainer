@@ -2,13 +2,19 @@
 """Raster alignment helpers for MBTiles imagery and GeoTIFF masks."""
 
 from pathlib import Path
-from typing import Iterable, Optional, Sequence
+from typing import Iterable, Optional, Sequence, Union
 
 import numpy as np
 import rasterio
+from rasterio.coords import BoundingBox
 from rasterio.enums import Resampling
+from rasterio.transform import array_bounds
 from rasterio.vrt import WarpedVRT
 from rasterio.windows import Window
+
+from pytorch_segmentation_models_trainer.tools.mbtiles.image_source import (
+    TiledImageSource,
+)
 
 _RESAMPLING = {
     "nearest": Resampling.nearest,
@@ -65,7 +71,7 @@ def normalize_selected_bands(
 
 
 def read_source_aligned_to_mask_window(
-    source_path: Path,
+    source_path: Union[Path, TiledImageSource],
     mask_src: rasterio.io.DatasetReader,
     window: Window,
     selected_bands: Optional[Sequence[int]] = None,
@@ -79,7 +85,11 @@ def read_source_aligned_to_mask_window(
     MBTiles/source imagery is resampled into that grid.
 
     Args:
-        source_path: Path to the MBTiles or any raster readable by rasterio.
+        source_path: Path to the MBTiles or any raster readable by rasterio, or
+            a :class:`~pytorch_segmentation_models_trainer.tools.mbtiles.image_source.TiledImageSource`
+            (see ``image_source.resolve_image_source``) for a directory of tiles —
+            each candidate file overlapping the window is warped into the
+            destination grid and composited (first file with data wins per pixel).
         mask_src: Open mask raster dataset.
         window: Mask pixel window to use as destination grid.
         selected_bands: Optional 1-based source band indexes.
@@ -106,6 +116,19 @@ def read_source_aligned_to_mask_window(
     dst_crs = mask_src.crs
     resampling = resolve_resampling(image_resampling)
 
+    if isinstance(source_path, TiledImageSource):
+        return _read_tiled_source_aligned(
+            source_path,
+            mask_src.name,
+            dst_crs,
+            dst_transform,
+            dst_width,
+            dst_height,
+            selected_bands,
+            image_dtype,
+            resampling,
+        )
+
     with rasterio.open(source_path) as source_src:
         bands = normalize_selected_bands(selected_bands, source_src.count)
         indexes: Optional[Iterable[int]] = bands
@@ -122,6 +145,63 @@ def read_source_aligned_to_mask_window(
     if image_dtype == "native":
         return data
     return data.astype(np.dtype(image_dtype), copy=False)
+
+
+def _read_tiled_source_aligned(
+    tiled_source: TiledImageSource,
+    tile_name: str,
+    dst_crs,
+    dst_transform,
+    dst_width: int,
+    dst_height: int,
+    selected_bands: Optional[Sequence[int]],
+    image_dtype: str,
+    resampling: Resampling,
+) -> np.ndarray:
+    """Composite the destination window from the resolved candidate file(s).
+
+    Candidates come from :meth:`TiledImageSource.resolve_candidates` — a direct
+    tile-keyed lookup when available, else bounds overlap. Read in that order;
+    the first candidate with non-nodata data at a given pixel wins. Returns an
+    all-nodata (zero) array of the expected shape when no candidate resolves.
+    """
+    dst_bounds = BoundingBox(*array_bounds(dst_height, dst_width, dst_transform))
+    candidates = tiled_source.resolve_candidates(tile_name, dst_bounds, dst_crs)
+
+    out: Optional[np.ndarray] = None
+    filled: Optional[np.ndarray] = None
+    for path in candidates:
+        with rasterio.open(path) as source_src:
+            bands = normalize_selected_bands(selected_bands, source_src.count)
+            with WarpedVRT(
+                source_src,
+                crs=dst_crs,
+                transform=dst_transform,
+                width=dst_width,
+                height=dst_height,
+                resampling=resampling,
+            ) as vrt:
+                data = vrt.read(indexes=bands)
+                nodata = vrt.nodata if vrt.nodata is not None else 0
+
+        if out is None:
+            out = np.zeros_like(data)
+            filled = np.zeros(data.shape[1:], dtype=bool)
+
+        valid = np.any(data != nodata, axis=0)
+        take = valid & ~filled
+        out[:, take] = data[:, take]
+        filled |= valid
+        if filled.all():
+            break
+
+    if out is None:
+        n_bands = len(selected_bands) if selected_bands else 1
+        out = np.zeros((n_bands, dst_height, dst_width), dtype=np.uint8)
+
+    if image_dtype == "native":
+        return out
+    return out.astype(np.dtype(image_dtype), copy=False)
 
 
 def read_mask_window(

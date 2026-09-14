@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tests for pytorch_segmentation_models_trainer.tools.slico_correction.slico_label_corrector."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -57,7 +58,7 @@ class TestSLICOLabelCorrectionConfig:
             coreset_csv="a", masks_dir="b", targets=[], mbtiles_path="d"
         )
         assert cfg.lulc_paths == []
-        assert cfg.include_bags is True
+        assert cfg.include_base_mask is True
         assert cfg.num_classes == 6
         assert cfg.nodata_val == 255
         assert cfg.chunk_size == 1024
@@ -82,6 +83,39 @@ class TestSlicoLabelCorrectorParseTargets:
         assert out_dir == tmp_path / "out"
 
 
+class TestSlicoLabelCorrectorImageSourceResolution:
+    def test_mbtiles_path_string_stays_a_path(self, tmp_path):
+        cfg = _make_config(tmp_path, mbtiles_path="/data/tiles.mbtiles")
+        corrector = SlicoLabelCorrector(cfg)
+        assert corrector._mbtiles == Path("/data/tiles.mbtiles")
+
+    def test_mbtiles_path_directory_spec_resolves_to_tiled_source(self, tmp_path):
+        rasterio = pytest.importorskip("rasterio")
+        from rasterio.transform import from_origin
+
+        from pytorch_segmentation_models_trainer.tools.mbtiles.image_source import (
+            TiledImageSource,
+        )
+
+        tiles_dir = tmp_path / "tiles"
+        tiles_dir.mkdir()
+        profile = {
+            "driver": "GTiff",
+            "height": 4,
+            "width": 4,
+            "count": 1,
+            "dtype": "uint8",
+            "crs": "EPSG:3857",
+            "transform": from_origin(0, 4, 1, 1),
+        }
+        with rasterio.open(tiles_dir / "a.tif", "w", **profile) as dst:
+            dst.write(np.zeros((4, 4), dtype=np.uint8), 1)
+
+        cfg = _make_config(tmp_path, mbtiles_path={"directory": str(tiles_dir)})
+        corrector = SlicoLabelCorrector(cfg)
+        assert isinstance(corrector._mbtiles, TiledImageSource)
+
+
 class TestSlicoLabelCorrectorChunkCacheKey:
     def test_key_format_includes_n_segments(self, tmp_path):
         cfg = _make_config(tmp_path)
@@ -89,6 +123,27 @@ class TestSlicoLabelCorrectorChunkCacheKey:
         window = _make_window(row_off=10, col_off=20, height=64, width=128)
         key = corrector._chunk_cache_key("some/path/tile_001.tif", window, 500)
         assert key == "tile_001_r10_c20_h64_w128_n500"
+
+
+class TestSlicoLabelCorrectorEstimateNChunks:
+    def test_single_chunk(self, tmp_path):
+        cfg = _make_config(tmp_path, chunk_size=1024)
+        corrector = SlicoLabelCorrector(cfg)
+        rows = pd.DataFrame({"row_off": [0], "col_off": [0], "patch_size": [256]})
+        assert corrector._estimate_n_chunks(rows) == 1
+
+    def test_multiple_chunks_both_axes(self, tmp_path):
+        cfg = _make_config(tmp_path, chunk_size=1024)
+        corrector = SlicoLabelCorrector(cfg)
+        # Spans 2048x2048 total extent -> 2x2 = 4 chunks at chunk_size=1024.
+        rows = pd.DataFrame(
+            {
+                "row_off": [0, 1792],
+                "col_off": [0, 1792],
+                "patch_size": [256, 256],
+            }
+        )
+        assert corrector._estimate_n_chunks(rows) == 4
 
 
 class TestSlicoLabelCorrectorResolveNSegments:
@@ -180,6 +235,57 @@ class TestSlicoLabelCorrectorRun:
 
         assert result["n_tiles"] == 1
         assert "elapsed_s" in result
+        assert result["tiles"] == [tile_stats]
+
+    def test_run_threaded_preserves_csv_tile_order(self, tmp_path):
+        """n_workers > 1 dispatches via ThreadPoolExecutor but the returned
+        `tiles` list still matches the coreset CSV's (sorted) tile order,
+        regardless of completion order."""
+        masks_dir = tmp_path / "masks"
+        masks_dir.mkdir()
+        for name in ["a.tif", "b.tif", "c.tif"]:
+            (masks_dir / name).touch()
+        df = pd.DataFrame(
+            {
+                "mask_path": ["a.tif", "b.tif", "c.tif"],
+                "row_off": [0, 0, 0],
+                "col_off": [0, 0, 0],
+                "patch_size": [4, 4, 4],
+            }
+        )
+        csv_path = tmp_path / "coreset.csv"
+        df.to_csv(csv_path, index=False)
+
+        cfg = _make_config(tmp_path, coreset_csv=str(csv_path), n_workers=4)
+        corrector = SlicoLabelCorrector(cfg)
+
+        def fake_process(tile_name, patch_rows):
+            return {"tile": tile_name, "n_chunks": 1, "n_skipped": 0, "per_target": []}
+
+        with patch.object(corrector, "_process_tile", side_effect=fake_process):
+            result = corrector.run()
+
+        assert [t["tile"] for t in result["tiles"]] == ["a.tif", "b.tif", "c.tif"]
+        assert result["n_tiles"] == 3
+
+    def test_run_threaded_single_tile_falls_back_to_sequential(self, tmp_path):
+        """n_workers > 1 with only one tile skips the thread pool entirely."""
+        csv_path = self._setup_csv(tmp_path)
+        cfg = _make_config(tmp_path, coreset_csv=str(csv_path), n_workers=4)
+        corrector = SlicoLabelCorrector(cfg)
+
+        tile_stats = {
+            "tile": "tile.tif",
+            "n_chunks": 1,
+            "n_skipped": 0,
+            "per_target": [],
+        }
+        with patch.object(
+            corrector, "_process_tile", return_value=tile_stats
+        ) as mock_pt:
+            result = corrector.run()
+
+        mock_pt.assert_called_once()
         assert result["tiles"] == [tile_stats]
 
     def test_run_respects_start_end_idx(self, tmp_path):

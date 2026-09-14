@@ -29,6 +29,79 @@ across multiple experiments with different target class sets.
 
 ---
 
+## Imagery source: four ways to point at it
+
+`mbtiles_path` and each entry of `lulc_paths` accept any of the following. All four are read through
+the same `read_source_aligned_to_mask_window` — a resolved candidate is always warped onto the exact
+pixel grid of the mask window being corrected, whichever form pointed at it.
+
+**1. Single file** (existing behavior, unchanged) — MBTiles, VRT, or any rasterio-readable raster:
+
+```yaml
+mbtiles_path: /data/imagery/tiles.mbtiles
+```
+
+**2. Directory, matched by spatial bounds** — every candidate file's bounds are indexed once (a
+cheap, header-only open); a window read only opens the files that actually overlap that window, and
+composites them (first file with data wins per pixel — files are expected to be non-overlapping):
+
+```yaml
+mbtiles_path:
+  directory: /data/imagery/scenes
+  extensions: [".tif", ".jp2"]   # default: [".tif", ".tiff"]
+  recursive: false                # default: false
+  match_by: bounds                # default
+```
+
+**3. Directory, matched by basename** — no file is opened to build the index, just listed. A mask
+tile named `tile_001.tif` pairs with `tile_001.<any extension>` in this folder, by filename stem:
+
+```yaml
+mbtiles_path:
+  directory: /data/imagery/per_tile
+  match_by: basename
+```
+
+**4. CSV manifest**, one row per tile — a `path` column is required. An optional `mask_path` column
+enables the same direct tile-keyed lookup as basename matching (matched by stem, no bounds needed);
+optional `minx,miny,maxx,maxy[,crs]` columns enable bounds-based matching as a fallback for rows
+without a `mask_path` hit. This mirrors the wide `tile_id,image_path,mask_path,<lulc columns>` CSV
+already used by `tools.soft_labels`.
+
+```yaml
+mbtiles_path:
+  csv_path: /data/imagery_manifest.csv
+  path_column: path              # default
+  mask_path_column: mask_path    # default; omit the CSV column to skip direct lookup
+  default_crs: ""                 # fallback CRS when the CSV has no crs column
+```
+
+```csv
+path,mask_path,minx,miny,maxx,maxy,crs
+/data/img_001.tif,/data/masks/tile_001.tif,,,,,
+/data/img_002.tif,,-6461070,-1803914,-6460458,-1803302,EPSG:3857
+```
+
+Direct tile-keyed lookup (mode 3, or mode 4 with a `mask_path` hit) is tried first whenever
+available — a plain dict lookup, no spatial computation — falling back to bounds-based search
+(mode 2, or mode 4's bounds columns) only when no direct entry exists.
+
+---
+
+## Overlapping I/O with GPU compute
+
+SAM's public API (`SamAutomaticMaskGenerator.generate()`) processes one image per call — there is no
+cross-image batching to enable. Two throughput knobs instead:
+
+- `points_per_batch` (default 64): SAM AMG's own internal point-prompt batching within one image —
+  raising it trades GPU memory for fewer forward passes per chunk (`points_per_side=32` gives 1024
+  points/chunk = 16 passes at the default 64/batch).
+- `prefetch` (default `True`): the next chunk's aligned imagery/LULC arrays are read on a background
+  thread while SAM processes the current chunk, overlapping I/O with GPU compute. This hides the I/O
+  wait, not the GPU compute time itself.
+
+---
+
 ## Installation
 
 SAM is not a dependency of the framework itself. Install it separately:
@@ -77,12 +150,13 @@ lulc_paths:
   - /data/lulc/esri.vrt
   - /data/lulc/dynamic_world.vrt
 
-include_bags: true        # include original mask as one vote source (default: true)
+include_base_mask: true   # include the mask being corrected as one vote source (default: true)
 
 # SAM AMG parameters
 sam_model_type: vit_b
 device: cuda:0
 points_per_side: 32
+points_per_batch: 64      # SAM AMG's own point-prompt batching, per image
 pred_iou_thresh: 0.80
 stability_score_thresh: 0.90
 min_mask_region_area: 200
@@ -91,6 +165,7 @@ min_mask_region_area: 200
 num_classes: 6
 nodata_val: 255
 chunk_size: 1024          # tile processing chunk size in pixels
+prefetch: true            # overlap next chunk's I/O with current chunk's GPU compute
 
 # NPZ segment cache (set to "" to disable)
 cache_dir: /data/sam_cache
@@ -180,12 +255,12 @@ import numpy as np
 from pytorch_segmentation_models_trainer.tools.sam_correction import apply_sam_correction
 
 corrected = apply_sam_correction(
-    bags_raw=original_mask,         # (H, W) uint8
+    base_mask=original_mask,        # (H, W) uint8 — the mask being corrected
     sam_masks=sam_output,           # list of SAM mask dicts
     lulc_maps=[lulc_array],         # list of (H, W) uint8 arrays
     classes_to_correct=frozenset([3, 5]),
     num_classes=6,
-    include_bags=True,
+    include_base_mask=True,
 )
 ```
 

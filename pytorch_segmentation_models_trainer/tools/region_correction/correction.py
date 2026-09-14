@@ -6,6 +6,11 @@ and ``tools.slico_correction`` (SLICO superpixels). The correction rule — majo
 vote within each region, applied only to pixels whose original class is eligible
 for correction — is identical regardless of how the region partition was produced;
 only the partition source differs between the two callers.
+
+There is always exactly one mask being corrected (``base_mask`` — whatever raster
+lives in ``masks_dir``; it need not be any particular dataset) plus zero or more
+auxiliary sources (``lulc_maps``) that only ever participate as extra votes in the
+consensus, never as the thing being corrected.
 """
 
 from pathlib import Path
@@ -15,23 +20,24 @@ import numpy as np
 
 
 def apply_region_correction(
-    bags_raw: np.ndarray,
+    base_mask: np.ndarray,
     segments: Union[List[Dict], np.ndarray],
     lulc_maps: List[np.ndarray],
     classes_to_correct: FrozenSet[int],
     num_classes: int = 6,
-    include_bags: bool = True,
+    include_base_mask: bool = True,
 ) -> np.ndarray:
     """Apply region-based majority-vote correction to a mask array.
 
     For each region that contains at least one pixel from ``classes_to_correct``,
     the winning class is determined by majority vote across all sources
-    (optionally the original mask + each LULC map). The winner is written to
+    (optionally ``base_mask`` itself + each LULC map). The winner is written to
     every pixel in the region. Non-target class pixels are always restored from
-    the original mask after processing.
+    ``base_mask`` after processing.
 
     Args:
-        bags_raw: Original mask array (H, W) uint8 — topographic vector source.
+        base_mask: The mask being corrected (H, W) uint8 — whatever raster
+            ``masks_dir`` holds; not tied to any particular dataset.
         segments: Region partition, in one of two formats:
 
             - ``List[Dict]`` — SAM AMG style: dicts with keys ``segmentation``
@@ -45,52 +51,64 @@ def apply_region_correction(
               and vectorized (no per-region Python loop).
 
         lulc_maps: List of auxiliary class arrays (H, W) uint8 used as extra
-            votes alongside ``bags_raw``.
+            votes alongside ``base_mask`` — never corrected themselves, only
+            consulted for consensus.
         classes_to_correct: Set of class indices eligible for correction.
         num_classes: Number of valid class indices (values >= num_classes ignored).
-        include_bags: If True, ``bags_raw`` is counted as one vote source.
+        include_base_mask: If True, ``base_mask`` is counted as one vote source
+            (alongside ``lulc_maps``) rather than only being the thing corrected.
 
     Returns:
-        Corrected mask array (H, W) uint8, same shape as ``bags_raw``.
+        Corrected mask array (H, W) uint8, same shape as ``base_mask``.
     """
     if isinstance(segments, np.ndarray):
         corrected = _apply_from_label_map(
-            bags_raw, segments, lulc_maps, classes_to_correct, num_classes, include_bags
+            base_mask,
+            segments,
+            lulc_maps,
+            classes_to_correct,
+            num_classes,
+            include_base_mask,
         )
     else:
         corrected = _apply_from_mask_list(
-            bags_raw, segments, lulc_maps, classes_to_correct, num_classes, include_bags
+            base_mask,
+            segments,
+            lulc_maps,
+            classes_to_correct,
+            num_classes,
+            include_base_mask,
         )
 
-    backup = bags_raw
+    backup = base_mask
     non_target = ~np.isin(backup, list(classes_to_correct))
     corrected[non_target] = backup[non_target]
     return corrected
 
 
 def _apply_from_mask_list(
-    bags_raw: np.ndarray,
+    base_mask: np.ndarray,
     sam_masks: List[Dict],
     lulc_maps: List[np.ndarray],
     classes_to_correct: FrozenSet[int],
     num_classes: int,
-    include_bags: bool,
+    include_base_mask: bool,
 ) -> np.ndarray:
-    corrected = bags_raw.copy()
+    corrected = base_mask.copy()
 
     # Sort ascending so higher-confidence/larger masks overwrite last.
     sorted_masks = sorted(sam_masks, key=lambda m: (m["predicted_iou"], m["area"]))
 
     all_sources: List[np.ndarray] = []
-    if include_bags:
-        all_sources.append(bags_raw)
+    if include_base_mask:
+        all_sources.append(base_mask)
     all_sources.extend(lulc_maps)
 
     for m in sorted_masks:
         seg: np.ndarray = m["segmentation"]
         if not seg.any():
             continue
-        if not np.isin(bags_raw[seg], list(classes_to_correct)).any():
+        if not np.isin(base_mask[seg], list(classes_to_correct)).any():
             continue
 
         vote_counts = np.zeros(num_classes, dtype=np.int64)
@@ -109,24 +127,24 @@ def _apply_from_mask_list(
 
 
 def _apply_from_label_map(
-    bags_raw: np.ndarray,
+    base_mask: np.ndarray,
     label_map: np.ndarray,
     lulc_maps: List[np.ndarray],
     classes_to_correct: FrozenSet[int],
     num_classes: int,
-    include_bags: bool,
+    include_base_mask: bool,
 ) -> np.ndarray:
-    corrected = bags_raw.copy()
+    corrected = base_mask.copy()
 
-    target_mask = np.isin(bags_raw, list(classes_to_correct))
+    target_mask = np.isin(base_mask, list(classes_to_correct))
     if not target_mask.any() or label_map.size == 0:
         return corrected
 
     n_labels = int(label_map.max()) + 1
 
     all_sources: List[np.ndarray] = []
-    if include_bags:
-        all_sources.append(bags_raw)
+    if include_base_mask:
+        all_sources.append(base_mask)
     all_sources.extend(lulc_maps)
 
     flat_labels = label_map.ravel().astype(np.int64)

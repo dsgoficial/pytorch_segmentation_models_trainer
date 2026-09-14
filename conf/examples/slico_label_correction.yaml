@@ -14,15 +14,24 @@ targets:
   - classes: [1, 3, 5]       # forest + grassland + cropland
     output_dir: /data/masks_slico_gcf
 
+# mbtiles_path also accepts a directory (matched by bounds or by basename) or a
+# CSV manifest instead of a single file — see website/docs/user-guide/sam-label-correction.md
+# mbtiles_path:
+#   directory: /data/imagery/scenes
+#   extensions: [".tif", ".jp2"]
+#   match_by: bounds            # or "basename" (pairs by filename stem, no bounds needed)
+# mbtiles_path:
+#   csv_path: /data/imagery_manifest.csv   # columns: path[, mask_path][, minx,miny,maxx,maxy,crs]
 mbtiles_path: /data/imagery/tiles.mbtiles
 
-# Optional auxiliary LULC rasters for consensus vote
+# Optional auxiliary LULC rasters for consensus vote (each entry also accepts
+# a directory spec, same as mbtiles_path above)
 lulc_paths:
   - /data/lulc/mapbiomas.vrt
   - /data/lulc/esri.vrt
   - /data/lulc/dynamic_world.vrt
 
-include_bags: true            # include original mask in majority vote
+include_base_mask: true       # include the mask being corrected as one vote source
 num_classes: 6
 nodata_val: 255
 chunk_size: 1024
@@ -37,5 +46,10 @@ n_segments: 1000
 match_sam_cache_dir: ""
 
 cache_dir: /data/slico_cache  # leave empty ("") to disable caching
+
+# Thread-pool parallelism (tile granularity, CPU-bound work — safe up to your
+# core count). Default 1 = sequential.
+n_workers: 8
+
 start_idx: 0
 end_idx: 999999

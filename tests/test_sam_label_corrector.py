@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tests for pytorch_segmentation_models_trainer.tools.sam_correction.sam_label_corrector."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -49,16 +50,16 @@ class TestApplySamCorrection:
         # LULC maps: all say class 4 (forest)
         lulc = [np.full((4, 4), 4, dtype=np.uint8)]
         result = apply_sam_correction(
-            bags_raw=bags,
+            base_mask=bags,
             sam_masks=sam_masks,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         # vote: BAGS=3 (16), LULC=4 (16) → tie resolved by argmax (lower index wins)
         # bags=3 count=16, class=4 count=16 → argmax picks 3 (same as original)
-        # Actually since include_bags=True: sources = [bags, lulc[0]]
+        # Actually since include_base_mask=True: sources = [bags, lulc[0]]
         # bags contributes 16 votes for class 3; lulc contributes 16 votes for class 4
         # argmax picks class 3 (first maximum)
         assert result.shape == bags.shape
@@ -74,12 +75,12 @@ class TestApplySamCorrection:
             np.full((4, 4), 5, dtype=np.uint8),
         ]
         result = apply_sam_correction(
-            bags_raw=bags,
+            base_mask=bags,
             sam_masks=sam_masks,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         assert np.all(result == 5)
 
@@ -90,12 +91,12 @@ class TestApplySamCorrection:
         sam_masks = [{"segmentation": seg, "predicted_iou": 0.9, "area": 4}]
         lulc = [np.full((2, 2), 5, dtype=np.uint8)]  # lulc says class 5
         result = apply_sam_correction(
-            bags_raw=bags,
+            base_mask=bags,
             sam_masks=sam_masks,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         # class 0 pixels (non-target) must remain 0
         assert result[0, 0] == 0
@@ -105,29 +106,29 @@ class TestApplySamCorrection:
         """Empty sam_masks list → original array returned unchanged."""
         bags = _make_mask(fill=3)
         result = apply_sam_correction(
-            bags_raw=bags,
+            base_mask=bags,
             sam_masks=[],
             lulc_maps=[],
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         np.testing.assert_array_equal(result, bags)
 
-    def test_include_bags_false_excludes_bags_from_vote(self):
-        """When include_bags=False, BAGS values are not counted in the vote."""
+    def test_include_base_mask_false_excludes_bags_from_vote(self):
+        """When include_base_mask=False, BAGS values are not counted in the vote."""
         bags = _make_mask(fill=3)
         seg = np.ones((4, 4), dtype=bool)
         sam_masks = [_make_sam_mask(seg)]
         # LULC unanimously says class 5; without BAGS, class 5 wins
         lulc = [np.full((4, 4), 5, dtype=np.uint8)]
         result = apply_sam_correction(
-            bags_raw=bags,
+            base_mask=bags,
             sam_masks=sam_masks,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=False,
+            include_base_mask=False,
         )
         assert np.all(result == 5)
 
@@ -138,12 +139,12 @@ class TestApplySamCorrection:
         sam_masks = [_make_sam_mask(seg)]
         lulc = [np.full((4, 4), 5, dtype=np.uint8)]
         result = apply_sam_correction(
-            bags_raw=bags,
+            base_mask=bags,
             sam_masks=sam_masks,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),  # grassland — not present
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         np.testing.assert_array_equal(result, bags)
 
@@ -154,12 +155,12 @@ class TestApplySamCorrection:
         sam_masks = [_make_sam_mask(seg)]
         lulc = [np.full((4, 4), 5, dtype=np.uint8)]
         result = apply_sam_correction(
-            bags_raw=bags,
+            base_mask=bags,
             sam_masks=sam_masks,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         np.testing.assert_array_equal(result, bags)
 
@@ -171,29 +172,29 @@ class TestApplySamCorrection:
         # LULC has only values >= NUM_CLASSES (nodata) — no valid votes
         lulc = [np.full((4, 4), 255, dtype=np.uint8)]
         result = apply_sam_correction(
-            bags_raw=bags,
+            base_mask=bags,
             sam_masks=sam_masks,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=False,  # exclude BAGS so only nodata votes remain
+            include_base_mask=False,  # exclude BAGS so only nodata votes remain
         )
         np.testing.assert_array_equal(result, bags)
 
     def test_does_not_mutate_input(self):
-        """apply_sam_correction must not modify the original bags_raw array."""
+        """apply_sam_correction must not modify the original base_mask array."""
         bags = _make_mask(fill=3)
         original = bags.copy()
         seg = np.ones((4, 4), dtype=bool)
         sam_masks = [_make_sam_mask(seg)]
         lulc = [np.full((4, 4), 5, dtype=np.uint8), np.full((4, 4), 5, dtype=np.uint8)]
         apply_sam_correction(
-            bags_raw=bags,
+            base_mask=bags,
             sam_masks=sam_masks,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         np.testing.assert_array_equal(bags, original)
 
@@ -211,12 +212,12 @@ class TestApplySamCorrection:
         # Here mask1 (iou=0.8) processed first, mask2 (iou=0.9) processed second → class 5
         lulc = [np.full((2, 2), 5, dtype=np.uint8), np.full((2, 2), 5, dtype=np.uint8)]
         result = apply_sam_correction(
-            bags_raw=bags,
+            base_mask=bags,
             sam_masks=sam_masks,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=False,
+            include_base_mask=False,
         )
         assert np.all(result == 5)
 
@@ -323,7 +324,7 @@ class TestSAMLabelCorrectionConfig:
             mbtiles_path="d",
         )
         assert cfg.lulc_paths == []
-        assert cfg.include_bags is True
+        assert cfg.include_base_mask is True
         assert cfg.sam_model_type == "vit_b"
         assert cfg.device == "cuda:0"
         assert cfg.num_classes == 6
@@ -385,6 +386,49 @@ class TestSamLabelCorrectorParseTargets:
         assert len(corrector._targets) == 2
         assert corrector._targets[0][0] == frozenset([3, 5])
         assert corrector._targets[1][0] == frozenset([1])
+
+
+class TestSamLabelCorrectorImageSourceResolution:
+    def test_mbtiles_path_string_stays_a_path(self, tmp_path):
+        cfg = _make_config(tmp_path, mbtiles_path="/data/tiles.mbtiles")
+        corrector = SamLabelCorrector(cfg)
+        assert corrector._mbtiles == Path("/data/tiles.mbtiles")
+
+    def test_mbtiles_path_directory_spec_resolves_to_tiled_source(self, tmp_path):
+        rasterio = pytest.importorskip("rasterio")
+        from rasterio.transform import from_origin
+
+        from pytorch_segmentation_models_trainer.tools.mbtiles.image_source import (
+            TiledImageSource,
+        )
+
+        tiles_dir = tmp_path / "tiles"
+        tiles_dir.mkdir()
+        profile = {
+            "driver": "GTiff",
+            "height": 4,
+            "width": 4,
+            "count": 1,
+            "dtype": "uint8",
+            "crs": "EPSG:3857",
+            "transform": from_origin(0, 4, 1, 1),
+        }
+        with rasterio.open(tiles_dir / "a.tif", "w", **profile) as dst:
+            dst.write(np.zeros((4, 4), dtype=np.uint8), 1)
+
+        cfg = _make_config(tmp_path, mbtiles_path={"directory": str(tiles_dir)})
+        corrector = SamLabelCorrector(cfg)
+        assert isinstance(corrector._mbtiles, TiledImageSource)
+
+    def test_lulc_paths_resolved_individually(self, tmp_path):
+        cfg = _make_config(
+            tmp_path, lulc_paths=["/data/lulc/mapbiomas.vrt", "/data/lulc/esri.vrt"]
+        )
+        corrector = SamLabelCorrector(cfg)
+        assert corrector._lulc_paths == [
+            Path("/data/lulc/mapbiomas.vrt"),
+            Path("/data/lulc/esri.vrt"),
+        ]
 
 
 class TestSamLabelCorrectorChunkCacheKey:
@@ -590,7 +634,9 @@ class TestSamLabelCorrectorProcessTile:
         sys_mods, _ = _mock_rasterio(open_ctx=open_ctx)
 
         with patch.dict("sys.modules", sys_mods):
-            with patch.object(corrector, "_process_chunk", return_value=[(2, 16)]):
+            with patch.object(
+                corrector, "_iter_chunk_results", return_value=iter([[(2, 16)]])
+            ):
                 result = corrector._process_tile("tile.tif", patch_rows, MagicMock())
 
         assert result["tile"] == "tile.tif"
@@ -617,7 +663,9 @@ class TestSamLabelCorrectorProcessTile:
         sys_mods, _ = _mock_rasterio(open_ctx=open_ctx)
 
         with patch.dict("sys.modules", sys_mods):
-            with patch.object(corrector, "_process_chunk", return_value=[(0, 0)]):
+            with patch.object(
+                corrector, "_iter_chunk_results", return_value=iter([[(0, 0)]])
+            ):
                 corrector._process_tile("tile.tif", patch_rows, MagicMock())
 
         assert dest.read_bytes() == b"\xff" * 16
@@ -643,11 +691,14 @@ class TestSamLabelCorrectorProcessTile:
 
         with patch.dict("sys.modules", sys_mods):
             with patch.object(
-                corrector, "_process_chunk", return_value=[(0, 0)]
-            ) as mock_pc:
+                corrector, "_iter_chunk_results", wraps=corrector._iter_chunk_results
+            ) as mock_icr:
                 result = corrector._process_tile("tile.tif", patch_rows, MagicMock())
 
-        mock_pc.assert_not_called()
+        # _enumerate_windows found zero windows, so _iter_chunk_results was
+        # called but yielded nothing (no chunk was ever processed).
+        mock_icr.assert_called_once()
+        assert mock_icr.call_args[0][1] == []
         assert result["n_chunks"] == 0
 
     def test_process_tile_skipped_chunk_counted(self, tmp_path):
@@ -668,70 +719,211 @@ class TestSamLabelCorrectorProcessTile:
         sys_mods, _ = _mock_rasterio(open_ctx=open_ctx)
 
         with patch.dict("sys.modules", sys_mods):
-            with patch.object(corrector, "_process_chunk", return_value=[(0, 0)]):
+            with patch.object(
+                corrector, "_iter_chunk_results", return_value=iter([[(0, 0)]])
+            ):
                 result = corrector._process_tile("tile.tif", patch_rows, MagicMock())
 
         assert result["n_skipped"] == 1
 
 
-class TestSamLabelCorrectorProcessChunk:
+class TestSamLabelCorrectorIterChunkResults:
+    def _corrector(self, tmp_path, **overrides):
+        return SamLabelCorrector(_make_config(tmp_path, **overrides))
+
+    def test_sequential_when_prefetch_disabled(self, tmp_path):
+        corrector = self._corrector(tmp_path, prefetch=False)
+        windows = [_make_window(), _make_window(col_off=4)]
+        with (
+            patch.object(
+                corrector, "_read_chunk_inputs", return_value=None
+            ) as mock_read,
+            patch.object(
+                corrector, "_run_sam_and_correct", return_value=[(0, 0)]
+            ) as mock_run,
+        ):
+            results = list(
+                corrector._iter_chunk_results(
+                    Path("tile.tif"),
+                    windows,
+                    [(frozenset([3]), Path("out.tif"))],
+                    MagicMock(),
+                )
+            )
+        assert len(results) == 2
+        assert mock_read.call_count == 2
+        assert mock_run.call_count == 2
+
+    def test_sequential_when_single_window_even_if_prefetch_enabled(self, tmp_path):
+        corrector = self._corrector(tmp_path, prefetch=True)
+        windows = [_make_window()]
+        with (
+            patch.object(
+                corrector, "_read_chunk_inputs", return_value=None
+            ) as mock_read,
+            patch.object(corrector, "_run_sam_and_correct", return_value=[(0, 0)]),
+        ):
+            list(
+                corrector._iter_chunk_results(
+                    Path("tile.tif"),
+                    windows,
+                    [(frozenset([3]), Path("out.tif"))],
+                    MagicMock(),
+                )
+            )
+        mock_read.assert_called_once()
+
+    def test_prefetch_reads_ahead(self, tmp_path):
+        """With prefetch on and >1 window, all windows are still read and processed,
+        in order, via the background-thread pipeline."""
+        corrector = self._corrector(tmp_path, prefetch=True)
+        windows = [_make_window(row_off=i) for i in range(4)]
+        read_calls = []
+
+        def fake_read(src_path, window, chunk_targets):
+            read_calls.append(window.row_off)
+            return None
+
+        run_calls = []
+
+        def fake_run(src_path, inputs, chunk_targets, window, mask_generator):
+            run_calls.append(window.row_off)
+            return [(0, 0)]
+
+        with (
+            patch.object(corrector, "_read_chunk_inputs", side_effect=fake_read),
+            patch.object(corrector, "_run_sam_and_correct", side_effect=fake_run),
+        ):
+            results = list(
+                corrector._iter_chunk_results(
+                    Path("tile.tif"),
+                    windows,
+                    [(frozenset([3]), Path("out.tif"))],
+                    MagicMock(),
+                )
+            )
+
+        assert len(results) == 4
+        assert read_calls == [0, 1, 2, 3]
+        assert run_calls == [0, 1, 2, 3]
+
+
+class TestSamLabelCorrectorReadChunkInputs:
     def _corrector(self, tmp_path):
         return SamLabelCorrector(_make_config(tmp_path))
 
-    def _mock_src(self, array):
-        src = MagicMock()
-        src.read.return_value = array
-        src.name = "tile.tif"
-        return src
-
-    def test_no_target_pixels_returns_zeros(self, tmp_path):
+    def test_no_target_pixels_returns_none(self, tmp_path):
         corrector = self._corrector(tmp_path)
         bags = np.full((4, 4), 0, dtype=np.uint8)  # class 0, not in targets
-        mask_src = self._mock_src(bags)
+        mask_src = MagicMock()
+        mask_src.read.return_value = bags
+        open_ctx = MagicMock()
+        open_ctx.__enter__ = MagicMock(return_value=mask_src)
+        open_ctx.__exit__ = MagicMock(return_value=False)
+        sys_mods, _ = _mock_rasterio(open_ctx=open_ctx)
         chunk_targets = [(frozenset([3]), tmp_path / "out" / "tile.tif")]
-        sys_mods, _, _, _ = _mock_chunk_imports()
 
         with patch.dict("sys.modules", sys_mods):
-            result = corrector._process_chunk(
-                mask_src, chunk_targets, _make_window(), MagicMock()
+            result = corrector._read_chunk_inputs(
+                Path("tile.tif"), _make_window(), chunk_targets
             )
 
-        assert result == [(0, 0)]
+        assert result is None
 
-    def test_image_read_exception_returns_zeros(self, tmp_path):
+    def test_image_read_exception_returns_none(self, tmp_path):
         corrector = self._corrector(tmp_path)
         bags = np.full((4, 4), 3, dtype=np.uint8)
-        mask_src = self._mock_src(bags)
+        mask_src = MagicMock()
+        mask_src.read.return_value = bags
+        open_ctx = MagicMock()
+        open_ctx.__enter__ = MagicMock(return_value=mask_src)
+        open_ctx.__exit__ = MagicMock(return_value=False)
+        sys_mods, mock_rio = _mock_rasterio(open_ctx=open_ctx)
+        _, _, _, mock_alignment = _mock_chunk_imports(
+            read_side_effect=RuntimeError("IO")
+        )
+        sys_mods["pytorch_segmentation_models_trainer.tools.mbtiles.alignment"] = (
+            mock_alignment
+        )
         chunk_targets = [(frozenset([3]), tmp_path / "out" / "tile.tif")]
-        sys_mods, _, _, _ = _mock_chunk_imports(read_side_effect=RuntimeError("IO"))
 
         with patch.dict("sys.modules", sys_mods):
-            result = corrector._process_chunk(
-                mask_src, chunk_targets, _make_window(), MagicMock()
+            result = corrector._read_chunk_inputs(
+                Path("tile.tif"), _make_window(), chunk_targets
             )
 
+        assert result is None
+
+    def test_returns_aligned_inputs(self, tmp_path):
+        corrector = self._corrector(tmp_path)
+        bags = np.full((4, 4), 3, dtype=np.uint8)
+        mask_src = MagicMock()
+        mask_src.read.return_value = bags
+        open_ctx = MagicMock()
+        open_ctx.__enter__ = MagicMock(return_value=mask_src)
+        open_ctx.__exit__ = MagicMock(return_value=False)
+        sys_mods, _ = _mock_rasterio(open_ctx=open_ctx)
+        image_chw = np.zeros((3, 4, 4), dtype=np.uint8)
+        _, _, _, mock_alignment = _mock_chunk_imports(read_return=image_chw)
+        sys_mods["pytorch_segmentation_models_trainer.tools.mbtiles.alignment"] = (
+            mock_alignment
+        )
+        chunk_targets = [(frozenset([3]), tmp_path / "out" / "tile.tif")]
+
+        with patch.dict("sys.modules", sys_mods):
+            result = corrector._read_chunk_inputs(
+                Path("tile.tif"), _make_window(), chunk_targets
+            )
+
+        assert result is not None
+        base_mask, image_hwc, lulc_maps = result
+        np.testing.assert_array_equal(base_mask, bags)
+        assert image_hwc.shape == (4, 4, 3)
+        assert lulc_maps == []
+
+
+class TestSamLabelCorrectorRunSamAndCorrect:
+    def _corrector(self, tmp_path):
+        return SamLabelCorrector(_make_config(tmp_path))
+
+    def test_inputs_none_returns_zeros(self, tmp_path):
+        corrector = self._corrector(tmp_path)
+        chunk_targets = [(frozenset([3]), tmp_path / "out" / "tile.tif")]
+        result = corrector._run_sam_and_correct(
+            Path("tile.tif"), None, chunk_targets, _make_window(), MagicMock()
+        )
         assert result == [(0, 0)]
 
     def test_cache_hit_skips_generator(self, tmp_path):
         corrector = self._corrector(tmp_path)
         bags = np.full((4, 4), 3, dtype=np.uint8)
-        mask_src = self._mock_src(bags)
+        image_hwc = np.zeros((4, 4, 3), dtype=np.uint8)
         chunk_targets = [(frozenset([3]), tmp_path / "out" / "tile.tif")]
 
         corrector._cache = MagicMock()
         corrector._cache.get.return_value = []  # cache hit → empty masks
 
-        image_chw = np.zeros((3, 4, 4), dtype=np.uint8)
-        sys_mods, _, _, _ = _mock_chunk_imports(read_return=image_chw)
-
         mock_generator = MagicMock()
-        with patch.dict("sys.modules", sys_mods):
-            corrector._process_chunk(
-                mask_src, chunk_targets, _make_window(), mock_generator
+        mock_dst = MagicMock()
+        dst_ctx = MagicMock()
+        dst_ctx.__enter__ = MagicMock(return_value=mock_dst)
+        dst_ctx.__exit__ = MagicMock(return_value=False)
+        mock_rio = MagicMock()
+        mock_rio.open.return_value = dst_ctx
+
+        with patch.dict("sys.modules", {"rasterio": mock_rio, "torch": MagicMock()}):
+            result = corrector._run_sam_and_correct(
+                Path("tile.tif"),
+                (bags, image_hwc, []),
+                chunk_targets,
+                _make_window(),
+                mock_generator,
             )
 
         mock_generator.generate.assert_not_called()
         corrector._cache.put.assert_not_called()
+        # no sam masks → no vote → no change, but all 16 pixels are target-class
+        assert result == [(0, 16)]
 
     def test_cache_miss_runs_generator_and_stores(self, tmp_path):
         out_dir = tmp_path / "out"
@@ -741,8 +933,7 @@ class TestSamLabelCorrectorProcessChunk:
 
         corrector = self._corrector(tmp_path)
         bags = np.full((4, 4), 3, dtype=np.uint8)
-        mask_src = self._mock_src(bags)
-        mask_src.name = str(tmp_path / "masks" / "tile.tif")
+        image_hwc = np.zeros((4, 4, 3), dtype=np.uint8)
         chunk_targets = [(frozenset([3]), corrected_file)]
 
         corrector._cache = MagicMock()
@@ -762,15 +953,17 @@ class TestSamLabelCorrectorProcessChunk:
         dst_ctx = MagicMock()
         dst_ctx.__enter__ = MagicMock(return_value=mock_dst)
         dst_ctx.__exit__ = MagicMock(return_value=False)
+        mock_rio = MagicMock()
+        mock_rio.open.return_value = dst_ctx
+        mock_torch = MagicMock()
 
-        image_chw = np.zeros((3, 4, 4), dtype=np.uint8)
-        sys_mods, mock_rio, _, _ = _mock_chunk_imports(
-            read_return=image_chw, open_ctx=dst_ctx
-        )
-
-        with patch.dict("sys.modules", sys_mods):
-            corrector._process_chunk(
-                mask_src, chunk_targets, _make_window(), mock_generator
+        with patch.dict("sys.modules", {"rasterio": mock_rio, "torch": mock_torch}):
+            corrector._run_sam_and_correct(
+                Path("some/tile.tif"),
+                (bags, image_hwc, []),
+                chunk_targets,
+                _make_window(),
+                mock_generator,
             )
 
         mock_generator.generate.assert_called_once()
@@ -779,7 +972,7 @@ class TestSamLabelCorrectorProcessChunk:
     def test_chunk_target_without_target_pixels_skipped(self, tmp_path):
         corrector = self._corrector(tmp_path)
         bags = np.full((4, 4), 3, dtype=np.uint8)
-        mask_src = self._mock_src(bags)
+        image_hwc = np.zeros((4, 4, 3), dtype=np.uint8)
         # Two targets: class 3 (present) and class 5 (absent)
         chunk_targets = [
             (frozenset([3]), tmp_path / "out" / "tile.tif"),
@@ -789,12 +982,20 @@ class TestSamLabelCorrectorProcessChunk:
         corrector._cache = MagicMock()
         corrector._cache.get.return_value = []  # empty → no write needed
 
-        image_chw = np.zeros((3, 4, 4), dtype=np.uint8)
-        sys_mods, _, _, _ = _mock_chunk_imports(read_return=image_chw)
+        mock_dst = MagicMock()
+        dst_ctx = MagicMock()
+        dst_ctx.__enter__ = MagicMock(return_value=mock_dst)
+        dst_ctx.__exit__ = MagicMock(return_value=False)
+        mock_rio = MagicMock()
+        mock_rio.open.return_value = dst_ctx
 
-        with patch.dict("sys.modules", sys_mods):
-            result = corrector._process_chunk(
-                mask_src, chunk_targets, _make_window(), MagicMock()
+        with patch.dict("sys.modules", {"rasterio": mock_rio, "torch": MagicMock()}):
+            result = corrector._run_sam_and_correct(
+                Path("tile.tif"),
+                (bags, image_hwc, []),
+                chunk_targets,
+                _make_window(),
+                MagicMock(),
             )
 
         assert result[1] == (0, 0)  # second target skipped

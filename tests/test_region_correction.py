@@ -36,12 +36,12 @@ class TestApplyRegionCorrectionMaskList:
             np.full((4, 4), 5, dtype=np.uint8),
         ]
         result = apply_region_correction(
-            bags_raw=bags,
+            base_mask=bags,
             segments=sam_masks,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         assert np.all(result == 5)
 
@@ -51,12 +51,12 @@ class TestApplyRegionCorrectionMaskList:
         sam_masks = [{"segmentation": seg, "predicted_iou": 0.9, "area": 4}]
         lulc = [np.full((2, 2), 5, dtype=np.uint8)]
         result = apply_region_correction(
-            bags_raw=bags,
+            base_mask=bags,
             segments=sam_masks,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         assert result[0, 0] == 0
         assert result[0, 1] == 0
@@ -68,12 +68,12 @@ class TestApplyRegionCorrectionMaskList:
         sam_masks = [{"segmentation": seg, "predicted_iou": 0.9, "area": 16}]
         lulc = [np.full((4, 4), 5, dtype=np.uint8), np.full((4, 4), 5, dtype=np.uint8)]
         apply_region_correction(
-            bags_raw=bags,
+            base_mask=bags,
             segments=sam_masks,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         np.testing.assert_array_equal(bags, original)
 
@@ -93,12 +93,12 @@ class TestApplyRegionCorrectionLabelMap:
             np.full((4, 4), 5, dtype=np.uint8),
         ]
         result = apply_region_correction(
-            bags_raw=bags,
+            base_mask=bags,
             segments=label_map,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         assert np.all(result == 5)
 
@@ -111,12 +111,12 @@ class TestApplyRegionCorrectionLabelMap:
             [[5, 5, 4, 4]] * 4, dtype=np.uint8
         )  # left votes 5, right votes 4
         result = apply_region_correction(
-            bags_raw=bags,
+            base_mask=bags,
             segments=label_map,
             lulc_maps=[lulc_left_right],
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=False,
+            include_base_mask=False,
         )
         assert np.all(result[:, :2] == 5)
         assert np.all(result[:, 2:] == 4)
@@ -126,12 +126,12 @@ class TestApplyRegionCorrectionLabelMap:
         label_map = np.zeros((2, 2), dtype=np.int32)
         lulc = [np.full((2, 2), 5, dtype=np.uint8)]
         result = apply_region_correction(
-            bags_raw=bags,
+            base_mask=bags,
             segments=label_map,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         assert result[0, 0] == 0
         assert result[0, 1] == 0
@@ -141,12 +141,12 @@ class TestApplyRegionCorrectionLabelMap:
         label_map = np.zeros((4, 4), dtype=np.int32)
         lulc = [np.full((4, 4), 5, dtype=np.uint8)]
         result = apply_region_correction(
-            bags_raw=bags,
+            base_mask=bags,
             segments=label_map,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         np.testing.assert_array_equal(result, bags)
 
@@ -154,12 +154,12 @@ class TestApplyRegionCorrectionLabelMap:
         bags = _make_mask(fill=0)
         label_map = np.zeros((4, 4), dtype=np.int32)
         result = apply_region_correction(
-            bags_raw=bags,
+            base_mask=bags,
             segments=label_map,
             lulc_maps=[],
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         np.testing.assert_array_equal(result, bags)
 
@@ -169,26 +169,26 @@ class TestApplyRegionCorrectionLabelMap:
         label_map = np.zeros((4, 4), dtype=np.int32)
         lulc = [np.full((4, 4), 255, dtype=np.uint8)]
         result = apply_region_correction(
-            bags_raw=bags,
+            base_mask=bags,
             segments=label_map,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=False,
+            include_base_mask=False,
         )
         np.testing.assert_array_equal(result, bags)
 
-    def test_include_bags_false_excludes_bags_from_vote(self):
+    def test_include_base_mask_false_excludes_bags_from_vote(self):
         bags = _make_mask(fill=3)
         label_map = np.zeros((4, 4), dtype=np.int32)
         lulc = [np.full((4, 4), 5, dtype=np.uint8)]
         result = apply_region_correction(
-            bags_raw=bags,
+            base_mask=bags,
             segments=label_map,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=False,
+            include_base_mask=False,
         )
         assert np.all(result == 5)
 
@@ -198,12 +198,12 @@ class TestApplyRegionCorrectionLabelMap:
         label_map = np.zeros((4, 4), dtype=np.int32)
         lulc = [np.full((4, 4), 5, dtype=np.uint8), np.full((4, 4), 5, dtype=np.uint8)]
         apply_region_correction(
-            bags_raw=bags,
+            base_mask=bags,
             segments=label_map,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         np.testing.assert_array_equal(bags, original)
 
@@ -214,23 +214,23 @@ class TestApplyRegionCorrectionLabelMap:
 
         label_map = np.zeros((4, 4), dtype=np.int32)
         result_label_map = apply_region_correction(
-            bags_raw=bags,
+            base_mask=bags,
             segments=label_map,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
 
         seg = np.ones((4, 4), dtype=bool)
         sam_masks = [{"segmentation": seg, "predicted_iou": 0.9, "area": 16}]
         result_mask_list = apply_region_correction(
-            bags_raw=bags,
+            base_mask=bags,
             segments=sam_masks,
             lulc_maps=lulc,
             classes_to_correct=frozenset([3]),
             num_classes=NUM_CLASSES,
-            include_bags=True,
+            include_base_mask=True,
         )
         np.testing.assert_array_equal(result_label_map, result_mask_list)
 

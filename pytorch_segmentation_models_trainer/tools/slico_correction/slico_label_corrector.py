@@ -3,8 +3,9 @@
 
 Pre-processing tool that corrects noisy GeoTIFF masks using SLICO
 (zero-parameter SLIC superpixels, Achanta & Susstrunk 2012) + majority vote
-within each superpixel across the original topographic vector source and
-optional LULC auxiliary maps.
+within each superpixel across the mask being corrected (whatever raster
+``masks_dir`` holds — not tied to any particular dataset) and optional LULC
+auxiliary maps.
 
 This is a region-generation ablation of ``tools.sam_correction``: stages 2/3
 (majority-vote consensus, per-class eligibility rule) are identical — both
@@ -15,10 +16,20 @@ fixed oversegmentation (``n_segments`` superpixels per 256x256 patch, default
 1000, ~65 px/segment) rather than tuned to match SAM's region count — this
 keeps the two region generators independent and comparable without one
 depending on the other having already run.
+
+Unlike SAM AMG (one image per GPU call, no cross-image batching in the public
+API), SLICO is pure CPU work — ``skimage.segmentation.slic``'s inner loop is
+Cython and releases the GIL, as does rasterio I/O, so tiles parallelize for
+real across threads (``n_workers``). Parallelism is at tile granularity, not
+chunk: each tile writes to its own output file (thread-safe by construction,
+no shared-file write contention), and tiles are processed largest-chunk-count
+first for load balancing when worker count doesn't divide tile count evenly.
 """
 
+import math
 import shutil
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, FrozenSet, List, Tuple
@@ -27,6 +38,10 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from pytorch_segmentation_models_trainer.tools.mbtiles.image_source import (
+    ImageSourceSpec,
+    resolve_image_source,
+)
 from pytorch_segmentation_models_trainer.tools.region_correction.correction import (
     apply_region_correction,
     chunk_cache_key,
@@ -50,11 +65,18 @@ class SLICOLabelCorrectionConfig:
         targets: List of dicts with keys ``classes`` (list of int) and
             ``output_dir`` (str). Each target produces a separate output directory
             with SLICO-corrected masks for the specified class set.
-        mbtiles_path: Path to MBTiles file used as RGB source imagery for SLICO.
-        lulc_paths: Paths to auxiliary LULC rasters/VRTs included in the
-            majority vote alongside the topographic vector source.
-        include_bags: Whether to include the original topographic vector source
-            mask in the majority vote (default True).
+        mbtiles_path: RGB source imagery for SLICO. Either a path to a single
+            file (MBTiles, VRT, or any rasterio-readable raster — existing
+            behavior), or a directory spec (``{directory, extensions, recursive}``)
+            to search a folder of per-tile raster files instead — see
+            ``tools.mbtiles.image_source.resolve_image_source``.
+        lulc_paths: Auxiliary LULC rasters included in the majority vote
+            alongside the mask being corrected. Each entry accepts the
+            same single-file-or-directory forms as ``mbtiles_path``.
+        include_base_mask: Whether the mask being corrected (whatever raster
+            ``masks_dir`` holds) counts as one vote source alongside
+            ``lulc_paths``, rather than only being the thing corrected
+            (default True).
         num_classes: Number of valid semantic classes (default 6).
         nodata_val: Pixel value treated as nodata/invalid (default 255).
         chunk_size: Tile processing chunk size in pixels (default 1024).
@@ -70,6 +92,9 @@ class SLICOLabelCorrectionConfig:
             analysis only (see module docstring); leave empty for the primary,
             SAM-independent comparison.
         cache_dir: Directory for NPZ label-map cache. Empty string disables cache.
+        n_workers: Number of tiles processed concurrently via a thread pool
+            (default 1 = sequential). SLICO is CPU-bound and thread-safe at
+            tile granularity — see module docstring.
         start_idx: First tile index to process (inclusive, for multi-worker splits).
         end_idx: Last tile index to process (exclusive).
 
@@ -88,20 +113,22 @@ class SLICOLabelCorrectionConfig:
           - /data/lulc/esri.vrt
         n_segments: 1000
         cache_dir: /data/slico_cache
+        n_workers: 8
     """
 
     coreset_csv: str
     masks_dir: str
     targets: list
-    mbtiles_path: str
+    mbtiles_path: ImageSourceSpec
     lulc_paths: list = field(default_factory=list)
-    include_bags: bool = True
+    include_base_mask: bool = True
     num_classes: int = 6
     nodata_val: int = 255
     chunk_size: int = 1024
     n_segments: int = 1000
     match_sam_cache_dir: str = ""
     cache_dir: str = ""
+    n_workers: int = 1
     start_idx: int = 0
     end_idx: int = 999999
 
@@ -139,9 +166,9 @@ class SlicoLabelCorrector:
             else None
         )
         self._targets = parse_correction_targets(config.targets)
-        self._lulc_paths = [Path(p) for p in config.lulc_paths]
+        self._lulc_paths = [resolve_image_source(p) for p in config.lulc_paths]
         self._masks_dir = Path(config.masks_dir)
-        self._mbtiles = Path(config.mbtiles_path)
+        self._mbtiles = resolve_image_source(config.mbtiles_path)
 
     # ------------------------------------------------------------------
     # Public API
@@ -149,6 +176,11 @@ class SlicoLabelCorrector:
 
     def run(self) -> Dict:
         """Run SLICO correction over all tiles in the coreset CSV.
+
+        When ``config.n_workers > 1``, tiles are processed concurrently via a
+        thread pool, ordered largest-estimated-chunk-count first for load
+        balancing (see module docstring); the returned ``tiles`` list is
+        reordered back to match the coreset CSV's tile order either way.
 
         Returns:
             Summary dict with keys ``n_tiles``, ``elapsed_s``, and per-target
@@ -164,20 +196,49 @@ class SlicoLabelCorrector:
         for _, out_dir in self._targets:
             out_dir.mkdir(parents=True, exist_ok=True)
 
-        results = []
+        tile_patch_rows = {t: df[df["mask_path"] == t].copy() for t in tiles}
+
         t_start = time.time()
+        results_by_tile: Dict[str, Dict] = {}
 
-        for tile_name in tqdm(tiles, desc="Tiles", unit="tile"):
-            patch_rows = df[df["mask_path"] == tile_name].copy()
-            stats = self._process_tile(tile_name, patch_rows)
-            results.append(stats)
+        if self._cfg.n_workers > 1 and len(tiles) > 1:
+            ordered = sorted(
+                tiles,
+                key=lambda t: self._estimate_n_chunks(tile_patch_rows[t]),
+                reverse=True,
+            )
+            with ThreadPoolExecutor(max_workers=self._cfg.n_workers) as pool:
+                futures = {
+                    pool.submit(self._process_tile, t, tile_patch_rows[t]): t
+                    for t in ordered
+                }
+                for fut in tqdm(
+                    as_completed(futures), total=len(futures), desc="Tiles", unit="tile"
+                ):
+                    t = futures[fut]
+                    results_by_tile[t] = fut.result()
+        else:
+            for t in tqdm(tiles, desc="Tiles", unit="tile"):
+                results_by_tile[t] = self._process_tile(t, tile_patch_rows[t])
 
+        results = [results_by_tile[t] for t in tiles]
         elapsed = time.time() - t_start
         return {"n_tiles": len(tiles), "elapsed_s": round(elapsed, 1), "tiles": results}
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _estimate_n_chunks(self, patch_rows: pd.DataFrame) -> int:
+        """Cheap chunk-count estimate for a tile, used to load-balance workers."""
+        row_min = int(patch_rows["row_off"].min())
+        col_min = int(patch_rows["col_off"].min())
+        row_max = int((patch_rows["row_off"] + patch_rows["patch_size"]).max())
+        col_max = int((patch_rows["col_off"] + patch_rows["patch_size"]).max())
+        chunk = self._cfg.chunk_size
+        n_rows = max(1, math.ceil((row_max - row_min) / chunk))
+        n_cols = max(1, math.ceil((col_max - col_min) / chunk))
+        return n_rows * n_cols
 
     def _chunk_cache_key(self, tile_name: str, window, n_segments: int) -> str:
         return f"{chunk_cache_key(tile_name, window)}_n{n_segments}"
@@ -265,9 +326,9 @@ class SlicoLabelCorrector:
             read_source_aligned_to_mask_window,
         )
 
-        bags_raw = mask_src.read(1, window=window)
+        base_mask = mask_src.read(1, window=window)
 
-        has_any = any(np.isin(bags_raw, list(cls)).any() for cls, _ in chunk_targets)
+        has_any = any(np.isin(base_mask, list(cls)).any() for cls, _ in chunk_targets)
         if not has_any:
             return [(0, 0)] * len(chunk_targets)
 
@@ -311,20 +372,20 @@ class SlicoLabelCorrector:
 
         results = []
         for classes_to_correct, corrected_path in chunk_targets:
-            if not np.isin(bags_raw, list(classes_to_correct)).any():
+            if not np.isin(base_mask, list(classes_to_correct)).any():
                 results.append((0, 0))
                 continue
 
             corrected = apply_region_correction(
-                bags_raw=bags_raw,
+                base_mask=base_mask,
                 segments=label_map,
                 lulc_maps=lulc_maps,
                 classes_to_correct=classes_to_correct,
                 num_classes=self._cfg.num_classes,
-                include_bags=self._cfg.include_bags,
+                include_base_mask=self._cfg.include_base_mask,
             )
-            n_target = int(np.isin(bags_raw, list(classes_to_correct)).sum())
-            n_changed = int((corrected != bags_raw).sum())
+            n_target = int(np.isin(base_mask, list(classes_to_correct)).sum())
+            n_changed = int((corrected != base_mask).sum())
 
             with rasterio.open(corrected_path, "r+") as dst:
                 dst.write(corrected[np.newaxis, :, :], window=window)

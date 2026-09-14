@@ -63,6 +63,43 @@ the primary comparison.
 
 ---
 
+## Imagery source: four ways to point at it
+
+`mbtiles_path` and each entry of `lulc_paths` accept a single file path, a directory (matched by
+spatial bounds or by basename), or a CSV manifest — same mechanism as
+[SAM Label Correction](sam-label-correction.md#imagery-source-four-ways-to-point-at-it), which has
+the full reference. Quick example (directory matched by basename):
+
+```yaml
+mbtiles_path:
+  directory: /data/imagery/per_tile
+  match_by: basename
+```
+
+---
+
+## Parallelism
+
+SLICO is CPU-bound and thread-safe at **tile** granularity: set `n_workers` above 1 to process
+tiles concurrently via a thread pool.
+
+```yaml
+n_workers: 8
+```
+
+`skimage.segmentation.slic`'s inner loop is Cython and releases the GIL, as does rasterio I/O, so
+this gives real wall-clock parallelism, not just concurrency. Each tile writes to its own output
+file — no shared-file write contention, no locking needed. Tiles are ordered
+largest-estimated-chunk-count first before dispatch, so a handful of big tiles don't leave workers
+idle at the end of a run. Verified to produce byte-identical output to the sequential (`n_workers: 1`)
+path (`tests/test_slico_label_corrector_integration.py`).
+
+Default is `1` (sequential) — safe to raise up to your CPU core count; each worker's peak memory is
+roughly one chunk's imagery + label-map arrays, so very large `chunk_size` × high `n_workers`
+combinations can add up.
+
+---
+
 ## CLI usage
 
 ```bash
@@ -92,7 +129,7 @@ lulc_paths:
   - /data/lulc/esri.vrt
   - /data/lulc/dynamic_world.vrt
 
-include_bags: true        # include original mask as one vote source (default: true)
+include_base_mask: true   # include the mask being corrected as one vote source (default: true)
 
 # Processing
 num_classes: 6
@@ -109,7 +146,10 @@ match_sam_cache_dir: ""
 # NPZ label-map cache (set to "" to disable)
 cache_dir: /data/slico_cache
 
-# Multi-worker splits (process tiles [start_idx, end_idx) on each worker)
+# Thread-pool parallelism (tile granularity, default 1 = sequential)
+n_workers: 1
+
+# Multi-process/multi-machine splits (process tiles [start_idx, end_idx) on each worker)
 start_idx: 0
 end_idx: 999999
 ```
@@ -166,11 +206,11 @@ from pytorch_segmentation_models_trainer.tools.region_correction import apply_re
 
 # label_map: dense int array (H, W), e.g. skimage.segmentation.slic output
 corrected = apply_region_correction(
-    bags_raw=original_mask,         # (H, W) uint8
+    base_mask=original_mask,        # (H, W) uint8 — the mask being corrected
     segments=label_map,             # dense label map OR a SAM-style mask-dict list
     lulc_maps=[lulc_array],         # list of (H, W) uint8 arrays
     classes_to_correct=frozenset([3, 5]),
     num_classes=6,
-    include_bags=True,
+    include_base_mask=True,
 )
 ```
