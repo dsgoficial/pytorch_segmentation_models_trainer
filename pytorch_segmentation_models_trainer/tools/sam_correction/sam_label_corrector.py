@@ -12,11 +12,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, FrozenSet, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, FrozenSet, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+
+if TYPE_CHECKING:
+    from rasterio.windows import Window
 
 from pytorch_segmentation_models_trainer.tools.mbtiles.image_source import (
     ImageSourceSpec,
