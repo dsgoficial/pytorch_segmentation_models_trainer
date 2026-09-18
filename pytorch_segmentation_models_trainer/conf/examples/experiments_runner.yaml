@@ -50,7 +50,8 @@ experiments_runner:
   seeds: [42, 101, 28]
   output_base_dir: outputs/experiments_runner
   save_summary: true
-  resume: false          # set to true to skip already-completed runs on restart
+  resume: true            # default; skips already-completed runs on restart
+  # overwrite: [1]        # force-redo specific run_idx even if already complete
   summary_metrics:
     - val/loss
     - val/F1Score

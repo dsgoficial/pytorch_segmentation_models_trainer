@@ -1,0 +1,69 @@
+# Pipeline example — DAG of independent experiment steps (including
+# non-Hydra data-prep tools), scheduled in parallel across GPUs/CPU slots,
+# unattended (nohup/tmux-friendly), idempotent on restart.
+# Usage: pytorch-smt --config-dir conf/examples --config-name pipeline
+
+mode: run-pipeline
+
+pipeline:
+  output_base_dir: outputs/pipeline
+  resume: true # default; steps already marked "done" are skipped on restart
+  # overwrite: [aio2_phase2_correction]   # force-redo specific steps by name
+  on_error: stop # or "continue" — whether one failed step halts the sequence
+  preflight: true # compose every Hydra-mode step's config before step 1 runs
+  # pytorch_smt_bin: /opt/venv/bin/pytorch-smt   # override if not on PATH
+
+  # Physical GPUs the scheduler may hand out via CUDA_VISIBLE_DEVICES.
+  # Omit entirely if every step below has gpus: 0 (CPU-only pipeline).
+  resources:
+    gpus:
+      - { id: 0, vram_gb: 24 }
+      - { id: 1, vram_gb: 24 }
+    max_parallel_cpu_steps: 4 # CPU-bound steps (gpus: 0) — independent pool
+
+  steps:
+    - name: slico_gc
+      # Data-prep step: pytorch-smt-tools, not pytorch-smt — use `command`,
+      # not config_dir/config_name (those build a `pytorch-smt` invocation).
+      # gpus: 0 (default) — CPU-bound, draws from max_parallel_cpu_steps.
+      command:
+        - pytorch-smt-tools
+        - build-slico-corrected-masks
+        - conf/examples/slico_label_correction.yaml
+
+    - name: zhu2019_baseline
+      # No depends_on -> independent of slico_gc, runs concurrently with it
+      # (as soon as a GPU is free) instead of waiting in line.
+      config_dir: conf/examples
+      config_name: zhu2019_boundary_relaxation
+      gpus: 1
+      vram_gb: 12 # bin-packable — can share a 24GB GPU with another small step
+
+    - name: unet_slico_gc
+      # This step's own config has `mode: run-experiments` — the pipeline
+      # transparently runs that whole multi-seed sweep before moving on.
+      config_dir: conf/examples
+      config_name: experiments_runner
+      overrides:
+        - train_dataset.input_csv_path=/data/masks_slico_gc/train.csv
+        - experiments_runner.output_base_dir=outputs/pipeline/unet_slico_gc
+      depends_on: [slico_gc] # trains on slico_gc's output — must wait for it
+      gpus: 1
+      vram_gb: 24 # needs a whole GPU to itself
+
+    - name: aio2_phase1_warmup
+      config_dir: conf/examples
+      config_name: mean_teacher_aio2
+      gpus: 2 # distributed (pl_trainer.devices: 2 in that config) —
+      # reserves 2 whole GPUs exclusively; CUDA_VISIBLE_DEVICES=<id0>,<id1>
+      # is set for the subprocess, PyTorch Lightning spawns DDP itself.
+
+    - name: aio2_phase2_correction
+      config_dir: conf/examples
+      config_name: mean_teacher_aio2
+      overrides:
+        - model.o2c_active=true
+      depends_on: [aio2_phase1_warmup] # reloads its warm-up checkpoint —
+      # act_checkpoint_dir in mean_teacher_aio2.yaml is the fixed, known
+      # location phase 2 reads from.
+      gpus: 2

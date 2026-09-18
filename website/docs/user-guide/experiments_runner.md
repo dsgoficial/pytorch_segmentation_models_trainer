@@ -58,7 +58,8 @@ pytorch-smt --config-path . --config-name my_experiment
 | `output_base_dir` | `str` | no | `outputs/experiments_runner` | Root directory for per-run outputs. |
 | `save_summary` | `bool` | no | `true` | Update `summary.csv` after every completed run. |
 | `summary_metrics` | `list[str]` | no | `[val/loss]` | Metric keys logged to the run summary table. |
-| `resume` | `bool` | no | `false` | Skip already-completed runs on restart using `runner_state.json`. |
+| `resume` | `bool` | no | `true` | Skip already-completed runs on restart using `runner_state.json`. Runs are idempotent by default — re-launching the same config never repeats finished work. Set to `false` to always start every run fresh. |
+| `overwrite` | `bool \| list[int]` | no | `false` | Forces re-execution of runs `resume` would otherwise skip. `true` forces every run; a list forces only those `run_idx` values. Deletes each forced run's previous output directory first, and replaces (not duplicates) its `runner_state.json` / `summary.csv` entry. |
 
 ### Seeds vs n\_runs
 
@@ -134,19 +135,50 @@ pl_trainer:
 
 ## Resuming an interrupted run sequence
 
-If training is interrupted between runs, restart with `resume: true`:
+Runs are idempotent by default (`resume: true`) — if training is
+interrupted between runs, just re-launch the same command:
 
 ```yaml
 experiments_runner:
   seeds: [42, 101, 28]
   output_base_dir: outputs/my_study
-  resume: true           # reads runner_state.json, skips completed runs
+  # resume: true is the default — no need to set it explicitly
 ```
 
 The runner reads `runner_state.json`, identifies which runs already have
 results, and starts from the first pending run.  For within-run resumption
 (interrupted mid-epoch), configure PyTorch Lightning's `ModelCheckpoint`
 callback and set `resume_from_checkpoint` in `hyperparameters` as usual.
+
+A run whose `output_dir` exists but is **not** recorded as complete (e.g. it
+crashed mid-training) has that leftover directory wiped before it is
+retried, so stale checkpoints from the failed attempt never mix with the
+new one.
+
+Set `resume: false` to disable this entirely and always start every run
+fresh, ignoring any existing state.
+
+---
+
+## Forcing specific runs to redo (`overwrite`)
+
+`resume` only skips runs that are missing or incomplete. To force a
+already-completed run to redo — for example, run 1 (seed 101) finished
+but its checkpoint turned out corrupted — use `overwrite`:
+
+```yaml
+experiments_runner:
+  seeds: [42, 101, 28]
+  output_base_dir: outputs/my_study
+  resume: true
+  overwrite: [1]          # redo only run_idx 1; runs 0 and 2 stay skipped
+```
+
+`overwrite: true` forces every completed run to redo (equivalent to
+deleting `runner_state.json` and starting over, but it also cleans each
+run's old output directory first — a plain `resume: false` restart does
+not). Each forced run's stale entry in `runner_state.json` and
+`summary.csv` is replaced by the new result, not duplicated.
 
 ---
 
@@ -165,6 +197,16 @@ feature.  Each run receives its seed through the same `set_training_seed()`
 mechanism (seeding Python `random`, NumPy, PyTorch CPU/CUDA, and DataLoader
 workers).  You can also set `deterministic_cudnn: true` in the config for fully
 deterministic GPU ops at the cost of throughput.
+
+---
+
+## Running a sequence of different experiments
+
+The Experiments Runner repeats **one** config with different seeds. To run
+a **sequence of different steps** (data-prep tools, different
+models/losses/datasets, different baselines) unattended on a remote
+server, see the [Pipeline](pipeline.md) — each of its steps can itself be
+an Experiments Runner config.
 
 ---
 

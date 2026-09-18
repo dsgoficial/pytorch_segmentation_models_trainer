@@ -24,10 +24,11 @@ import logging
 import multiprocessing as mp
 import os
 import secrets
+import shutil
 import statistics
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 from omegaconf import DictConfig, OmegaConf
 
@@ -159,8 +160,12 @@ class ExperimentsRunner:
 
     After every completed run the runner writes a ``runner_state.json`` to
     ``output_base_dir`` and, when ``save_summary`` is enabled, updates
-    ``summary.csv``.  Set ``resume: true`` to skip already-completed runs
-    on restart.
+    ``summary.csv``.  Runs are idempotent by default (``resume: true``):
+    already-completed runs are skipped on restart, so re-launching the same
+    config never repeats or overwrites finished work.  Set ``resume: false``
+    to always start every run fresh, or use ``overwrite`` (``true``, or a
+    list of ``run_idx`` values) to force specific completed runs to be
+    redone — their previous output directory is deleted first.
 
     Args:
         cfg: Full Hydra config including the ``experiments_runner`` sub-tree.
@@ -204,6 +209,16 @@ class ExperimentsRunner:
                 f"len(experiments_runner.seeds) ({len(seeds)}) when both are provided."
             )
 
+        overwrite = self.runner_cfg.get("overwrite", None)
+        if overwrite is not None and not isinstance(overwrite, bool):
+            try:
+                [int(i) for i in overwrite]
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "experiments_runner.overwrite must be a bool or a list of "
+                    f"int run_idx values, got {overwrite!r}."
+                )
+
     # ------------------------------------------------------------------
     # Public helpers (also used in tests)
     # ------------------------------------------------------------------
@@ -225,6 +240,36 @@ class ExperimentsRunner:
         if seeds is not None:
             return list(seeds)
         return [secrets.randbelow(2**31) for _ in range(self._n_runs())]
+
+    def _resolve_overwrite(self) -> Union[bool, Set[int]]:
+        """Return the resolved ``overwrite`` setting.
+
+        Returns:
+            ``True`` if every completed run must be forced to re-run, or a
+            (possibly empty) set of ``run_idx`` values to force individually.
+        """
+        overwrite = self.runner_cfg.get("overwrite", None)
+        if overwrite is None or overwrite is False:
+            return set()
+        if overwrite is True:
+            return True
+        return {int(i) for i in overwrite}
+
+    def _should_force(self, run_idx: int, overwrite: Union[bool, Set[int]]) -> bool:
+        """Whether ``run_idx`` must be forced to re-run despite being complete."""
+        return overwrite is True or (
+            isinstance(overwrite, set) and run_idx in overwrite
+        )
+
+    def _clean_output_dir(self, output_dir: str) -> None:
+        """Remove ``output_dir`` if it already exists.
+
+        Called right before (re)executing a run, so that a forced overwrite
+        or a retry of a previously interrupted run never mixes stale files
+        (old checkpoints, logs) from a prior attempt with the new one.
+        """
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
 
     def _build_run_cfg(
         self,
@@ -589,15 +634,20 @@ class ExperimentsRunner:
 
         On each completed run the state is persisted to ``runner_state.json``
         and ``summary.csv`` is updated (when ``save_summary`` is enabled).
-        When ``resume: true`` is set and a state file exists, already-completed
-        runs are skipped; seeds are loaded from the state file so
+        When ``resume: true`` (the default) and a state file exists,
+        already-completed runs are skipped — runs are idempotent by
+        default — and seeds are loaded from the state file so
         auto-generated seeds remain stable across restarts.
+        ``experiments_runner.overwrite`` forces specific (or all) completed
+        runs to re-run anyway, deleting their previous output directory
+        first and replacing their stale state/summary entry.
 
         Returns:
             List of :class:`RunResult`, one per run, ordered by ``run_idx``.
         """
-        resume = self.runner_cfg.get("resume", False)
+        resume = self.runner_cfg.get("resume", True)
         state_exists = os.path.exists(self._state_path())
+        overwrite = self._resolve_overwrite()
 
         if resume and state_exists:
             state = self._load_state()
@@ -616,14 +666,25 @@ class ExperimentsRunner:
         results: List[RunResult] = list(completed_results)
 
         for run_idx, seed in enumerate(all_seeds):
-            if run_idx in completed_indices:
+            force = self._should_force(run_idx, overwrite)
+            if run_idx in completed_indices and not force:
                 logger.info(
                     "ExperimentsRunner — run %d (seed=%d) already done, skipping.",
                     run_idx,
                     seed,
                 )
                 continue
+            if run_idx in completed_indices and force:
+                logger.info(
+                    "ExperimentsRunner — run %d (seed=%d) forced via overwrite, "
+                    "re-running.",
+                    run_idx,
+                    seed,
+                )
+                results = [r for r in results if r.run_idx != run_idx]
 
+            _, output_dir = self._build_run_cfg(run_idx, seed)
+            self._clean_output_dir(output_dir)
             result = self._run_single(run_idx, seed)
             results.append(result)
             results_sorted = sorted(results, key=lambda r: r.run_idx)
@@ -656,8 +717,9 @@ class ExperimentsRunner:
         )
         n_folds = len(fold_paths)
 
-        resume = self.runner_cfg.get("resume", False)
+        resume = self.runner_cfg.get("resume", True)
         state_exists = os.path.exists(self._state_path())
+        overwrite = self._resolve_overwrite()
 
         if resume and state_exists:
             state = self._load_state()
@@ -679,8 +741,9 @@ class ExperimentsRunner:
         for seed_idx, seed in enumerate(all_seeds):
             for fold_idx, paths in enumerate(fold_paths):
                 run_idx = seed_idx * n_folds + fold_idx
+                force = self._should_force(run_idx, overwrite)
 
-                if run_idx in completed_indices:
+                if run_idx in completed_indices and not force:
                     logger.info(
                         "ExperimentsRunner — run %d (seed=%d fold=%d) already done, skipping.",
                         run_idx,
@@ -688,7 +751,20 @@ class ExperimentsRunner:
                         fold_idx,
                     )
                     continue
+                if run_idx in completed_indices and force:
+                    logger.info(
+                        "ExperimentsRunner — run %d (seed=%d fold=%d) forced via "
+                        "overwrite, re-running.",
+                        run_idx,
+                        seed,
+                        fold_idx,
+                    )
+                    results = [r for r in results if r.run_idx != run_idx]
 
+                _, output_dir = self._build_run_cfg(
+                    run_idx, seed, fold_idx=fold_idx, fold_paths=paths
+                )
+                self._clean_output_dir(output_dir)
                 result = self._run_single(
                     run_idx, seed, fold_idx=fold_idx, fold_paths=paths
                 )

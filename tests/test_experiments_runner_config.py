@@ -17,7 +17,20 @@ class TestExperimentsRunnerConfig:
         assert cfg.output_base_dir == "outputs/experiments_runner"
         assert cfg.save_summary is True
         assert cfg.summary_metrics == ["val/loss"]
-        assert cfg.resume is False
+        assert cfg.resume is True
+        assert cfg.overwrite is None
+
+    def test_overwrite_accepts_bool(self):
+        runner = ExperimentsRunnerConfig()
+        runner.overwrite = True
+        cfg = OmegaConf.structured(runner)
+        assert cfg.overwrite is True
+
+    def test_overwrite_accepts_run_idx_list(self):
+        runner = ExperimentsRunnerConfig()
+        runner.overwrite = [1, 3]
+        cfg = OmegaConf.structured(runner)
+        assert list(cfg.overwrite) == [1, 3]
 
     def test_kfold_is_none_by_default(self):
         cfg = OmegaConf.structured(ExperimentsRunnerConfig)

@@ -621,13 +621,17 @@ class TestStateFile(BasicTestCase):
         super().setUp()
         self.tmp = self.make_temp_dir()
 
-    def _make_cfg(self, seeds=None, n_runs=None, resume=False, save_summary=False):
+    def _make_cfg(
+        self, seeds=None, n_runs=None, resume=False, save_summary=False, overwrite=None
+    ):
+        extra = {"overwrite": overwrite} if overwrite is not None else None
         return _make_runner_cfg(
             seeds=seeds,
             n_runs=n_runs,
             output_base_dir=self.tmp,
             save_summary=save_summary,
             resume=resume,
+            extra=extra,
         )
 
     @patch(_RUN_SINGLE_PATH)
@@ -805,6 +809,156 @@ class TestStateFile(BasicTestCase):
         self.assertEqual(len(results), 2)
 
 
+class TestOverwrite(BasicTestCase):
+    """`overwrite` forces re-execution of runs `resume` would otherwise skip."""
+
+    def setUp(self):
+        super().setUp()
+        self.tmp = self.make_temp_dir()
+
+    def _make_cfg(self, seeds=None, resume=True, save_summary=False, overwrite=None):
+        extra = {"overwrite": overwrite} if overwrite is not None else None
+        return _make_runner_cfg(
+            seeds=seeds,
+            output_base_dir=self.tmp,
+            save_summary=save_summary,
+            resume=resume,
+            extra=extra,
+        )
+
+    def _write_state(self, all_seeds, completed_run_idx):
+        import dataclasses as _dc
+
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            RunResult,
+        )
+
+        completed = [
+            _dc.asdict(
+                RunResult(
+                    run_idx=i,
+                    seed=all_seeds[i],
+                    training_time_seconds=10.0,
+                    train_metrics={},
+                    val_metrics={"val/loss": 0.5},
+                    test_metrics={},
+                    output_dir=os.path.join(
+                        self.tmp, f"run_{i:02d}_seed{all_seeds[i]}"
+                    ),
+                )
+            )
+            for i in completed_run_idx
+        ]
+        state = {"all_seeds": all_seeds, "completed_runs": completed}
+        os.makedirs(self.tmp, exist_ok=True)
+        with open(os.path.join(self.tmp, "runner_state.json"), "w") as f:
+            json.dump(state, f)
+
+    @patch(_RUN_SINGLE_PATH)
+    def test_default_skips_completed_run_without_overwrite(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        self._write_state([42, 101], completed_run_idx=[0])
+        cfg = self._make_cfg(seeds=[42, 101])  # resume defaults True, no overwrite
+        results = ExperimentsRunner(cfg).run()
+
+        self.assertEqual(mock_rs.call_count, 1)  # only run 1 (seed 101) executed
+        self.assertEqual(len(results), 2)
+
+    @patch(_RUN_SINGLE_PATH)
+    def test_overwrite_true_forces_all_completed_runs(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.1}, output_base_dir=self.tmp
+        )
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        self._write_state([42, 101], completed_run_idx=[0, 1])
+        cfg = self._make_cfg(seeds=[42, 101], overwrite=True)
+        results = ExperimentsRunner(cfg).run()
+
+        self.assertEqual(mock_rs.call_count, 2)
+        self.assertEqual(len(results), 2)
+
+    @patch(_RUN_SINGLE_PATH)
+    def test_overwrite_list_forces_only_listed_run_idx(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.1}, output_base_dir=self.tmp
+        )
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        self._write_state([42, 101, 28], completed_run_idx=[0, 1, 2])
+        cfg = self._make_cfg(seeds=[42, 101, 28], overwrite=[1])
+        results = ExperimentsRunner(cfg).run()
+
+        self.assertEqual(mock_rs.call_count, 1)  # only run_idx 1 re-run
+        self.assertEqual(len(results), 3)
+
+    @patch(_RUN_SINGLE_PATH)
+    def test_overwrite_replaces_stale_result_not_duplicates(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.05}, output_base_dir=self.tmp
+        )
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        self._write_state([42, 101], completed_run_idx=[0])
+        cfg = self._make_cfg(seeds=[42, 101], overwrite=[0])
+        results = ExperimentsRunner(cfg).run()
+
+        run0 = [r for r in results if r.run_idx == 0]
+        self.assertEqual(len(run0), 1)
+        self.assertEqual(run0[0].val_metrics["val/loss"], 0.05)  # new, not stale 0.5
+
+    @patch(_RUN_SINGLE_PATH)
+    def test_overwrite_deletes_stale_output_dir_before_rerun(self, mock_rs):
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        run_dir = os.path.join(self.tmp, "run_00_seed42")
+        os.makedirs(run_dir, exist_ok=True)
+        stale_file = os.path.join(run_dir, "stale_checkpoint.ckpt")
+        with open(stale_file, "w") as f:
+            f.write("stale")
+
+        self._write_state([42], completed_run_idx=[0])
+        cfg = self._make_cfg(seeds=[42], overwrite=True)
+        ExperimentsRunner(cfg).run()
+
+        self.assertFalse(os.path.exists(stale_file))
+
+    @patch(_RUN_SINGLE_PATH)
+    def test_retry_of_incomplete_run_cleans_leftover_dir(self, mock_rs):
+        """A run_idx absent from completed_runs (e.g. crashed mid-training)
+        gets its leftover output_dir wiped before the retry, even without
+        `overwrite` — only `resume` is needed to reach this run at all."""
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        run_dir = os.path.join(self.tmp, "run_00_seed42")
+        os.makedirs(run_dir, exist_ok=True)
+        leftover = os.path.join(run_dir, "epoch_03.ckpt")
+        with open(leftover, "w") as f:
+            f.write("leftover")
+
+        self._write_state([42], completed_run_idx=[])  # never completed
+        cfg = self._make_cfg(seeds=[42])
+        ExperimentsRunner(cfg).run()
+
+        self.assertFalse(os.path.exists(leftover))
+
+
 import dataclasses
 import pandas as pd
 from pathlib import Path
@@ -822,6 +976,7 @@ def _make_kfold_runner_cfg(
     n_splits: int = 3,
     save_summary: bool = False,
     resume: bool = False,
+    overwrite=None,
 ):
     """Build a DictConfig with kfold block, train_dataset, and val_dataset."""
     cfg_dict = {
@@ -832,6 +987,7 @@ def _make_kfold_runner_cfg(
             "save_summary": save_summary,
             "summary_metrics": ["val/loss"],
             "resume": resume,
+            **({"overwrite": overwrite} if overwrite is not None else {}),
             "kfold": {
                 "n_splits": n_splits,
                 "seed": 42,
@@ -884,7 +1040,9 @@ class TestKFoldRunMethod(BasicTestCase):
         pd.DataFrame(rows).to_csv(csv_path, index=False)
         self.csv_path = csv_path
 
-    def _make_cfg(self, seeds=None, n_splits=3, save_summary=False, resume=False):
+    def _make_cfg(
+        self, seeds=None, n_splits=3, save_summary=False, resume=False, overwrite=None
+    ):
         return _make_kfold_runner_cfg(
             tmp_dir=self.tmp,
             csv_path=self.csv_path,
@@ -892,6 +1050,7 @@ class TestKFoldRunMethod(BasicTestCase):
             n_splits=n_splits,
             save_summary=save_summary,
             resume=resume,
+            overwrite=overwrite,
         )
 
     @patch(_RUN_SINGLE_PATH)
@@ -1020,6 +1179,44 @@ class TestKFoldRunMethod(BasicTestCase):
         results = ExperimentsRunner(cfg).run()
         self.assertEqual(mock_rs.call_count, 3)
         self.assertEqual(len(results), 6)
+
+    @patch(_RUN_SINGLE_PATH)
+    def test_kfold_overwrite_forces_specific_fold_run(self, mock_rs):
+        """overwrite=[0] re-runs only fold_00_seed42 even though all 6 are done."""
+        mock_rs.side_effect = _make_run_single_se(
+            metrics={"val/loss": 0.05}, output_base_dir=self.tmp
+        )
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+            RunResult,
+        )
+
+        completed = [
+            dataclasses.asdict(
+                RunResult(
+                    run_idx=i,
+                    seed=42 if i < 3 else 101,
+                    training_time_seconds=5.0,
+                    train_metrics={},
+                    val_metrics={"val/loss": 0.3},
+                    test_metrics={},
+                    output_dir=os.path.join(self.tmp, f"fold_{i % 3:02d}_seed_x"),
+                    fold_idx=i % 3,
+                )
+            )
+            for i in range(6)
+        ]
+        state = {"all_seeds": [42, 101], "completed_runs": completed}
+        os.makedirs(self.tmp, exist_ok=True)
+        with open(os.path.join(self.tmp, "runner_state.json"), "w") as f:
+            json.dump(state, f)
+
+        cfg = self._make_cfg(seeds=[42, 101], n_splits=3, resume=True, overwrite=[0])
+        results = ExperimentsRunner(cfg).run()
+        self.assertEqual(mock_rs.call_count, 1)
+        self.assertEqual(len(results), 6)
+        run0 = [r for r in results if r.run_idx == 0][0]
+        self.assertEqual(run0.val_metrics["val/loss"], 0.05)
 
     @patch(_RUN_SINGLE_PATH)
     def test_kfold_fold_csvs_generated_once(self, mock_rs):

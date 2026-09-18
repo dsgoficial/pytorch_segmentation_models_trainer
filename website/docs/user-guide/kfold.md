@@ -129,8 +129,11 @@ The total number of runs is `len(seeds) × n_splits`.  Fold CSVs are generated
 
 ## Resuming Interrupted Runs
 
-Set `resume: true` to skip already-completed runs.  State is persisted in
-`runner_state.json` after every run:
+`resume: true` is the default — already-completed seed×fold runs are
+skipped automatically on restart. State is persisted in
+`runner_state.json` after every run. Use `overwrite` (`true`, or a list of
+`run_idx` values) to force specific completed runs to redo instead — see
+[Experiments Runner — Forcing specific runs to redo](experiments_runner.md#forcing-specific-runs-to-redo-overwrite):
 
 ```yaml
 experiments_runner:

@@ -94,6 +94,12 @@ def main(cfg: DictConfig):
         )
 
         return ExperimentsRunner(cfg).run()
+    elif cfg.mode == "run-pipeline":
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.pipeline_runner import (
+            PipelineRunner,
+        )
+
+        return PipelineRunner(cfg).run()
     elif cfg.mode == "ddoq-vae-distill":
         from pytorch_segmentation_models_trainer.tools.dataset_distillation.vae_ddoq_distillation import (
             run_vae_ddoq_from_config,

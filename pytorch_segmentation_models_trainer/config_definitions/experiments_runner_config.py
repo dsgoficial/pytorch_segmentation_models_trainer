@@ -44,11 +44,23 @@ class ExperimentsRunnerConfig:
         summary_metrics: Metric keys (as logged by Lightning, e.g.
             ``"val/loss"``) to highlight in log output.  All available
             metrics are always written to the CSV regardless of this list.
-        resume: When ``True`` and a ``runner_state.json`` exists in
+        resume: When ``True`` (default) and a ``runner_state.json`` exists in
             ``output_base_dir``, already-completed runs are skipped and
-            execution continues from the first pending run.  Seeds are
-            loaded from the state file so auto-generated seeds are stable
-            across restarts.
+            execution continues from the first pending run — i.e. runs are
+            idempotent by default: re-launching the same config is safe and
+            will not repeat or overwrite finished work. Seeds are loaded
+            from the state file so auto-generated seeds are stable across
+            restarts. Set explicitly to ``False`` to always start every run
+            fresh, ignoring any existing state.
+        overwrite: Forces re-execution of runs that are already marked
+            complete in ``runner_state.json`` (which ``resume`` would
+            otherwise skip). ``True`` forces every run; a list of ints
+            forces only those ``run_idx`` values (the ``run`` column in
+            ``summary.csv`` / the ``run_XX_seed...`` output directory
+            prefix). ``False`` or ``None`` (default) forces nothing. Each
+            forced run's previous output directory is deleted before it is
+            re-run, and its stale entry in ``runner_state.json`` /
+            ``summary.csv`` is replaced (not duplicated) by the new result.
         representative_metric: Metric key used to select the representative
             run (closest to mean) and the best run (highest value).  When
             absent, the first val metric found alphabetically is used.
@@ -62,7 +74,8 @@ class ExperimentsRunnerConfig:
           seeds: [42, 101, 28]
           output_base_dir: outputs/reproducibility_study
           save_summary: true
-          resume: false
+          resume: true
+          overwrite: [1]        # redo only run_idx 1 (e.g. seed 101 crashed)
           summary_metrics:
             - val/loss
             - val/F1Score
@@ -73,7 +86,8 @@ class ExperimentsRunnerConfig:
     output_base_dir: str = "outputs/experiments_runner"
     save_summary: bool = True
     summary_metrics: List[str] = field(default_factory=lambda: ["val/loss"])
-    resume: bool = False
+    resume: bool = True
+    overwrite: Optional[Any] = None
     kfold: Optional[Any] = None
     representative_metric: Optional[str] = None
     optuna_search: Optional[Any] = None
