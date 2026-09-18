@@ -125,6 +125,47 @@ python -c "import torch; print(torch.cuda.get_arch_list())"
 
 There is no `cu126` extra baked into `pyproject.toml` — uv has no clean way to express "default index normally, override only for one hardware target" without also breaking the default install for everyone else, so this is a manual, documented step for V100 hosts.
 
+### AIO2 O2C GPU Acceleration (optional)
+
+[Mean-Teacher AIO2](website/docs/user-guide/mean-teacher-aio2.md)'s online
+object-wise correction (O2C) runs connected-component labelling once per
+image, every batch — CPU-bound (`skimage`/`scipy`) by default, which forces
+a CUDA sync + host transfer on every call. Installing the `gpu-ml` extra
+(above) lets it run entirely on GPU instead, via
+[cuCIM](https://github.com/rapidsai/cucim) (RAPIDS) — same exact
+connected-components algorithm as `skimage`, zero-copy from PyTorch CUDA
+tensors via DLPack, no CPU round-trip:
+
+```bash
+uv sync --extra gpu-ml
+```
+
+Requires an NVIDIA GPU with compute capability **7.0+** (Volta or newer —
+a Tesla V100 qualifies) and Linux (or WSL2) — cuCIM/RAPIDS has no native
+macOS/Windows support. `gpu-ml`'s dependency resolution pins the whole
+RAPIDS stack (and, transitively, `torch`) to the CUDA 12.x line — on a
+V100 this already lands on a CUDA-12-compatible `torch` build, so the
+manual `cu126` override two sections up is not needed on top of `gpu-ml`.
+
+This is entirely optional and auto-detected at runtime — `online_object_correction`
+falls back to the CPU path automatically whenever cuCIM isn't importable
+or the input isn't already on a CUDA device; nothing else changes if you
+skip this extra. Verify the install:
+
+```bash
+python -c "import cucim, cupy; print(cucim.__version__, cupy.__version__)"
+```
+
+Then confirm the GPU path produces identical output to the CPU path on
+your actual hardware before relying on it for a real run — this repo's
+test suite includes that exact equivalence check
+(`tests/test_o2c_correction.py::TestGpuCpuEquivalence`), skipped
+automatically without CUDA, so it only runs where it actually can:
+
+```bash
+uv run pytest tests/test_o2c_correction.py -v -k GpuCpuEquivalence
+```
+
 ### Dependencies
 
 Core dependencies include:

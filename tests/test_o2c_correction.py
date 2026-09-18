@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 """Tests for online_object_correction (O2C, AIO2 §2.4, multiclass generalization)."""
 
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 import torch
 
 from pytorch_segmentation_models_trainer.utils.o2c_correction import (
+    _resolve_use_gpu,
     online_object_correction,
 )
 
@@ -239,3 +242,76 @@ class TestDeviceAndDtypePreservation:
         probs = torch.ones(3, H, W) / 3
         out = online_object_correction(noisy, probs, [0, 1])
         assert out.device == noisy.device
+
+
+_O2C_MODULE = "pytorch_segmentation_models_trainer.utils.o2c_correction"
+
+
+class TestUseGpuDispatch:
+    """`_resolve_use_gpu` in isolation — no CUDA/cuCIM needed to test the
+    decision logic itself, only the actual GPU codepath needs real hardware."""
+
+    def test_default_none_stays_cpu_without_cuda_tensor(self):
+        with patch(f"{_O2C_MODULE}._cucim_available", return_value=True):
+            assert _resolve_use_gpu(None, is_cuda=False) is False
+
+    def test_default_none_stays_cpu_without_cucim_even_if_cuda(self):
+        with patch(f"{_O2C_MODULE}._cucim_available", return_value=False):
+            assert _resolve_use_gpu(None, is_cuda=True) is False
+
+    def test_default_none_uses_gpu_when_cuda_and_cucim_available(self):
+        with patch(f"{_O2C_MODULE}._cucim_available", return_value=True):
+            assert _resolve_use_gpu(None, is_cuda=True) is True
+
+    def test_explicit_false_forces_cpu_even_on_cuda_with_cucim(self):
+        with patch(f"{_O2C_MODULE}._cucim_available", return_value=True):
+            assert _resolve_use_gpu(False, is_cuda=True) is False
+
+    def test_explicit_true_raises_when_cucim_missing(self):
+        with patch(f"{_O2C_MODULE}._cucim_available", return_value=False):
+            with pytest.raises(RuntimeError, match="cuCIM"):
+                _resolve_use_gpu(True, is_cuda=True)
+
+    def test_explicit_true_ok_when_cucim_available(self):
+        with patch(f"{_O2C_MODULE}._cucim_available", return_value=True):
+            assert _resolve_use_gpu(True, is_cuda=False) is True
+
+    def test_online_object_correction_cpu_tensor_never_touches_cucim(self):
+        """End-to-end: a CPU input never even checks cuCIM availability,
+        let alone imports it — existing CPU-only callers are unaffected."""
+        noisy = torch.zeros(H, W, dtype=torch.long)
+        probs = torch.ones(3, H, W) / 3
+        with patch(f"{_O2C_MODULE}._cucim_available") as mock_avail:
+            out = online_object_correction(noisy, probs, [0, 1])
+        mock_avail.assert_not_called()
+        assert out.device == noisy.device
+
+    def test_online_object_correction_use_gpu_true_raises_without_cucim(self):
+        noisy = torch.zeros(H, W, dtype=torch.long)
+        probs = torch.ones(3, H, W) / 3
+        with patch(f"{_O2C_MODULE}._cucim_available", return_value=False):
+            with pytest.raises(RuntimeError, match="cuCIM"):
+                online_object_correction(noisy, probs, [0, 1], use_gpu=True)
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="GPU equivalence check needs a real CUDA device",
+)
+class TestGpuCpuEquivalence:
+    """Only runs where CUDA is actually present (the training server, not
+    this dev machine) — the check the module docstring calls for: same
+    inputs through both backends must give the exact same output."""
+
+    def test_gpu_path_matches_cpu_path(self):
+        noisy = torch.randint(0, 4, (32, 32), dtype=torch.long)
+        probs = torch.rand(4, 32, 32)
+        probs = probs / probs.sum(dim=0, keepdim=True)
+
+        out_cpu = online_object_correction(
+            noisy, probs, [1, 2], filter_size=3, use_gpu=False
+        )
+        out_gpu = online_object_correction(
+            noisy.cuda(), probs.cuda(), [1, 2], filter_size=3, use_gpu=True
+        )
+        assert torch.equal(out_cpu, out_gpu.cpu())

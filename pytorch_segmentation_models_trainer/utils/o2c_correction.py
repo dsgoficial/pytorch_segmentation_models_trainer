@@ -10,10 +10,45 @@ literal per-class replay of the official binary logic is documented as such,
 and mirrored in the article repository's decision log
 (``doutorado_artigo_sam_noisy_labels/descricao_novos_experimentos.md``,
 section "Adendo").
+
+GPU acceleration (2026-09-18 addendum)
+---------------------------------------
+This function is called once per image in a batch, every batch in
+``correct_base="iter"`` mode (the default) — a real hot path. The default
+(CPU) path round-trips through ``.cpu().numpy()`` and uses
+``skimage``/``scipy`` for connected-component labelling and boundary
+erosion, which forces a CUDA sync + host transfer on every call.
+
+An earlier attempt at a GPU-native connected-components replacement
+(``kornia.contrib.connected_components``) was verified and rejected: it's
+an *approximate*, iterative label-propagation algorithm, not the exact
+scanline algorithm skimage uses. Empirically, on realistic 256x256 masks it
+mismatched skimage in 41/60 trials at its default ``num_iterations=100``,
+and still needed ~512 iterations (5x default) to reach 0/60 mismatches in
+that sample — with no formal convergence guarantee for an unseen mask
+shape. Not acceptable for an operation that decides which pixels a
+published method corrects.
+
+The path below instead uses **cuCIM** (RAPIDS, ``uv sync --extra gpu-ml`` —
+see the README's "AIO2 O2C GPU Acceleration" section) for
+``label``/``uniform_filter``: connected-component labelling has an exact
+solution (Rosenfeld & Pfaltz 1966) — every correct implementation,
+including cuCIM's, produces an identical partition to skimage's, they only
+differ in speed. cuCIM interoperates with PyTorch CUDA tensors via DLPack
+(zero-copy — no host transfer at all). Requires an NVIDIA GPU with compute
+capability 7.0+ (Volta or newer, e.g. V100) and a matching CUDA major
+version for the ``cucim-cuXX`` wheel (the ``gpu-ml`` extra pins this).
+
+**Not exercised by this repo's test suite** (no CUDA on the dev machine) —
+only the CPU path and the ``use_gpu`` dispatch *decision* are covered by
+tests. Before trusting the GPU path in a real training run: on the actual
+training server, run one batch through both ``use_gpu=True`` and
+``use_gpu=False`` on the *same* inputs and assert the outputs are
+identical, the same equivalence check used to reject kornia above.
 """
 
 import logging
-from typing import Dict, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
 import torch
@@ -24,6 +59,46 @@ logger = logging.getLogger(__name__)
 
 _VALID_CONFLICT_RESOLUTIONS = ("priority_order", "teacher_confidence")
 
+_cucim_available_cache: Optional[bool] = None
+
+
+def _cucim_available() -> bool:
+    """Whether cuCIM (+ CuPy) can be imported — cached after the first check."""
+    global _cucim_available_cache
+    if _cucim_available_cache is None:
+        try:
+            import cucim.scipy.ndimage  # noqa: F401
+            import cucim.skimage.measure  # noqa: F401
+            import cupy  # noqa: F401
+
+            _cucim_available_cache = True
+        except ImportError:
+            _cucim_available_cache = False
+    return _cucim_available_cache
+
+
+def _resolve_use_gpu(use_gpu: Optional[bool], is_cuda: bool) -> bool:
+    """Decide whether to run the cuCIM/CuPy path.
+
+    ``None`` (default) — GPU path iff the input tensor is already on a CUDA
+    device *and* cuCIM is importable; otherwise the CPU path, silently.
+    ``True`` — force the GPU path, raising if cuCIM isn't available (rather
+    than silently falling back, so a misconfigured server doesn't quietly
+    train on the slow path without anyone noticing).
+    ``False`` — force the CPU path regardless of device (useful to run the
+    GPU-input/CPU-path equivalence check called for in the module docstring).
+    """
+    if use_gpu is None:
+        return is_cuda and _cucim_available()
+    if use_gpu and not _cucim_available():
+        raise RuntimeError(
+            "online_object_correction: use_gpu=True but cuCIM is not "
+            "importable. Install it with `uv sync --extra gpu-ml` (see the "
+            "README's 'AIO2 O2C GPU Acceleration' section). Leave use_gpu "
+            "unset (None) to fall back to the CPU path automatically instead."
+        )
+    return bool(use_gpu)
+
 
 def online_object_correction(
     noisy_hard: torch.Tensor,
@@ -31,12 +106,13 @@ def online_object_correction(
     classes_to_correct: Sequence[int],
     filter_size: int = -1,
     conflict_resolution: str = "priority_order",
+    use_gpu: Optional[bool] = None,
 ) -> torch.Tensor:
     """Correct one noisy hard label using the teacher's predictions (O2C).
 
     Operates on a single image (not batched — call once per item in a
-    batch; connected-component labelling has no batched GPU implementation,
-    same constraint as the official code).
+    batch; connected-component labelling has no batched GPU implementation
+    in either backend used here, same constraint as the official code).
 
     For each class ``c`` in ``classes_to_correct`` (order matters — see
     ``conflict_resolution``), finds connected components of
@@ -111,6 +187,13 @@ def online_object_correction(
             ``<= 0`` disables it (hard proposals used as-is), matching the
             official code's "use hard labels" branch.
         conflict_resolution: ``"priority_order"`` or ``"teacher_confidence"``.
+        use_gpu: ``None`` (default) auto-selects cuCIM/CuPy when
+            ``noisy_hard`` is already on a CUDA device and cuCIM is
+            importable, else the CPU (numpy/scipy/skimage) path. ``True``
+            forces the GPU path (raises if cuCIM isn't available). ``False``
+            forces the CPU path regardless of device — see the module
+            docstring's GPU-acceleration note for why/how to use this for
+            an equivalence check.
 
     Returns:
         ``(H, W)`` tensor, same dtype/device as ``noisy_hard`` — the
@@ -136,64 +219,89 @@ def online_object_correction(
             f"got {classes_to_correct}"
         )
 
-    noisy_np = noisy_hard.detach().cpu().numpy()
-    probs_np = teacher_probs.detach().cpu().numpy()
+    use_gpu = _resolve_use_gpu(use_gpu, bool(noisy_hard.is_cuda))
 
-    proposals = _per_class_proposals(noisy_np, probs_np, classes_to_correct)
+    if use_gpu:
+        import cupy as cp
+        from cucim.scipy import ndimage as ndi
+        from cucim.skimage.measure import label as label_fn
+
+        xp = cp
+        noisy_arr = cp.from_dlpack(
+            torch.utils.dlpack.to_dlpack(noisy_hard.detach().contiguous())
+        )
+        probs_arr = cp.from_dlpack(
+            torch.utils.dlpack.to_dlpack(teacher_probs.detach().contiguous())
+        )
+    else:
+        xp = np
+        ndi = ndimage
+        label_fn = cc_label
+        noisy_arr = noisy_hard.detach().cpu().numpy()
+        probs_arr = teacher_probs.detach().cpu().numpy()
+
+    proposals = _per_class_proposals(
+        noisy_arr, probs_arr, classes_to_correct, xp, label_fn
+    )
     assigned = _resolve_conflicts(
-        proposals, probs_np, classes_to_correct, conflict_resolution
+        proposals, probs_arr, classes_to_correct, conflict_resolution, xp
     )
 
     if filter_size > 0:
-        assigned = _erode_boundaries(assigned, classes_to_correct, filter_size)
+        assigned = _erode_boundaries(assigned, classes_to_correct, filter_size, xp, ndi)
 
-    corrected = noisy_np.copy()
+    corrected = noisy_arr.copy()
     has_new = assigned >= 0
     corrected[has_new] = assigned[has_new]
 
     # "Fixed classes": restore every pixel whose ORIGINAL class is not
     # eligible for correction, regardless of what was proposed for it.
     # Verbatim mirror of apply_region_correction (SAM/SLICO), see docstring.
-    non_target = ~np.isin(noisy_np, classes_to_correct)
-    corrected[non_target] = noisy_np[non_target]
+    non_target = ~xp.isin(noisy_arr, classes_to_correct)
+    corrected[non_target] = noisy_arr[non_target]
 
+    if use_gpu:
+        out = torch.utils.dlpack.from_dlpack(corrected.toDlpack())
+        return out.to(dtype=noisy_hard.dtype, device=noisy_hard.device)
     return torch.from_numpy(corrected).to(
         dtype=noisy_hard.dtype, device=noisy_hard.device
     )
 
 
 def _per_class_proposals(
-    noisy_np: np.ndarray, probs_np: np.ndarray, classes_to_correct: Sequence[int]
-) -> Dict[int, np.ndarray]:
+    noisy_arr, probs_arr, classes_to_correct: Sequence[int], xp, label_fn
+) -> Dict[int, Any]:
     """Per-class candidate "missed object" masks (before conflict resolution).
 
     Port of the overlap-check core of ``obj_wise_label_correction``, run
     once per class instead of once (the official code has exactly one
-    foreground class).
+    foreground class). ``xp``/``label_fn`` select the numpy+skimage or
+    cupy+cuCIM backend — the logic is identical either way.
     """
     proposals = {}
     for c in classes_to_correct:
-        pred_bin = probs_np[c] > 0.5
-        noisy_bin = noisy_np == c
-        labeled = cc_label(pred_bin)
+        pred_bin = probs_arr[c] > 0.5
+        noisy_bin = noisy_arr == c
+        labeled = label_fn(pred_bin)
         if labeled.max() == 0:
-            proposals[c] = np.zeros_like(pred_bin, dtype=bool)
+            proposals[c] = xp.zeros_like(pred_bin, dtype=bool)
             continue
-        overlap_ids = np.unique(labeled[noisy_bin])
+        overlap_ids = xp.unique(labeled[noisy_bin])
         overlap_ids = overlap_ids[overlap_ids != 0]  # 0 = not-an-object, not a real id
-        proposals[c] = (labeled > 0) & ~np.isin(labeled, overlap_ids)
+        proposals[c] = (labeled > 0) & ~xp.isin(labeled, overlap_ids)
     return proposals
 
 
 def _resolve_conflicts(
-    proposals: Dict[int, np.ndarray],
-    probs_np: np.ndarray,
+    proposals: Dict[int, Any],
+    probs_arr,
     classes_to_correct: Sequence[int],
     conflict_resolution: str,
-) -> np.ndarray:
+    xp,
+):
     """Return ``(H, W)`` int array: winning class per pixel, or ``-1`` (no proposal)."""
     shape = next(iter(proposals.values())).shape
-    assigned = np.full(shape, -1, dtype=np.int64)
+    assigned = xp.full(shape, -1, dtype=np.int64)
 
     if conflict_resolution == "priority_order":
         for c in classes_to_correct:  # first in the list wins disputed pixels
@@ -202,28 +310,28 @@ def _resolve_conflicts(
         return assigned
 
     # teacher_confidence: highest teacher_probs[c] among proposing classes wins.
-    stacked_probs = np.stack([probs_np[c] for c in classes_to_correct])  # (K, H, W)
-    stacked_mask = np.stack(
+    stacked_probs = xp.stack([probs_arr[c] for c in classes_to_correct])  # (K, H, W)
+    stacked_mask = xp.stack(
         [proposals[c] for c in classes_to_correct]
     )  # (K, H, W) bool
-    masked_probs = np.where(stacked_mask, stacked_probs, -np.inf)
+    masked_probs = xp.where(stacked_mask, stacked_probs, -np.inf)
     any_claim = stacked_mask.any(axis=0)
-    best_idx = np.argmax(masked_probs, axis=0)  # index into classes_to_correct
-    winning_class = np.asarray(classes_to_correct)[best_idx]
+    best_idx = xp.argmax(masked_probs, axis=0)  # index into classes_to_correct
+    winning_class = xp.asarray(classes_to_correct)[best_idx]
     assigned[any_claim] = winning_class[any_claim]
     return assigned
 
 
 def _erode_boundaries(
-    assigned: np.ndarray, classes_to_correct: Sequence[int], filter_size: int
-) -> np.ndarray:
+    assigned, classes_to_correct: Sequence[int], filter_size: int, xp, ndi
+):
     """Shrink each newly-assigned class region inward (see module docstring point 3)."""
     result = assigned.copy()
     for c in classes_to_correct:
         mask = assigned == c
         if not mask.any():
             continue
-        smoothed = ndimage.uniform_filter(mask.astype(np.float64), size=filter_size)
+        smoothed = ndi.uniform_filter(mask.astype(np.float64), size=filter_size)
         keep = mask & (smoothed > 0.5)
         result[mask & ~keep] = -1
     return result

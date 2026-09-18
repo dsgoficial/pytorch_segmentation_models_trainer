@@ -212,6 +212,18 @@ covers what AIO2 needs.
 
 ---
 
+## GPU acceleration for O2C
+
+O2C's connected-component labelling runs once per image, every batch —
+CPU-bound by default. It auto-detects and uses a GPU-native path (cuCIM,
+zero-copy from CUDA tensors) whenever available, with zero config changes
+here — see the [README's "AIO2 O2C GPU Acceleration"
+section](../../../README.md#aio2-o2c-gpu-acceleration-optional) for
+installation (`uv sync --extra gpu-ml`) and hardware requirements
+(compute capability 7.0+, e.g. Tesla V100).
+
+---
+
 ## API Reference
 
 ### `ACTTracker`
