@@ -35,6 +35,7 @@ from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks imp
 )
 from pytorch_segmentation_models_trainer.tools.inference.inference_processors import (
     MultiClassInferenceProcessor,
+    SingleImageInfereceProcessor,
 )
 
 
@@ -1072,6 +1073,25 @@ class TestTTATransforms(unittest.TestCase):
         transforms = proc._get_tta_transforms()
         self.assertEqual(len(transforms), 8)
 
+    def test_get_tta_transforms_d8_is_alias_for_d4(self):
+        """'d8' names the same 8 dihedral transforms as 'd4' (two conventional
+        names for the square's symmetry group — 4-gon vs. group order 8)."""
+        proc = MultiClassInferenceProcessor.__new__(MultiClassInferenceProcessor)
+        proc.tta_mode = "d8"
+        transforms = proc._get_tta_transforms()
+        self.assertEqual(len(transforms), 8)
+        proc.tta_mode = "d4"
+        self.assertEqual(transforms, proc._get_tta_transforms())
+
+    def test_multiclass_processor_accepts_d8_tta_mode(self):
+        MultiClassInferenceProcessor(
+            model=Mock(),
+            device="cpu",
+            batch_size=1,
+            export_strategy=Mock(),
+            tta_mode="d8",
+        )
+
     def test_get_tta_transforms_flip(self):
         proc = MultiClassInferenceProcessor.__new__(MultiClassInferenceProcessor)
         proc.tta_mode = "flip"
@@ -1094,6 +1114,24 @@ class TestTTATransforms(unittest.TestCase):
                 export_strategy=Mock(),
                 tta_mode="invalid",
             )
+
+    def test_single_image_processor_d8_mode_selects_same_augs_as_d4(self):
+        proc_d4 = SingleImageInfereceProcessor(
+            model=Mock(),
+            device="cpu",
+            batch_size=1,
+            export_strategy=Mock(),
+            tta_mode="d4",
+        )
+        proc_d8 = SingleImageInfereceProcessor(
+            model=Mock(),
+            device="cpu",
+            batch_size=1,
+            export_strategy=Mock(),
+            tta_mode="d8",
+        )
+        self.assertEqual(proc_d4.tta_augmentations, proc_d8.tta_augmentations)
+        self.assertEqual(len(proc_d8.tta_augmentations), 8)
 
 
 # ----------------------------------------------------------------------

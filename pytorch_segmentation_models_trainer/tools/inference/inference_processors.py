@@ -206,17 +206,21 @@ class AbstractInferenceProcessor(ABC):
 
 class SingleImageInfereceProcessor(AbstractInferenceProcessor):
     # Map tta_mode strings to tta_augmentations lists (same interface as MultiClass)
+    # "d4" and "d8" are the same 8 transforms under the two conventional names
+    # for the square's dihedral group (4-gon vs. group-order-8) — both accepted.
+    _D4_D8_AUGMENTATIONS = [
+        "rot0",
+        "rot90",
+        "rot180",
+        "rot270",
+        "flip_h",
+        "flip_v",
+        "flip_h_rot90",
+        "flip_v_rot90",
+    ]
     _TTA_MODE_AUGMENTATIONS = {
-        "d4": [
-            "rot0",
-            "rot90",
-            "rot180",
-            "rot270",
-            "flip_h",
-            "flip_v",
-            "flip_h_rot90",
-            "flip_v_rot90",
-        ],
+        "d4": _D4_D8_AUGMENTATIONS,
+        "d8": _D4_D8_AUGMENTATIONS,
         "flip": ["rot0", "flip_h", "rot180", "flip_v"],
     }
 
@@ -245,7 +249,7 @@ class SingleImageInfereceProcessor(AbstractInferenceProcessor):
         if tta_mode is not None:
             if tta_mode not in self._TTA_MODE_AUGMENTATIONS:
                 raise ValueError(
-                    f"tta_mode must be None, 'd4', or 'flip', got '{tta_mode}'"
+                    f"tta_mode must be None, 'd4', 'd8', or 'flip', got '{tta_mode}'"
                 )
             use_tta = True
             tta_augmentations = self._TTA_MODE_AUGMENTATIONS[tta_mode]
@@ -473,9 +477,9 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
             tile_weight=tile_weight,
         )
         self.num_classes = num_classes
-        if tta_mode is not None and tta_mode not in ("d4", "flip"):
+        if tta_mode is not None and tta_mode not in ("d4", "d8", "flip"):
             raise ValueError(
-                f"tta_mode must be None, 'd4', or 'flip', got '{tta_mode}'"
+                f"tta_mode must be None, 'd4', 'd8', or 'flip', got '{tta_mode}'"
             )
         self.tta_mode = tta_mode
         self.striped_threshold_pixels = striped_threshold_pixels
@@ -521,7 +525,7 @@ class MultiClassInferenceProcessor(SingleImageInfereceProcessor):
         return tensor
 
     def _get_tta_transforms(self):
-        if self.tta_mode == "d4":
+        if self.tta_mode in ("d4", "d8"):
             return self._D4_TRANSFORMS
         elif self.tta_mode == "flip":
             return self._FLIP_TRANSFORMS

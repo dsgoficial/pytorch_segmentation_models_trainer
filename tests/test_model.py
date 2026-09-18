@@ -100,6 +100,35 @@ class TestModelLoader(unittest.TestCase):
             augs = model_pl._get_tta_augmentations()
             self.assertEqual(len(augs), 8)
 
+    def test_get_tta_augmentations_d8_is_alias_for_d4(self):
+        """'d8' (group-order convention) and 'd4' (4-gon convention) name the
+        same 8-transform dihedral set — both accepted, identical result."""
+        with patch(
+            "pytorch_segmentation_models_trainer.model_loader.model.instantiate"
+        ) as mock_inst:
+            mock_model = nn.Identity()
+            mock_loss = nn.BCEWithLogitsLoss()
+            mock_metric = torchmetrics.JaccardIndex(task="binary")
+            mock_inst.side_effect = [mock_model, mock_loss, mock_metric]
+
+            self.cfg.tta_mode = "d8"
+            model_pl = Model(self.cfg)
+            augs = model_pl._get_tta_augmentations()
+            self.assertEqual(len(augs), 8)
+            self.assertEqual(
+                augs,
+                [
+                    "rot0",
+                    "rot90",
+                    "rot180",
+                    "rot270",
+                    "flip_h",
+                    "flip_v",
+                    "flip_h_rot90",
+                    "flip_v_rot90",
+                ],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1161,13 +1161,19 @@ class Model(pl.LightningModule):
         (SingleImageInferenceProcessor-style interface).
 
         ``tta_mode`` values:
-            - ``"d4"``   — all 8 dihedral symmetries (4 rotations × 2 flips)
+            - ``"d4"`` / ``"d8"`` — all 8 dihedral symmetries of the square
+              (4 rotations × 2 flips). Same 8 transforms under two names —
+              the dihedral group of a square is called "D4" in the
+              geometric convention (4-gon) and "D8" in the algebraic one
+              (group order 8); both are common in the literature, so both
+              spellings are accepted here rather than forcing one on
+              config authors coming from either convention.
             - ``"flip"`` — identity + hflip + rot180 + vflip (4 passes)
             - ``None``   — disabled (fall through to use_tta)
 
         YAML example — tta_mode interface::
 
-            tta_mode: d4   # or: flip
+            tta_mode: d8   # or: d4 (same thing), or: flip
 
         YAML example — use_tta interface::
 
@@ -1178,24 +1184,26 @@ class Model(pl.LightningModule):
               - rot180
               - rot270
         """
+        _D4_D8_AUGMENTATIONS = [
+            "rot0",
+            "rot90",
+            "rot180",
+            "rot270",
+            "flip_h",
+            "flip_v",
+            "flip_h_rot90",
+            "flip_v_rot90",
+        ]
         _TTA_MODE_MAP = {
-            "d4": [
-                "rot0",
-                "rot90",
-                "rot180",
-                "rot270",
-                "flip_h",
-                "flip_v",
-                "flip_h_rot90",
-                "flip_v_rot90",
-            ],
+            "d4": _D4_D8_AUGMENTATIONS,
+            "d8": _D4_D8_AUGMENTATIONS,
             "flip": ["rot0", "flip_h", "rot180", "flip_v"],
         }
         tta_mode = getattr(self.cfg, "tta_mode", None)
         if tta_mode is not None:
             if tta_mode not in _TTA_MODE_MAP:
                 raise ValueError(
-                    f"tta_mode must be None, 'd4', or 'flip', got '{tta_mode}'"
+                    f"tta_mode must be None, 'd4', 'd8', or 'flip', got '{tta_mode}'"
                 )
             return _TTA_MODE_MAP[tta_mode]
 

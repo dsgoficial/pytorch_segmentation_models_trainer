@@ -60,7 +60,7 @@ Use the `tta_mode` field for the cleanest config. Two presets are available:
 
 | `tta_mode` | Passes | Coverage |
 | --- | --- | --- |
-| `"d4"` | 8× | All 8 dihedral symmetries (4 rotations × 2 flips) |
+| `"d4"` / `"d8"` | 8× | All 8 dihedral symmetries of the square (4 rotations × 2 flips). Same 8 transforms under both names — "D4" (4-gon) and "D8" (group order 8) are both standard names for this group in the literature, so both spellings are accepted. |
 | `"flip"` | 4× | Identity + horizontal flip + 180° rotation + vertical flip |
 
 ```yaml title="configs/predict_multiclass_tta.yaml"
@@ -69,7 +69,7 @@ inference_processor:
   model_input_shape: [512, 512]
   step_shape: [256, 256]
   num_classes: 5
-  tta_mode: d4          # or: flip
+  tta_mode: d8          # or: d4 (same thing), or: flip
   tile_weight: gaussian # optional: mean | pyramid | gaussian
 ```
 
@@ -97,7 +97,7 @@ inference_processor:
   model_input_shape: [448, 448]
   step_shape: [224, 224]
   # ── Option A: compact preset ─────────────────────────────────────────────
-  tta_mode: d4
+  tta_mode: d8 # or: d4 (same thing)
   # ── Option B: explicit list ──────────────────────────────────────────────
   # use_tta: true
   # tta_augmentations:
@@ -129,7 +129,7 @@ To enable TTA during model evaluation, add `tta_mode` (compact) or `use_tta` (ex
 ```yaml title="configs/train_with_tta_eval.yaml"
 # ... other training settings ...
 
-tta_mode: d4   # or: flip
+tta_mode: d8   # or: d4 (same thing), or: flip
 ```
 
 **Option B — explicit augmentation list:**
