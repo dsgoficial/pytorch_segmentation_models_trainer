@@ -9,6 +9,38 @@ imported from dedicated modules and registered with ``cli.add_command(...)``.
 import click
 
 
+def _load_config_with_paths(yaml_path) -> dict:
+    """Load a YAML config via OmegaConf, auto-merging a sibling ``paths.yaml``
+    (same directory as ``yaml_path``, if present) underneath it before
+    resolving interpolations.
+
+    This is the non-Hydra ``pytorch-smt-tools`` commands' equivalent of
+    Hydra's ``defaults: - paths`` composition (used by ``pytorch-smt``
+    proper): it's what lets a config here reference ``${paths.base}/...``
+    instead of hardcoding an absolute path — plain ``yaml.safe_load`` (used
+    everywhere else in this file) has no interpolation or file-composition
+    support at all, so this is a deliberate, separate loader only for
+    commands that opt into it.
+
+    Args:
+        yaml_path: Path to the command's own YAML config.
+
+    Returns:
+        The fully resolved config as a plain dict (OmegaConf containers
+        resolved to native Python types) — ready to filter down to one
+        subsection and pass as kwargs to a config dataclass.
+    """
+    from pathlib import Path
+
+    from omegaconf import OmegaConf
+
+    cfg = OmegaConf.load(yaml_path)
+    paths_file = Path(yaml_path).parent / "paths.yaml"
+    if paths_file.exists():
+        cfg = OmegaConf.merge(OmegaConf.load(paths_file), cfg)
+    return OmegaConf.to_container(cfg, resolve=True)
+
+
 @click.group()
 def cli():
     """Command-line utilities for pytorch_segmentation_models_trainer."""
@@ -2124,17 +2156,15 @@ def build_sam_corrected_masks_cmd(yaml_path):
     """Run SAM-based label correction over a coreset of GeoTIFF masks.
 
     YAML_PATH must point to a YAML file with SAMLabelCorrectionConfig fields.
+    A sibling ``paths.yaml`` next to YAML_PATH, if present, is merged in
+    automatically so the config can reference ``${paths.xxx}``.
     """
-    import yaml
-
     from pytorch_segmentation_models_trainer.tools.sam_correction.sam_label_corrector import (
         SAMLabelCorrectionConfig,
         SamLabelCorrector,
     )
 
-    with open(yaml_path) as fh:
-        raw = yaml.safe_load(fh)
-
+    raw = _load_config_with_paths(yaml_path)
     cfg_dict = raw.get("sam_label_correction", raw)
 
     try:
@@ -2157,17 +2187,15 @@ def build_slico_corrected_masks_cmd(yaml_path):
     """Run SLICO-based label correction over a coreset of GeoTIFF masks.
 
     YAML_PATH must point to a YAML file with SLICOLabelCorrectionConfig fields.
+    A sibling ``paths.yaml`` next to YAML_PATH, if present, is merged in
+    automatically so the config can reference ``${paths.xxx}``.
     """
-    import yaml
-
     from pytorch_segmentation_models_trainer.tools.slico_correction.slico_label_corrector import (
         SLICOLabelCorrectionConfig,
         SlicoLabelCorrector,
     )
 
-    with open(yaml_path) as fh:
-        raw = yaml.safe_load(fh)
-
+    raw = _load_config_with_paths(yaml_path)
     cfg_dict = raw.get("slico_label_correction", raw)
 
     try:
