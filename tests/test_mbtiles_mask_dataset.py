@@ -508,3 +508,76 @@ def test_invalid_window_index_cache_extension_raises(tmp_path):
             stride=16,
             window_index_cache=tmp_path / "index.json",
         )
+
+
+def test_mask_class_mapping_merges_classes(tmp_path):
+    source = tmp_path / "source.tif"
+    mask = tmp_path / "masks" / "mask.tif"
+    _write_rgb_raster(source)
+    _write_mask(mask, values=(0, 5))
+
+    ds = mbtiles_mask_dataset.MBTilesMaskWindowedDataset(
+        mbtiles_path=source,
+        mask_paths=[mask],
+        patch_size=32,
+        stride=32,
+        n_classes=5,
+        mask_class_mapping={5: 3},
+    )
+
+    values = set(torch.unique(ds[0]["mask"]).tolist())
+    assert values == {0, 3}
+
+
+def test_mask_class_mapping_invalid_raises(tmp_path):
+    source = tmp_path / "source.tif"
+    mask = tmp_path / "masks" / "mask.tif"
+    _write_rgb_raster(source)
+    _write_mask(mask)
+
+    with pytest.raises(ValueError):
+        mbtiles_mask_dataset.MBTilesMaskWindowedDataset(
+            mbtiles_path=source,
+            mask_paths=[mask],
+            patch_size=32,
+            n_classes=5,
+            mask_class_mapping={5: 256},
+        )
+
+
+def test_mask_class_mapping_config_dataclass(tmp_path):
+    source = tmp_path / "source.tif"
+    mask = tmp_path / "masks" / "mask.tif"
+    _write_rgb_raster(source)
+    _write_mask(mask, values=(0, 5))
+
+    cfg = OmegaConf.merge(
+        OmegaConf.structured(dataset_config.MBTilesMaskWindowedDatasetConfig),
+        {
+            "mbtiles_path": str(source),
+            "mask_paths": [str(mask)],
+            "patch_size": 32,
+            "n_classes": 5,
+            "mask_class_mapping": {5: 3},
+        },
+    )
+    root = OmegaConf.create({"hyperparameters": {"batch_size": 2}, "ds": cfg})
+    ds = instantiate(root.ds)
+    assert int(np.max(np.asarray(ds[0]["mask"]))) == 3
+
+
+def test_mask_class_mapping_applied_before_binarization(tmp_path):
+    source = tmp_path / "source.tif"
+    mask = tmp_path / "masks" / "mask.tif"
+    _write_rgb_raster(source)
+    _write_mask(mask, values=(0, 5))
+
+    ds = mbtiles_mask_dataset.MBTilesMaskWindowedDataset(
+        mbtiles_path=source,
+        mask_paths=[mask],
+        patch_size=32,
+        n_classes=2,
+        mask_class_mapping={5: 0},
+    )
+
+    assert torch.count_nonzero(ds[0]["mask"]) == 0

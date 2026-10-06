@@ -42,6 +42,11 @@ When `n_classes == 2`, mask values greater than zero become foreground class
 `1`. For multiclass masks, set `n_classes` to the real number of classes so
 class IDs are preserved.
 
+`mask_class_mapping` (e.g. `{5: 3}`) remaps class values right after each mask
+window is read, before binarization and augmentations, without rewriting the
+mask rasters. It is inherited by `MBTilesLulcInputMaskWindowedDataset`.
+See [Mask Class Mapping](./mask-class-mapping.md).
+
 ## Hydra Example
 
 ```yaml title="conf/examples/mbtiles_mask_windowed_segmentation.yaml"

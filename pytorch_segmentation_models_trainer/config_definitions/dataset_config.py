@@ -20,7 +20,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from omegaconf import MISSING
 
@@ -45,6 +45,7 @@ class DatasetConfig:
     augmentation_list: List = field(default_factory=list)
     data_loader: DataLoaderConfig = field(default_factory=DataLoaderConfig)
     image_dtype: str = "uint8"
+    mask_class_mapping: Optional[Dict[int, int]] = None
 
 
 @dataclass
@@ -230,6 +231,7 @@ class RasterPatchDatasetConfig:
     image_dtype: str = "uint8"
     n_classes: int = 2
     reset_augmentation_function: bool = False
+    mask_class_mapping: Optional[Dict[int, int]] = None
 
 
 @dataclass
@@ -269,6 +271,7 @@ class MBTilesMaskWindowedDatasetConfig:
     window_index_cache: Optional[str] = None
     window_index_mask_path_key: str = "mask_path"
     window_index_coordinate_mode: str = "auto"
+    mask_class_mapping: Optional[Dict[int, int]] = None
 
 
 @dataclass
@@ -364,6 +367,7 @@ class CSVWindowedDatasetConfig(DatasetConfig):
     selected_bands: Optional[List[int]] = None
     use_rasterio: bool = True
     reset_augmentation_function: bool = False
+    max_read_retries: int = 10
 
 
 @dataclass
@@ -612,6 +616,7 @@ class LulcInputWindowedDatasetConfig(LulcInputDatasetConfig):
     row_off_key: str = "row_off"
     col_off_key: str = "col_off"
     patch_size_key: str = "patch_size"
+    mask_class_mapping: Optional[Dict[int, int]] = None
 
 
 @dataclass

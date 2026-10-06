@@ -33,6 +33,10 @@ from rasterio.windows import Window
 import torch
 from torch.utils.data import Dataset
 
+from pytorch_segmentation_models_trainer.dataset_loader.mask_class_mapping import (
+    apply_mask_class_lut,
+    build_mask_class_lut,
+)
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     _DTYPE_NORMALIZATION,
     _VALID_IMAGE_DTYPES,
@@ -109,6 +113,12 @@ class RasterPatchDataset(Dataset):
             vira ``1``. Para segmentação multi-classe, passe o número real de classes
             e os valores de pixel da máscara devem corresponder diretamente aos índices
             de classe.
+        mask_class_mapping (Optional[Dict[int, int]]): Dicionário opcional
+            ``{classe_origem: classe_destino}`` aplicado ao patch da máscara
+            logo após a leitura (antes da binarização e das augmentations), sem
+            reescrever os rasters. Valores fora do dicionário são mantidos.
+            Ex.: ``{5: 3}`` funde a classe 5 na 3.
+        **kwargs: Ignorados; compatibilidade com instanciação via Hydra.
         reset_augmentation_function (bool): Quando ``True``, faz deepcopy do pipeline
             de augmentação antes de cada chamada e o deleta em seguida, evitando o
             acúmulo de cache interno do Albumentations em treinos longos que pode levar
@@ -158,8 +168,11 @@ class RasterPatchDataset(Dataset):
         image_dtype: str = "uint8",
         n_classes: int = 2,
         reset_augmentation_function: bool = False,
+        mask_class_mapping: Optional[Dict[int, int]] = None,
+        **kwargs,
     ) -> None:
         super().__init__()
+        del kwargs
 
         if image_dtype not in _VALID_IMAGE_DTYPES:
             raise ValueError(
@@ -177,6 +190,7 @@ class RasterPatchDataset(Dataset):
         self.image_dtype = image_dtype
         self.selected_bands = selected_bands
         self.n_classes = n_classes
+        self.mask_class_lut = build_mask_class_lut(mask_class_mapping)
         self.reset_augmentation_function = reset_augmentation_function
         self.data_loader = data_loader
 
@@ -394,7 +408,7 @@ class RasterPatchDataset(Dataset):
         """
         with rasterio.open(path) as src:
             data = src.read(1, window=window)
-        mask = data.astype(np.uint8)
+        mask = apply_mask_class_lut(data.astype(np.uint8), self.mask_class_lut)
         if self.n_classes == 2:
             mask = (mask > 0).astype(np.uint8)
         return mask

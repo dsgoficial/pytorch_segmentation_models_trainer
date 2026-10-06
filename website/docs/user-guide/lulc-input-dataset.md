@@ -183,6 +183,7 @@ train_dataset:
 | `row_off_key` | `str` | `"row_off"` | CSV column for patch top-left row offset |
 | `col_off_key` | `str` | `"col_off"` | CSV column for patch top-left col offset |
 | `patch_size_key` | `str` | `"patch_size"` | CSV column for patch size (square) |
+| `mask_class_mapping` | `Dict[int, int] \| None` | `None` | Remaps mask classes on the fly (`{5: 3}` merges 5 into 3), before augmentations. Also accepted by `MBTilesLulcInputMaskWindowedDataset`. See [Mask Class Mapping](./mask-class-mapping.md). |
 
 ### Extra (`MBTilesLulcInputMaskWindowedDataset`)
 

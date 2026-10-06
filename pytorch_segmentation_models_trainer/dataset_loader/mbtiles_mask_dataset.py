@@ -12,6 +12,9 @@ from rasterio.crs import CRS
 from rasterio.windows import Window, from_bounds
 from torch.utils.data import Dataset
 
+from pytorch_segmentation_models_trainer.dataset_loader.mask_class_mapping import (
+    build_mask_class_lut,
+)
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     _DTYPE_NORMALIZATION,
     _VALID_IMAGE_DTYPES,
@@ -64,6 +67,10 @@ class MBTilesMaskWindowedDataset(Dataset):
             paths read from ``window_index_cache``. Has no effect when paths
             are already absolute. Useful for storing only filenames in the CSV
             and resolving them at runtime via the YAML config.
+        mask_class_mapping: Optional ``{source_class: target_class}`` dict
+            applied to each mask window right after reading (before
+            binarization and augmentations), without rewriting the rasters.
+            Unlisted values are kept. E.g. ``{5: 3}`` merges class 5 into 3.
         **kwargs: Compatibility kwargs for Hydra instantiation.
 
     Returns:
@@ -103,10 +110,12 @@ class MBTilesMaskWindowedDataset(Dataset):
         window_index_mask_path_key: str = "mask_path",
         window_index_coordinate_mode: str = "auto",
         mask_base_path: Optional[str] = None,
+        mask_class_mapping: Optional[Dict[int, int]] = None,
         **kwargs,
     ) -> None:
         super().__init__()
         del kwargs
+        self.mask_class_lut = build_mask_class_lut(mask_class_mapping)
         if image_dtype not in _VALID_IMAGE_DTYPES:
             raise ValueError(
                 f"image_dtype '{image_dtype}' is invalid. "
@@ -205,7 +214,12 @@ class MBTilesMaskWindowedDataset(Dataset):
                 image_dtype=self.image_dtype,
                 image_resampling=self.image_resampling,
             )
-            mask = read_mask_window(mask_src, window, n_classes=self.n_classes)
+            mask = read_mask_window(
+                mask_src,
+                window,
+                n_classes=self.n_classes,
+                class_lut=self.mask_class_lut,
+            )
 
         if self.transform is not None:
             transformed = self.transform(

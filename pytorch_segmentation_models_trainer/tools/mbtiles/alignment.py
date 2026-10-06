@@ -208,6 +208,7 @@ def read_mask_window(
     mask_src: rasterio.io.DatasetReader,
     window: Window,
     n_classes: int = 2,
+    class_lut: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Read a single-band mask window using class-index conventions.
 
@@ -216,11 +217,16 @@ def read_mask_window(
         window: Pixel window to read.
         n_classes: Number of classes. When ``2``, all values greater than zero
             are mapped to foreground class ``1``.
+        class_lut: Optional lookup table from
+            :func:`~pytorch_segmentation_models_trainer.dataset_loader.mask_class_mapping.build_mask_class_lut`,
+            applied before binarization.
 
     Returns:
         ``uint8`` mask array with shape ``(H, W)``.
     """
     mask = mask_src.read(1, window=window).astype(np.uint8, copy=False)
+    if class_lut is not None:
+        mask = class_lut[mask]
     if n_classes == 2:
         mask = (mask > 0).astype(np.uint8)
     return mask

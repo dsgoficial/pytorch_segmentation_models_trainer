@@ -528,3 +528,59 @@ class TestMBTilesLulcInputMaskWindowedDataset:
         batch = next(iter(lightning_model.train_dataloader()))
         loss = lightning_model.training_step(batch, 0)
         assert loss.ndim == 0
+
+
+class TestLulcInputWindowedMaskClassMapping:
+    def test_mapping_merges_classes(self, windowed_csv, lulc_keys, scene_dir):
+        ds = LulcInputWindowedDataset(
+            input_csv_path=windowed_csv,
+            lulc_keys=lulc_keys,
+            num_classes=C,
+            mask_class_mapping={5: 3},
+        )
+        with rasterio.open(scene_dir["mask"]) as src:
+            raw = src.read(1)[:H, :W]
+        expected = np.where(raw == 5, 3, raw)
+        np.testing.assert_array_equal(ds[0]["mask"].numpy(), expected)
+        assert 5 not in ds[0]["mask"].unique().tolist()
+
+    def test_without_mapping_masks_unchanged(self, windowed_csv, lulc_keys, scene_dir):
+        ds = LulcInputWindowedDataset(
+            input_csv_path=windowed_csv, lulc_keys=lulc_keys, num_classes=C
+        )
+        with rasterio.open(scene_dir["mask"]) as src:
+            raw = src.read(1)[:H, :W]
+        np.testing.assert_array_equal(ds[0]["mask"].numpy(), raw)
+
+    def test_invalid_mapping_raises(self, windowed_csv, lulc_keys):
+        with pytest.raises(ValueError):
+            LulcInputWindowedDataset(
+                input_csv_path=windowed_csv,
+                lulc_keys=lulc_keys,
+                num_classes=C,
+                mask_class_mapping={"x": 3},
+            )
+
+    def test_config_dataclass_has_mapping_field(self):
+        from pytorch_segmentation_models_trainer.config_definitions.dataset_config import (
+            LulcInputWindowedDatasetConfig,
+        )
+
+        cfg = OmegaConf.structured(LulcInputWindowedDatasetConfig)
+        assert cfg.mask_class_mapping is None
+
+
+class TestMBTilesLulcInputMaskClassMapping:
+    def test_mapping_merges_classes(self, mbtiles_lulc_setup):
+        ds = MBTilesLulcInputMaskWindowedDataset(
+            mbtiles_path=mbtiles_lulc_setup["image"],
+            mask_paths=[mbtiles_lulc_setup["mask"]],
+            lulc_paths=mbtiles_lulc_setup["lulc_paths"],
+            window_index_cache=mbtiles_lulc_setup["cache"],
+            num_classes=C,
+            mask_class_mapping={5: 3},
+            return_metadata=False,
+        )
+        with rasterio.open(mbtiles_lulc_setup["mask"]) as src:
+            raw = src.read(1)[:H, :W]
+        np.testing.assert_array_equal(ds[0]["mask"].numpy(), np.where(raw == 5, 3, raw))

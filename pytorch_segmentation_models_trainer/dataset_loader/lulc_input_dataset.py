@@ -11,6 +11,10 @@ import rasterio
 import rasterio.windows
 import torch
 
+from pytorch_segmentation_models_trainer.dataset_loader.mask_class_mapping import (
+    apply_mask_class_lut,
+    build_mask_class_lut,
+)
 from pytorch_segmentation_models_trainer.dataset_loader.dataset import (
     AbstractDataset,
 )
@@ -341,6 +345,10 @@ class LulcInputWindowedDataset(LulcInputDataset):
         row_off_key: CSV column for patch row offset. Default ``"row_off"``.
         col_off_key: CSV column for patch column offset. Default ``"col_off"``.
         patch_size_key: CSV column for patch size. Default ``"patch_size"``.
+        mask_class_mapping: Optional ``{source_class: target_class}`` dict
+            applied to each mask window right after reading (before
+            augmentations), without rewriting the rasters. Unlisted values are
+            kept. E.g. ``{5: 3}`` merges class 5 into class 3.
         All other args are forwarded to ``LulcInputDataset``.
 
     Example YAML:
@@ -395,6 +403,7 @@ class LulcInputWindowedDataset(LulcInputDataset):
         row_off_key: str = "row_off",
         col_off_key: str = "col_off",
         patch_size_key: str = "patch_size",
+        mask_class_mapping: Optional[Dict[int, int]] = None,
         **kwargs,
     ) -> None:
         super().__init__(
@@ -415,6 +424,7 @@ class LulcInputWindowedDataset(LulcInputDataset):
         self.row_off_key = row_off_key
         self.col_off_key = col_off_key
         self.patch_size_key = patch_size_key
+        self.mask_class_lut = build_mask_class_lut(mask_class_mapping)
 
         for col in [row_off_key, col_off_key, patch_size_key]:
             if col not in self.df.columns:
@@ -450,7 +460,8 @@ class LulcInputWindowedDataset(LulcInputDataset):
         if window is None:
             window = self._window(idx)
         with rasterio.open(self.get_path(idx, key=self.mask_key)) as src:
-            return src.read(1, window=window).astype(np.uint8)
+            mask = src.read(1, window=window).astype(np.uint8)
+        return apply_mask_class_lut(mask, self.mask_class_lut)
 
     def _load_lulc_np(self, idx: int, key: str, window: rasterio.windows.Window = None, **_) -> np.ndarray:  # type: ignore[override]
         """Load a single LULC source patch as (H, W) uint8."""
@@ -598,7 +609,12 @@ class MBTilesLulcInputMaskWindowedDataset(MBTilesMaskWindowedDataset):
                 image_dtype=self.image_dtype,
                 image_resampling=self.image_resampling,
             )
-            mask = read_mask_window(mask_src, window, n_classes=self.n_classes)
+            mask = read_mask_window(
+                mask_src,
+                window,
+                n_classes=self.n_classes,
+                class_lut=self.mask_class_lut,
+            )
             lulc_arrays = [
                 read_source_aligned_to_mask_window(
                     source_path=path,

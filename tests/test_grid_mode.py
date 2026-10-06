@@ -599,3 +599,124 @@ class TestGridBinaryClassMask(unittest.TestCase, GridModeTestMixin):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReadErrorHandling(unittest.TestCase, GridModeTestMixin):
+    """Unreadable crops: bounded retries, RuntimeError when exhausted,
+    non-read errors propagate."""
+
+    def setUp(self):
+        warnings.simplefilter("ignore")
+        self._create_synthetic_dataset()
+
+    def tearDown(self):
+        self._cleanup()
+
+    def _ds(self, grid_mode, **kwargs):
+        return RandomCropSegmentationDataset(
+            input_csv_path=self.csv_path,
+            crop_size=self.CROP_SIZE,
+            n_classes=self.N_CLASSES,
+            grid_mode=grid_mode,
+            samples_per_epoch=10,
+            **kwargs,
+        )
+
+    @staticmethod
+    def _always_fail(*args, **kwargs):
+        raise rasterio.errors.RasterioIOError("unreadable crop")
+
+    def test_grid_all_tiles_unreadable_raises(self):
+        ds = self._ds(grid_mode=True)
+        ds._read_crop = self._always_fail
+        with self.assertRaisesRegex(RuntimeError, "unreadable crop"):
+            ds._get_grid_crop(0)
+
+    def test_grid_unreadable_tile_falls_back_to_next(self):
+        ds = self._ds(grid_mode=True)
+        original = ds._read_crop
+        calls = {"n": 0}
+
+        def fail_first_tile(path, x, y, is_mask=False):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise rasterio.errors.RasterioIOError("unreadable crop")
+            return original(path, x, y, is_mask=is_mask)
+
+        ds._read_crop = fail_first_tile
+        image, mask = ds._get_grid_crop(0)
+        self.assertEqual(
+            ds._last_crop_position, tuple(int(v) for v in ds._grid_positions[1])
+        )
+        self.assertEqual(mask.shape, tuple(self.CROP_SIZE))
+
+    def test_grid_retries_bounded_by_max_retries(self):
+        ds = self._ds(grid_mode=True, max_retries=2)
+        calls = {"n": 0}
+
+        def count_and_fail(*args, **kwargs):
+            calls["n"] += 1
+            raise rasterio.errors.RasterioIOError("unreadable crop")
+
+        ds._read_crop = count_and_fail
+        with self.assertRaises(RuntimeError):
+            ds._get_grid_crop(0)
+        self.assertEqual(calls["n"], 2)
+
+    def test_grid_non_read_error_propagates(self):
+        ds = self._ds(grid_mode=True)
+
+        def bug(*args, **kwargs):
+            raise ValueError("programming error")
+
+        ds._read_crop = bug
+        with self.assertRaises(ValueError):
+            ds._get_grid_crop(0)
+
+    def test_random_all_reads_fail_raises(self):
+        ds = self._ds(grid_mode=False, max_retries=3)
+        ds._read_crop = self._always_fail
+        with self.assertRaisesRegex(RuntimeError, "unreadable crop"):
+            ds._get_random_crop()
+
+    def test_random_non_read_error_propagates(self):
+        ds = self._ds(grid_mode=False)
+
+        def bug(*args, **kwargs):
+            raise ValueError("programming error")
+
+        ds._read_crop = bug
+        with self.assertRaises(ValueError):
+            ds._get_random_crop()
+
+    def test_read_crop_does_not_wrap_non_read_errors(self):
+        ds = self._ds(grid_mode=False)
+
+        def bug(*args, **kwargs):
+            raise ValueError("programming error")
+
+        ds._read_crop_data = bug
+        with self.assertLogs(level="ERROR") as logs:
+            import logging
+
+            logging.getLogger().error("sentinel")
+            with self.assertRaises(ValueError):
+                ds._read_crop(self.image_paths[0], 0, 0)
+        self.assertFalse(any("Error reading window" in m for m in logs.output))
+
+    def test_random_last_crop_position_matches_returned_crop(self):
+        ds = self._ds(grid_mode=False, max_retries=2)
+        original = ds._read_crop
+        seen = []
+
+        def fail_second_attempt(path, x, y, is_mask=False):
+            seen.append((x, y))
+            if len(seen) > 2:  # 2nd attempt (calls 3-4) is unreadable
+                raise rasterio.errors.RasterioIOError("unreadable crop")
+            return original(path, x, y, is_mask=is_mask)
+
+        ds._read_crop = fail_second_attempt
+        ds._is_crop_valid = lambda *a, **k: False  # force a 2nd attempt
+        ds._get_random_crop()
+        _, x, y = ds._last_crop_position
+        self.assertEqual((x, y), seen[0])

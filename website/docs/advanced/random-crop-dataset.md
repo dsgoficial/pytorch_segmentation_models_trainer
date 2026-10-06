@@ -88,6 +88,7 @@ train_dataset:
 | `rasterio_lock_dir` | `str` | `/tmp/psmt_rasterio_locks` | Directory used for per-raster lock files. |
 | `reopen_rasterio_on_read` | `bool` | `False` | Open and close the raster inside each locked read instead of reusing per-worker cached handles. |
 | `n_first_rows_to_read` | `int` | `None` | Limit the number of CSV rows read. |
+| `max_retries` | `int` | `10` | Random mode: attempts to find a valid (and readable) crop. Grid mode: tiles tried, starting at the requested one, when a tile can't be read (`RasterioError`/`OSError`). If no crop could be read at all, raises `RuntimeError`. |
 
 ---
 

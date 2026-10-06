@@ -115,6 +115,8 @@ A ready-to-run full example is available at `conf/examples/csv_windowed_segmenta
 | `selected_bands` | `List[int] \| None` | `None` | 1-based band indices to load. |
 | `use_rasterio` | `bool` | `True` | Must be `True` for windowed read. |
 | `image_dtype` | `str` | `"uint8"` | Cast dtype after reading. |
+| `mask_class_mapping` | `Dict[int, int] \| None` | `None` | Remaps mask classes on the fly (`{5: 3}` merges 5 into 3), before binarization and augmentations. See [Mask Class Mapping](./mask-class-mapping.md). |
+| `max_read_retries` | `int` | `10` | If a row's window (image or mask) can't be read (`RasterioError`/`OSError`), try up to this many following rows; image and mask always come from the same row. Raises `RuntimeError` when exhausted. `0` disables the fallback. |
 
 ## Comparison with other datasets
 

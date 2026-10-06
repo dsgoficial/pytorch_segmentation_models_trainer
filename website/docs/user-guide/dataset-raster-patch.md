@@ -169,6 +169,7 @@ A ready-to-run full example is available at `conf/examples/raster_patch_segmenta
 | `data_loader` | `DataLoaderConfig \| None` | `None` | Stored as `ds.data_loader`; consumed by the Lightning `Model`. |
 | `selected_bands` | `List[int] \| None` | `None` | 1-based band indices to load. `None` → all bands. |
 | `image_dtype` | `str` | `"uint8"` | Cast dtype after reading. See table below. |
+| `mask_class_mapping` | `Dict[int, int] \| None` | `None` | Remaps mask classes on the fly (`{5: 3}` merges 5 into 3), before binarization and augmentations. See [Mask Class Mapping](./mask-class-mapping.md). |
 
 ### `image_dtype` values
 

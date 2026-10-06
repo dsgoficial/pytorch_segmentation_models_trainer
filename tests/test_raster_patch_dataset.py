@@ -585,3 +585,61 @@ class TestRasterPatchDataset(BasicTestCase):
         self.assertEqual(len(ds.image_info), 2)
         warning_messages = [str(w.message) for w in caught]
         self.assertTrue(any("orphan_mask.tif" in m for m in warning_messages))
+
+
+class TestRasterPatchMaskClassMapping(BasicTestCase):
+    def setUp(self):
+        super().setUp()
+        self.tmp = Path(self.make_temp_dir())
+        self.img_dir = self.tmp / "images"
+        self.mask_dir = self.tmp / "masks"
+        _write_tif(self.img_dir / "a.tif", width=64, height=64, bands=3)
+        self.mask = np.tile(np.arange(6, dtype=np.uint8), (64, 11))[:, :64]
+        self.mask_dir.mkdir(parents=True, exist_ok=True)
+        with rasterio.open(
+            self.mask_dir / "a.tif",
+            "w",
+            driver="GTiff",
+            height=64,
+            width=64,
+            count=1,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=from_bounds(0, 0, 1, 1, 64, 64),
+        ) as dst:
+            dst.write(self.mask, 1)
+
+    def _ds(self, **kwargs):
+        return RasterPatchDataset(
+            image_dir=self.img_dir,
+            mask_dir=self.mask_dir,
+            patch_size=64,
+            stride=64,
+            **kwargs,
+        )
+
+    def test_mapping_merges_classes(self):
+        out = self._ds(n_classes=5, mask_class_mapping={5: 3})[0]["mask"].numpy()
+        np.testing.assert_array_equal(out, np.where(self.mask == 5, 3, self.mask))
+
+    def test_without_mapping_masks_unchanged(self):
+        np.testing.assert_array_equal(
+            self._ds(n_classes=6)[0]["mask"].numpy(), self.mask
+        )
+
+    def test_invalid_mapping_raises_at_init(self):
+        with self.assertRaises(ValueError):
+            self._ds(n_classes=5, mask_class_mapping={-1: 3})
+
+    def test_config_dataclass_has_mapping_field(self):
+        from omegaconf import OmegaConf
+        from pytorch_segmentation_models_trainer.config_definitions.dataset_config import (
+            RasterPatchDatasetConfig,
+        )
+
+        cfg = OmegaConf.structured(RasterPatchDatasetConfig)
+        assert cfg.mask_class_mapping is None
+
+    def test_accepts_unknown_kwargs(self):
+        ds = self._ds(n_classes=6, gpu_augmentation_list=[], unused_option=1)
+        self.assertEqual(len(ds), 1)

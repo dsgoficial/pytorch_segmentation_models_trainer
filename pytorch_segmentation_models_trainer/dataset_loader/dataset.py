@@ -41,6 +41,10 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 from albumentations.pytorch import ToTensorV2
+from pytorch_segmentation_models_trainer.dataset_loader.mask_class_mapping import (
+    apply_mask_class_lut,
+    build_mask_class_lut,
+)
 from pytorch_segmentation_models_trainer.utils import polygonrnn_utils
 from pytorch_segmentation_models_trainer.utils.object_detection_utils import (
     bbox_xywh_to_xyxy,
@@ -240,6 +244,21 @@ class SegmentationDataset(AbstractDataset):
         image_dtype (str): Data type for image interpretation after rasterio read.
             Accepted values: "uint8" (default), "uint16", "float32", "native".
             "native" preserves the original dtype without casting.
+        mask_class_mapping (Optional[Dict[int, int]]): Optional
+            ``{source_class: target_class}`` dict applied to the target mask
+            right after it is read (before ``n_classes == 2`` binarization and
+            augmentations), without rewriting the mask files. Unlisted values
+            are kept. Inherited by ``CSVWindowedSegmentationDataset``,
+            ``SegmentationDatasetFromFolder`` and ``FullImageSegmentationDataset``.
+
+    Example YAML::
+
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+          input_csv_path: /data/train.csv
+          n_classes: 5
+          mask_class_mapping:
+            5: 3
     """
 
     def __init__(
@@ -258,6 +277,7 @@ class SegmentationDataset(AbstractDataset):
         reset_augmentation_function: bool = False,
         image_dtype: str = "uint8",
         seed=None,
+        mask_class_mapping: Optional[Dict[int, int]] = None,
     ) -> None:
         super(SegmentationDataset, self).__init__(
             input_csv_path=input_csv_path,
@@ -271,6 +291,7 @@ class SegmentationDataset(AbstractDataset):
             seed=seed,
         )
         self.n_classes = n_classes
+        self.mask_class_lut = build_mask_class_lut(mask_class_mapping)
         self.selected_bands = selected_bands
         self.use_rasterio = use_rasterio
         self.reset_augmentation_function = reset_augmentation_function
@@ -330,6 +351,30 @@ class SegmentationDataset(AbstractDataset):
                 image_path, is_mask=False, force_rgb=force_rgb
             )
 
+    def load_target_mask(self, idx: int) -> np.ndarray:
+        """Load the target mask, applying ``mask_class_mapping`` before binarization.
+
+        Args:
+            idx: Item index in the dataset.
+
+        Returns:
+            np.ndarray: ``(H, W)`` mask; binarized (``> 0``) when ``n_classes == 2``.
+        """
+        if self.mask_class_lut is None:
+            return self.load_image(
+                idx,
+                key=self.mask_key,
+                is_mask=True,
+                is_binary_mask=(self.n_classes == 2),
+            )
+        mask = self.load_image(
+            idx, key=self.mask_key, is_mask=True, is_binary_mask=False
+        )
+        mask = apply_mask_class_lut(mask, self.mask_class_lut)
+        if self.n_classes == 2:
+            mask = (mask > 0).astype(np.uint8)
+        return mask
+
     def _load_image_with_rasterio(self, image_path: str) -> np.ndarray:
         with rasterio.open(image_path, "r") as src:
             data = (
@@ -349,9 +394,7 @@ class SegmentationDataset(AbstractDataset):
         idx = idx % self.len
 
         image = self.load_image(idx, key=self.image_key)
-        mask = self.load_image(
-            idx, key=self.mask_key, is_mask=True, is_binary_mask=(self.n_classes == 2)
-        )
+        mask = self.load_target_mask(idx)
         if self.transform is None:
             image = torch.from_numpy(image).float()
             image = image.permute(2, 0, 1)  # (H,W,C) -> (C,H,W) for PyTorch
@@ -486,6 +529,7 @@ class SegmentationDatasetFromFolder(SegmentationDataset):
         use_rasterio: bool = False,
         reset_augmentation_function: bool = False,
         image_dtype: str = "uint8",
+        mask_class_mapping: Optional[Dict[int, int]] = None,
     ) -> None:
         image_folder = Path(image_folder)
         mask_folder = Path(mask_folder)
@@ -511,6 +555,7 @@ class SegmentationDatasetFromFolder(SegmentationDataset):
             use_rasterio=use_rasterio,
             reset_augmentation_function=reset_augmentation_function,
             image_dtype=image_dtype,
+            mask_class_mapping=mask_class_mapping,
         )
 
         self.image_folder = image_folder
@@ -587,6 +632,29 @@ class CSVWindowedSegmentationDataset(SegmentationDataset):
     - row_off: Offset vertical (linha) do patch.
     - col_off: Offset horizontal (coluna) do patch.
     - patch_size: Tamanho do patch (largura e altura).
+
+    Args:
+        mask_class_mapping: Dicionário opcional ``{classe_origem: classe_destino}``
+            aplicado à janela da máscara logo após a leitura (antes da
+            binarização e das augmentations), sem reescrever os rasters.
+            Valores fora do dicionário são mantidos. Ex.: ``{5: 3}`` funde a
+            classe 5 na 3; ``{4: 255}`` manda a classe 4 para o ignore index.
+        max_read_retries: Quantas linhas seguintes tentar quando a janela
+            (imagem ou máscara) de uma linha não pode ser lida (``RasterioError``
+            ou ``OSError``). Imagem e máscara vêm sempre da mesma linha. Esgotadas
+            as tentativas, levanta ``RuntimeError``. ``0`` desativa o fallback.
+        **kwargs: Ignorados; permitem instanciar via Hydra com campos extras
+            de ``DatasetConfig`` (ex.: ``gpu_augmentation_list``).
+
+    Example YAML::
+
+        train_dataset:
+          _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.CSVWindowedSegmentationDataset
+          input_csv_path: /data/train_windows.csv
+          n_classes: 5
+          mask_class_mapping:
+            5: 3
+          max_read_retries: 10
     """
 
     def __init__(
@@ -607,7 +675,16 @@ class CSVWindowedSegmentationDataset(SegmentationDataset):
         use_rasterio: bool = True,
         reset_augmentation_function: bool = False,
         image_dtype: str = "uint8",
+        mask_class_mapping: Optional[Dict[int, int]] = None,
+        max_read_retries: int = 10,
+        **kwargs,
     ) -> None:
+        del kwargs
+        if not isinstance(max_read_retries, int) or max_read_retries < 0:
+            raise ValueError(
+                f"max_read_retries must be a non-negative integer, got {max_read_retries!r}"
+            )
+        self.max_read_retries = max_read_retries
         super().__init__(
             input_csv_path=input_csv_path,
             df=df,
@@ -622,6 +699,7 @@ class CSVWindowedSegmentationDataset(SegmentationDataset):
             use_rasterio=use_rasterio,
             reset_augmentation_function=reset_augmentation_function,
             image_dtype=image_dtype,
+            mask_class_mapping=mask_class_mapping,
         )
         self.row_off_key = row_off_key
         self.col_off_key = col_off_key
@@ -633,6 +711,41 @@ class CSVWindowedSegmentationDataset(SegmentationDataset):
                 raise ValueError(
                     f"A coluna '{col}' é obrigatória no CSV/DataFrame para CSVWindowedSegmentationDataset."
                 )
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        """Return the item at ``idx``, falling back to the next rows on read errors.
+
+        The whole item (image and mask) is retried together, so they always
+        come from the same row. At most ``max_read_retries`` extra rows are
+        tried (never more than the dataset length).
+
+        Raises:
+            RuntimeError: If no row could be read within the retry budget.
+        """
+        idx = idx % self.len
+        attempts = min(self.max_read_retries + 1, self.len)
+        last_error = None
+        for offset in range(attempts):
+            candidate = (idx + offset) % self.len
+            try:
+                return super().__getitem__(candidate)
+            except (rasterio.errors.RasterioError, OSError) as e:
+                last_error = e
+                logger.error(f"Error reading row {candidate}: {e}")
+        raise RuntimeError(
+            f"Could not read any window in {attempts} attempt(s) starting at row "
+            f"{idx}: {last_error}"
+        ) from last_error
+
+    def load_target_mask(self, idx: int) -> np.ndarray:
+        """Load the target mask window.
+
+        ``mask_class_mapping`` is applied inside :meth:`load_image`, right
+        after the window is read, so the parent hook must not apply it again.
+        """
+        return self.load_image(
+            idx, key=self.mask_key, is_mask=True, is_binary_mask=(self.n_classes == 2)
+        )
 
     def load_image(
         self,
@@ -653,32 +766,26 @@ class CSVWindowedSegmentationDataset(SegmentationDataset):
             height=row[self.patch_size_key],
         )
 
-        try:
-            with rasterio.open(image_path) as src:
-                if is_mask:
-                    # Máscara: lê a primeira banda e converte para uint8
-                    data = src.read(1, window=window)
-                    mask = data.astype(np.uint8)
-                    if is_binary_mask:
-                        mask = (mask > 0).astype(np.uint8)
-                    return mask
-                else:
-                    # Imagem: lê as bandas selecionadas (ou todas)
-                    data = (
-                        src.read(window=window)
-                        if self.selected_bands is None
-                        else src.read(self.selected_bands, window=window)
-                    )
-                    image = np.transpose(data, (1, 2, 0)).copy()
-                    if self.image_dtype == "native":
-                        return image
-                    return np.array(image, dtype=np.dtype(self.image_dtype))
-        except (rasterio.errors.RasterioIOError, Exception) as e:
-            logger.error(f"Error reading window {window} from {image_path}: {e}")
-            # Try another index
-            return self.load_image(
-                (idx + 1) % self.len, key, is_mask, force_rgb, is_binary_mask
+        # Read errors propagate; __getitem__ retries the whole item (image + mask).
+        with rasterio.open(image_path) as src:
+            if is_mask:
+                # Máscara: lê a primeira banda e converte para uint8
+                data = src.read(1, window=window)
+                mask = data.astype(np.uint8)
+                mask = apply_mask_class_lut(mask, self.mask_class_lut)
+                if is_binary_mask:
+                    mask = (mask > 0).astype(np.uint8)
+                return mask
+            # Imagem: lê as bandas selecionadas (ou todas)
+            data = (
+                src.read(window=window)
+                if self.selected_bands is None
+                else src.read(self.selected_bands, window=window)
             )
+            image = np.transpose(data, (1, 2, 0)).copy()
+            if self.image_dtype == "native":
+                return image
+            return np.array(image, dtype=np.dtype(self.image_dtype))
 
 
 @contextlib.contextmanager
@@ -1198,10 +1305,10 @@ class RandomCropSegmentationDataset(AbstractDataset):
             if self.image_dtype == "native":
                 return image
             return image.astype(np.dtype(self.image_dtype))
-        except (rasterio.errors.RasterioIOError, Exception) as e:
+        except (rasterio.errors.RasterioError, OSError) as e:
             logger.error(f"Error reading window {window} from {image_path}: {e}")
-            # Raise exception so caller can retry
-            raise e
+            # Re-raise so the caller can retry another crop
+            raise
 
     def _read_crop_data(self, src, window, is_mask: bool):
         """Read raw crop data from an already-open rasterio dataset."""
@@ -1943,6 +2050,7 @@ class RandomCropSegmentationDataset(AbstractDataset):
         """
         crop_h, crop_w = self.crop_size
         image = mask = None
+        last_error = None
 
         for _ in range(self.max_retries):
             if getattr(self, "class_balanced_sampling", False) and getattr(
@@ -1968,19 +2076,26 @@ class RandomCropSegmentationDataset(AbstractDataset):
             mask_path = self.get_path(img_idx, key=self.mask_key)
 
             try:
-                image = self._read_crop(image_path, x, y, is_mask=False)
-                mask = self._read_crop(mask_path, x, y, is_mask=True)
-            except Exception:
+                crop_image = self._read_crop(image_path, x, y, is_mask=False)
+                crop_mask = self._read_crop(mask_path, x, y, is_mask=True)
+            except (rasterio.errors.RasterioError, OSError) as e:
+                last_error = e
                 continue
+            image, mask = crop_image, crop_mask
+            crop_position = (img_idx, x, y)
 
             if self._is_crop_valid(image, mask_data=mask):
                 break
-        # If all retries fail, use the last crop anyway
+        # If no crop is valid, use the last readable crop anyway
+        if mask is None:
+            raise RuntimeError(
+                f"Could not read any crop in {self.max_retries} attempt(s): {last_error}"
+            ) from last_error
 
         if self.n_classes == 2 and not self.soft_labels:
             mask = (mask > 0).astype(np.uint8)
 
-        self._last_crop_position = (img_idx, x, y)
+        self._last_crop_position = crop_position
         return image, mask
 
     def _get_random_grid_tile(self, target_class: int = -1, exclude_class: int = -1):
@@ -2010,27 +2125,42 @@ class RandomCropSegmentationDataset(AbstractDataset):
         return self._get_grid_crop(tile_idx)
 
     def _get_grid_crop(self, idx: int):
-        """Get a pre-computed grid tile by index. No retries needed.
+        """Get a pre-computed grid tile by index.
+
+        If the tile can't be read (``RasterioError``/``OSError``), the next
+        tiles are tried, up to ``max_retries`` attempts in total (never more
+        than the number of grid tiles).
 
         Args:
             idx: Index into self._grid_positions.
 
         Returns:
             Tuple[np.ndarray, np.ndarray]: (image, mask).
+
+        Raises:
+            RuntimeError: If no tile could be read within the retry budget.
         """
-        img_idx, x, y = self._grid_positions[idx]
-        img_idx, x, y = int(img_idx), int(x), int(y)
+        n_tiles = len(self._grid_positions)
+        attempts = max(1, min(self.max_retries, n_tiles))
+        last_error = None
+        for offset in range(attempts):
+            img_idx, x, y = self._grid_positions[(idx + offset) % n_tiles]
+            img_idx, x, y = int(img_idx), int(x), int(y)
 
-        image_path = self.get_path(img_idx, key=self.image_key)
-        mask_path = self.get_path(img_idx, key=self.mask_key)
+            image_path = self.get_path(img_idx, key=self.image_key)
+            mask_path = self.get_path(img_idx, key=self.mask_key)
 
-        try:
-            image = self._read_crop(image_path, x, y, is_mask=False)
-            mask = self._read_crop(mask_path, x, y, is_mask=True)
-        except Exception:
-            # If a grid tile fails, try the next one to avoid crashing
-            new_idx = (idx + 1) % len(self._grid_positions)
-            return self._get_grid_crop(new_idx)
+            try:
+                image = self._read_crop(image_path, x, y, is_mask=False)
+                mask = self._read_crop(mask_path, x, y, is_mask=True)
+                break
+            except (rasterio.errors.RasterioError, OSError) as e:
+                last_error = e
+        else:
+            raise RuntimeError(
+                f"Could not read any grid tile in {attempts} attempt(s) starting at "
+                f"tile {idx}: {last_error}"
+            ) from last_error
 
         if self.n_classes == 2 and not self.soft_labels:
             mask = (mask > 0).astype(np.uint8)

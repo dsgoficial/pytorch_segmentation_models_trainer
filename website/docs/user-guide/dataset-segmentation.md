@@ -89,6 +89,7 @@ When `n_classes=2` (the default), the dataset automatically binarises the mask: 
 | `mask_key` | `str` | `"mask"` | CSV column name for the mask path |
 | `n_first_rows_to_read` | `int` | `None` | Limit the number of CSV rows read (useful for quick experiments) |
 | `n_classes` | `int` | `2` | Number of segmentation classes |
+| `mask_class_mapping` | `Dict[int, int] \| None` | `None` | Remaps mask classes on the fly (`{5: 3}` merges 5 into 3), before binarization and augmentations. Inherited by `SegmentationDatasetFromFolder`, `FullImageSegmentationDataset` and `CSVWindowedSegmentationDataset`. See [Mask Class Mapping](./mask-class-mapping.md). |
 | `selected_bands` | `List[int]` | `None` | 1-based list of band indices to read (e.g. `[1, 2, 3]`) |
 | `use_rasterio` | `bool` | `False` | Use rasterio instead of PIL for image loading |
 | `image_dtype` | `str` | `"uint8"` | Data type for image interpretation when using rasterio. Accepted values: `"uint8"`, `"uint16"`, `"float32"`, `"native"`. See [Image Dtype](#image-dtype) below. |
