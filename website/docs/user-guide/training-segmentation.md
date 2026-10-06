@@ -84,7 +84,7 @@ scheduler_list:
 ```
 
 :::tip OneCycleLR Auto-Configuration
-When using `OneCycleLR`, set `steps_per_epoch` to `null` or omit it entirely. The framework automatically computes it from the CSV dataset size and batch size at the start of training:
+When using `OneCycleLR`, set `steps_per_epoch` to `null` or omit it entirely. The framework automatically computes it from the dataset size and batch size at the start of training. The size comes from `samples_per_epoch`, the grid positions (`grid_mode`), the rows of `input_csv_path`, or — for datasets configured without `input_csv_path`, such as `MBTilesMaskWindowedDataset` with `window_index_cache` — the length of the instantiated training dataset:
 
 ```
 steps_per_epoch = dataset_size // (batch_size * devices * accumulate_grad_batches)

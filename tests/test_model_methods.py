@@ -212,6 +212,95 @@ class TestComputeStepsFromConfig:
         result = model._compute_steps_from_config()
         assert result == 1
 
+    def test_uses_instantiated_dataset_length_without_csv(self):
+        # Window-indexed datasets (e.g. MBTilesMaskWindowedDataset) have no
+        # input_csv_path; the instantiated dataset length must be used.
+        model = _make_model()
+        model.cfg = OmegaConf.merge(
+            model.cfg,
+            OmegaConf.create(
+                {
+                    "train_dataset": {
+                        "window_index_cache": "windows.csv",
+                        "data_loader": {"batch_size": 16},
+                    }
+                }
+            ),
+        )
+        model.train_ds = list(range(141))
+        # 141 samples // 16 = 8
+        assert model._compute_steps_from_config() == 8
+
+    def test_without_csv_and_without_dataset_returns_none(self):
+        model = _make_model()
+        model.cfg = OmegaConf.merge(
+            model.cfg,
+            OmegaConf.create({"train_dataset": {"data_loader": {"batch_size": 16}}}),
+        )
+        model.train_ds = None
+        assert model._compute_steps_from_config() is None
+
+    def test_without_csv_and_unsized_dataset_returns_none(self):
+        model = _make_model()
+        model.cfg = OmegaConf.merge(
+            model.cfg,
+            OmegaConf.create({"train_dataset": {"data_loader": {"batch_size": 16}}}),
+        )
+        model.train_ds = iter(range(10))  # no __len__
+        assert model._compute_steps_from_config() is None
+
+    def test_csv_path_still_takes_precedence_over_dataset_length(self, tmp_path):
+        import pandas as pd
+
+        csv_path = tmp_path / "train.csv"
+        pd.DataFrame({"image": range(100), "mask": range(100)}).to_csv(
+            csv_path, index=False
+        )
+        model = _make_model()
+        model.cfg = OmegaConf.merge(
+            model.cfg,
+            OmegaConf.create(
+                {
+                    "train_dataset": {
+                        "input_csv_path": str(csv_path),
+                        "data_loader": {"batch_size": 4},
+                    }
+                }
+            ),
+        )
+        model.train_ds = list(range(8))
+        assert model._compute_steps_from_config() == 25
+
+    def test_onecycle_auto_steps_with_window_indexed_dataset(self):
+        model = _make_model()
+        model.model = nn.Conv2d(3, 2, 1)
+        model.cfg = OmegaConf.merge(
+            model.cfg,
+            OmegaConf.create(
+                {
+                    "optimizer": {"_target_": "torch.optim.Adam", "lr": 1.0e-3},
+                    "scheduler_list": [
+                        {
+                            "scheduler": {
+                                "_target_": "torch.optim.lr_scheduler.OneCycleLR",
+                                "max_lr": 1.0e-3,
+                                "epochs": 10,
+                            },
+                            "interval": "step",
+                        }
+                    ],
+                    "train_dataset": {
+                        "window_index_cache": "windows.csv",
+                        "data_loader": {"batch_size": 16},
+                    },
+                }
+            ),
+        )
+        model.train_ds = list(range(307))
+        _, schedulers = model.configure_optimizers()
+        # 307 // 16 = 19 steps per epoch x 10 epochs
+        assert schedulers[0]["scheduler"].total_steps == 190
+
 
 # ---------------------------------------------------------------------------
 # get_loss_function

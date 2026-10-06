@@ -1,5 +1,10 @@
 # Unreleased
 
+## OneCycleLR auto `steps_per_epoch` for datasets without `input_csv_path`
+
+- `Model._compute_steps_from_config` now falls back to `len(self.train_ds)` when the train dataset config has no `input_csv_path` (and no `samples_per_epoch`/`grid_mode`). Before, OneCycleLR auto-configuration raised `Cannot determine steps_per_epoch` for window-indexed datasets such as `MBTilesMaskWindowedDataset` (`window_index_cache`). CSV-backed datasets keep using the CSV row count.
+- Tests: 5 new cases in `tests/test_model_methods.py` (dataset-length fallback, missing/unsized dataset, CSV precedence, end-to-end OneCycleLR `total_steps`). Docs: OneCycleLR tip in `training-segmentation.md`.
+
 ## On-the-fly mask class remapping (`mask_class_mapping`)
 
 - New `dataset_loader/mask_class_mapping.py`: `build_mask_class_lut` (validates a `{source: target}` mapping — ints or numeric strings in `[0, 255]`, `dict` or `DictConfig` — and returns a 256-entry `uint8` LUT; `None`/empty disables it) and `apply_mask_class_lut` (vectorized lookup; identity for unlisted classes; single pass, not chained).

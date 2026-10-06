@@ -196,8 +196,26 @@ class Model(pl.LightningModule):
 
     def _compute_steps_from_config(self):
         """
-        Compute steps_per_epoch by reading the CSV file from config.
-        This is called during configure_optimizers before trainer is available.
+        Compute steps_per_epoch for OneCycleLR auto-configuration.
+
+        Dataset size comes from, in order: the grid positions (``grid_mode``),
+        ``samples_per_epoch``, ``len(self.train_ds)`` when the config has no
+        ``input_csv_path`` (e.g. window-indexed datasets such as
+        ``MBTilesMaskWindowedDataset``), or the row count of ``input_csv_path``.
+        Called during configure_optimizers, before the trainer is available.
+
+        Returns:
+            Optional[int]: ``dataset_size // effective_batch_size`` (at least 1),
+            or ``None`` when the size or batch size cannot be determined.
+
+        Example YAML::
+
+            scheduler_list:
+              - scheduler:
+                  _target_: torch.optim.lr_scheduler.OneCycleLR
+                  max_lr: 1.0e-3
+                  epochs: 150
+                interval: step
         """
         try:
             # Get train_dataset config
@@ -230,14 +248,19 @@ class Model(pl.LightningModule):
                     and hasattr(self.train_ds, "samples_per_epoch")
                 ):
                     dataset_size = self.train_ds.samples_per_epoch
-            else:
-                # Get CSV path for traditional CSV/DataFrame-backed datasets.
-                if "input_csv_path" not in dataset_cfg:
+            elif "input_csv_path" not in dataset_cfg:
+                # Datasets without a CSV in the config (e.g. window-indexed
+                # MBTilesMaskWindowedDataset): use the instantiated dataset.
+                train_ds = getattr(self, "train_ds", None)
+                if train_ds is None or not hasattr(train_ds, "__len__"):
                     logger.warning(
-                        "'input_csv_path' not found in train_dataset config "
-                        "and no samples_per_epoch is available"
+                        "'input_csv_path' not found in train_dataset config, "
+                        "no samples_per_epoch and no sized train dataset"
                     )
                     return None
+                dataset_size = len(train_ds)
+            else:
+                # Get CSV path for traditional CSV/DataFrame-backed datasets.
 
                 csv_path = dataset_cfg.input_csv_path
                 if not os.path.exists(csv_path):
