@@ -1,0 +1,90 @@
+# Generalized few-shot segmentation (GFSS) over a frozen base model, run for
+# every base seed x support episode by the ExperimentsRunner.
+#
+# - model + gfss.base_checkpoint: the base model (5 classes) exactly as trained;
+#   with from_runner, the checkpoint of the base run with the same seed is used.
+# - gfss.hierarchy: novel class 5 is a child of base class 3 (category
+#   splitting). Standard GFSS (novel classes hidden in the background) = {0: [0, ...]}.
+# - train_dataset = support set (window index injected per episode);
+#   test_dataset = query set, with the masks of the final 6 classes.
+# - BaseOnly never predicts the novel class: it is the floor of the tables.
+#   Methods with trainable parameters set pl_trainer.max_steps > 0;
+#   transductive ones need pl_trainer.inference_mode: false.
+mode: run-experiments
+
+experiments_runner:
+  seeds: [42, 123, 456]                    # seeds of the base models
+  output_base_dir: outputs/gfss/base_only_pampa
+  episodes:
+    csv: outputs/episodes/pampa.csv        # from build_fewshot_episodes.yaml
+    shots: [1, 3, 5, 10]
+    support_csv_key: train_dataset.window_index_cache
+  summary_group_by: [shots]
+  representative_metric: test/oem_score
+
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.gfss_model.GFSSModel
+
+model:                                     # base model, as in its training config
+  _target_: segmentation_models_pytorch.UPerNet
+  encoder_name: resnet50
+  encoder_weights: null
+  classes: 5
+
+class_definitions:
+  names: [water, built_up, bare_soil, grassland, forest, cropland]
+
+gfss:
+  hierarchy:
+    3: [3, 5]
+  base_checkpoint:
+    from_runner: outputs/baselines/r2_pampa   # or path: /ckpts/r2.ckpt
+  method:
+    _target_: pytorch_segmentation_models_trainer.few_shot.methods.base_only.BaseOnly
+  not_novel_index: 254
+
+hyperparameters:
+  batch_size: 8
+
+optimizer:                                 # used only by methods with parameters
+  _target_: torch.optim.SGD
+  lr: 1.0e-3
+
+pl_trainer:
+  max_steps: 0
+  accelerator: gpu
+  devices: 1
+  enable_checkpointing: false              # adapted state lives in memory
+
+train_dataset:                             # support set
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_mask_dataset.MBTilesMaskWindowedDataset
+  mbtiles_path: /data/images/tiles.mbtiles
+  patch_size: 256
+  selected_bands: [1, 2, 3]
+  n_classes: 6
+  window_index_cache: "???"                # injected per episode
+  mask_base_path: /data/masks
+  # S-novel regime (only the novel class is labelled): send base classes to
+  # gfss.not_novel_index. Remove for the full-label regime.
+  mask_class_mapping: {0: 254, 1: 254, 2: 254, 3: 254, 4: 254}
+  augmentation_list:
+    - _target_: albumentations.Normalize
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    num_workers: 4
+    shuffle: false
+
+test_dataset:                              # query set (6-class masks)
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_mask_dataset.MBTilesMaskWindowedDataset
+  mbtiles_path: /data/images/tiles.mbtiles
+  patch_size: 256
+  selected_bands: [1, 2, 3]
+  n_classes: 6
+  window_index_cache: /data/tiles_data/test_pampa.csv
+  mask_base_path: /data/masks
+  augmentation_list:
+    - _target_: albumentations.Normalize
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    num_workers: 4
+    shuffle: false

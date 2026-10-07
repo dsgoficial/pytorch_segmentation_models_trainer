@@ -21,6 +21,34 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 from hydra.core.config_store import ConfigStore
+from omegaconf import MISSING
+
+
+@dataclass
+class ExperimentsEpisodesConfig:
+    """Few-shot episodes axis of the ExperimentsRunner (seed × episode).
+
+    Args:
+        csv: Episodes file written by ``mode: build-fewshot-episodes``.
+        shots: Support sizes to run (default: all in the file).
+        draws: Draw indices to run (default: all in the file).
+        support_csv_key: Config key receiving each episode's support window
+            index.
+
+    Example YAML::
+
+        experiments_runner:
+          seeds: [42, 123, 456]       # seeds of the base models
+          episodes:
+            csv: outputs/episodes/pampa.csv
+            shots: [1, 3, 5, 10]
+          summary_group_by: [shots]
+    """
+
+    csv: str = MISSING
+    shots: Optional[List[int]] = None
+    draws: Optional[List[int]] = None
+    support_csv_key: str = "train_dataset.window_index_cache"
 
 
 @dataclass
@@ -61,6 +89,12 @@ class ExperimentsRunnerConfig:
             forced run's previous output directory is deleted before it is
             re-run, and its stale entry in ``runner_state.json`` /
             ``summary.csv`` is replaced (not duplicated) by the new result.
+        episodes: Few-shot episodes axis (:class:`ExperimentsEpisodesConfig`);
+            runs every seed × (shots, draw) and cannot be combined with
+            ``kfold``.
+        summary_group_by: Extra ``mean[col=v]``/``std[col=v]`` rows in
+            ``summary.csv`` per value of these columns (``seed``,
+            ``fold_idx``, ``shots``, ``draw``).
         representative_metric: Metric key used to select the representative
             run (closest to mean) and the best run (highest value).  When
             absent, the first val metric found alphabetically is used.
@@ -91,6 +125,8 @@ class ExperimentsRunnerConfig:
     kfold: Optional[Any] = None
     representative_metric: Optional[str] = None
     optuna_search: Optional[Any] = None
+    episodes: Optional[ExperimentsEpisodesConfig] = None
+    summary_group_by: Optional[List[str]] = None
 
 
 def _register_configs() -> None:

@@ -40,6 +40,9 @@ from pytorch_segmentation_models_trainer.domain_adaptation.feature_hooks import 
     FeatureExtractorHook,
 )
 from pytorch_segmentation_models_trainer.model_loader.model import Model
+from pytorch_segmentation_models_trainer.utils.checkpoint_loading import (
+    load_pretrained_weights,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -200,31 +203,12 @@ class DomainAdaptationModel(Model):
             ckpt_cfg: :class:`PretrainedCheckpointConfig` instance with
                 ``path``, ``source_format``, and ``strict_loading`` fields.
         """
-        logger.info(
-            "Loading pretrained weights from '%s' (format=%s, strict=%s)",
+        load_pretrained_weights(
+            model,
             ckpt_cfg.path,
-            ckpt_cfg.source_format,
-            ckpt_cfg.strict_loading,
+            source_format=ckpt_cfg.source_format,
+            strict_loading=ckpt_cfg.strict_loading,
         )
-        ckpt = torch.load(ckpt_cfg.path, map_location="cpu")
-
-        if ckpt_cfg.source_format == "pytorch_lightning":
-            raw = ckpt["state_dict"]
-            state_dict = {
-                k.removeprefix("model."): v
-                for k, v in raw.items()
-                if k.startswith("model.")
-            }
-        else:
-            state_dict = ckpt
-
-        missing, unexpected = model.load_state_dict(
-            state_dict, strict=ckpt_cfg.strict_loading
-        )
-        if missing:
-            logger.warning("Pretrained checkpoint: missing keys: %s", missing)
-        if unexpected:
-            logger.warning("Pretrained checkpoint: unexpected keys: %s", unexpected)
         logger.info("Pretrained weights loaded successfully.")
 
     # ------------------------------------------------------------------

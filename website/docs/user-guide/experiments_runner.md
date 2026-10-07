@@ -60,6 +60,8 @@ pytorch-smt --config-path . --config-name my_experiment
 | `summary_metrics` | `list[str]` | no | `[val/loss]` | Metric keys logged to the run summary table. |
 | `resume` | `bool` | no | `true` | Skip already-completed runs on restart using `runner_state.json`. Runs are idempotent by default — re-launching the same config never repeats finished work. Set to `false` to always start every run fresh. |
 | `overwrite` | `bool \| list[int]` | no | `false` | Forces re-execution of runs `resume` would otherwise skip. `true` forces every run; a list forces only those `run_idx` values. Deletes each forced run's previous output directory first, and replaces (not duplicates) its `runner_state.json` / `summary.csv` entry. |
+| `episodes` | `dict` | no | — | Few-shot episodes axis: runs every seed × (shots, draw) of an episodes file. See [Few-shot episodes](#few-shot-episodes-gfss). Cannot be combined with `kfold`. |
+| `summary_group_by` | `list[str]` | no | — | Adds `mean[col=v]` / `std[col=v]` rows to `summary.csv` for each value of these columns (`seed`, `fold_idx`, `shots`, `draw`). |
 
 ### Seeds vs n\_runs
 
@@ -179,6 +181,39 @@ deleting `runner_state.json` and starting over, but it also cleans each
 run's old output directory first — a plain `resume: false` restart does
 not). Each forced run's stale entry in `runner_state.json` and
 `summary.csv` is replaced by the new result, not duplicated.
+
+---
+
+## Few-shot episodes (GFSS)
+
+For generalized few-shot segmentation the unit of work is a *base model seed ×
+support episode*. With an `episodes` block the runner reads the file written
+by `mode: build-fewshot-episodes` (see
+[Generalized few-shot segmentation](./few-shot-segmentation.md)) and, for each
+seed and each `(shots, draw)`:
+
+1. writes the episode's support windows (window-index columns only, without
+   duplicates) to `<output_base_dir>/episodes/support_kKK_dDD.csv`;
+2. injects that path at `support_csv_key` (default
+   `train_dataset.window_index_cache`) and adds `episode.shots` /
+   `episode.draw` to the run config;
+3. runs in `<output_base_dir>/ep_kKK_dDD_seed<seed>/`.
+
+`seed` stays the base model seed, so `gfss.base_checkpoint.from_runner` picks
+the matching base checkpoint. `resume` and `overwrite` work as usual
+(`run_idx` spans seed × episode). `summary.csv` gains `shots` and `draw`
+columns.
+
+```yaml
+experiments_runner:
+  seeds: [42, 123, 456]
+  output_base_dir: outputs/gfss/diam_pampa
+  episodes:
+    csv: outputs/episodes/pampa.csv
+    shots: [1, 3, 5, 10]      # optional filter (default: all in the file)
+    draws: [0, 1, 2, 3, 4]    # optional filter
+  summary_group_by: [shots]   # mean[shots=1], std[shots=1], ...
+```
 
 ---
 

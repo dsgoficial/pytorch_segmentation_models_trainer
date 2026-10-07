@@ -100,6 +100,12 @@ def main(cfg: DictConfig):
         )
 
         return PipelineRunner(cfg).run()
+    elif cfg.mode == "build-fewshot-episodes":
+        from pytorch_segmentation_models_trainer.tools.few_shot.episodes import (
+            build_fewshot_episodes,
+        )
+
+        return build_fewshot_episodes(cfg)
     elif cfg.mode == "ddoq-vae-distill":
         from pytorch_segmentation_models_trainer.tools.dataset_distillation.vae_ddoq_distillation import (
             run_vae_ddoq_from_config,

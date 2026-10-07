@@ -1,0 +1,312 @@
+# -*- coding: utf-8 -*-
+"""Tests for GFSSModel (LightningModule of generalized few-shot segmentation)."""
+
+import json
+from unittest.mock import MagicMock
+
+import pytest
+import segmentation_models_pytorch as smp
+import torch
+from omegaconf import OmegaConf
+from torch.utils.data import Dataset
+
+from pytorch_segmentation_models_trainer.few_shot.base_method import BaseGFSSMethod
+from pytorch_segmentation_models_trainer.few_shot.methods.base_only import BaseOnly
+from pytorch_segmentation_models_trainer.model_loader.gfss_model import GFSSModel
+
+_MODEL = {
+    "_target_": "segmentation_models_pytorch.UPerNet",
+    "encoder_name": "resnet18",
+    "encoder_weights": None,
+    "classes": 3,
+    "decoder_channels": 16,
+}
+
+
+class TinySegDataset(Dataset):
+    """4 images 64x64; mask: left half class 0, right half ``right`` class,
+    top-right quadrant class ``corner``."""
+
+    def __init__(self, n=4, right=1, corner=2, seed=None, **kwargs):
+        g = torch.Generator().manual_seed(0)
+        self.images = torch.randn(n, 3, 64, 64, generator=g)
+        mask = torch.zeros(64, 64, dtype=torch.long)
+        mask[:, 32:] = right
+        mask[:32, 32:] = corner
+        self.mask = mask
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, i):
+        return {"image": self.images[i], "mask": self.mask.clone()}
+
+
+class TrainableProbe(BaseGFSSMethod):
+    """Minimal trainable method used to exercise the training path."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.scale = torch.nn.Parameter(torch.ones(1))
+        self.init_calls = 0
+        self.seen_masks = None
+
+    def init_from_support(self, features, masks):
+        self.init_calls += 1
+        self.seen_masks = masks
+
+    def support_loss(self, features, masks):
+        return (self.scale * features.mean()) ** 2
+
+    def forward(self, features):
+        base = torch.einsum("bfhw,cf->bchw", features, self.base_weight)
+        base = base + self.base_bias.view(1, -1, 1, 1)
+        novel = base[:, [2]] * self.scale
+        return torch.cat([base, novel], dim=1)
+
+
+class TransductiveProbe(TrainableProbe):
+    transductive = True
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.adapt_calls = 0
+
+    def adapt_to_query(self, support_features, support_masks, query_features):
+        assert torch.is_grad_enabled()
+        self.adapt_calls += 1
+
+
+def _ds(**kw):
+    node = {
+        "_target_": "tests.test_gfss_model.TinySegDataset",
+        "data_loader": {"num_workers": 0, "shuffle": False, "drop_last": False},
+    }
+    node.update(kw)
+    return node
+
+
+@pytest.fixture
+def base_ckpt(tmp_path):
+    torch.manual_seed(0)
+    model = smp.UPerNet(**{k: v for k, v in _MODEL.items() if k != "_target_"})
+    path = tmp_path / "base.ckpt"
+    torch.save(
+        {"state_dict": {f"model.{k}": v for k, v in model.state_dict().items()}}, path
+    )
+    return path, model
+
+
+def _cfg(
+    ckpt_path,
+    method="pytorch_segmentation_models_trainer.few_shot.methods.base_only.BaseOnly",
+    **extra,
+):
+    cfg = {
+        "model": dict(_MODEL),
+        "gfss": {
+            "hierarchy": {2: [2, 3]},
+            "base_checkpoint": {"path": str(ckpt_path)},
+            "method": {"_target_": method},
+        },
+        "hyperparameters": {"batch_size": 2},
+        "optimizer": {"_target_": "torch.optim.SGD", "lr": 0.1},
+        "train_dataset": _ds(right=1, corner=3),
+        "test_dataset": _ds(right=1, corner=3),
+    }
+    cfg.update(extra)
+    return OmegaConf.create(cfg)
+
+
+class TestConstruction:
+    def test_builds_frozen_base_and_method(self, base_ckpt):
+        path, base = base_ckpt
+        m = GFSSModel(_cfg(path))
+        assert isinstance(m.method, BaseOnly)
+        assert m.hierarchy.num_classes == 4
+        assert not any(p.requires_grad for p in m.model.parameters())
+        torch.testing.assert_close(
+            m.method.base_weight, base.segmentation_head[0].weight.detach().flatten(1)
+        )
+        assert m.loss_function is None
+
+    def test_forward_shape_and_floor_matches_base(self, base_ckpt):
+        path, base = base_ckpt
+        m = GFSSModel(_cfg(path)).eval()
+        x = torch.randn(2, 3, 64, 64)
+        logits = m(x)
+        assert logits.shape == (2, 4, 64, 64)
+        torch.testing.assert_close(logits[:, :3], base.eval()(x))
+
+    def test_checkpoint_from_runner_uses_seed(self, base_ckpt, tmp_path):
+        path, _ = base_ckpt
+        runner = tmp_path / "runner"
+        runner.mkdir()
+        (runner / "runner_state.json").write_text(
+            json.dumps(
+                {
+                    "completed_runs": [
+                        {"run_idx": 0, "seed": 7, "best_checkpoint_path": str(path)}
+                    ]
+                }
+            )
+        )
+        cfg = _cfg(path, seed=7)
+        cfg.gfss.base_checkpoint = {"from_runner": str(runner)}
+        assert GFSSModel(cfg).hierarchy.num_base_classes == 3
+
+    def test_from_runner_without_seed_raises(self, base_ckpt, tmp_path):
+        path, _ = base_ckpt
+        cfg = _cfg(path)
+        cfg.gfss.base_checkpoint = {"from_runner": str(tmp_path)}
+        with pytest.raises(ValueError, match="seed"):
+            GFSSModel(cfg)
+
+    @pytest.mark.parametrize("ckpt", [{}, {"path": "a", "from_runner": "b"}])
+    def test_exactly_one_checkpoint_source(self, base_ckpt, ckpt):
+        path, _ = base_ckpt
+        cfg = _cfg(path)
+        cfg.gfss.base_checkpoint = ckpt
+        with pytest.raises(ValueError, match="exactly one"):
+            GFSSModel(cfg)
+
+    def test_class_names_from_class_definitions(self, base_ckpt):
+        path, _ = base_ckpt
+        cfg = _cfg(path, class_definitions={"names": ["a", "b", "c", "d"]})
+        assert GFSSModel(cfg).test_gfss_metrics.class_names == ["a", "b", "c", "d"]
+
+    def test_class_names_from_gfss_node_win(self, base_ckpt):
+        path, _ = base_ckpt
+        cfg = _cfg(path, class_definitions={"names": ["a", "b", "c", "d"]})
+        cfg.gfss.class_names = ["w", "x", "y", "z"]
+        assert GFSSModel(cfg).test_gfss_metrics.class_names == ["w", "x", "y", "z"]
+
+
+class TestOptimizers:
+    def test_no_trainable_parameters_returns_none(self, base_ckpt):
+        m = GFSSModel(_cfg(base_ckpt[0]))
+        assert m.configure_optimizers() is None
+
+    def test_only_method_parameters_are_optimized(self, base_ckpt):
+        m = GFSSModel(_cfg(base_ckpt[0], method="tests.test_gfss_model.TrainableProbe"))
+        opt = m.configure_optimizers()[0][0]
+        params = [p for g in opt.param_groups for p in g["params"]]
+        assert len(params) == 1 and params[0] is m.method.scale
+
+
+class TestSteps:
+    def test_support_masks_downsampled_and_init_once(self, base_ckpt):
+        m = GFSSModel(_cfg(base_ckpt[0], method="tests.test_gfss_model.TrainableProbe"))
+        m.on_fit_start()
+        m.on_fit_start()
+        assert m.method.init_calls == 1
+        assert m.method.seen_masks.shape == (4, 16, 16)
+        assert set(m.method.seen_masks.unique().tolist()) == {0, 1, 3}
+
+    def test_training_step_returns_loss_and_logs(self, base_ckpt):
+        m = GFSSModel(_cfg(base_ckpt[0], method="tests.test_gfss_model.TrainableProbe"))
+        m.log = MagicMock()
+        batch = next(iter(m.train_dataloader()))
+        loss = m.training_step(batch, 0)
+        assert loss.requires_grad
+        loss.backward()
+        assert m.method.scale.grad is not None
+        m.log.assert_called()
+
+    def test_training_step_without_loss_returns_none(self, base_ckpt):
+        m = GFSSModel(_cfg(base_ckpt[0]))
+        assert m.training_step(next(iter(m.train_dataloader())), 0) is None
+
+    def test_test_step_accumulates_and_epoch_end_logs(self, base_ckpt):
+        m = GFSSModel(_cfg(base_ckpt[0]))
+        m.log_dict = MagicMock()
+        for i, batch in enumerate(m.test_dataloader()):
+            m.test_step(batch, i)
+        assert m.test_gfss_metrics.confmat.sum() == 4 * 64 * 64
+        m.on_test_epoch_end()
+        logged = m.log_dict.call_args[0][0]
+        assert logged["test/iou/3"] == 0.0
+        assert "test/split_ceiling/3" in logged and "test/locality" in logged
+        assert m.test_gfss_metrics.confmat.sum() == 0
+
+    def test_validation_uses_val_metrics(self, base_ckpt):
+        cfg = _cfg(base_ckpt[0], val_dataset=_ds(right=1, corner=3))
+        m = GFSSModel(cfg)
+        m.log_dict = MagicMock()
+        m.validation_step(next(iter(m.val_dataloader())), 0)
+        m.on_validation_epoch_end()
+        assert "val/miou" in m.log_dict.call_args[0][0]
+
+    def test_transductive_method_adapts_per_batch_with_grad(self, base_ckpt):
+        m = GFSSModel(
+            _cfg(base_ckpt[0], method="tests.test_gfss_model.TransductiveProbe")
+        )
+        with torch.no_grad():
+            for i, batch in enumerate(m.test_dataloader()):
+                m.test_step(batch, i)
+        assert m.method.adapt_calls == 2
+        assert m.method.init_calls == 1
+
+
+class TestTrainIntegration:
+    @pytest.mark.parametrize(
+        "method, steps, extra",
+        [
+            ("tests.test_gfss_model.TrainableProbe", 3, {}),
+            (
+                "pytorch_segmentation_models_trainer.few_shot.methods.base_only.BaseOnly",
+                0,
+                {},
+            ),
+            ("tests.test_gfss_model.TransductiveProbe", 0, {"inference_mode": False}),
+        ],
+    )
+    def test_train_entrypoint_runs_fit_and_test(
+        self, base_ckpt, tmp_path, method, steps, extra
+    ):
+        from pytorch_segmentation_models_trainer.train import train
+
+        cfg = _cfg(
+            base_ckpt[0],
+            method=method,
+            pl_model={
+                "_target_": "pytorch_segmentation_models_trainer.model_loader.gfss_model.GFSSModel"
+            },
+            pl_trainer={
+                "max_steps": steps,
+                "accelerator": "cpu",
+                "enable_checkpointing": False,
+                "enable_progress_bar": False,
+                "default_root_dir": str(tmp_path),
+                **extra,
+            },
+        )
+        trainer = train(cfg)
+        assert trainer.global_step == steps
+        assert "test/miou" in trainer.callback_metrics
+        assert "test/oem_score" in trainer.callback_metrics
+
+
+def test_example_configs_match_dataclasses():
+    from pathlib import Path
+
+    from pytorch_segmentation_models_trainer.config_definitions.experiments_runner_config import (
+        ExperimentsRunnerConfig,
+    )
+    from pytorch_segmentation_models_trainer.config_definitions.few_shot_config import (
+        FewShotEpisodesConfig,
+        GFSSConfig,
+    )
+    from pytorch_segmentation_models_trainer.few_shot.hierarchy import ClassHierarchy
+
+    root = Path(__file__).resolve().parents[1] / "conf" / "examples"
+    gfss = OmegaConf.load(root / "gfss_base_only.yaml")
+    merged = OmegaConf.merge(OmegaConf.structured(GFSSConfig), gfss.gfss)
+    ClassHierarchy(merged.hierarchy, num_base_classes=gfss.model.classes)
+    OmegaConf.merge(
+        OmegaConf.structured(ExperimentsRunnerConfig), gfss.experiments_runner
+    )
+    episodes = OmegaConf.load(root / "build_fewshot_episodes.yaml")
+    OmegaConf.merge(
+        OmegaConf.structured(FewShotEpisodesConfig), episodes.fewshot_episodes
+    )

@@ -328,7 +328,7 @@ class TestDomainAdaptationModelCheckpointLoading:
         da_model = DomainAdaptationModel.__new__(DomainAdaptationModel)
         da_model.cfg = _make_cfg()
         with patch(
-            "pytorch_segmentation_models_trainer.model_loader.domain_adaptation_model.logger"
+            "pytorch_segmentation_models_trainer.utils.checkpoint_loading.logger"
         ) as logger_mock:
             da_model._load_pretrained_weights(_DummySegModel(), ckpt_cfg)
 

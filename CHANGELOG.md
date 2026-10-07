@@ -1,5 +1,20 @@
 # Unreleased
 
+## Generalized few-shot segmentation (GFSS) — infrastructure
+
+- New package `few_shot/`:
+  - `hierarchy.ClassHierarchy`: mother → children mapping between a base model and its GFSS extension (one or several mothers, e.g. `{3: [3, 5], 4: [4, 6]}`; standard GFSS = `{0: [0, novel...]}`). Validates indices (mother is a base class and one of its children; novel classes contiguous after the base ones; no child shared by two mothers). Provides `new_to_old`, `project_new_to_old` (DIaM's `π_new2old` generalised from background to any mother) and `to_old_labels`.
+  - `backbone.FrozenLinearHeadSegmenter`: splits a frozen smp model into decoder features and its 1×1 head (`weight`, `bias`), the feature space of DIaM/ClassTrans-style methods; rejects non-linear heads (smp U-Net 3×3) and stays in eval mode.
+  - `base_method.BaseGFSSMethod`: method API (`setup`, `init_from_support`, `support_loss`, `adapt_to_query` for transductive methods, `forward`).
+  - `methods.base_only.BaseOnly`: frozen base model that never predicts novel classes (floor of the tables / smoke test).
+  - `metrics.GFSSMetrics` (torchmetrics): per-class IoU/precision/recall, `miou`, `miou_base`, `miou_novel`, `oem_score` (0.4·base + 0.6·novel), `locality` (accuracy on untouched classes relative to the base model) and `split_ceiling/<c>` (fraction of a child's true pixels the base model assigns to its mother).
+- New `model_loader/gfss_model.GFSSModel` (`pl_model`): builds the base model from `model`, loads `gfss.base_checkpoint` (strict; `path` or `from_runner` + `seed`), freezes it and delegates to `gfss.method`. `trainer.fit` = adaptation on the support set (`train_dataset`); transductive methods adapt per test batch (`pl_trainer.inference_mode: false`); metrics logged as `test/...`/`val/...`; `val_dataset` optional.
+- New `mode: build-fewshot-episodes` (`tools/few_shot/episodes.py`): fixed, nested support draws per (K, draw, novel class) from a window index, with a minimum novel-class fraction over valid pixels; writes the selected windows with `shots`, `draw`, `novel_class`, `novel_fraction`.
+- ExperimentsRunner: new `episodes` axis (seed × (shots, draw)); writes one support window index per episode, injects it at `episodes.support_csv_key` (default `train_dataset.window_index_cache`) plus `episode.shots/draw`, runs in `ep_kKK_dDD_seed<seed>/`, keeps resume/overwrite; `RunResult` gains `shots`/`draw`; `summary.csv` gains `shots`/`draw` columns. New `summary_group_by` adds `mean[col=v]`/`std[col=v]` rows. `kfold` and `episodes` are mutually exclusive.
+- New `utils/checkpoint_loading.py`: `load_pretrained_weights` (extracted from `DomainAdaptationModel._load_pretrained_weights`, which now delegates to it; loads with `weights_only=False`) and `resolve_checkpoint_from_runner` (best checkpoint of the run with a given seed from `runner_state.json`).
+- Config dataclasses: `FewShotEpisodesConfig`, `GFSSConfig`, `GFSSCheckpointConfig` (`config_definitions/few_shot_config.py`), `ExperimentsEpisodesConfig` and `ExperimentsRunnerConfig.episodes`/`summary_group_by`.
+- Docs: new `user-guide/few-shot-segmentation.md`; Experiments Runner page documents `episodes` and `summary_group_by`. Examples: `conf/examples/build_fewshot_episodes.yaml`, `conf/examples/gfss_base_only.yaml`.
+
 ## OneCycleLR auto `steps_per_epoch` for datasets without `input_csv_path`
 
 - `Model._compute_steps_from_config` now falls back to `len(self.train_ds)` when the train dataset config has no `input_csv_path` (and no `samples_per_epoch`/`grid_mode`). Before, OneCycleLR auto-configuration raised `Cannot determine steps_per_epoch` for window-indexed datasets such as `MBTilesMaskWindowedDataset` (`window_index_cache`). CSV-backed datasets keep using the CSV row count.

@@ -30,6 +30,7 @@ import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple, Union
 
+import pandas as pd
 from omegaconf import DictConfig, OmegaConf
 
 from pytorch_segmentation_models_trainer.utils.spatial_kfold import SpatialKFoldSplitter
@@ -132,6 +133,8 @@ class RunResult:
         fold_idx: Zero-based fold index when in k-fold mode; ``None`` otherwise.
         epochs_trained: Number of epochs actually completed, including early
             stopping.  ``None`` when not yet populated.
+        shots: Support size K of the few-shot episode (episodes mode only).
+        draw: Support draw index of the episode (episodes mode only).
         best_checkpoint_path: Absolute path to the best checkpoint saved by
             ``ModelCheckpoint`` for this run.  Empty string when no checkpoint
             callback is configured.  ``None`` when not yet populated.
@@ -147,6 +150,8 @@ class RunResult:
     fold_idx: Optional[int] = None
     epochs_trained: Optional[int] = None
     best_checkpoint_path: Optional[str] = None
+    shots: Optional[int] = None
+    draw: Optional[int] = None
 
 
 class ExperimentsRunner:
@@ -195,6 +200,21 @@ class ExperimentsRunner:
         # Optuna mode manages its own n_trials; seeds/n_runs are optional.
         if self.runner_cfg.get("optuna_search", None) is not None:
             return
+
+        if (
+            self.runner_cfg.get("kfold", None) is not None
+            and self.runner_cfg.get("episodes", None) is not None
+        ):
+            raise ValueError(
+                "experiments_runner: 'kfold' and 'episodes' cannot be combined."
+            )
+        group_by = self.runner_cfg.get("summary_group_by", None) or []
+        unknown = set(group_by) - {"seed", "fold_idx", "shots", "draw"}
+        if unknown:
+            raise ValueError(
+                f"experiments_runner.summary_group_by: unknown columns {sorted(unknown)} "
+                "(allowed: seed, fold_idx, shots, draw)."
+            )
 
         seeds = self.runner_cfg.get("seeds", None)
         n_runs = self.runner_cfg.get("n_runs", None)
@@ -612,7 +632,8 @@ class ExperimentsRunner:
         Priority order:
         1. ``experiments_runner.optuna_search`` → :class:`OptunaRunner`
         2. ``experiments_runner.kfold`` → :meth:`_run_kfold_loop`
-        3. Default → :meth:`_run_seed_loop`
+        3. ``experiments_runner.episodes`` → :meth:`_run_episodes_loop`
+        4. Default → :meth:`_run_seed_loop`
 
         Returns:
             - When Optuna: tuple of ``(study, seed_results)``.
@@ -627,6 +648,9 @@ class ExperimentsRunner:
         kfold_cfg = self.runner_cfg.get("kfold", None)
         if kfold_cfg is not None:
             return self._run_kfold_loop(kfold_cfg)
+        episodes_cfg = self.runner_cfg.get("episodes", None)
+        if episodes_cfg is not None:
+            return self._run_episodes_loop(episodes_cfg)
         return self._run_seed_loop()
 
     def _run_seed_loop(self) -> List[RunResult]:
@@ -778,6 +802,127 @@ class ExperimentsRunner:
         return sorted(results, key=lambda r: r.run_idx)
 
     # ------------------------------------------------------------------
+    # Few-shot episodes
+    # ------------------------------------------------------------------
+
+    _EPISODE_COLUMNS = ("shots", "draw", "novel_class", "novel_fraction")
+
+    def _write_episode_csvs(
+        self, episodes_cfg: DictConfig
+    ) -> List[Tuple[int, int, str]]:
+        """Split the episodes file into one support window index per episode.
+
+        Args:
+            episodes_cfg: The ``experiments_runner.episodes`` sub-config.
+
+        Returns:
+            Sorted ``(shots, draw, csv_path)`` tuples. The CSVs keep only the
+            window-index columns, without duplicated windows (a window drawn
+            for several novel classes appears once).
+
+        Raises:
+            ValueError: If a requested (shots, draw) pair is not in the file.
+        """
+        df = pd.read_csv(episodes_cfg.csv)
+        shots = list(episodes_cfg.get("shots", None) or sorted(df["shots"].unique()))
+        draws = list(episodes_cfg.get("draws", None) or sorted(df["draw"].unique()))
+        out_dir = os.path.join(self.runner_cfg.output_base_dir, "episodes")
+        os.makedirs(out_dir, exist_ok=True)
+        window_cols = [c for c in df.columns if c not in self._EPISODE_COLUMNS]
+        episodes = []
+        for k in shots:
+            for d in draws:
+                sub = df[(df["shots"] == k) & (df["draw"] == d)]
+                if sub.empty:
+                    raise ValueError(
+                        f"experiments_runner.episodes: no episode with shots={k}, "
+                        f"draw={d} in {episodes_cfg.csv}."
+                    )
+                path = os.path.join(out_dir, f"support_k{int(k):02d}_d{int(d):02d}.csv")
+                sub[window_cols].drop_duplicates().to_csv(path, index=False)
+                episodes.append((int(k), int(d), path))
+        return episodes
+
+    def _run_episodes_loop(self, episodes_cfg: DictConfig) -> List[RunResult]:
+        """Few-shot loop: iterates seed × episode (shots, draw).
+
+        For each run the support window index of the episode is written to
+        ``<output_base_dir>/episodes/`` and injected at
+        ``episodes.support_csv_key`` (default
+        ``train_dataset.window_index_cache``); ``episode.shots`` and
+        ``episode.draw`` are added to the run config (usable in
+        interpolations) and the run directory is
+        ``ep_k<shots>_d<draw>_seed<seed>``. The seed is the one of the base
+        model (e.g. for ``gfss.base_checkpoint.from_runner``). State, resume
+        and ``overwrite`` work as in the seed-only loop, with ``run_idx``
+        spanning all seed × episode combinations.
+
+        Args:
+            episodes_cfg: The ``experiments_runner.episodes`` sub-config.
+
+        Returns:
+            List of :class:`RunResult` ordered by ``run_idx``.
+        """
+        episodes = self._write_episode_csvs(episodes_cfg)
+        support_key = episodes_cfg.get(
+            "support_csv_key", "train_dataset.window_index_cache"
+        )
+
+        resume = self.runner_cfg.get("resume", True)
+        overwrite = self._resolve_overwrite()
+        if resume and os.path.exists(self._state_path()):
+            state = self._load_state()
+            all_seeds = state["all_seeds"]
+            results = [RunResult(**r) for r in state["completed_runs"]]
+        else:
+            all_seeds = self._resolve_seeds()
+            results = []
+        completed = {r.run_idx for r in results}
+
+        for seed_idx, seed in enumerate(all_seeds):
+            for ep_idx, (shots, draw, support_csv) in enumerate(episodes):
+                run_idx = seed_idx * len(episodes) + ep_idx
+                force = self._should_force(run_idx, overwrite)
+                if run_idx in completed and not force:
+                    logger.info(
+                        "ExperimentsRunner — run %d (seed=%d shots=%d draw=%d) "
+                        "already done, skipping.",
+                        run_idx,
+                        seed,
+                        shots,
+                        draw,
+                    )
+                    continue
+                results = [r for r in results if r.run_idx != run_idx]
+
+                run_cfg, _ = self._build_run_cfg(run_idx, seed)
+                output_dir = os.path.join(
+                    self.runner_cfg.output_base_dir,
+                    f"ep_k{shots:02d}_d{draw:02d}_seed{seed}",
+                )
+                OmegaConf.update(run_cfg, support_key, support_csv, merge=True)
+                OmegaConf.update(
+                    run_cfg, "episode", {"shots": shots, "draw": draw}, merge=True
+                )
+                if "pl_trainer" in run_cfg:
+                    OmegaConf.update(
+                        run_cfg, "pl_trainer.default_root_dir", output_dir, merge=True
+                    )
+                self._clean_output_dir(output_dir)
+                result = self._run_single(
+                    run_idx, seed, run_cfg=run_cfg, output_dir=output_dir
+                )
+                result.shots, result.draw = shots, draw
+                results.append(result)
+                results = sorted(results, key=lambda r: r.run_idx)
+
+                self._save_state(all_seeds, results)
+                if self.runner_cfg.get("save_summary", True):
+                    self._save_summary(results)
+
+        return sorted(results, key=lambda r: r.run_idx)
+
+    # ------------------------------------------------------------------
     # Summary CSV
     # ------------------------------------------------------------------
 
@@ -802,6 +947,7 @@ class ExperimentsRunner:
         summary_path = os.path.join(output_base_dir, "summary.csv")
 
         has_fold = any(r.fold_idx is not None for r in results)
+        has_episode = any(r.shots is not None for r in results)
         all_metric_keys = sorted({k for r in results for k in self._all_run_metrics(r)})
 
         base_cols = [
@@ -820,6 +966,9 @@ class ExperimentsRunner:
                 "epochs_trained",
                 "best_checkpoint_path",
             ]
+        if has_episode:
+            base_cols.insert(base_cols.index("seed") + 1, "draw")
+            base_cols.insert(base_cols.index("seed") + 1, "shots")
         fieldnames = base_cols + all_metric_keys + ["representative", "best_run"]
 
         def _fmt(v) -> str:
@@ -857,9 +1006,45 @@ class ExperimentsRunner:
             }
             if has_fold:
                 row["fold_idx"] = r.fold_idx if r.fold_idx is not None else ""
+            if has_episode:
+                row["shots"] = r.shots if r.shots is not None else ""
+                row["draw"] = r.draw if r.draw is not None else ""
             for k in all_metric_keys:
                 row[k] = _fmt(m[k]) if k in m else ""
             rows.append(row)
+
+        rows.extend(
+            self._aggregate_rows(results, all_metric_keys, "", has_fold, has_episode)
+        )
+        for col in self.runner_cfg.get("summary_group_by", None) or []:
+            values = sorted({getattr(r, col) for r in results} - {None})
+            for v in values:
+                group = [r for r in results if getattr(r, col) == v]
+                rows.extend(
+                    self._aggregate_rows(
+                        group, all_metric_keys, f"[{col}={v}]", has_fold, has_episode
+                    )
+                )
+
+        with open(summary_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        logger.info("ExperimentsRunner — summary saved to %s", summary_path)
+
+    def _aggregate_rows(
+        self,
+        results: List[RunResult],
+        all_metric_keys: List[str],
+        suffix: str,
+        has_fold: bool,
+        has_episode: bool,
+    ) -> List[Dict]:
+        """``mean<suffix>`` and ``std<suffix>`` summary rows over ``results``."""
+
+        def _fmt(v) -> str:
+            return f"{v:.6f}"
 
         durations = [r.training_time_seconds for r in results]
         epochs_list = [
@@ -867,7 +1052,7 @@ class ExperimentsRunner:
         ]
 
         mean_row: Dict = {
-            "run": "mean",
+            "run": f"mean{suffix}",
             "seed": "-",
             "duration_s": _fmt(statistics.mean(durations)),
             "epochs_trained": (
@@ -878,7 +1063,7 @@ class ExperimentsRunner:
             "best_run": "",
         }
         std_row: Dict = {
-            "run": "std",
+            "run": f"std{suffix}",
             "seed": "-",
             "duration_s": (
                 _fmt(statistics.stdev(durations)) if len(durations) >= 2 else "0.000000"
@@ -909,11 +1094,8 @@ class ExperimentsRunner:
                 else ("0.000000" if vals else "")
             )
 
-        rows.extend([mean_row, std_row])
-
-        with open(summary_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
-
-        logger.info("ExperimentsRunner — summary saved to %s", summary_path)
+        if has_episode:
+            for row in (mean_row, std_row):
+                row["shots"] = ""
+                row["draw"] = ""
+        return [mean_row, std_row]
