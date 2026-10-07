@@ -113,9 +113,10 @@ class GFSSModel(Model):
     # ------------------------------------------------------------------
 
     def _resolve_checkpoint(self) -> GFSSCheckpointConfig:
+        node = self.cfg.gfss.get("base_checkpoint", None)
         ckpt = OmegaConf.merge(
             OmegaConf.structured(GFSSCheckpointConfig),
-            self.cfg.gfss.get("base_checkpoint", {}) or {},
+            OmegaConf.to_container(node, resolve=True) if node is not None else {},
         )
         if bool(ckpt.path) == bool(ckpt.from_runner):
             raise ValueError(

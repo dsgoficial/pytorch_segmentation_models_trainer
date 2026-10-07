@@ -21,6 +21,7 @@ import csv
 import dataclasses
 import json
 import logging
+import math
 import multiprocessing as mp
 import os
 import secrets
@@ -1086,6 +1087,7 @@ class ExperimentsRunner:
                 self._all_run_metrics(r)[k]
                 for r in results
                 if k in self._all_run_metrics(r)
+                and not math.isnan(self._all_run_metrics(r)[k])  # absent classes
             ]
             mean_row[k] = _fmt(statistics.mean(vals)) if vals else ""
             std_row[k] = (

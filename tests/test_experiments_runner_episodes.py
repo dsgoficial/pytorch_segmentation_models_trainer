@@ -229,3 +229,15 @@ def test_config_dataclasses_accept_episodes_and_group_by():
     assert cfg.episodes.support_csv_key == "train_dataset.window_index_cache"
     assert cfg.episodes.shots is None
     assert ExperimentsEpisodesConfig(csv="x").draws is None
+
+
+def test_summary_aggregates_skip_nan_metrics(tmp_path, episodes_csv):
+    values = iter([float("nan"), 1.0, 3.0, float("nan")] * 2)
+    with patch(_RUN_SINGLE, side_effect=_fake_run_single([], lambda cfg: next(values))):
+        ExperimentsRunner(_cfg(tmp_path, episodes_csv)).run()
+    with open(tmp_path / "out" / "summary.csv") as f:
+        rows = {r["run"]: r for r in csv.DictReader(f)}
+    assert float(rows["mean"]["test/miou"]) == pytest.approx(2.0)
+    assert float(rows["std"]["test/miou"]) == pytest.approx(
+        1.1547005
+    )  # finite values [1, 3, 1, 3]

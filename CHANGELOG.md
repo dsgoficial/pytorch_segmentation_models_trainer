@@ -1,5 +1,10 @@
 # Unreleased
 
+## Bug fixes (GFSS / ExperimentsRunner)
+
+- `build-fewshot-episodes` and `GFSSModel` (`gfss.base_checkpoint`): interpolations to the root config (e.g. `${paths.masks_dir}`, `${paths.outputs_dir}/r2_pampa`) failed with `InterpolationKeyError` because the node was merged into its dataclass detached from the root; it is now resolved first.
+- ExperimentsRunner `summary.csv`: mean/std rows crashed (`'float' object has no attribute 'numerator'` in `statistics.stdev`, Python 3.13) when a metric was `nan` in some run (e.g. per-class IoU of a class absent from the test set). `nan` values are now skipped in the aggregates.
+
 ## GFSS: HiSplit (hierarchical split of a base class)
 
 - `few_shot/methods/hisplit.HiSplit`: `p(child) = p_base(mother) · q(child|x)` over the frozen base, other classes unchanged; `q` variants `proto` (cosine to support prototypes), `proto_prob` (diagonal Gaussian, shared or per-class variance), `linear` (trained on the support in `trainer.fit`) and `trans` (linear + per-tile transductive entropy/prior restricted to the superclass). S-novel "free negatives" (not-novel pixels the base predicts as the mother), several mothers, hierarchical decoding that preserves base predictions outside the superclass, or flat decoding. Example `conf/examples/gfss_hisplit.yaml`; documented in `user-guide/few-shot-segmentation.md`.

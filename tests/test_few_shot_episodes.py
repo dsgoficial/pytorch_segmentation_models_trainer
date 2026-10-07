@@ -231,3 +231,21 @@ def test_main_dispatches_build_fewshot_episodes(monkeypatch):
     monkeypatch.setattr(episodes, "build_fewshot_episodes", lambda cfg: "called")
     cfg = OmegaConf.create({"mode": "build-fewshot-episodes"})
     assert main_module.main.__wrapped__(cfg) == "called"
+
+
+def test_interpolations_to_the_root_config_are_resolved(mask_dir, tmp_path):
+    d, csv = mask_dir
+    cfg = OmegaConf.create(
+        {
+            "paths": {"masks": str(d), "out": str(tmp_path)},
+            "fewshot_episodes": {
+                "window_index_cache": str(csv),
+                "mask_base_path": "${paths.masks}",
+                "novel_classes": [5],
+                "shots": [1],
+                "n_draws": 1,
+                "output_csv": "${paths.out}/e.csv",
+            },
+        }
+    )
+    assert build_fewshot_episodes(cfg) == str(tmp_path / "e.csv")

@@ -134,8 +134,11 @@ def build_fewshot_episodes(cfg: DictConfig) -> str:
     Returns:
         Path of the written episodes CSV.
     """
+    # Resolve against the full config first: merging a detached node would
+    # break interpolations such as ``${paths.masks_dir}``.
     ep = OmegaConf.merge(
-        OmegaConf.structured(FewShotEpisodesConfig), cfg.fewshot_episodes
+        OmegaConf.structured(FewShotEpisodesConfig),
+        OmegaConf.to_container(cfg.fewshot_episodes, resolve=True),
     )
     index_path = Path(ep.window_index_cache)
     df = (

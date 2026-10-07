@@ -155,6 +155,12 @@ class TestConstruction:
         cfg.gfss.base_checkpoint = {"from_runner": str(runner)}
         assert GFSSModel(cfg).hierarchy.num_base_classes == 3
 
+    def test_checkpoint_path_interpolated_from_root(self, base_ckpt):
+        path, _ = base_ckpt
+        cfg = _cfg(path, paths={"ckpt": str(path)})
+        cfg.gfss.base_checkpoint = {"path": "${paths.ckpt}"}
+        assert GFSSModel(cfg).hierarchy.num_base_classes == 3
+
     def test_from_runner_without_seed_raises(self, base_ckpt, tmp_path):
         path, _ = base_ckpt
         cfg = _cfg(path)
