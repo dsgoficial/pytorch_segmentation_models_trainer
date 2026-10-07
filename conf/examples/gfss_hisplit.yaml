@@ -11,7 +11,7 @@ experiments_runner:
 gfss:
   method:
     _target_: pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit
-    q: proto                 # proto | proto_prob | linear | trans
+    q: proto                 # proto | proto_prob | linear | trans | edl
     tau: 10.0                # cosine temperature (proto, init of linear/trans)
     variance: shared         # proto_prob: shared | per_class
     decoding: hierarchical   # hierarchical | flat
@@ -20,7 +20,20 @@ gfss:
     adapt_iter: 50
     lr: 1.0e-3
     pi_update_at: [10]
+    # edl only: steps to reach full weight of the EDL KL regulariser
+    kl_anneal_steps: 50
 
 pl_trainer:
-  max_steps: 0               # q: linear/trans -> e.g. 100 (support CE, optimizer node)
+  max_steps: 0               # q: linear/trans/edl -> e.g. 100 (optimizer node)
   inference_mode: true       # false for q: trans
+
+# Evidential base (R2 trained with EvidentialWrapper): replace `model` with the
+# wrapper as in its training config; HiSplit splits the Dirichlet evidence and
+# logs base_vacuity / dissonance in test/unc/...
+# model:
+#   _target_: pytorch_segmentation_models_trainer.custom_models.edl_wrapper.EvidentialWrapper
+#   model:
+#     _target_: segmentation_models_pytorch.UPerNet
+#     encoder_name: resnet50
+#     encoder_weights: null
+#     classes: 5

@@ -1,5 +1,12 @@
 # Unreleased
 
+## GFSS: evidential HiSplit and uncertainty evaluation
+
+- `HiSplit(q="edl")`: evidential pair head (Dirichlet over the children of each mother, `q = α/S`) trained on the support with the EDL MSE loss plus the KL regulariser annealed over `kl_anneal_steps`.
+- Evidential base models: `FrozenLinearHeadSegmenter` unwraps an `EvidentialWrapper` (`evidential` flag); `BaseGFSSMethod.setup(..., base_output="softmax"|"evidential")` with `base_alpha`/`base_probabilities`; `GFSSModel` passes it. HiSplit splits the mother's evidence and base rate by `q` (`α_child = α_mother·q`, exact Dirichlet aggregation).
+- `BaseGFSSMethod.uncertainty_names()` / `HiSplit.uncertainty()`: per-pixel `split_entropy`, `split_vacuity` (edl), `base_vacuity` and `dissonance` (evidential base).
+- New `few_shot/uncertainty.py`: `vacuity`, `dissonance` (Jøsang), `normalized_entropy` and `GFSSUncertaintyMetrics` (binned AURC of the split decisions; per-tile mean uncertainty and Spearman correlation with the tile error). `GFSSModel` evaluates and logs them as `test/unc/...` / `val/unc/...` when the method provides uncertainty maps.
+
 ## Bug fixes (GFSS / ExperimentsRunner)
 
 - `build-fewshot-episodes` and `GFSSModel` (`gfss.base_checkpoint`): interpolations to the root config (e.g. `${paths.masks_dir}`, `${paths.outputs_dir}/r2_pampa`) failed with `InterpolationKeyError` because the node was merged into its dataclass detached from the root; it is now resolved first.

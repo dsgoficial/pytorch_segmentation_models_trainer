@@ -116,11 +116,36 @@ every other class keeps `p_base`. Variants of `q` (`q:`):
 | `proto_prob` | diagonal Gaussian log-likelihood; variance `shared` by the children of a mother or `per_class`, floored at `var_floor` | none |
 | `linear` | `w·f + b`, initialised as `proto` | support CE in `trainer.fit` |
 | `trans` | `linear` + per-query-tile SGD on support CE + entropy and KL(q̄‖π) weighted by `p_base(m)` | fit + transductive (`inference_mode: false`) |
+| `edl` | evidential pair head: `e = softplus(w·f + b)`, `α = e + 1`, `q = α / S` within each mother | EDL MSE + KL regulariser (annealed over `kl_anneal_steps`) in `trainer.fit` |
 
 Support targets: pixels labelled with a child; and, in the S-novel regime,
 pixels labelled "not novel" that the base model predicts as the mother become
 examples of the child that keeps the mother's index ("free negatives";
 noisy where the base model is wrong).
+
+#### Evidential base model and uncertainty
+
+With a base model trained with the lib's `EvidentialWrapper` (Dirichlet
+head), set `model` to the wrapper exactly as in its training config; the
+GFSS model unwraps it and the methods receive `base_output: evidential`.
+HiSplit then uses the Dirichlet mean as `p_base` and splits the mother's
+evidence **and** base rate by `q` (`e_c = e_m·q_c`, `a_c = a_m·q_c`), so
+`α_c = α_m·q_c` (exact Dirichlet aggregation) and beliefs stay non-negative.
+
+Methods that estimate uncertainty (HiSplit) are evaluated automatically,
+logged as `test/unc/...`:
+
+| Map | When |
+|---|---|
+| `split_entropy` | always: normalised entropy of the split of the mother predicted by the base model |
+| `split_vacuity` | `q: edl`: `n_children / S` of the pair head |
+| `base_vacuity`, `dissonance` | evidential base: vacuity `K/S` of the base and Jøsang dissonance of the split opinion |
+
+For each map: `aurc/<map>` — area under the risk–coverage curve of the split
+decisions (pixels whose true class is a child and that the base model assigns
+to its mother; abstaining = sending them back to the mother), and
+`tile_mean/<map>`, `tile_spearman/<map>` — Spearman correlation between the
+tile mean uncertainty and the tile error (1 − pixel accuracy).
 
 `decoding: hierarchical` (default) keeps the base argmax and splits only the
 pixels predicted as a mother, so the predictions of all other classes are

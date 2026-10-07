@@ -162,3 +162,58 @@ class TestTraining:
 def test_invalid_arguments(kw, match):
     with pytest.raises(ValueError, match=match):
         HiSplit(**kw)
+
+
+class TestEvidential:
+    def test_edl_q_is_dirichlet_mean_and_trains(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="edl", kl_anneal_steps=4)
+        assert m.q_weight.requires_grad
+        scores = m._scores(f, m.q_weight, m.q_bias)
+        alpha = torch.nn.functional.softplus(scores) + 1
+        torch.testing.assert_close(m._q(scores), alpha / alpha.sum(1, keepdim=True))
+        m.q_weight.data.zero_()
+        opt = torch.optim.SGD([m.q_weight, m.q_bias], lr=0.05)
+        first = m.support_loss(f, masks)
+        for _ in range(10):
+            loss = m.support_loss(f, masks)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+        assert m._edl_step == 11
+        assert m.support_loss(f, masks) < first
+
+    def test_edl_loss_skips_mothers_without_targets(self):
+        f, masks, w, b = _data()
+        masks[:] = 255
+        m = _ready(f, masks, w, b, q="edl")
+        assert m.support_loss(f, masks).item() == 0.0
+
+    def test_uncertainty_softmax_base(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="edl")
+        u = m.uncertainty(f)
+        assert set(u) == {"split_entropy", "split_vacuity"}
+        base_pred = m._base_probs(f).argmax(1)
+        assert (u["split_entropy"][base_pred != 1] == 0).all()
+        assert ((u["split_vacuity"] > 0) == (base_pred == 1)).all()
+        assert all(((v >= 0) & (v <= 1)).all() for v in u.values())
+
+    def test_evidential_base_split_and_uncertainty(self):
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="proto")
+        m.setup(h, w, b, NN, base_output="evidential")
+        m.init_from_support(f, masks)
+        logits = torch.einsum("bfhw,cf->bchw", f, w) + b.view(1, -1, 1, 1)
+        alpha = torch.nn.functional.softplus(logits) + 1
+        p = m.split_probabilities(f)
+        q = m._q(m._scores(f, m.q_weight, m.q_bias))
+        strength = alpha.sum(1)
+        torch.testing.assert_close(
+            p[:, 3], alpha[:, 1] * q[:, 1] / strength
+        )  # α_c = α_m q_c
+        u = m.uncertainty(f)
+        assert set(u) == {"split_entropy", "base_vacuity", "dissonance"}
+        torch.testing.assert_close(u["base_vacuity"], 3 / strength)
+        assert ((u["dissonance"] >= 0) & (u["dissonance"] <= 1)).all()

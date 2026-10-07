@@ -41,8 +41,13 @@ class FrozenLinearHeadSegmenter(nn.Module):
     The wrapped model is frozen and kept in eval mode even when the parent
     module is put in training mode (BatchNorm statistics never change).
 
+    An ``EvidentialWrapper`` around such a model is unwrapped and flagged
+    (``evidential = True``): its logits are evidence pre-activations
+    (``alpha = softplus(logits) + 1``).
+
     Args:
-        model: smp segmentation model with a 1x1 convolutional head.
+        model: smp segmentation model with a 1x1 convolutional head, or an
+            ``EvidentialWrapper`` around one.
 
     Raises:
         ValueError: If the head is not a 1x1 convolution (e.g. smp U-Net,
@@ -51,6 +56,14 @@ class FrozenLinearHeadSegmenter(nn.Module):
 
     def __init__(self, model: nn.Module) -> None:
         super().__init__()
+        # EvidentialWrapper (Dirichlet head of the lib): the linear head and
+        # the features are those of the wrapped model; only the mapping from
+        # logits to probabilities changes (see ``BaseGFSSMethod.base_output``).
+        self.evidential = not hasattr(model, "segmentation_head") and hasattr(
+            model, "model"
+        )
+        if self.evidential:
+            model = model.model
         head = model.segmentation_head[0]
         if not isinstance(head, nn.Conv2d) or tuple(head.kernel_size) != (1, 1):
             raise ValueError(

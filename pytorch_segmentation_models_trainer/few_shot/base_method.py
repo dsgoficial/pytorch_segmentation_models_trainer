@@ -19,8 +19,10 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import List, Optional
 
+import torch
+import torch.nn.functional as F
 from torch import Tensor, nn
 
 from pytorch_segmentation_models_trainer.few_shot.hierarchy import ClassHierarchy
@@ -56,6 +58,7 @@ class BaseGFSSMethod(nn.Module, ABC):
         super().__init__()
         self.hierarchy: Optional[ClassHierarchy] = None
         self.not_novel_index: int = 254
+        self.base_output: str = "softmax"
 
     def setup(
         self,
@@ -63,6 +66,7 @@ class BaseGFSSMethod(nn.Module, ABC):
         base_weight: Tensor,
         base_bias: Tensor,
         not_novel_index: int = 254,
+        base_output: str = "softmax",
     ) -> None:
         """Receive the task hierarchy and the frozen base classifier.
 
@@ -71,11 +75,29 @@ class BaseGFSSMethod(nn.Module, ABC):
             base_weight: ``(num_base_classes, F)`` base classifier weight.
             base_bias: ``(num_base_classes,)`` base classifier bias.
             not_novel_index: Support label meaning "not any novel class".
+            base_output: ``softmax`` (cross-entropy base model) or
+                ``evidential`` (Dirichlet base model, ``EvidentialWrapper``).
         """
+        if base_output not in {"softmax", "evidential"}:
+            raise ValueError(
+                f"base_output must be 'softmax' or 'evidential', got {base_output!r}."
+            )
         self.hierarchy = hierarchy
         self.not_novel_index = not_novel_index
+        self.base_output = base_output
         self.register_buffer("base_weight", base_weight.clone())
         self.register_buffer("base_bias", base_bias.clone())
+
+    def base_alpha(self, logits: Tensor) -> Tensor:
+        """Dirichlet parameters ``softplus(logits) + 1`` of an evidential base."""
+        return F.softplus(logits) + 1.0
+
+    def base_probabilities(self, logits: Tensor) -> Tensor:
+        """Base class probabilities: softmax, or the Dirichlet mean ``α / S``."""
+        if self.base_output == "evidential":
+            alpha = self.base_alpha(logits)
+            return alpha / alpha.sum(dim=1, keepdim=True)
+        return torch.softmax(logits, dim=1)
 
     def init_from_support(self, features: Tensor, masks: Tensor) -> None:
         """Initialise from the full support set (default: nothing)."""
@@ -90,6 +112,16 @@ class BaseGFSSMethod(nn.Module, ABC):
     ) -> None:
         """Transductive adaptation to one query batch (default: nothing)."""
         return None
+
+    def uncertainty_names(self) -> List[str]:
+        """Names of the maps returned by ``uncertainty`` (default: none).
+
+        Methods that estimate per-pixel uncertainty override this and
+        ``uncertainty(features) -> {name: (B, h, w)}`` with values in
+        ``[0, 1]``; ``GFSSModel`` then evaluates them (AURC of the split
+        decisions, per-tile Spearman with the tile error).
+        """
+        return []
 
     @abstractmethod
     def forward(self, features: Tensor) -> Tensor:

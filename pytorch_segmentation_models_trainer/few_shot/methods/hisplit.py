@@ -19,7 +19,7 @@
 """
 
 import logging
-from typing import List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 import torch
 import torch.nn.functional as F
@@ -29,12 +29,21 @@ from pytorch_segmentation_models_trainer.few_shot.backbone import (
     FrozenLinearHeadSegmenter,
 )
 from pytorch_segmentation_models_trainer.few_shot.base_method import BaseGFSSMethod
+from pytorch_segmentation_models_trainer.custom_losses.edl_utils import (
+    edl_kl_regulariser,
+)
 from pytorch_segmentation_models_trainer.few_shot.losses import valid_mean
+from pytorch_segmentation_models_trainer.few_shot.uncertainty import (
+    dissonance,
+    normalized_entropy,
+    vacuity,
+)
 
 logger = logging.getLogger(__name__)
 
 _EPS = 1e-10
-_Q_TYPES = {"proto", "proto_prob", "linear", "trans"}
+_Q_TYPES = {"proto", "proto_prob", "linear", "trans", "edl"}
+_TRAINABLE = {"linear", "trans", "edl"}
 
 
 class HiSplit(BaseGFSSMethod):
@@ -60,7 +69,23 @@ class HiSplit(BaseGFSSMethod):
       steps on ``w_ce·CE_support + w_ent·H(q) + w_kl·KL(q̄ ‖ π)``, where
       the entropy and the child proportions ``q̄`` are weighted by
       ``p_base(m)`` (restricted to the superclass) and ``π`` is
-      self-estimated and re-estimated at ``pi_update_at`` (DIaM-style).
+      self-estimated and re-estimated at ``pi_update_at`` (DIaM-style);
+    * ``edl``: evidential pair head (D4 4a): evidence
+      ``softplus(w_c·f + b_c)``, ``α = e + 1`` and ``q = α / S`` within each
+      mother; trained by ``trainer.fit`` with the EDL MSE loss (Sensoy et al.
+      2018) plus the KL regulariser annealed linearly over ``kl_anneal_steps``.
+
+    With an evidential base model (``base_output: evidential``, R2-EDL),
+    ``p_base`` is the Dirichlet mean and the split divides the mother's
+    evidence **and** base rate by ``q`` (``e_c = e_m q_c``, ``a_c = a_m q_c``),
+    so ``α_c = α_m q_c`` (Dirichlet aggregation is exact) and the beliefs stay
+    non-negative (D4 4c).
+
+    ``uncertainty(features)`` returns per-pixel maps in ``[0, 1]``:
+    ``split_entropy`` (normalised entropy of the split of the mother predicted
+    by the base model; 0 elsewhere), ``split_vacuity`` (``edl`` only),
+    ``base_vacuity`` and ``dissonance`` (evidential base only; dissonance of
+    the split opinion over all classes).
 
     Support targets of ``q``: a pixel labelled with a child is an example of
     that child; a pixel labelled ``not_novel_index`` (S-novel regime) that
@@ -85,6 +110,7 @@ class HiSplit(BaseGFSSMethod):
         adapt_iter: SGD iterations per query map (``trans``).
         lr: SGD learning rate (``trans``).
         pi_update_at: Iterations (1-based) where π is re-estimated (``trans``).
+        kl_anneal_steps: Steps to reach full KL weight (``edl``).
 
     Example YAML::
 
@@ -110,6 +136,7 @@ class HiSplit(BaseGFSSMethod):
         adapt_iter: int = 50,
         lr: float = 1e-3,
         pi_update_at: Sequence[int] = (10,),
+        kl_anneal_steps: int = 50,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -133,17 +160,17 @@ class HiSplit(BaseGFSSMethod):
         self.adapt_iter = int(adapt_iter)
         self.lr = float(lr)
         self.pi_update_at = [int(i) for i in pi_update_at]
+        self.kl_anneal_steps = int(kl_anneal_steps)
         self.transductive = q == "trans"
+        self._edl_step = 0
         self._task_params: Optional[tuple] = None
 
     # ------------------------------------------------------------------
     # Setup / support
     # ------------------------------------------------------------------
 
-    def setup(
-        self, hierarchy, base_weight, base_bias, not_novel_index: int = 254
-    ) -> None:
-        super().setup(hierarchy, base_weight, base_bias, not_novel_index)
+    def setup(self, hierarchy, base_weight, base_bias, not_novel_index=254, **kwargs):
+        super().setup(hierarchy, base_weight, base_bias, not_novel_index, **kwargs)
         self.child_classes: List[int] = [
             c for m in hierarchy.mothers for c in hierarchy.children_of(m)
         ]
@@ -151,7 +178,7 @@ class HiSplit(BaseGFSSMethod):
             hierarchy.mother_of(c) for c in self.child_classes
         ]
         n, dim = len(self.child_classes), base_weight.shape[1]
-        if self.q in {"linear", "trans"}:
+        if self.q in _TRAINABLE:
             self.q_weight = nn.Parameter(base_weight.new_zeros(n, dim))
             self.q_bias = nn.Parameter(base_weight.new_zeros(n))
         else:
@@ -160,10 +187,12 @@ class HiSplit(BaseGFSSMethod):
         self.register_buffer("q_var", base_weight.new_ones(n, dim))
 
     def _base_probs(self, features: Tensor) -> Tensor:
-        logits = FrozenLinearHeadSegmenter.linear(
+        return self.base_probabilities(self._base_logits(features))
+
+    def _base_logits(self, features: Tensor) -> Tensor:
+        return FrozenLinearHeadSegmenter.linear(
             features, self.base_weight, self.base_bias
         )
-        return torch.softmax(logits, dim=1)
 
     def _targets(self, features: Tensor, masks: Tensor) -> Tensor:
         """Index into ``self.child_classes`` of each support pixel, or -1."""
@@ -222,11 +251,20 @@ class HiSplit(BaseGFSSMethod):
             )
         return torch.einsum("bfhw,cf->bchw", features, weight) + bias.view(1, -1, 1, 1)
 
-    def _q(self, scores: Tensor) -> Tensor:
-        """Softmax of the scores within the children of each mother."""
-        q = torch.empty_like(scores)
+    def _groups(self):
         for mother in self.hierarchy.mothers:
-            idx = [i for i, m in enumerate(self.child_mother) if m == mother]
+            yield mother, [i for i, m in enumerate(self.child_mother) if m == mother]
+
+    def _q(self, scores: Tensor) -> Tensor:
+        """Split within the children of each mother: softmax of the scores,
+        or the Dirichlet mean ``α / S`` for ``edl``."""
+        q = torch.empty_like(scores)
+        if self.q == "edl":
+            alpha = F.softplus(scores) + 1.0
+            for _, idx in self._groups():
+                q[:, idx] = alpha[:, idx] / alpha[:, idx].sum(1, keepdim=True)
+            return q
+        for _, idx in self._groups():
             q[:, idx] = torch.softmax(scores[:, idx], dim=1)
         return q
 
@@ -264,13 +302,36 @@ class HiSplit(BaseGFSSMethod):
         ce = -torch.log(p + _EPS)
         return (ce * valid).sum() / valid.sum().clamp(min=1)
 
+    def _edl_loss(self, features: Tensor, targets: Tensor) -> Tensor:
+        """EDL MSE + annealed KL of the evidential pair head, per mother."""
+        alpha = F.softplus(self._scores(features, self.q_weight, self.q_bias)) + 1.0
+        kl_weight = min(1.0, self._edl_step / max(self.kl_anneal_steps, 1))
+        total = alpha.new_zeros(())
+        for _, idx in self._groups():
+            in_group = (targets >= min(idx)) & (targets <= max(idx))
+            if not in_group.any():
+                continue
+            a = alpha[:, idx]
+            local = (targets - min(idx)).clamp(min=0, max=len(idx) - 1)
+            y = F.one_hot(local, len(idx)).movedim(-1, 1).to(a.dtype)
+            s = a.sum(1, keepdim=True)
+            p = a / s
+            mse = ((y - p) ** 2 + a * (s - a) / (s**2 * (s + 1))).sum(1)
+            per_pixel = mse + kl_weight * edl_kl_regulariser(a, y)
+            total = total + per_pixel[in_group].mean()
+        return total
+
     def support_loss(self, features: Tensor, masks: Tensor) -> Optional[Tensor]:
-        """CE of q on the support targets (``linear``/``trans`` only)."""
-        if self.q not in {"linear", "trans"}:
+        """Loss of q on the support targets (trainable variants): CE
+        (``linear``/``trans``) or EDL MSE + annealed KL (``edl``)."""
+        if self.q not in _TRAINABLE:
             return None
-        return self._support_ce(
-            features, self._targets(features, masks), self.q_weight, self.q_bias
-        )
+        targets = self._targets(features, masks)
+        if self.q == "edl":
+            loss = self._edl_loss(features, targets)
+            self._edl_step += 1
+            return loss
+        return self._support_ce(features, targets, self.q_weight, self.q_bias)
 
     def _superclass_terms(self, q: Tensor, p_base: Tensor, pi: Tensor):
         """Entropy of q and KL(q̄ ‖ π), weighted by ``p_base(mother)``, per map."""
@@ -329,6 +390,54 @@ class HiSplit(BaseGFSSMethod):
                         self._q(self._scores(query_features, weight, bias)), p_base
                     )
         self._task_params = (weight.detach(), bias.detach())
+
+    # ------------------------------------------------------------------
+    # Uncertainty
+    # ------------------------------------------------------------------
+
+    def uncertainty_names(self) -> List[str]:
+        """Keys returned by :meth:`uncertainty` (after ``setup``)."""
+        names = ["split_entropy"]
+        if self.q == "edl":
+            names.append("split_vacuity")
+        if self.base_output == "evidential":
+            names += ["base_vacuity", "dissonance"]
+        return names
+
+    def uncertainty(self, features: Tensor) -> Dict[str, Tensor]:
+        """Per-pixel uncertainty maps ``(B, h, w)`` in ``[0, 1]`` (see class doc)."""
+        scores = self._scores(features, *self._current_params(features.shape[0]))
+        q = self._q(scores)
+        logits = self._base_logits(features)
+        base_pred = logits.argmax(1)
+        split_entropy = features.new_zeros(base_pred.shape)
+        split_vacuity = features.new_zeros(base_pred.shape)
+        for mother, idx in self._groups():
+            here = base_pred == mother
+            split_entropy = torch.where(
+                here, normalized_entropy(q[:, idx]), split_entropy
+            )
+            if self.q == "edl":
+                alpha_q = F.softplus(scores[:, idx]) + 1.0
+                split_vacuity = torch.where(here, vacuity(alpha_q), split_vacuity)
+        out = {"split_entropy": split_entropy}
+        if self.q == "edl":
+            out["split_vacuity"] = split_vacuity
+        if self.base_output == "evidential":
+            alpha = self.base_alpha(logits)
+            strength = alpha.sum(1, keepdim=True)
+            evidence = alpha - 1.0
+            belief = evidence.new_zeros(
+                evidence.shape[0], self.hierarchy.num_classes, *evidence.shape[2:]
+            )
+            belief[:, : self.hierarchy.num_base_classes] = evidence
+            for i, (child, mother) in enumerate(
+                zip(self.child_classes, self.child_mother)
+            ):
+                belief[:, child] = evidence[:, mother] * q[:, i]
+            out["base_vacuity"] = vacuity(alpha)
+            out["dissonance"] = dissonance(belief / strength)
+        return out
 
     # ------------------------------------------------------------------
     # Prediction

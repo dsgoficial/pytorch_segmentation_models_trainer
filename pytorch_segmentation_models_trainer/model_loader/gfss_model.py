@@ -36,6 +36,9 @@ from pytorch_segmentation_models_trainer.few_shot.backbone import (
 )
 from pytorch_segmentation_models_trainer.few_shot.hierarchy import ClassHierarchy
 from pytorch_segmentation_models_trainer.few_shot.metrics import GFSSMetrics
+from pytorch_segmentation_models_trainer.few_shot.uncertainty import (
+    GFSSUncertaintyMetrics,
+)
 from pytorch_segmentation_models_trainer.model_loader.model import Model
 from pytorch_segmentation_models_trainer.utils.checkpoint_loading import (
     load_pretrained_weights,
@@ -105,6 +108,13 @@ class GFSSModel(Model):
         self.test_gfss_metrics = GFSSMetrics(
             self.hierarchy, class_names=names, ignore_index=ignore, prefix="test/"
         )
+        names_u = self.method.uncertainty_names()
+        self.val_unc_metrics = (
+            GFSSUncertaintyMetrics(names_u, prefix="val/unc/") if names_u else None
+        )
+        self.test_unc_metrics = (
+            GFSSUncertaintyMetrics(names_u, prefix="test/unc/") if names_u else None
+        )
         self.register_buffer("_gfss_initialised", torch.tensor(False))
         self._support: Optional[Tuple[Tensor, Tensor]] = None
 
@@ -150,6 +160,7 @@ class GFSSModel(Model):
             weight,
             bias,
             not_novel_index=self.cfg.gfss.get("not_novel_index", 254),
+            base_output="evidential" if segmenter.evidential else "softmax",
         )
         logger.info(
             "GFSSModel: base %s from %s, %s, method %s",
@@ -229,31 +240,62 @@ class GFSSModel(Model):
         self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
-    def _eval_step(self, batch, metrics: GFSSMetrics) -> None:
+    def _update_uncertainty(self, feats, images, masks, pred, base_pred, unc_metrics):
+        """Evaluate the method's uncertainty maps on the split decisions:
+        pixels whose true class is a child (novel or kept mother) and that
+        the base model assigns to that child's mother."""
+        size = images.shape[-2:]
+        maps = {
+            k: F.interpolate(
+                v.unsqueeze(1), size=size, mode="bilinear", align_corners=True
+            )
+            .squeeze(1)
+            .clamp(0, 1)
+            for k, v in self.method.uncertainty(feats).items()
+        }
+        valid = masks != self.cfg.gfss.get("ignore_index", 255)
+        target = masks.clamp(min=0, max=self.hierarchy.num_classes - 1)
+        mother_of_target = self.hierarchy.new_to_old.to(masks.device)[target]
+        children = torch.tensor(
+            [c for m in self.hierarchy.mothers for c in self.hierarchy.children_of(m)],
+            device=masks.device,
+        )
+        region = valid & torch.isin(target, children) & (base_pred == mother_of_target)
+        unc_metrics.update(maps, region, pred == masks, valid)
+
+    def _eval_step(self, batch, metrics: GFSSMetrics, unc_metrics=None) -> None:
         self._ensure_initialised()
         images, masks = self._unpack_batch(batch)
+        masks = masks.long()
         feats = self.model.features(images)
         if self.method.transductive:
             with torch.enable_grad():
                 self.method.adapt_to_query(*self._get_support(), feats)
         logits = self.model.upsample(self.method(feats), images.shape[-2:])
+        pred = logits.argmax(1)
         base_pred = self.model.base_logits(images).argmax(1)
-        metrics.update(logits.argmax(1), masks.long(), base_pred)
+        metrics.update(pred, masks, base_pred)
+        if unc_metrics is not None:
+            self._update_uncertainty(feats, images, masks, pred, base_pred, unc_metrics)
 
     def val_dataloader(self):
         """Validation is optional in GFSS (no ``val_dataset`` -> no loop)."""
         return [] if self.val_ds is None else super().val_dataloader()
 
     def validation_step(self, batch, batch_idx):
-        self._eval_step(batch, self.val_gfss_metrics)
+        self._eval_step(batch, self.val_gfss_metrics, self.val_unc_metrics)
 
     def test_step(self, batch, batch_idx):
-        self._eval_step(batch, self.test_gfss_metrics)
+        self._eval_step(batch, self.test_gfss_metrics, self.test_unc_metrics)
+
+    def _log_and_reset(self, *metrics) -> None:
+        for m in metrics:
+            if m is not None:
+                self.log_dict(m.compute())
+                m.reset()
 
     def on_validation_epoch_end(self) -> None:
-        self.log_dict(self.val_gfss_metrics.compute())
-        self.val_gfss_metrics.reset()
+        self._log_and_reset(self.val_gfss_metrics, self.val_unc_metrics)
 
     def on_test_epoch_end(self) -> None:
-        self.log_dict(self.test_gfss_metrics.compute())
-        self.test_gfss_metrics.reset()
+        self._log_and_reset(self.test_gfss_metrics, self.test_unc_metrics)

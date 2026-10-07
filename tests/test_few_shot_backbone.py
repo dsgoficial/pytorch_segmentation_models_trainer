@@ -98,3 +98,39 @@ class TestBaseOnly:
         torch.testing.assert_close(logits[:, :2], base)
         assert (logits.argmax(1) != 2).all()
         assert torch.isfinite(logits).all()
+
+
+class TestEvidentialBase:
+    def test_wrapper_is_unwrapped_and_flagged(self):
+        from pytorch_segmentation_models_trainer.custom_models.edl_wrapper import (
+            EvidentialWrapper,
+        )
+
+        inner = _upernet()
+        seg = FrozenLinearHeadSegmenter(EvidentialWrapper(inner))
+        assert seg.evidential is True
+        assert seg.model is inner
+        x = torch.randn(1, 3, 64, 64)
+        torch.testing.assert_close(seg.base_logits(x), inner.eval()(x))
+        assert FrozenLinearHeadSegmenter(_upernet()).evidential is False
+
+
+class TestBaseProbabilities:
+    def test_softmax_and_dirichlet_mean(self):
+        h = ClassHierarchy({1: [1, 2]}, num_base_classes=2)
+        logits = torch.randn(1, 2, 3, 3)
+        m = BaseOnly()
+        m.setup(h, torch.randn(2, 4), torch.zeros(2))
+        assert m.base_output == "softmax"
+        torch.testing.assert_close(m.base_probabilities(logits), logits.softmax(1))
+        m.setup(h, torch.randn(2, 4), torch.zeros(2), base_output="evidential")
+        alpha = torch.nn.functional.softplus(logits) + 1
+        torch.testing.assert_close(m.base_alpha(logits), alpha)
+        torch.testing.assert_close(
+            m.base_probabilities(logits), alpha / alpha.sum(1, keepdim=True)
+        )
+
+    def test_invalid_base_output(self):
+        h = ClassHierarchy({1: [1, 2]}, num_base_classes=2)
+        with pytest.raises(ValueError, match="base_output"):
+            BaseOnly().setup(h, torch.randn(2, 4), torch.zeros(2), base_output="nig")

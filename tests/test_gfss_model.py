@@ -384,3 +384,73 @@ def test_hisplit_runs_through_train(base_ckpt, tmp_path, q, steps, extra):
     trainer = train(cfg)
     assert trainer.global_step == steps
     assert "test/locality" in trainer.callback_metrics
+
+
+class TestUncertaintyEvaluation:
+    def test_methods_without_uncertainty_have_no_unc_metrics(self, base_ckpt):
+        m = GFSSModel(_cfg(base_ckpt[0]))
+        assert m.test_unc_metrics is None and m.val_unc_metrics is None
+
+    def test_hisplit_edl_logs_uncertainty_metrics_through_train(
+        self, base_ckpt, tmp_path
+    ):
+        from pytorch_segmentation_models_trainer.train import train
+
+        cfg = _cfg(
+            base_ckpt[0],
+            method="pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit",
+            pl_model={
+                "_target_": "pytorch_segmentation_models_trainer.model_loader.gfss_model.GFSSModel"
+            },
+            pl_trainer={
+                "max_steps": 3,
+                "accelerator": "cpu",
+                "enable_checkpointing": False,
+                "enable_progress_bar": False,
+                "default_root_dir": str(tmp_path),
+            },
+        )
+        cfg.gfss.method.q = "edl"
+        trainer = train(cfg)
+        keys = set(trainer.callback_metrics)
+        for name in ("split_entropy", "split_vacuity"):
+            assert f"test/unc/aurc/{name}" in keys
+            assert f"test/unc/tile_spearman/{name}" in keys
+            assert f"test/unc/tile_mean/{name}" in keys
+
+    def test_evidential_base_checkpoint(self, tmp_path):
+        from pytorch_segmentation_models_trainer.custom_models.edl_wrapper import (
+            EvidentialWrapper,
+        )
+
+        torch.manual_seed(0)
+        inner = smp.UPerNet(**{k: v for k, v in _MODEL.items() if k != "_target_"})
+        wrapper = EvidentialWrapper(inner)
+        path = tmp_path / "edl.ckpt"
+        torch.save(
+            {"state_dict": {f"model.{k}": v for k, v in wrapper.state_dict().items()}},
+            path,
+        )
+        cfg = _cfg(
+            path,
+            method="pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit",
+        )
+        cfg.model = {
+            "_target_": "pytorch_segmentation_models_trainer.custom_models.edl_wrapper.EvidentialWrapper",
+            "model": dict(_MODEL),
+        }
+        m = GFSSModel(cfg)
+        assert m.model.evidential and m.method.base_output == "evidential"
+        assert m.test_unc_metrics.names == [
+            "split_entropy",
+            "base_vacuity",
+            "dissonance",
+        ]
+        m.log_dict = MagicMock()
+        for i, batch in enumerate(m.test_dataloader()):
+            m.test_step(batch, i)
+        m.on_test_epoch_end()
+        logged = {}
+        for call in m.log_dict.call_args_list:
+            logged.update(call[0][0])
+        assert "test/unc/aurc/dissonance" in logged and "test/miou" in logged
