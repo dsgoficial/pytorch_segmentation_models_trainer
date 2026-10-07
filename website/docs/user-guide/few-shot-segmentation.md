@@ -102,6 +102,31 @@ features (`FrozenLinearHeadSegmenter.features`) and the base classifier
 | `pytorch_segmentation_models_trainer.few_shot.methods.prototype.PrototypeImprinting` | Training-free: novel rows = L2-normalised support prototypes × `scale` (`base_norm`, `unit` or a number), zero bias. |
 | `pytorch_segmentation_models_trainer.few_shot.methods.diam.DIaM` | DIaM (CVPR 2023), port of the official classifier. Transductive. |
 | `pytorch_segmentation_models_trainer.few_shot.methods.classtrans.ClassTrans` | ClassTrans (CVPRW 2024), port of the official `TransitionClassifier`. Transductive. |
+| `pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit` | Hierarchical split of each mother among its children over the frozen base (category splitting). |
+
+### HiSplit
+
+Only the split of each mother `m` is learned:
+`p(child) = p_base(m) · q(child | x)` with `Σ q = 1` over the children of `m`;
+every other class keeps `p_base`. Variants of `q` (`q:`):
+
+| `q` | Scores | Training |
+|---|---|---|
+| `proto` | `tau · cos(f, μ_child)` (support prototypes) | none (`max_steps: 0`) |
+| `proto_prob` | diagonal Gaussian log-likelihood; variance `shared` by the children of a mother or `per_class`, floored at `var_floor` | none |
+| `linear` | `w·f + b`, initialised as `proto` | support CE in `trainer.fit` |
+| `trans` | `linear` + per-query-tile SGD on support CE + entropy and KL(q̄‖π) weighted by `p_base(m)` | fit + transductive (`inference_mode: false`) |
+
+Support targets: pixels labelled with a child; and, in the S-novel regime,
+pixels labelled "not novel" that the base model predicts as the mother become
+examples of the child that keeps the mother's index ("free negatives";
+noisy where the base model is wrong).
+
+`decoding: hierarchical` (default) keeps the base argmax and splits only the
+pixels predicted as a mother, so the predictions of all other classes are
+those of the base model (`locality` = 1 up to ties within `decode_eps`);
+`decoding: flat` takes the argmax of `log p` over all classes, where the split
+mass can lose to neighbour classes.
 
 ### DIaM
 
@@ -176,5 +201,5 @@ downsampled (nearest) to the feature resolution.
 
 See `conf/examples/build_fewshot_episodes.yaml`,
 `conf/examples/gfss_base_only.yaml` and the per-method configs
-`gfss_prototype.yaml`, `gfss_diam.yaml`, `gfss_classtrans.yaml` (Hydra
+`gfss_prototype.yaml`, `gfss_diam.yaml`, `gfss_classtrans.yaml`, `gfss_hisplit.yaml` (Hydra
 `defaults` on top of `gfss_base_only`).

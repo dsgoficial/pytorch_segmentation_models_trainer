@@ -333,6 +333,7 @@ def test_example_configs_match_dataclasses():
         ("gfss_prototype", "PrototypeImprinting"),
         ("gfss_diam", "DIaM"),
         ("gfss_classtrans", "ClassTrans"),
+        ("gfss_hisplit", "HiSplit"),
     ],
 )
 def test_method_example_configs_compose_and_instantiate(name, target):
@@ -348,3 +349,32 @@ def test_method_example_configs_compose_and_instantiate(name, target):
     assert type(method).__name__ == target
     assert cfg.gfss.hierarchy == {3: [3, 5]}
     assert cfg.experiments_runner.episodes.csv == "outputs/episodes/pampa.csv"
+
+
+@pytest.mark.parametrize(
+    "q, steps, extra",
+    [("proto", 0, {}), ("linear", 3, {}), ("trans", 2, {"inference_mode": False})],
+)
+def test_hisplit_runs_through_train(base_ckpt, tmp_path, q, steps, extra):
+    from pytorch_segmentation_models_trainer.train import train
+
+    cfg = _cfg(
+        base_ckpt[0],
+        method="pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit",
+        pl_model={
+            "_target_": "pytorch_segmentation_models_trainer.model_loader.gfss_model.GFSSModel"
+        },
+        pl_trainer={
+            "max_steps": steps,
+            "accelerator": "cpu",
+            "enable_checkpointing": False,
+            "enable_progress_bar": False,
+            "default_root_dir": str(tmp_path),
+            **extra,
+        },
+    )
+    cfg.gfss.method.q = q
+    cfg.gfss.method.adapt_iter = 2
+    trainer = train(cfg)
+    assert trainer.global_step == steps
+    assert "test/locality" in trainer.callback_metrics

@@ -1,5 +1,9 @@
 # Unreleased
 
+## GFSS: HiSplit (hierarchical split of a base class)
+
+- `few_shot/methods/hisplit.HiSplit`: `p(child) = p_base(mother) · q(child|x)` over the frozen base, other classes unchanged; `q` variants `proto` (cosine to support prototypes), `proto_prob` (diagonal Gaussian, shared or per-class variance), `linear` (trained on the support in `trainer.fit`) and `trans` (linear + per-tile transductive entropy/prior restricted to the superclass). S-novel "free negatives" (not-novel pixels the base predicts as the mother), several mothers, hierarchical decoding that preserves base predictions outside the superclass, or flat decoding. Example `conf/examples/gfss_hisplit.yaml`; documented in `user-guide/few-shot-segmentation.md`.
+
 ## GFSS methods: prototype imprinting, DIaM, ClassTrans
 
 - `few_shot/losses.py`: shared GFSS losses — `projected_ce` (DIaM's π_S: "not novel" pixels use the sum of base probabilities, weighted like the official `compute_wce`), `entropy_and_marginal_kl`, `hierarchical_kd` (π_new2old into each mother), `class_prior`, `novel_prototypes`, `support_one_hot`, `default_not_novel_weight`.

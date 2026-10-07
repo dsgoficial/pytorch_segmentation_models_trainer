@@ -1,0 +1,26 @@
+# HiSplit: split a base class (mother) among its children over the frozen
+# base model; classes outside the hierarchy keep the base predictions
+# (hierarchical decoding).
+defaults:
+  - gfss_base_only
+  - _self_
+
+experiments_runner:
+  output_base_dir: outputs/gfss/hisplit_proto_pampa
+
+gfss:
+  method:
+    _target_: pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit
+    q: proto                 # proto | proto_prob | linear | trans
+    tau: 10.0                # cosine temperature (proto, init of linear/trans)
+    variance: shared         # proto_prob: shared | per_class
+    decoding: hierarchical   # hierarchical | flat
+    # trans only:
+    trans_weights: [1.0, 1.0, 1.0]   # CE support, entropy, KL(q̄||π) in the superclass
+    adapt_iter: 50
+    lr: 1.0e-3
+    pi_update_at: [10]
+
+pl_trainer:
+  max_steps: 0               # q: linear/trans -> e.g. 100 (support CE, optimizer node)
+  inference_mode: true       # false for q: trans
