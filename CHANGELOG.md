@@ -1,5 +1,14 @@
 # Unreleased
 
+## GFSS methods: prototype imprinting, DIaM, ClassTrans
+
+- `few_shot/losses.py`: shared GFSS losses — `projected_ce` (DIaM's π_S: "not novel" pixels use the sum of base probabilities, weighted like the official `compute_wce`), `entropy_and_marginal_kl`, `hierarchical_kd` (π_new2old into each mother), `class_prior`, `novel_prototypes`, `support_one_hot`, `default_not_novel_weight`.
+- `few_shot/methods/prototype.PrototypeImprinting`: training-free baseline; novel rows = normalised support prototypes × `scale` (`base_norm`, `unit`, number).
+- `few_shot/methods/diam.DIaM`: port of the official DIaM classifier (transductive; one classifier per query tile; weights/iterations/lr/π schedule as in the official config), generalised from background to mother classes.
+- `few_shot/methods/classtrans.ClassTrans`: port of the official ClassTrans `TransitionClassifier`, faithful to the code (optimal-transport init, transition branch on base logits with zero-initialised `layer_scale`, 4-term loss with KD, LDAM from iteration 101), without the OpenEarthMap post-processing; `class_counts` configurable (default: counted on the support).
+- Parity tests against tensors produced by the official DIaM and ClassTrans code (`tests/testing_data/few_shot/*_reference.pt`; generator kept outside the library).
+- Examples `conf/examples/gfss_{prototype,diam,classtrans}.yaml`; methods documented in `user-guide/few-shot-segmentation.md`.
+
 ## Generalized few-shot segmentation (GFSS) — infrastructure
 
 - New package `few_shot/`:

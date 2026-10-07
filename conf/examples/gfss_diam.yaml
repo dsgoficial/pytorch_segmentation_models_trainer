@@ -1,0 +1,23 @@
+# DIaM (Hajimiri et al., CVPR 2023), port of the official classifier.
+# Transductive: one classifier per query tile, optimised in test_step.
+defaults:
+  - gfss_base_only
+  - _self_
+
+experiments_runner:
+  output_base_dir: outputs/gfss/diam_pampa
+
+gfss:
+  method:
+    _target_: pytorch_segmentation_models_trainer.few_shot.methods.diam.DIaM
+    weights: [100, 1, 1, 100]    # CE support, KL(marginal||pi), entropy, KD
+    adapt_iter: 100
+    lr: 1.25e-3
+    pi_estimation: self          # self | uniform
+    pi_update_at: [10]
+    fine_tune_base_classifier: true
+    not_novel_weight: null       # null = official rule (0.01 one-shot, else 0.15)
+
+pl_trainer:
+  max_steps: 0
+  inference_mode: false          # gradients inside test_step

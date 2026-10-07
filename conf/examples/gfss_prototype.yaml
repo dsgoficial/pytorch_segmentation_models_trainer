@@ -1,0 +1,13 @@
+# GFSS baseline: novel rows imprinted from support prototypes (no training).
+# Everything else (data, base model, runner) comes from gfss_base_only.yaml.
+defaults:
+  - gfss_base_only
+  - _self_
+
+experiments_runner:
+  output_base_dir: outputs/gfss/prototype_pampa
+
+gfss:
+  method:
+    _target_: pytorch_segmentation_models_trainer.few_shot.methods.prototype.PrototypeImprinting
+    scale: base_norm        # base_norm | unit (DIaM init) | <float>

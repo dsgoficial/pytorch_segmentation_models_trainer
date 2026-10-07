@@ -1,0 +1,27 @@
+# ClassTrans (Wang et al., CVPRW 2024), port of the official TransitionClassifier
+# (faithful to the code, not to the paper; no OEM post-processing).
+defaults:
+  - gfss_base_only
+  - _self_
+
+experiments_runner:
+  output_base_dir: outputs/gfss/classtrans_pampa
+
+gfss:
+  method:
+    _target_: pytorch_segmentation_models_trainer.few_shot.methods.classtrans.ClassTrans
+    weights: [650, 3, 16, 7]     # CE support, entropy, KL(marginal||pi), KD
+    adapt_iter: 130
+    lr: 9.0e-5
+    momentum: 0.9
+    weight_decay: 5.0e-4
+    ldam_start_iter: 101
+    ldam_max_margin: 6
+    class_counts: null           # null = counted on the support; or per-class pixel counts
+    pi_update_at: [10, 20, 30, 40, 50, 100]
+    fine_tune_base_classifier: true
+    ot_lambda: 0.1
+
+pl_trainer:
+  max_steps: 0
+  inference_mode: false

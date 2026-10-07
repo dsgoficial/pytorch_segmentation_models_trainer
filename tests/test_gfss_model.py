@@ -259,6 +259,21 @@ class TestTrainIntegration:
                 {},
             ),
             ("tests.test_gfss_model.TransductiveProbe", 0, {"inference_mode": False}),
+            (
+                "pytorch_segmentation_models_trainer.few_shot.methods.prototype.PrototypeImprinting",
+                0,
+                {},
+            ),
+            (
+                "pytorch_segmentation_models_trainer.few_shot.methods.diam.DIaM",
+                0,
+                {"inference_mode": False},
+            ),
+            (
+                "pytorch_segmentation_models_trainer.few_shot.methods.classtrans.ClassTrans",
+                0,
+                {"inference_mode": False},
+            ),
         ],
     )
     def test_train_entrypoint_runs_fit_and_test(
@@ -310,3 +325,26 @@ def test_example_configs_match_dataclasses():
     OmegaConf.merge(
         OmegaConf.structured(FewShotEpisodesConfig), episodes.fewshot_episodes
     )
+
+
+@pytest.mark.parametrize(
+    "name, target",
+    [
+        ("gfss_prototype", "PrototypeImprinting"),
+        ("gfss_diam", "DIaM"),
+        ("gfss_classtrans", "ClassTrans"),
+    ],
+)
+def test_method_example_configs_compose_and_instantiate(name, target):
+    from pathlib import Path
+
+    from hydra import compose, initialize_config_dir
+    from hydra.utils import instantiate
+
+    root = Path(__file__).resolve().parents[1] / "conf" / "examples"
+    with initialize_config_dir(config_dir=str(root), version_base="1.2"):
+        cfg = compose(config_name=name)
+    method = instantiate(cfg.gfss.method, _recursive_=False)
+    assert type(method).__name__ == target
+    assert cfg.gfss.hierarchy == {3: [3, 5]}
+    assert cfg.experiments_runner.episodes.csv == "outputs/episodes/pampa.csv"

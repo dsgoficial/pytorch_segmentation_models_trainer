@@ -99,6 +99,54 @@ features (`FrozenLinearHeadSegmenter.features`) and the base classifier
 | `_target_` | Description |
 |---|---|
 | `pytorch_segmentation_models_trainer.few_shot.methods.base_only.BaseOnly` | Frozen base model; never predicts novel classes (floor). |
+| `pytorch_segmentation_models_trainer.few_shot.methods.prototype.PrototypeImprinting` | Training-free: novel rows = L2-normalised support prototypes × `scale` (`base_norm`, `unit` or a number), zero bias. |
+| `pytorch_segmentation_models_trainer.few_shot.methods.diam.DIaM` | DIaM (CVPR 2023), port of the official classifier. Transductive. |
+| `pytorch_segmentation_models_trainer.few_shot.methods.classtrans.ClassTrans` | ClassTrans (CVPRW 2024), port of the official `TransitionClassifier`. Transductive. |
+
+### DIaM
+
+Port of `src/classifier.py` of the [official repository](https://github.com/sinahmr/DIaM).
+For every query batch, one linear classifier per query tile (base rows +
+novel rows initialised with normalised support prototypes) is optimised for
+`adapt_iter` SGD steps (no momentum) on
+`w_ce·CE_support + w_kl·KL(marginal‖π) + w_ent·H(p_query) + w_kd·KD`
+(`weights: [100, 1, 1, 100]`, `lr: 1.25e-3`, `adapt_iter: 100`, π estimated by
+the model and re-estimated at iteration 10). The support CE projects "not
+novel" pixels onto the sum of base probabilities (Eq. 5); the KD sums each
+novel class into its **mother** (the background in the original).
+
+Differences from the official code: novel classes go to their mother instead
+of the background; all query pixels are treated as valid (the official test
+reads the query ground truth to drop ignored pixels).
+
+### ClassTrans
+
+Port of the [official code](https://github.com/earth-insights/ClassTrans),
+which differs from the paper (the paper's loss is LDAM + λ·L_π without KD).
+Faithful to the code:
+
+- novel rows initialised by entropic optimal transport (Sinkhorn) between
+  support novel features and base-predicted regions;
+- logits = classification branch + `layer_scale ⊙ (S(f) · W_base f)`,
+  `S = (W_c f + b_c) ⊗ (W_r f + b_r)`, with `layer_scale` starting at 0;
+- loss `650·CE + 3·H(p_query) + 16·KL(marginal‖π) + 7·KD`, the CE replaced
+  by LDAM (margins ∝ n^-1/4, max 6) from iteration 101 of 130; SGD
+  (`lr 9e-5`, momentum 0.9, weight decay 5e-4).
+
+Not ported: the OpenEarthMap post-processing of `test.py` (vision-language
+and CascadePSP masks, zeroed classes). Differences: one classifier per query
+tile (the official code handles one query image), transition layers drawn
+once from the support, LDAM counts from `class_counts` or from the support
+labels (the official code hard-codes OpenEarthMap counts), query valid mask
+= all pixels.
+
+### Parity with the official code
+
+`tests/test_few_shot_diam.py` and `tests/test_few_shot_classtrans.py` compare
+the ports with tensors produced by the official classifiers on small random
+inputs, with the standard GFSS hierarchy `{0: [0, novel...]}` (background
+as mother): prototypes / transport initialisation and final logits match
+(`rtol 1e-4`).
 
 ### Writing a method
 
@@ -126,5 +174,7 @@ downsampled (nearest) to the feature resolution.
 
 ## Full example
 
-See `conf/examples/build_fewshot_episodes.yaml` and
-`conf/examples/gfss_base_only.yaml`.
+See `conf/examples/build_fewshot_episodes.yaml`,
+`conf/examples/gfss_base_only.yaml` and the per-method configs
+`gfss_prototype.yaml`, `gfss_diam.yaml`, `gfss_classtrans.yaml` (Hydra
+`defaults` on top of `gfss_base_only`).
