@@ -160,11 +160,12 @@ class ClassTrans(BaseGFSSMethod):
         self.ot_lambda = float(ot_lambda)
         self.not_novel_weight = not_novel_weight
         self.hierarchical_mask = hierarchical_mask
-        if isinstance(base_class_counts, str):  # JSON of mode count-class-pixels
-            with open(base_class_counts) as f:
-                base_class_counts = json.load(f)["counts"]
+        # A JSON path (mode count-class-pixels) is read lazily in
+        # init_from_support: the file may be produced by an earlier pipeline step.
         self.base_class_counts = (
-            None if base_class_counts is None else [float(c) for c in base_class_counts]
+            base_class_counts
+            if base_class_counts is None or isinstance(base_class_counts, str)
+            else [float(c) for c in base_class_counts]
         )
         self._task_params: Optional[dict] = None
 
@@ -223,6 +224,9 @@ class ClassTrans(BaseGFSSMethod):
         if self.class_counts is not None:
             counts = torch.tensor(self.class_counts, dtype=torch.float64)
         elif self.base_class_counts is not None:
+            if isinstance(self.base_class_counts, str):
+                with open(self.base_class_counts) as f:
+                    self.base_class_counts = [float(c) for c in json.load(f)["counts"]]
             if len(self.base_class_counts) != nb:
                 raise ValueError(
                     f"base_class_counts must have {nb} entries, "

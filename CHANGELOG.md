@@ -9,7 +9,7 @@
 ## GFSS: LDAM class counts and prototype options
 
 - New `mode: count-class-pixels` (`tools/few_shot/class_counts.py`, `ClassCountsConfig`): pixel count of each class over a window index after an optional class remapping, written as JSON. Example `conf/examples/count_class_pixels.yaml`.
-- `ClassTrans(base_class_counts=...)`: base-class counts from the training set (list or the JSON above) + novel counts from the support for the LDAM margins, as described in the paper; `class_counts` keeps precedence; default unchanged (support only).
+- `ClassTrans(base_class_counts=...)`: base-class counts from the training set (list or the JSON above, read lazily at `init_from_support` so it may be produced by an earlier pipeline step) + novel counts from the support for the LDAM margins, as described in the paper; `class_counts` keeps precedence; default unchanged (support only).
 - `PrototypeImprinting`: `scale: mother_norm` and `bias: zero | base_mean | mother` (default unchanged: `base_norm`, `zero`).
 
 ## GFSS: abstention and calibration of the uncertainty

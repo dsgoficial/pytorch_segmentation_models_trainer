@@ -189,3 +189,15 @@ def test_base_class_counts_from_json_file(small, tmp_path):
     m_file = _ready(h, fs, ms, base_class_counts=str(path))
     m_list = _ready(h, fs, ms, base_class_counts=[1000.0, 4000.0])
     torch.testing.assert_close(m_file.ldam_margins, m_list.ldam_margins)
+
+
+def test_base_class_counts_path_is_read_lazily(small, tmp_path):
+    import json
+
+    h, fs, ms, fq = small
+    path = tmp_path / "later.json"
+    m = ClassTrans(base_class_counts=str(path))  # file does not exist yet
+    m.setup(h, torch.randn(2, 4), torch.zeros(2), NOT_NOVEL)
+    path.write_text(json.dumps({"num_classes": 2, "counts": [10, 20]}))
+    m.init_from_support(fs, ms)
+    assert m.base_class_counts == [10.0, 20.0]
