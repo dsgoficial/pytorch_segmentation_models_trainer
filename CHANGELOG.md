@@ -2,7 +2,7 @@
 
 ## GFSS: boundary of the superclass (P2)
 
-- `HiSplit`: `leak` (hierarchical leak "HierTrans": learned `t[n, c]` moves mass from other base classes into each novel child, trained with the NLL of the final distribution on the support; hierarchical decoding lets the superclass absorb the leaked mass), `widen: prob | dissonance` + `widen_threshold` (novel child where the mother is the base's second choice above a probability or dissonance threshold and q prefers the novel child), `novel_prior_weight`, and `sweep` (thresholds evaluated as extra decoding variants).
+- `HiSplit`: `leak` (hierarchical leak "HierTrans": learned `t[n, c]` moves mass from other base classes into each novel child, trained with the NLL of the final distribution on the support; hierarchical decoding lets the superclass absorb the leaked mass, and a pixel outside the superclass either keeps the base class or becomes a child — classes outside the superclass are compared with a common per-pixel shift, so uneven leak fractions never swap neighbours), `widen: prob | dissonance` + `widen_threshold` (novel child where the mother is the base's second choice above a probability or dissonance threshold and q prefers the novel child), `novel_prior_weight`, and `sweep` (thresholds evaluated as extra decoding variants).
 - `BaseGFSSMethod.variant_names()` / `decode_variants()`; `GFSSModel` evaluates each variant with its own `GFSSMetrics` (`test/var/<name>/...`, `val/var/<name>/...`).
 - `ClassTrans(hierarchical_mask=True)`: ablation where the transition into a novel class only comes from its mother's column.
 - Tests: `tests/test_gfss_model.py` base checkpoint fixture is module-scoped (one ~45 MB file per module instead of one per test).

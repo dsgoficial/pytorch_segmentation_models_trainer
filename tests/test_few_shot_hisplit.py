@@ -332,3 +332,47 @@ class TestBoundaryP2:
     def test_invalid_p2_arguments(self, kw, match):
         with pytest.raises(ValueError, match=match):
             HiSplit(**kw)
+
+
+def test_leak_never_swaps_classes_outside_the_superclass():
+    """Uneven leak fractions must not reorder classes outside the superclass:
+    p0 = 0.50, p2 = 0.45, p_vb = 0.05 and half of class 0 leaks into the
+    novel child -> p''(0) = 0.25 < p2 = 0.45. Before the fix the pixel became
+    class 2; now it may only keep class 0 or join the superclass (here the
+    superclass wins: 0.05 + 0.25 = 0.30 > 0.25)."""
+    h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+    m = HiSplit(q="proto", leak=True)
+    m.setup(h, torch.eye(3), torch.zeros(3), NN)  # logits = features
+    support = (
+        torch.log(torch.tensor([0.1, 0.8, 0.1])).view(1, 3, 1, 1).repeat(1, 1, 2, 2)
+    )
+    support_masks = torch.tensor([[[3, NN], [NN, NN]]])
+    support[0, 2, 0, 0] += 1.0  # the novel pixel looks different
+    m.init_from_support(support, support_masks)
+    with torch.no_grad():
+        m.leak_logit.fill_(-30.0)
+        m.leak_logit[1, 0] = 0.0  # t = 0.5 from class 0
+    query = torch.log(torch.tensor([0.50, 0.05, 0.45])).view(1, 3, 1, 1)
+    assert m._base_probs(query).argmax(1).item() == 0
+    assert m(query).argmax(1).item() in (1, 3)
+    # with a smaller leak (t = 0.2) neither neighbour nor superclass wins:
+    # p''(0) = 0.40 > p''(vb) = 0.15 -> the base decision (0) is kept, not 2
+    with torch.no_grad():
+        m.leak_logit[1, 0] = torch.logit(torch.tensor(0.2))
+    assert m(query).argmax(1).item() == 0
+
+
+def test_leak_can_still_take_pixels_into_the_superclass():
+    h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+    m = HiSplit(q="proto", leak=True)
+    m.setup(h, torch.eye(3), torch.zeros(3), NN)
+    support = (
+        torch.log(torch.tensor([0.1, 0.8, 0.1])).view(1, 3, 1, 1).repeat(1, 1, 2, 2)
+    )
+    support[0, 0, 0, 0] += 2.0
+    m.init_from_support(support, torch.tensor([[[3, NN], [NN, NN]]]))
+    with torch.no_grad():
+        m.leak_logit.fill_(-30.0)
+        m.leak_logit[1, 0] = 4.0  # ~98% of class 0 leaks
+    query = torch.log(torch.tensor([0.50, 0.05, 0.45])).view(1, 3, 1, 1)
+    assert m(query).argmax(1).item() in (1, 3)

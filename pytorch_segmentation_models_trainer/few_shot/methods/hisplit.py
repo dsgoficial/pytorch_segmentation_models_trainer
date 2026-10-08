@@ -110,7 +110,9 @@ class HiSplit(BaseGFSSMethod):
       ``trainer.fit``) with the likelihood of the final distribution: novel
       labels ``−log p'(n)``, "not novel" labels ``−log(1 − Σ_n p'(n))``, base
       labels ``−log p'(c)``. Hierarchical decoding first decides the
-      superclass (which absorbs the leaked mass), then the split.
+      superclass (which absorbs the leaked mass), then the split; a pixel
+      outside the superclass either keeps the base class or becomes a child
+      (uneven leak fractions never swap neighbours).
     * ``widen: prob | dissonance`` (superclass widened by a threshold):
       where the mother is the base model's **second** choice and
       ``p''(m) ≥ widen_threshold`` (``prob``) or the base dissonance is
@@ -569,12 +571,24 @@ class HiSplit(BaseGFSSMethod):
         """Hierarchical-decoding logits; ``threshold`` enables widening."""
         q = self._q(self._scores(features, *self._current_params(features.shape[0])))
         logits_base = self._base_logits(features)
-        level, mass = self._masses(self.base_probabilities(logits_base), q)
+        p_base = self.base_probabilities(logits_base)
+        level, mass = self._masses(p_base, q)
         log_level = torch.log(level.clamp(min=_EPS))
         out = log_level.new_empty(
             level.shape[0], self.hierarchy.num_classes, *level.shape[2:]
         )
-        out[:, : self.hierarchy.num_base_classes] = log_level
+        # Stage 1 outside the superclasses: every base class gets the SAME
+        # per-pixel shift log(1 − T_top), T_top = leaked fraction of the base
+        # model's class at that pixel. The order among these classes stays the
+        # base model's (uneven leak fractions cannot swap neighbours) and the
+        # base class still competes with the superclass with its exact p''.
+        # Without leak the shift is 0 (out = log p'').
+        out[:, : self.hierarchy.num_base_classes] = torch.log(p_base.clamp(min=_EPS))
+        t = self.leak_coefficients()
+        if t is not None:
+            kept = (1.0 - t.sum(0)).clamp(min=_EPS)  # (Cb,)
+            shift = torch.log(kept)[p_base.argmax(1)]  # (B, h, w)
+            out[:, : self.hierarchy.num_base_classes] += shift.unsqueeze(1)
         for i, (child, mother) in enumerate(zip(self.child_classes, self.child_mother)):
             share = mass[:, i] / level[:, mother].clamp(min=_EPS)
             out[:, child] = log_level[:, mother] + self.decode_eps * (share - 1.0)
