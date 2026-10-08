@@ -325,7 +325,7 @@ class GFSSModel(Model):
         def predict(x: Tensor) -> dict:
             feats = self.model.features(x)
             size = x.shape[-2:]
-            out = {self._MAIN: self.model.upsample(self.method(feats), size)}
+            out = {self._MAIN: self.method.decode_to(feats, size, self.model.upsample)}
             for name, variant in self.method.decode_variants(feats).items():
                 out[name] = self.model.upsample(variant, size)
             out["__base__"] = ref.base_logits(x)

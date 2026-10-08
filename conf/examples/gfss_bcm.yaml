@@ -1,0 +1,24 @@
+# BCM — base-class mining (Sakai et al., NeurIPS 2024), port of the official
+# classifier (github.com/IBM/BCM): logistic regression per mapped base class on
+# the frozen features; the base prediction is overwritten only where it is that
+# base class. mapping: mined (official, co-occurrence) or hierarchy (mother).
+defaults:
+  - gfss_base_only
+  - _self_
+
+experiments_runner:
+  output_base_dir: outputs/gfss/bcm_pampa
+
+gfss:
+  method:
+    _target_: pytorch_segmentation_models_trainer.few_shot.methods.bcm.BCM
+    mapping: mined        # mined | hierarchy
+    top_k: 1
+    sampling: us          # us | os | bg
+    beta: 1.0
+    n_splits: 5
+    n_C: 10
+    seed: 0
+
+pl_trainer:
+  max_steps: 0

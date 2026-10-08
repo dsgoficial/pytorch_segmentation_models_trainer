@@ -137,6 +137,15 @@ class BaseGFSSMethod(nn.Module, ABC):
         """Logits of the extra decoding variants (default: none)."""
         return {}
 
+    def decode_to(self, features: Tensor, size, upsample) -> Tensor:
+        """Logits at the output resolution ``size``.
+
+        Default: ``upsample(self(features), size)``. Methods whose official
+        decision is taken after upsampling several maps separately (e.g.
+        BCM) override this to reproduce it exactly.
+        """
+        return upsample(self(features), size)
+
     @abstractmethod
     def forward(self, features: Tensor) -> Tensor:
         """Logits ``(B, num_classes, h, w)`` for features ``(B, F, h, w)``."""

@@ -150,6 +150,7 @@ tta_mode: d8   # same as the base models, so GFSS and R1/R2 are comparable
 | `pytorch_segmentation_models_trainer.few_shot.methods.prototype.PrototypeImprinting` | Training-free: novel rows = L2-normalised support prototypes × `scale` (`base_norm`, `mother_norm`, `unit` or a number), bias `zero`, `base_mean` or `mother`. With `mother_norm` + `mother`, a pixel is novel iff it is closer (cosine) to the novel prototype than to the mother's row (uses the hierarchy). |
 | `pytorch_segmentation_models_trainer.few_shot.methods.diam.DIaM` | DIaM (CVPR 2023), port of the official classifier. Transductive. |
 | `pytorch_segmentation_models_trainer.few_shot.methods.classtrans.ClassTrans` | ClassTrans (CVPRW 2024), port of the official `TransitionClassifier`. Transductive. |
+| `pytorch_segmentation_models_trainer.few_shot.methods.bcm.BCM` | BCM (NeurIPS 2024), port of the official classifier: per mapped base class, a logistic regression on the frozen features; the base prediction is overwritten only where it is that class. |
 | `pytorch_segmentation_models_trainer.few_shot.methods.finetune.FineTune` | Fine-tuning baselines (B1a isolated head, B1b full ± KD, LoRA) on the support. |
 | `pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit` | Hierarchical split of each mother among its children over the frozen base (category splitting). |
 
@@ -331,9 +332,32 @@ once from the support, LDAM counts from `class_counts` or from the support
 labels (the official code hard-codes OpenEarthMap counts), query valid mask
 = all pixels.
 
+### BCM
+
+Port of `src/bcm.py` of the [official repository](https://github.com/IBM/BCM)
+(Sakai et al., "A Surprisingly Simple Approach to Generalized Few-Shot
+Semantic Segmentation", NeurIPS 2024):
+
+- **mapping** — `mined` (official): for each novel class, the top-`top_k` base
+  classes predicted by the base model on its support pixels; `hierarchy`: the
+  novel class's mother;
+- **g_β** — for each mapped base class β, a logistic regression on the frozen
+  features of all support pixels ("not novel" = 0 vs the novel classes of β),
+  C chosen in `logspace(-5, 5, n_C)` by stratified `n_splits`-fold mean
+  average precision, with class balancing (`sampling: us | os | bg`);
+- **inference** — the base prediction is kept, except where it is β and g_β
+  predicts a novel class; decided at the output resolution after upsampling
+  the base and g_β probabilities separately (method hook `decode_to`).
+
+Differences: `sklearnex` replaced by `sklearn` (same API), a seeded
+`RandomState` instead of NumPy's global generator, no shot-wise ensemble.
+Like HiSplit's hierarchical decoding, BCM keeps every base class outside the
+mapping exactly as predicted by the base model (its Proposition 4.1).
+
 ### Parity with the official code
 
-`tests/test_few_shot_diam.py` and `tests/test_few_shot_classtrans.py` compare
+`tests/test_few_shot_diam.py`, `tests/test_few_shot_classtrans.py` and
+`tests/test_few_shot_bcm.py` compare
 the ports with tensors produced by the official classifiers on small random
 inputs, with the standard GFSS hierarchy `{0: [0, novel...]}` (background
 as mother): prototypes / transport initialisation and final logits match

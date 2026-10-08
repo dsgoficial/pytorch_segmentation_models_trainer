@@ -1,5 +1,10 @@
 # Unreleased
 
+## GFSS: BCM baseline
+
+- `few_shot/methods/bcm.BCM`: port of the official BCM classifier (Sakai et al., NeurIPS 2024; github.com/IBM/BCM) — base→novel mapping mined by co-occurrence (`mapping: mined`, official) or taken from the hierarchy (`mapping: hierarchy`), one cross-validated logistic regression per mapped base class on the frozen features with class balancing, base prediction overwritten only where it is the mapped class. Parity test against tensors produced by the official code (`tests/testing_data/few_shot/bcm_reference.pt`). Example `conf/examples/gfss_bcm.yaml`.
+- `BaseGFSSMethod.decode_to(features, size, upsample)`: output-resolution logits (default: upsample the feature-resolution logits); `GFSSModel` uses it, so methods that decide after upsampling several maps (BCM) reproduce the official rule.
+
 ## GFSS: test-time augmentation
 
 - `GFSSModel` applies the base `Model`'s TTA options (`tta_mode: d8|d4|flip`, `use_tta`) at test time: method logits, decoding variants and the reference base model are averaged over the de-augmented views (`apply_tta`), so GFSS results are comparable with base models evaluated with TTA. Transductive methods adapt once on the original view; uncertainty maps use the original view.

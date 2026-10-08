@@ -281,6 +281,7 @@ class TestTrainIntegration:
                 0,
                 {"inference_mode": False},
             ),
+            ("pytorch_segmentation_models_trainer.few_shot.methods.bcm.BCM", 0, {}),
         ],
     )
     def test_train_entrypoint_runs_fit_and_test(
@@ -342,6 +343,7 @@ def test_example_configs_match_dataclasses():
         ("gfss_classtrans", "ClassTrans"),
         ("gfss_hisplit", "HiSplit"),
         ("gfss_finetune", "FineTune"),
+        ("gfss_bcm", "BCM"),
     ],
 )
 def test_method_example_configs_compose_and_instantiate(name, target):
