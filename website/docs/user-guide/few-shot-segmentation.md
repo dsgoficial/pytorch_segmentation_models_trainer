@@ -102,7 +102,61 @@ features (`FrozenLinearHeadSegmenter.features`) and the base classifier
 | `pytorch_segmentation_models_trainer.few_shot.methods.prototype.PrototypeImprinting` | Training-free: novel rows = L2-normalised support prototypes × `scale` (`base_norm`, `mother_norm`, `unit` or a number), bias `zero`, `base_mean` or `mother`. With `mother_norm` + `mother`, a pixel is novel iff it is closer (cosine) to the novel prototype than to the mother's row (uses the hierarchy). |
 | `pytorch_segmentation_models_trainer.few_shot.methods.diam.DIaM` | DIaM (CVPR 2023), port of the official classifier. Transductive. |
 | `pytorch_segmentation_models_trainer.few_shot.methods.classtrans.ClassTrans` | ClassTrans (CVPRW 2024), port of the official `TransitionClassifier`. Transductive. |
+| `pytorch_segmentation_models_trainer.few_shot.methods.finetune.FineTune` | Fine-tuning baselines (B1a isolated head, B1b full ± KD, LoRA) on the support. |
 | `pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit` | Hierarchical split of each mother among its children over the frozen base (category splitting). |
+
+### Fine-tuning baselines (`FineTune` + `gfss.backbone`)
+
+`FineTune` is transfer learning on the K support tiles, used as the
+reference GFSS methods must beat:
+
+```yaml
+gfss:
+  backbone:
+    trainable: none          # none | decoder | all | lora
+    # lora: {r: 8, alpha: 16, target_modules: [qkv]}
+  method:
+    _target_: pytorch_segmentation_models_trainer.few_shot.methods.finetune.FineTune
+    train_rows: children     # children | novel | all
+    init: mother             # mother | prototype
+    kd_weight: 0.0           # > 0: hierarchical KD to the frozen base model
+pl_trainer:
+  max_steps: 200
+```
+
+| Baseline | `gfss.backbone.trainable` | `train_rows` | `kd_weight` |
+|---|---|---|---|
+| B1a — isolated fine-tuning of the split | `none` | `children` | 0 |
+| B1b — full fine-tuning | `all` | `all` | 0 |
+| B1b + KD | `all` | `all` | > 0 |
+| M3 — LoRA (transformer encoder, e.g. Swin-T) | `lora` | `all` | 0 or > 0 |
+
+**How this differs from the framework's `fine_tuning` strategies.** The
+`Model`'s `fine_tuning.strategy` (`full`, `freeze_backbone`,
+`linear_probe`, `lora`; configured by the `fine_tuning` node, see
+`config_definitions/fine_tuning_config.py::FineTuningConfig`)
+decides *which parameters train* in an ordinary training run with the loss
+in `cfg.loss` and a head with the number of classes of `cfg.model`. The
+GFSS fine-tuning baselines need more than that, so they live in
+`GFSSModel` + `FineTune`:
+
+| Aspect | Framework `fine_tuning` | GFSS `FineTune` |
+|---|---|---|
+| 5 → 6 classes | a new `classes: 6` head is randomly initialised (the 5-class checkpoint does not load into it) | base rows copied from the checkpoint; novel rows initialised from the **mother** row (or the scaled prototype) |
+| Which head rows train | whole head | only the superclass children (`children`, isolated fine-tuning), only the novel rows, or all |
+| Support labelled "only the novel class" (`not_novel_index`) | plain CE cannot use it (pixels would have to be ignored) | CE projected as in DIaM: "not novel" pixels use the sum of base probabilities |
+| Forgetting | no distillation to the old model (the lib's `KnowledgeDistillationLoss` is plain KD) | hierarchical KD: KL(novel summed into its mother ‖ frozen base model) |
+| BatchNorm | trained in train mode | statistics frozen (K = 1–10 support tiles) |
+| LoRA | `get_peft_model` wraps the whole model | `peft.inject_adapter_in_model` into the encoder, in place (keeps `encoder`/`decoder` separable) |
+| Evaluation | `Model` metrics | GFSS metrics (`locality` against the **unmodified** base model, `split_ceiling`, OEM score) and the episodes axis of the runner |
+
+What is shared: `decoder`/`all` unfreeze the backbone with the framework's
+`fine_tuning.lora_utils.freeze_modules_by_name` (same mechanics as
+`freeze_backbone`/`full`), and LoRA uses the same `peft` package (extra
+`transformers`). With a trainable backbone, `GFSSModel` keeps a frozen copy
+of the base model for the KD snapshot and for the base predictions used by
+`locality`, and optimises the method's parameters plus the unfrozen
+backbone parameters with `cfg.optimizer`.
 
 ### HiSplit
 

@@ -18,11 +18,15 @@
  ****
 """
 
-from typing import Sequence
+from typing import Any, Dict, Optional, Sequence
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+
+from pytorch_segmentation_models_trainer.fine_tuning.lora_utils import (
+    freeze_modules_by_name,
+)
 
 
 class FrozenLinearHeadSegmenter(nn.Module):
@@ -74,6 +78,55 @@ class FrozenLinearHeadSegmenter(nn.Module):
         for p in self.model.parameters():
             p.requires_grad_(False)
         self.model.eval()
+        self.trainable = False
+
+    def enable_training(self, mode: str, lora: Optional[Dict[str, Any]] = None) -> None:
+        """Unfreeze part of the backbone for the fine-tuning baselines.
+
+        ``decoder`` and ``all`` reuse the framework's
+        ``fine_tuning.lora_utils.freeze_modules_by_name`` (same mechanics as
+        ``fine_tuning.strategy: freeze_backbone`` / ``full``). ``lora``
+        injects low-rank adapters **in place** into the encoder with
+        ``peft.inject_adapter_in_model`` (the framework's ``strategy: lora``
+        wraps the whole model in a ``PeftModel``, which would hide
+        ``encoder``/``decoder``). In every mode the 1x1 head stays frozen
+        (the GFSS method owns the new head) and BatchNorm statistics stay
+        frozen (the module is always in eval mode).
+
+        Args:
+            mode: ``decoder``, ``all`` (encoder + decoder) or ``lora``.
+            lora: ``r`` (default 8), ``alpha`` (default 16), ``dropout``
+                (default 0) and ``target_modules`` (required, e.g. ``[qkv]``).
+        """
+        if mode not in {"decoder", "all", "lora"}:
+            raise ValueError(
+                f"trainable must be 'decoder', 'all' or 'lora', got {mode!r}."
+            )
+        if mode == "lora":
+            lora = dict(lora or {})
+            targets = list(lora.get("target_modules") or [])
+            if not targets:
+                raise ValueError("LoRA needs lora.target_modules (e.g. [qkv]).")
+            from peft import LoraConfig, inject_adapter_in_model
+
+            config = LoraConfig(
+                r=int(lora.get("r", 8)),
+                lora_alpha=float(lora.get("alpha", 16)),
+                lora_dropout=float(lora.get("dropout", 0.0)),
+                target_modules=targets,
+            )
+            inject_adapter_in_model(config, self.model.encoder)
+            for name, p in self.model.encoder.named_parameters():
+                p.requires_grad_("lora_" in name)
+        else:
+            trainable = ("decoder",) if mode == "decoder" else ("encoder", "decoder")
+            freeze_modules_by_name(
+                self.model,
+                frozen_names=("encoder", "decoder", "segmentation_head"),
+                trainable_names=trainable,
+            )
+        self.trainable = True
+        self.model.eval()
 
     def train(self, mode: bool = True) -> "FrozenLinearHeadSegmenter":
         """Keep the frozen model in eval mode regardless of mode."""
@@ -93,10 +146,11 @@ class FrozenLinearHeadSegmenter(nn.Module):
             return self.weight.new_zeros(self.weight.shape[0])
         return b.detach().clone()
 
-    @torch.no_grad()
     def features(self, x: Tensor) -> Tensor:
-        """Decoder output (B, F, h, w) for images x."""
-        return self.model.decoder(self.model.encoder(x))
+        """Decoder output (B, F, h, w) for images x; with gradients only when
+        the backbone was made trainable and grad is enabled."""
+        with torch.set_grad_enabled(self.trainable and torch.is_grad_enabled()):
+            return self.model.decoder(self.model.encoder(x))
 
     @staticmethod
     def linear(features: Tensor, weight: Tensor, bias: Tensor) -> Tensor:

@@ -1,0 +1,33 @@
+# Fine-tuning baselines for GFSS on the support (transfer learning).
+#   B1a (isolated fine-tuning of the split): backbone none, train_rows children
+#   B1b (full fine-tuning):                  backbone all,  train_rows all
+#   B1b + KD:                                 + kd_weight > 0
+#   LoRA (transformer encoder):               backbone lora, train_rows all
+# Unlike the framework's `fine_tuning` strategies, the head keeps the base
+# rows, the novel row starts from its mother, the support CE understands
+# "not novel" labels, and the KD distils novel→mother to a frozen copy of the
+# base model (see docs: few-shot-segmentation.md).
+defaults:
+  - gfss_base_only
+  - _self_
+
+experiments_runner:
+  output_base_dir: outputs/gfss/finetune_b1a_pampa
+
+gfss:
+  backbone:
+    trainable: none          # none | decoder | all | lora
+    # lora: {r: 8, alpha: 16, dropout: 0.0, target_modules: [qkv]}
+  method:
+    _target_: pytorch_segmentation_models_trainer.few_shot.methods.finetune.FineTune
+    train_rows: children     # children | novel | all
+    init: mother             # mother | prototype
+    kd_weight: 0.0
+    not_novel_weight: 1.0
+
+optimizer:
+  _target_: torch.optim.Adam
+  lr: 1.0e-4
+
+pl_trainer:
+  max_steps: 200

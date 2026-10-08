@@ -134,3 +134,67 @@ class TestBaseProbabilities:
         h = ClassHierarchy({1: [1, 2]}, num_base_classes=2)
         with pytest.raises(ValueError, match="base_output"):
             BaseOnly().setup(h, torch.randn(2, 4), torch.zeros(2), base_output="nig")
+
+
+class _TinyEncoder(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 8, 1)
+        self.qkv = torch.nn.Linear(8, 8)
+
+    def forward(self, x):
+        y = self.conv(x)
+        return self.qkv(y.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+
+
+class _TinySeg(torch.nn.Module):
+    """smp-like model: encoder, decoder, segmentation_head (1x1 + upsample)."""
+
+    def __init__(self):
+        super().__init__()
+        self.encoder = _TinyEncoder()
+        self.decoder = torch.nn.Conv2d(8, 4, 1)
+        self.segmentation_head = torch.nn.Sequential(
+            torch.nn.Conv2d(4, 3, 1), torch.nn.Identity(), torch.nn.Identity()
+        )
+
+
+class TestTrainableBackbone:
+    @pytest.mark.parametrize(
+        "mode, enc, dec", [("decoder", False, True), ("all", True, True)]
+    )
+    def test_modes_unfreeze_parts_and_keep_eval(self, mode, enc, dec):
+        seg = FrozenLinearHeadSegmenter(_upernet())
+        seg.enable_training(mode)
+        assert all(p.requires_grad == enc for p in seg.model.encoder.parameters())
+        assert all(p.requires_grad == dec for p in seg.model.decoder.parameters())
+        assert not any(
+            p.requires_grad for p in seg.model.segmentation_head.parameters()
+        )
+        seg.train()
+        assert not seg.model.training  # BatchNorm statistics stay frozen
+        feats = seg.features(torch.randn(1, 3, 64, 64))
+        assert feats.requires_grad
+        with torch.no_grad():
+            assert not seg.features(torch.randn(1, 3, 64, 64)).requires_grad
+
+    def test_lora_injects_adapters_into_encoder_only(self):
+        seg = FrozenLinearHeadSegmenter(_TinySeg())
+        x = torch.randn(1, 3, 4, 4)
+        before = seg.features(x).detach()
+        seg.enable_training("lora", {"r": 2, "alpha": 4, "target_modules": ["qkv"]})
+        trainable = [n for n, p in seg.named_parameters() if p.requires_grad]
+        assert trainable and all("lora_" in n for n in trainable)
+        assert all(
+            ".encoder." in f".{n}" or n.startswith("model.encoder") for n in trainable
+        )
+        torch.testing.assert_close(seg.features(x), before)  # B starts at zero
+
+    def test_lora_needs_target_modules(self):
+        seg = FrozenLinearHeadSegmenter(_TinySeg())
+        with pytest.raises(ValueError, match="target_modules"):
+            seg.enable_training("lora", {"r": 2})
+
+    def test_invalid_mode(self):
+        with pytest.raises(ValueError, match="trainable"):
+            FrozenLinearHeadSegmenter(_upernet()).enable_training("head")

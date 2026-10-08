@@ -1,5 +1,11 @@
 # Unreleased
 
+## GFSS: fine-tuning baselines
+
+- `few_shot/methods/finetune.FineTune`: linear head over all classes with base rows from the checkpoint and novel rows initialised from the mother (or the scaled prototype); trains only the superclass children (`train_rows: children`, B1a isolated fine-tuning), the novel rows or the whole head, with the DIaM-projected support CE (S-novel labels) and optional hierarchical KD (`kd_weight`) to the frozen base model.
+- `gfss.backbone.trainable: none | decoder | all | lora` (`GFSSConfig.backbone`): `FrozenLinearHeadSegmenter.enable_training` unfreezes the decoder or encoder+decoder with the framework's `freeze_modules_by_name`, or injects LoRA adapters in place into the encoder (`peft.inject_adapter_in_model`); BatchNorm and the 1x1 head stay frozen. `GFSSModel` keeps a frozen copy of the base model as reference (KD snapshot via `support_loss(..., snapshot_logits=...)`, base predictions for `locality`) and optimises method + unfrozen backbone parameters.
+- Docs: how these baselines differ from the framework's `fine_tuning` strategies (`few-shot-segmentation.md`).
+
 ## GFSS: LDAM class counts and prototype options
 
 - New `mode: count-class-pixels` (`tools/few_shot/class_counts.py`, `ClassCountsConfig`): pixel count of each class over a window index after an optional class remapping, written as JSON. Example `conf/examples/count_class_pixels.yaml`.

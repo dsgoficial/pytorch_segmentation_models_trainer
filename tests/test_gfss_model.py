@@ -341,6 +341,7 @@ def test_example_configs_match_dataclasses():
         ("gfss_diam", "DIaM"),
         ("gfss_classtrans", "ClassTrans"),
         ("gfss_hisplit", "HiSplit"),
+        ("gfss_finetune", "FineTune"),
     ],
 )
 def test_method_example_configs_compose_and_instantiate(name, target):
@@ -501,3 +502,56 @@ def test_uncertainty_evaluation_options_from_config(base_ckpt):
     m = GFSSModel(cfg)
     assert m.test_unc_metrics.abstain_thresholds == [0.3]
     assert m.test_unc_metrics.ece_bins == 5 and m.val_unc_metrics.n_bins == 100
+
+
+class TestTrainableBackbone:
+    def _cfg(self, base_ckpt, tmp_path, trainable, kd):
+        cfg = _cfg(
+            base_ckpt[0],
+            method="pytorch_segmentation_models_trainer.few_shot.methods.finetune.FineTune",
+            pl_model={
+                "_target_": "pytorch_segmentation_models_trainer.model_loader.gfss_model.GFSSModel"
+            },
+            pl_trainer={
+                "max_steps": 2,
+                "accelerator": "cpu",
+                "enable_checkpointing": False,
+                "enable_progress_bar": False,
+                "default_root_dir": str(tmp_path),
+            },
+        )
+        cfg.gfss.backbone = {"trainable": trainable}
+        cfg.gfss.method.train_rows = "all"
+        cfg.gfss.method.kd_weight = kd
+        return cfg
+
+    def test_frozen_reference_and_optimizer_params(self, base_ckpt, tmp_path):
+        m = GFSSModel(self._cfg(base_ckpt, tmp_path, "decoder", 1.0))
+        assert m.base_reference is not None
+        assert not any(p.requires_grad for p in m.base_reference.parameters())
+        opt = m.configure_optimizers()[0][0]
+        n_opt = sum(p.numel() for g in opt.param_groups for p in g["params"])
+        n_dec = sum(p.numel() for p in m.model.model.decoder.parameters())
+        assert n_opt > n_dec
+        assert GFSSModel(_cfg(base_ckpt[0])).base_reference is None
+
+    def test_full_finetune_with_kd_through_train(self, base_ckpt, tmp_path):
+        from pytorch_segmentation_models_trainer.train import train
+
+        cfg = self._cfg(base_ckpt, tmp_path, "all", 1.0)
+        before = torch.load(base_ckpt[0], weights_only=False)["state_dict"]
+        trainer = train(cfg)
+        assert trainer.global_step == 2
+        assert "test/locality" in trainer.callback_metrics
+        model = trainer.lightning_module
+        tuned = model.model.model.state_dict()
+        ref = model.base_reference.model.state_dict()
+        keys = [k for k in tuned if k.startswith("decoder.") and k.endswith("weight")]
+        assert keys
+        # the backbone was fine-tuned, the reference stayed equal to the checkpoint
+        assert any(not torch.equal(tuned[k], before[f"model.{k}"]) for k in keys)
+        assert all(torch.equal(ref[k], before[f"model.{k}"]) for k in keys)
+
+    def test_invalid_trainable_value(self, base_ckpt, tmp_path):
+        with pytest.raises(ValueError, match="trainable"):
+            GFSSModel(self._cfg(base_ckpt, tmp_path, "head", 0.0))

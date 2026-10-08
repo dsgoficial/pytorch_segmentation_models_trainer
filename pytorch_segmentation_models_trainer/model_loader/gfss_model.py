@@ -18,6 +18,7 @@
  ****
 """
 
+import copy
 import logging
 from typing import Optional, Tuple
 
@@ -170,6 +171,14 @@ class GFSSModel(Model):
         )
         segmenter = FrozenLinearHeadSegmenter(base)
         weight, bias = segmenter.weight, segmenter.bias
+        backbone = dict(self.cfg.gfss.get("backbone", None) or {})
+        trainable = backbone.get("trainable", "none")
+        # Fine-tuning baselines: a frozen copy of the base model is the
+        # reference for the KD snapshot and for base predictions (locality).
+        self.base_reference = None
+        if trainable != "none":
+            self.base_reference = FrozenLinearHeadSegmenter(copy.deepcopy(base))
+            segmenter.enable_training(trainable, backbone.get("lora", None))
         self.hierarchy = ClassHierarchy(
             self.cfg.gfss.hierarchy, num_base_classes=weight.shape[0]
         )
@@ -190,17 +199,32 @@ class GFSSModel(Model):
         )
         return segmenter
 
+    def _reference(self) -> FrozenLinearHeadSegmenter:
+        """The unmodified base model (frozen copy when the backbone trains)."""
+        return self.base_reference if self.base_reference is not None else self.model
+
     def get_loss_function(self):
         """GFSS losses live in the method (``support_loss``)."""
         return None
 
+    def _trainable_parameters(self):
+        return [
+            p
+            for module in (self.method, self.model)
+            for p in module.parameters()
+            if p.requires_grad
+        ]
+
     def get_optimizer(self):
-        params = [p for p in self.method.parameters() if p.requires_grad]
-        return instantiate(self.cfg.optimizer, params=params, _recursive_=False)
+        """Optimizer over the method's parameters and, for the fine-tuning
+        baselines, the unfrozen backbone parameters."""
+        return instantiate(
+            self.cfg.optimizer, params=self._trainable_parameters(), _recursive_=False
+        )
 
     def configure_optimizers(self):
-        """No optimizer when the method has no trainable parameters."""
-        if not any(p.requires_grad for p in self.method.parameters()):
+        """No optimizer when nothing is trainable."""
+        if not self._trainable_parameters():
             return None
         return super().configure_optimizers()
 
@@ -253,7 +277,13 @@ class GFSSModel(Model):
     def training_step(self, batch, batch_idx):
         images, masks = self._unpack_batch(batch)
         feats, small = self._features_and_masks(images, masks)
-        loss = self.method.support_loss(feats, small)
+        if getattr(self.method, "requires_snapshot", False):
+            ref = self._reference()
+            with torch.no_grad():
+                snapshot = ref.linear(ref.features(images), ref.weight, ref.bias)
+            loss = self.method.support_loss(feats, small, snapshot_logits=snapshot)
+        else:
+            loss = self.method.support_loss(feats, small)
         if loss is None:
             return None
         self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True)
@@ -292,7 +322,7 @@ class GFSSModel(Model):
                 self.method.adapt_to_query(*self._get_support(), feats)
         logits = self.model.upsample(self.method(feats), images.shape[-2:])
         pred = logits.argmax(1)
-        base_pred = self.model.base_logits(images).argmax(1)
+        base_pred = self._reference().base_logits(images).argmax(1)
         metrics.update(pred, masks, base_pred)
         stage = metrics.prefix.rstrip("/")
         for name, variant in self.method.decode_variants(feats).items():
