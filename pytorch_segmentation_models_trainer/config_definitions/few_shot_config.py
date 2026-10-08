@@ -83,6 +83,36 @@ class FewShotEpisodesConfig:
 
 
 @dataclass
+class ClassCountsConfig:
+    """Configuration of ``mode: count-class-pixels``.
+
+    Counts the pixels of each class over a window index (e.g. the training
+    split), after an optional remapping, and writes
+    ``{"num_classes": n, "counts": [...]}`` to ``output_json`` — e.g. the
+    base-class counts of ClassTrans' LDAM margins (``base_class_counts``).
+
+    Example YAML::
+
+        mode: count-class-pixels
+        class_counts:
+          window_index_cache: experiment_configs/tiles_data/train_pampa.csv
+          mask_base_path: /data/masks
+          num_classes: 5
+          mask_class_mapping: {5: 3}
+          output_json: outputs/class_counts/pampa_base.json
+    """
+
+    window_index_cache: str = MISSING
+    output_json: str = MISSING
+    num_classes: int = MISSING
+    mask_class_mapping: Optional[Dict[int, int]] = None
+    mask_base_path: Optional[str] = None
+    window_index_mask_path_key: str = "mask_path"
+    window_index_coordinate_mode: str = "auto"
+    ignore_index: int = 255
+
+
+@dataclass
 class GFSSCheckpointConfig:
     """Frozen base model checkpoint of a GFSS task.
 
@@ -152,6 +182,7 @@ def _register_configs() -> None:
     cs = ConfigStore.instance()
     cs.store(name="fewshot_episodes_config", node=FewShotEpisodesConfig)
     cs.store(name="gfss_config", node=GFSSConfig)
+    cs.store(name="class_counts_config", node=ClassCountsConfig)
 
 
 _register_configs()

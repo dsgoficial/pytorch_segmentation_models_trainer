@@ -106,6 +106,12 @@ def main(cfg: DictConfig):
         )
 
         return build_fewshot_episodes(cfg)
+    elif cfg.mode == "count-class-pixels":
+        from pytorch_segmentation_models_trainer.tools.few_shot.class_counts import (
+            count_class_pixels_from_config,
+        )
+
+        return count_class_pixels_from_config(cfg)
     elif cfg.mode == "ddoq-vae-distill":
         from pytorch_segmentation_models_trainer.tools.dataset_distillation.vae_ddoq_distillation import (
             run_vae_ddoq_from_config,

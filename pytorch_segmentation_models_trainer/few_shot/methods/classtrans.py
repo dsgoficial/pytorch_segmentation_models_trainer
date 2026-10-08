@@ -18,7 +18,8 @@
  ****
 """
 
-from typing import Optional, Sequence
+import json
+from typing import Optional, Sequence, Union
 
 import torch
 from torch import Tensor
@@ -98,6 +99,12 @@ class ClassTrans(BaseGFSSMethod):
         pi_update_at: Iterations (1-based) where π is re-estimated.
         fine_tune_base_classifier: Also optimise the base rows (official).
         ot_lambda: Entropic regularisation of the transport (official: 0.1).
+        base_class_counts: Pixel counts of the ``num_base_classes`` base
+            classes on the training set (``mode: count-class-pixels`` with the
+            base mapping); novel counts then come from the support, as in the
+            paper ("estimated via D_train and D_support"). A list, or the path
+            of the JSON written by ``count-class-pixels``. Ignored when
+            ``class_counts`` is given.
         hierarchical_mask: Ablation (HierTrans): the transition into each
             novel class only comes from its mother's column (hard
             hierarchical prior); base rows unchanged.
@@ -134,6 +141,7 @@ class ClassTrans(BaseGFSSMethod):
         ot_lambda: float = 0.1,
         not_novel_weight: Optional[float] = None,
         hierarchical_mask: bool = False,
+        base_class_counts: Optional[Union[Sequence[float], str]] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -152,6 +160,12 @@ class ClassTrans(BaseGFSSMethod):
         self.ot_lambda = float(ot_lambda)
         self.not_novel_weight = not_novel_weight
         self.hierarchical_mask = hierarchical_mask
+        if isinstance(base_class_counts, str):  # JSON of mode count-class-pixels
+            with open(base_class_counts) as f:
+                base_class_counts = json.load(f)["counts"]
+        self.base_class_counts = (
+            None if base_class_counts is None else [float(c) for c in base_class_counts]
+        )
         self._task_params: Optional[dict] = None
 
     # ------------------------------------------------------------------
@@ -206,11 +220,19 @@ class ClassTrans(BaseGFSSMethod):
         )
         self.register_buffer("row_weight", row)
         self.register_buffer("col_weight", col)
-        counts = (
-            torch.tensor(self.class_counts, dtype=torch.float64)
-            if self.class_counts is not None
-            else self._support_counts(masks)
-        )
+        if self.class_counts is not None:
+            counts = torch.tensor(self.class_counts, dtype=torch.float64)
+        elif self.base_class_counts is not None:
+            if len(self.base_class_counts) != nb:
+                raise ValueError(
+                    f"base_class_counts must have {nb} entries, "
+                    f"got {len(self.base_class_counts)}."
+                )
+            counts = self._support_counts(masks)
+            counts[:nb] = torch.tensor(self.base_class_counts, dtype=torch.float64)
+            counts = counts.clamp(min=1.0)
+        else:
+            counts = self._support_counts(masks)
         if counts.numel() != h.num_classes:
             raise ValueError(
                 f"class_counts must have {h.num_classes} entries, got {counts.numel()}."

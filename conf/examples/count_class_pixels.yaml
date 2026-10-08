@@ -1,0 +1,12 @@
+# Pixel count of each class over a window index (e.g. the training split),
+# after the base model's class remapping. Used as base_class_counts of
+# ClassTrans' LDAM margins (novel counts come from the support).
+# Run: pytorch-smt --config-dir conf/examples --config-name count_class_pixels
+mode: count-class-pixels
+class_counts:
+  window_index_cache: /data/tiles_data/train_pampa.csv
+  mask_base_path: /data/masks
+  num_classes: 5
+  mask_class_mapping: {5: 3}     # same mapping as the base model's training
+  ignore_index: 255
+  output_json: outputs/class_counts/pampa_base.json

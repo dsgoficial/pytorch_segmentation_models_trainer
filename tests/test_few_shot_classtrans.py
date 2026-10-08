@@ -163,3 +163,29 @@ def test_hierarchical_mask_feeds_novel_only_from_mother(small, masked):
     m.base_weight[0] += 1.0  # change the snapshot logit of a non-mother class
     after = m._transition(f5, p)[:, :, 2]
     assert torch.allclose(before, after) == masked
+
+
+def test_base_class_counts_with_support_novel_counts(small):
+    h, fs, ms, fq = small
+    m = _ready(h, fs, ms, base_class_counts=[1000.0, 4000.0])
+    n_novel = float((ms == 2).sum())
+    expected = torch.tensor([1000.0, 4000.0, n_novel], dtype=torch.float64) ** -0.25
+    expected = (expected * 6.0 / expected.max()).float()
+    torch.testing.assert_close(m.ldam_margins, expected)
+
+
+def test_base_class_counts_length_checked(small):
+    h, fs, ms, fq = small
+    with pytest.raises(ValueError, match="base_class_counts"):
+        _ready(h, fs, ms, base_class_counts=[1.0])
+
+
+def test_base_class_counts_from_json_file(small, tmp_path):
+    import json
+
+    h, fs, ms, fq = small
+    path = tmp_path / "counts.json"
+    path.write_text(json.dumps({"num_classes": 2, "counts": [1000, 4000]}))
+    m_file = _ready(h, fs, ms, base_class_counts=str(path))
+    m_list = _ready(h, fs, ms, base_class_counts=[1000.0, 4000.0])
+    torch.testing.assert_close(m_file.ldam_margins, m_list.ldam_margins)

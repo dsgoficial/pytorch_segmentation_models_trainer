@@ -99,7 +99,7 @@ features (`FrozenLinearHeadSegmenter.features`) and the base classifier
 | `_target_` | Description |
 |---|---|
 | `pytorch_segmentation_models_trainer.few_shot.methods.base_only.BaseOnly` | Frozen base model; never predicts novel classes (floor). |
-| `pytorch_segmentation_models_trainer.few_shot.methods.prototype.PrototypeImprinting` | Training-free: novel rows = L2-normalised support prototypes × `scale` (`base_norm`, `unit` or a number), zero bias. |
+| `pytorch_segmentation_models_trainer.few_shot.methods.prototype.PrototypeImprinting` | Training-free: novel rows = L2-normalised support prototypes × `scale` (`base_norm`, `mother_norm`, `unit` or a number), bias `zero`, `base_mean` or `mother`. With `mother_norm` + `mother`, a pixel is novel iff it is closer (cosine) to the novel prototype than to the mother's row (uses the hierarchy). |
 | `pytorch_segmentation_models_trainer.few_shot.methods.diam.DIaM` | DIaM (CVPR 2023), port of the official classifier. Transductive. |
 | `pytorch_segmentation_models_trainer.few_shot.methods.classtrans.ClassTrans` | ClassTrans (CVPRW 2024), port of the official `TransitionClassifier`. Transductive. |
 | `pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit` | Hierarchical split of each mother among its children over the frozen base (category splitting). |
@@ -214,6 +214,10 @@ Faithful to the code:
   support novel features and base-predicted regions;
 - logits = classification branch + `layer_scale ⊙ (S(f) · W_base f)`,
   `S = (W_c f + b_c) ⊗ (W_r f + b_r)`, with `layer_scale` starting at 0;
+- LDAM counts: `class_counts` (all classes), or `base_class_counts` (list or
+  the JSON of `mode: count-class-pixels` on the training split with the base
+  mapping) + novel counts from the support — as in the paper ("estimated via
+  D_train and D_support"); default: counted on the support only;
 - loss `650·CE + 3·H(p_query) + 16·KL(marginal‖π) + 7·KD`, the CE replaced
   by LDAM (margins ∝ n^-1/4, max 6) from iteration 101 of 130; SGD
   (`lr 9e-5`, momentum 0.9, weight decay 5e-4).

@@ -57,3 +57,32 @@ def test_forward_keeps_base_logits(data):
 def test_invalid_scale():
     with pytest.raises(ValueError, match="scale"):
         PrototypeImprinting(scale="cosine")
+
+
+@pytest.mark.parametrize("bias", ["zero", "base_mean", "mother"])
+def test_bias_options(data, bias):
+    h, fs, ms = data
+    m = PrototypeImprinting(bias=bias)
+    w = torch.randn(2, 4)
+    b = torch.tensor([0.3, -0.1])
+    m.setup(h, w, b, 254)
+    m.init_from_support(fs, ms)
+    # novel 2 is a child of 1, novel 3 a child of 0
+    expected = {"zero": [0.0, 0.0], "base_mean": [0.1, 0.1], "mother": [-0.1, 0.3]}[
+        bias
+    ]
+    torch.testing.assert_close(m.novel_bias, torch.tensor(expected))
+
+
+def test_mother_norm_scale(data):
+    h, fs, ms = data
+    m = PrototypeImprinting(scale="mother_norm")
+    w = torch.randn(2, 4)
+    m.setup(h, w, torch.zeros(2), 254)
+    m.init_from_support(fs, ms)
+    torch.testing.assert_close(m.novel_weight.norm(dim=1), w.norm(dim=1)[[1, 0]])
+
+
+def test_invalid_bias():
+    with pytest.raises(ValueError, match="bias"):
+        PrototypeImprinting(bias="median")
