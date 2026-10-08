@@ -54,6 +54,16 @@ class FewShotEpisodesConfig:
         window_index_mask_path_key: Column with the mask path.
         window_index_coordinate_mode: ``auto``, ``pixel`` or ``bounds``.
         ignore_index: Mask value excluded from the fractions.
+        selection: Optional label-free selection with a frozen base model:
+            ``method`` (``random`` | ``kcenter``), ``uncertainty`` (``null`` |
+            ``base_entropy`` | ``base_vacuity`` | ``base_dissonance``),
+            ``gamma``, ``pooling`` (``superclass`` | ``tile``), ``mothers``,
+            ``batch_size``, ``model`` (Hydra node of the base model),
+            ``base_checkpoint`` (``path`` or ``from_runner`` + ``seed``) and
+            ``dataset`` (Hydra node reading the images of the same windows;
+            ``window_index_cache`` is injected). Adds the columns
+            ``selection``, ``diversity`` (Vendi score of each support) and
+            ``uncertainty`` (when used); with ``random`` it only measures.
 
     Example YAML::
 
@@ -80,6 +90,7 @@ class FewShotEpisodesConfig:
     window_index_mask_path_key: str = "mask_path"
     window_index_coordinate_mode: str = "auto"
     ignore_index: int = 255
+    selection: Optional[Dict[str, Any]] = None
 
 
 @dataclass

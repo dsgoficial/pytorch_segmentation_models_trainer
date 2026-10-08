@@ -48,6 +48,40 @@ taken for every K, so supports are **nested** (K=1 ⊂ K=3 ⊂ …) and identica
 for every method. The window index may use pixel or bounds columns (same
 formats as `MBTilesMaskWindowedDataset`).
 
+### Diversity- and uncertainty-driven supports (optional)
+
+By default supports are drawn at random. A `selection` block computes, with a
+frozen base model and **without labels**, one embedding and one uncertainty
+per window of the pool, and can pick diverse supports:
+
+```yaml
+fewshot_episodes:
+  # ... as above
+  selection:
+    method: kcenter            # random (only measures) | kcenter
+    uncertainty: null          # null | base_entropy | base_vacuity | base_dissonance
+    gamma: 1.0                 # weight u^gamma in the k-center score
+    pooling: superclass        # superclass | tile
+    mothers: [3]
+    model: {_target_: segmentation_models_pytorch.UPerNet, encoder_name: resnet50, encoder_weights: null, classes: 5}
+    base_checkpoint: {from_runner: outputs/baselines/r2_pampa, seed: 42}
+    dataset: {...}             # image dataset over the same windows (window_index_cache is injected)
+```
+
+- **Embedding:** mean decoder feature over the pixels the base model predicts
+  as a mother (`superclass`, tile mean if none) — the diversity of what has to
+  be split — or over the whole tile (`tile`); L2-normalised.
+- **Uncertainty:** mean over the same pixels of the normalised entropy of the
+  base probabilities, and for an evidential base its vacuity and dissonance.
+- **`kcenter`:** for each draw, the first window is random among the eligible
+  ones and the others follow the greedy farthest-point order, maximising
+  `distance to the selected set × u^gamma` (`uncertainty: null` or `gamma: 0`
+  = pure diversity). Supports stay nested across K.
+- Output columns: `selection`, `diversity` (Vendi score of each support's
+  embeddings, cosine kernel: 1 = all alike, K = all different) and
+  `uncertainty`. With `method: random` the block only **measures** the
+  diversity of the random supports (for correlating it with the results).
+
 ## 2. `GFSSModel`
 
 `GFSSModel` is a LightningModule run by the regular `train()` entry point:

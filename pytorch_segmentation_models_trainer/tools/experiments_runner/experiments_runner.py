@@ -814,7 +814,15 @@ class ExperimentsRunner:
     # Few-shot episodes
     # ------------------------------------------------------------------
 
-    _EPISODE_COLUMNS = ("shots", "draw", "novel_class", "novel_fraction")
+    _EPISODE_COLUMNS = (
+        "shots",
+        "draw",
+        "novel_class",
+        "novel_fraction",
+        "selection",
+        "diversity",
+        "uncertainty",
+    )
 
     def _write_episode_csvs(
         self, episodes_cfg: DictConfig

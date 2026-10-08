@@ -1,5 +1,11 @@
 # Unreleased
 
+## GFSS: diversity- and uncertainty-driven support selection
+
+- `build-fewshot-episodes` gains an optional `selection` block (`FewShotEpisodesConfig.selection`): with a frozen base model (`model`, `base_checkpoint` path or `from_runner` + `seed`) and an image `dataset` over the same windows, computes label-free tile descriptors — decoder embedding pooled over the predicted superclass (or the whole tile) and base uncertainty (`base_entropy`; `base_vacuity`, `base_dissonance` for an evidential base) — and selects supports by `method: kcenter` (greedy farthest point, random first window per draw, nested across K, optionally weighted by `uncertainty ** gamma`) or keeps `random` while measuring. New columns `selection`, `diversity` (Vendi score) and `uncertainty`.
+- New `tools/few_shot/support_selection.py`: `weighted_kcenter`, `support_diversity` (reuses `tools/coreset/vendi_score`) and `tile_descriptors`.
+- ExperimentsRunner: these columns are not copied to the per-episode support CSVs.
+
 ## GFSS: fine-tuning baselines
 
 - `few_shot/methods/finetune.FineTune`: linear head over all classes with base rows from the checkpoint and novel rows initialised from the mother (or the scaled prototype); trains only the superclass children (`train_rows: children`, B1a isolated fine-tuning), the novel rows or the whole head, with the DIaM-projected support CE (S-novel labels) and optional hierarchical KD (`kd_weight`) to the frozen base model.
