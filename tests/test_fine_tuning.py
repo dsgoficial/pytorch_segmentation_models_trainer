@@ -15,6 +15,7 @@ import pytest
 import torch.nn as nn
 
 from pytorch_segmentation_models_trainer.fine_tuning.lora_utils import (
+    _DEFAULT_TRAINABLE_NAMES,
     apply_fine_tuning_strategy,
     freeze_modules_by_name,
     get_trainable_parameter_count,
@@ -352,6 +353,103 @@ class TestLoraStrategy:
         with patch.dict(sys.modules, {"peft": fake_peft}):
             with pytest.raises(ValueError, match="auto-detect"):
                 apply_fine_tuning_strategy(model, cfg)
+
+    def test_lora_does_not_force_a_huggingface_task_type(self):
+        """task_type must stay unset — see docstring in lora_utils._apply_lora.
+
+        TaskType.FEATURE_EXTRACTION (or any other) routes get_peft_model()
+        to a PeftModel subclass with an HF-style forward(input_ids=...),
+        which breaks plain nn.Module vision models (forward(x)).
+        """
+        fake_lora_config = MagicMock(return_value=object())
+        fake_peft = types.SimpleNamespace(
+            LoraConfig=fake_lora_config,
+            TaskType=types.SimpleNamespace(FEATURE_EXTRACTION=1),
+        )
+        fake_peft.get_peft_model = MagicMock(return_value=MagicMock())
+        model = _AttentionModel()
+        cfg = _cfg(
+            strategy="lora",
+            lora_config=_cfg(
+                r=4, lora_alpha=8, lora_dropout=0.0, bias="none",
+                target_modules=["query", "value"],
+            ),
+        )
+
+        with patch.dict(sys.modules, {"peft": fake_peft}):
+            apply_fine_tuning_strategy(model, cfg)
+
+        assert "task_type" not in fake_lora_config.call_args.kwargs
+
+    def test_lora_defaults_modules_to_save_to_trainable_modules(self):
+        """Decoder/head must stay trainable — see docstring in lora_utils."""
+        fake_lora_config = MagicMock(return_value=object())
+        fake_peft = types.SimpleNamespace(
+            LoraConfig=fake_lora_config,
+            TaskType=types.SimpleNamespace(FEATURE_EXTRACTION=1),
+        )
+        fake_peft.get_peft_model = MagicMock(return_value=MagicMock())
+        model = _AttentionModel()
+        cfg = _cfg(
+            strategy="lora",
+            lora_config=_cfg(
+                r=4, lora_alpha=8, lora_dropout=0.0, bias="none",
+                target_modules=["query", "value"],
+            ),
+        )
+
+        with patch.dict(sys.modules, {"peft": fake_peft}):
+            apply_fine_tuning_strategy(model, cfg)
+
+        kwargs = fake_lora_config.call_args.kwargs
+        assert kwargs["modules_to_save"] == list(_DEFAULT_TRAINABLE_NAMES)
+
+    def test_lora_honors_top_level_trainable_modules(self):
+        fake_lora_config = MagicMock(return_value=object())
+        fake_peft = types.SimpleNamespace(
+            LoraConfig=fake_lora_config,
+            TaskType=types.SimpleNamespace(FEATURE_EXTRACTION=1),
+        )
+        fake_peft.get_peft_model = MagicMock(return_value=MagicMock())
+        model = _AttentionModel()
+        cfg = _cfg(
+            strategy="lora",
+            trainable_modules=["segmentation_head"],
+            lora_config=_cfg(
+                r=4, lora_alpha=8, lora_dropout=0.0, bias="none",
+                target_modules=["query", "value"],
+            ),
+        )
+
+        with patch.dict(sys.modules, {"peft": fake_peft}):
+            apply_fine_tuning_strategy(model, cfg)
+
+        kwargs = fake_lora_config.call_args.kwargs
+        assert kwargs["modules_to_save"] == ["segmentation_head"]
+
+    def test_lora_config_modules_to_save_overrides_top_level(self):
+        fake_lora_config = MagicMock(return_value=object())
+        fake_peft = types.SimpleNamespace(
+            LoraConfig=fake_lora_config,
+            TaskType=types.SimpleNamespace(FEATURE_EXTRACTION=1),
+        )
+        fake_peft.get_peft_model = MagicMock(return_value=MagicMock())
+        model = _AttentionModel()
+        cfg = _cfg(
+            strategy="lora",
+            trainable_modules=["segmentation_head"],
+            lora_config=_cfg(
+                r=4, lora_alpha=8, lora_dropout=0.0, bias="none",
+                target_modules=["query", "value"],
+                modules_to_save=["decoder"],
+            ),
+        )
+
+        with patch.dict(sys.modules, {"peft": fake_peft}):
+            apply_fine_tuning_strategy(model, cfg)
+
+        kwargs = fake_lora_config.call_args.kwargs
+        assert kwargs["modules_to_save"] == ["decoder"]
 
     def test_merge_lora_weights(self):
         fake_model = MagicMock()

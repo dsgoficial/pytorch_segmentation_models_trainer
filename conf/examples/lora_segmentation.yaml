@@ -1,0 +1,17 @@
+# LoRA fine-tuning for a segmentation model with a transformer encoder.
+# Only the encoder's attention layers get LoRA adapters; the decoder and
+# segmentation head (not pretrained, and not nn.Linear so LoRA can't target
+# them anyway) are kept fully trainable via modules_to_save — otherwise
+# get_peft_model() freezes everything that isn't a LoRA adapter and the
+# model can never learn the segmentation task.
+fine_tuning:
+  strategy: lora
+  lora_config:
+    r: 16
+    lora_alpha: 32
+    lora_dropout: 0.1
+    bias: none
+    target_modules: [qkv]   # Swin/ViT-style combined qkv projection
+    # modules_to_save: [decoder, segmentation_head]  # optional override;
+    # defaults to fine_tuning.trainable_modules below.
+  trainable_modules: [decoder, head, segmentation_head, neck]

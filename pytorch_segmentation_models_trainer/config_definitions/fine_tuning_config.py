@@ -40,6 +40,15 @@ class LoraAdapterConfig:
             with LoRA variants.  Leave empty for auto-detection based on
             common attention-layer naming conventions (query, key, value,
             qkv, q_proj, …).
+        modules_to_save: Names of modules to keep **fully trainable**
+            (not LoRA, not frozen) alongside the adapters — typically the
+            decoder and segmentation head, which are task-specific and not
+            pretrained.  Without this, ``get_peft_model`` freezes every
+            parameter that isn't a LoRA adapter, including the decoder, and
+            the model can never learn the segmentation task.  Leave empty
+            to reuse the top-level ``fine_tuning.trainable_modules`` list
+            (defaults to ``["decoder", "head", "segmentation_head",
+            "neck"]``).
 
     Example::
 
@@ -53,6 +62,9 @@ class LoraAdapterConfig:
             target_modules:
               - query
               - value
+            modules_to_save:
+              - decoder
+              - segmentation_head
     """
 
     r: int = 16
@@ -60,6 +72,7 @@ class LoraAdapterConfig:
     lora_dropout: float = 0.1
     bias: str = "none"
     target_modules: List[str] = field(default_factory=list)
+    modules_to_save: List[str] = field(default_factory=list)
 
 
 @dataclass

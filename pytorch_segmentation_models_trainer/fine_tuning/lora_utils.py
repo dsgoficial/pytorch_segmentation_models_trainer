@@ -39,7 +39,15 @@ Provides four strategies, all applied by :func:`apply_fine_tuning_strategy`:
 
 ``"lora"``
     Apply PEFT LoRA adapters to the attention layers of the model.
-    Requires ``peft`` to be installed (``pip install peft``).
+    Requires ``peft`` to be installed (``pip install peft``).  The
+    decoder/head (``fine_tuning.trainable_modules``, or
+    ``lora_config.modules_to_save`` to override) are kept fully trainable
+    via ``LoraConfig(modules_to_save=...)`` — otherwise ``get_peft_model``
+    freezes everything that isn't a LoRA adapter, including the
+    (non-pretrained) decoder, and the model can never learn the task.  No
+    ``task_type`` is passed to ``LoraConfig``: peft's task-specific
+    ``PeftModel`` subclasses assume a HuggingFace ``forward(input_ids=...)``
+    signature, which breaks plain vision models (``forward(x)``).
 
 All strategies log a parameter count summary via Python's ``logging`` module.
 """
@@ -169,7 +177,7 @@ def _apply_linear_probe(model: nn.Module, cfg: Any) -> nn.Module:
 
 def _apply_lora(model: nn.Module, cfg: Any) -> nn.Module:
     try:
-        from peft import LoraConfig, TaskType, get_peft_model
+        from peft import LoraConfig, get_peft_model
     except ImportError as e:
         raise ImportError(
             "The 'peft' package is required for LoRA fine-tuning.  "
@@ -199,13 +207,38 @@ def _apply_lora(model: nn.Module, cfg: Any) -> nn.Module:
             )
         logger.info("LoRA: auto-detected target_modules=%s", target_modules)
 
+    # Segmentation models have a task-specific decoder/head that is not
+    # pretrained and must keep training normally — only the (pretrained)
+    # encoder's attention layers get LoRA adapters.  Without this,
+    # get_peft_model() freezes every parameter that isn't a LoRA adapter,
+    # including the decoder/head, and the model can never learn the
+    # segmentation task.  modules_to_save reuses the same names already
+    # used by freeze_backbone/linear_probe to identify decoder/head
+    # modules, so a single `fine_tuning.trainable_modules` list drives all
+    # three strategies consistently.
+    modules_to_save = list(
+        getattr(lora_cfg, "modules_to_save", None)
+        or getattr(cfg, "trainable_modules", None)
+        or _DEFAULT_TRAINABLE_NAMES
+    )
+
+    # No task_type: peft's task-specific PeftModel subclasses (incl.
+    # TaskType.FEATURE_EXTRACTION) assume a HuggingFace-style forward
+    # signature (forward(input_ids=..., ...)).  Our models are plain
+    # nn.Module/LightningModule with forward(x) — passing a task_type
+    # wraps the model in a subclass whose forward() rejects the image
+    # tensor ("forward() got an unexpected keyword argument 'input_ids'").
+    # Leaving task_type unset routes get_peft_model() to the generic
+    # PeftModel, whose forward is a clean `base_model(*args, **kwargs)`
+    # passthrough — the documented behavior for any nn.Module that isn't a
+    # Transformers PreTrainedModel (see get_peft_model's own docstring).
     peft_config = LoraConfig(
-        task_type=TaskType.FEATURE_EXTRACTION,
         r=r,
         lora_alpha=lora_alpha,
         lora_dropout=lora_dropout,
         bias=bias,
         target_modules=target_modules,
+        modules_to_save=modules_to_save,
     )
 
     model = get_peft_model(model, peft_config)
