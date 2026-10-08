@@ -68,13 +68,21 @@ def _seed_subprocess_worker(yaml_cfg: str, output_dir: str, result_path: str) ->
 
     _os.makedirs(output_dir, exist_ok=True)
 
+    trainer = None
     try:
         cfg = _OmegaConf.create(_yaml.safe_load(yaml_cfg))
-        trainer = _train(cfg)
+        try:
+            trainer = _train(cfg)
+        except SystemExit as se:
+            # @hydra.main calls sys.exit(0) after the decorated function returns.
+            # SystemExit(0) means success; any other code is a real error.
+            if se.code != 0:
+                raise RuntimeError(f"train() exited with code {se.code}") from se
 
         all_metrics: Dict[str, float] = {}
         try:
-            all_metrics = {k: float(v) for k, v in trainer.callback_metrics.items()}
+            if trainer is not None:
+                all_metrics = {k: float(v) for k, v in trainer.callback_metrics.items()}
         except Exception:
             pass
 
@@ -96,9 +104,9 @@ def _seed_subprocess_worker(yaml_cfg: str, output_dir: str, result_path: str) ->
             if k.startswith("test/") or k.endswith("/test")
         }
 
-        ckpt_cb = getattr(trainer, "checkpoint_callback", None)
+        ckpt_cb = getattr(trainer, "checkpoint_callback", None) if trainer else None
         best_ckpt = (getattr(ckpt_cb, "best_model_path", "") or "") if ckpt_cb else ""
-        epochs = trainer.current_epoch + 1
+        epochs = (trainer.current_epoch + 1) if trainer is not None else 0
 
         result = {
             "ok": True,

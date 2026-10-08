@@ -64,6 +64,12 @@
 - Config dataclasses: `FewShotEpisodesConfig`, `GFSSConfig`, `GFSSCheckpointConfig` (`config_definitions/few_shot_config.py`), `ExperimentsEpisodesConfig` and `ExperimentsRunnerConfig.episodes`/`summary_group_by`.
 - Docs: new `user-guide/few-shot-segmentation.md`; Experiments Runner page documents `episodes` and `summary_group_by`. Examples: `conf/examples/build_fewshot_episodes.yaml`, `conf/examples/gfss_base_only.yaml`.
 
+## `_seed_subprocess_worker`: handle `@hydra.main`'s internal `SystemExit`
+
+- `train()` is decorated with `@hydra.main`, which calls `sys.exit(0)` after the decorated function returns — a normal exit, but an uncaught `SystemExit` all the same. `_seed_subprocess_worker` didn't catch it, so every seed's subprocess exited via the uncaught-exception path instead of returning its result normally, and `trainer` was left unset for the metric-extraction code below (`trainer.callback_metrics`, `trainer.checkpoint_callback`, `trainer.current_epoch` all assumed a live `Trainer`).
+- Fix: catch `SystemExit` around the `_train(cfg)` call — `code == 0` is treated as success (the normal `@hydra.main` exit) and anything else re-raised as a `RuntimeError` so real errors still fail the run. `trainer` is initialized to `None` beforehand and the metric-extraction code now guards every `trainer.*` access, so a worker that exits before producing a `Trainer` (e.g. erroring inside `_train` before `Trainer(...)` is constructed) reports `epochs=0` and empty metrics instead of raising `AttributeError` on `None`.
+- Not covered by a new test in this change — `_seed_subprocess_worker` imports `train` locally (so it runs inside the spawned subprocess) and is exercised today only through `ExperimentsRunner`'s higher-level, mocked tests in `tests/test_experiments_runner.py`, none of which drive this specific path.
+
 ## LoRA fine-tuning: fix two bugs that made it unusable for vision segmentation models
 
 Found and fixed while setting up a real LoRA run (Swin-T encoder + UPerNet decoder) for an external project — both bugs are in `fine_tuning.lora_utils._apply_lora` and only show up once you actually try to train, not at config-composition time.
