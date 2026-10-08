@@ -1,5 +1,10 @@
 # Unreleased
 
+## GFSS: abstention and calibration of the uncertainty
+
+- `GFSSUncertaintyMetrics`: abstention operating points `coverage@<t>/<map>` and `risk@<t>/<map>` (`abstain_thresholds`) and `ece/<map>` (calibration of `1 − u` against the correctness of the split decisions, `ece_bins` grouped from the fine histogram). Configurable via the new `gfss.uncertainty_eval` node (`GFSSConfig.uncertainty_eval`).
+- `HiSplit.abstention(features, measure, threshold)`: abstention map (pixels of a mother whose split uncertainty exceeds the threshold go back to the mother class).
+
 ## GFSS: boundary of the superclass (P2)
 
 - `HiSplit`: `leak` (hierarchical leak "HierTrans": learned `t[n, c]` moves mass from other base classes into each novel child, trained with the NLL of the final distribution on the support; hierarchical decoding lets the superclass absorb the leaked mass, and a pixel outside the superclass either keeps the base class or becomes a child — classes outside the superclass are compared with a common per-pixel shift, so uneven leak fractions never swap neighbours), `widen: prob | dissonance` + `widen_threshold` (novel child where the mother is the base's second choice above a probability or dissonance threshold and q prefers the novel child), `novel_prior_weight`, and `sweep` (thresholds evaluated as extra decoding variants).

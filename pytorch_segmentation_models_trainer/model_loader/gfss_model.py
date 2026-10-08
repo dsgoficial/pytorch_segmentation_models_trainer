@@ -109,11 +109,16 @@ class GFSSModel(Model):
             self.hierarchy, class_names=names, ignore_index=ignore, prefix="test/"
         )
         names_u = self.method.uncertainty_names()
+        unc_eval = dict(gfss.get("uncertainty_eval", None) or {})
         self.val_unc_metrics = (
-            GFSSUncertaintyMetrics(names_u, prefix="val/unc/") if names_u else None
+            GFSSUncertaintyMetrics(names_u, prefix="val/unc/", **unc_eval)
+            if names_u
+            else None
         )
         self.test_unc_metrics = (
-            GFSSUncertaintyMetrics(names_u, prefix="test/unc/") if names_u else None
+            GFSSUncertaintyMetrics(names_u, prefix="test/unc/", **unc_eval)
+            if names_u
+            else None
         )
         # ModuleList + keys: variant names may contain "." (e.g. widen_0.1),
         # which ModuleDict rejects.

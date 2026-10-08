@@ -97,3 +97,45 @@ class TestUncertaintyMetrics:
         c = torch.ones(1, 2, dtype=torch.bool)
         with pytest.raises(KeyError, match="v"):
             m.update({"v": torch.rand(1, 2)}, c, c, c)
+
+
+class TestAbstentionAndCalibration:
+    def _filled(self, **kw):
+        # 4 decisions: u = 0.05 (ok), 0.15 (ok), 0.85 (error), 0.95 (error)
+        m = GFSSUncertaintyMetrics(["u"], n_bins=10, **kw)
+        correct = torch.tensor([[1, 1, 0, 0]], dtype=torch.bool)
+        region = torch.ones_like(correct)
+        m.update(
+            {"u": torch.tensor([[0.05, 0.15, 0.85, 0.95]])}, region, correct, region
+        )
+        return m.compute()
+
+    def test_operating_points(self):
+        out = self._filled(abstain_thresholds=[0.5, 0.9, 1.0])
+        assert out["coverage@0.5/u"].item() == pytest.approx(0.5)
+        assert out["risk@0.5/u"].item() == pytest.approx(0.0)
+        assert out["coverage@0.9/u"].item() == pytest.approx(0.75)
+        assert out["risk@0.9/u"].item() == pytest.approx(1 / 3)
+        assert out["coverage@1/u"].item() == pytest.approx(1.0)
+        assert out["risk@1/u"].item() == pytest.approx(0.5)
+
+    def test_risk_undefined_when_nothing_retained(self):
+        out = self._filled(abstain_thresholds=[0.0])
+        assert out["coverage@0/u"].item() == 0.0
+        assert math.isnan(out["risk@0/u"].item())
+
+    def test_ece(self):
+        # confidence = 1 - u: 0.95 and 0.85 (correct), 0.15 and 0.05 (wrong)
+        out = self._filled(ece_bins=10)
+        expected = (0.05 + 0.15 + 0.15 + 0.05) / 4
+        assert out["ece/u"].item() == pytest.approx(expected, abs=1e-6)
+
+    def test_ece_undefined_without_pixels(self):
+        m = GFSSUncertaintyMetrics(["u"])
+        assert math.isnan(m.compute()["ece/u"].item())
+
+    def test_ece_with_coarse_bins_not_dividing_histogram(self):
+        # 3 coarse bins over 10 fine ones: [0.05, 0.15] | - | [0.85, 0.95]
+        out = self._filled(ece_bins=3)
+        expected = 0.5 * abs(1.0 - 0.9) + 0.5 * abs(0.0 - 0.1)
+        assert out["ece/u"].item() == pytest.approx(expected, abs=1e-6)

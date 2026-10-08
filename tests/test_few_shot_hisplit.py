@@ -376,3 +376,22 @@ def test_leak_can_still_take_pixels_into_the_superclass():
         m.leak_logit[1, 0] = 4.0  # ~98% of class 0 leaks
     query = torch.log(torch.tensor([0.50, 0.05, 0.45])).view(1, 3, 1, 1)
     assert m(query).argmax(1).item() in (1, 3)
+
+
+class TestAbstentionMap:
+    def test_abstains_only_on_superclass_pixels_above_threshold(self):
+        f, masks, w, b = _data()
+        f = f + torch.randn_like(f)
+        m = _ready(f, masks, w, b)
+        u = m.uncertainty(f)["split_entropy"]
+        mask = m.abstention(f, "split_entropy", 0.5)
+        base = m._base_probs(f).argmax(1)
+        assert mask.dtype == torch.bool and mask.shape == base.shape
+        assert torch.equal(mask, (base == 1) & (u > 0.5))
+        assert not m.abstention(f, "split_entropy", 1.0).any()
+
+    def test_unknown_measure_raises(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b)
+        with pytest.raises(KeyError, match="dissonance"):
+            m.abstention(f, "dissonance", 0.5)

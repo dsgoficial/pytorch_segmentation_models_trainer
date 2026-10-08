@@ -486,3 +486,18 @@ def test_decoding_variants_are_evaluated_and_logged(base_ckpt, tmp_path):
 def test_no_variant_metrics_by_default(base_ckpt):
     m = GFSSModel(_cfg(base_ckpt[0]))
     assert len(m.variant_metrics) == 0
+
+
+def test_uncertainty_evaluation_options_from_config(base_ckpt):
+    cfg = _cfg(
+        base_ckpt[0],
+        method="pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit",
+    )
+    cfg.gfss.uncertainty_eval = {
+        "abstain_thresholds": [0.3],
+        "ece_bins": 5,
+        "n_bins": 100,
+    }
+    m = GFSSModel(cfg)
+    assert m.test_unc_metrics.abstain_thresholds == [0.3]
+    assert m.test_unc_metrics.ece_bins == 5 and m.val_unc_metrics.n_bins == 100

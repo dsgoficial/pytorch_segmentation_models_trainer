@@ -123,6 +123,9 @@ class GFSSConfig:
         ignore_index: Label ignored by losses and metrics.
         class_names: Names of the ``num_classes`` final classes used in the
             metric keys (default: ``class_definitions.names`` or indices).
+        uncertainty_eval: Options of ``GFSSUncertaintyMetrics`` for methods
+            with uncertainty maps (``abstain_thresholds``, ``ece_bins``,
+            ``n_bins``).
 
     Example YAML::
 
@@ -142,6 +145,7 @@ class GFSSConfig:
     not_novel_index: int = 254
     ignore_index: int = 255
     class_names: Optional[List[str]] = None
+    uncertainty_eval: Optional[Dict[str, Any]] = None
 
 
 def _register_configs() -> None:

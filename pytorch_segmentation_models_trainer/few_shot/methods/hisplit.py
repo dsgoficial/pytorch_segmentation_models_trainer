@@ -528,6 +528,26 @@ class HiSplit(BaseGFSSMethod):
             names += ["base_vacuity", "dissonance"]
         return names
 
+    def abstention(self, features: Tensor, measure: str, threshold: float) -> Tensor:
+        """Abstention map ``(B, h, w)``: pixels the base model assigns to a
+        mother whose split uncertainty ``measure`` exceeds ``threshold``. Their
+        decision goes back to the mother class (e.g. "low vegetation")
+        instead of a child.
+
+        Raises:
+            KeyError: ``measure`` is not provided by this configuration.
+        """
+        maps = self.uncertainty(features)
+        if measure not in maps:
+            raise KeyError(
+                f"uncertainty measure {measure!r} not available ({sorted(maps)})."
+            )
+        base_pred = self._base_logits(features).argmax(1)
+        in_superclass = torch.isin(
+            base_pred, torch.tensor(self.hierarchy.mothers, device=base_pred.device)
+        )
+        return in_superclass & (maps[measure] > threshold)
+
     def uncertainty(self, features: Tensor) -> Dict[str, Tensor]:
         """Per-pixel uncertainty maps ``(B, h, w)`` in ``[0, 1]`` (see class doc)."""
         scores = self._scores(features, *self._current_params(features.shape[0]))

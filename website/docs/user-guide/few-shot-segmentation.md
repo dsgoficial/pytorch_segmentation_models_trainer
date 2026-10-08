@@ -164,7 +164,23 @@ For each map: `aurc/<map>` — area under the risk–coverage curve of the split
 decisions (pixels whose true class is a child and that the base model assigns
 to its mother; abstaining = sending them back to the mother), and
 `tile_mean/<map>`, `tile_spearman/<map>` — Spearman correlation between the
-tile mean uncertainty and the tile error (1 − pixel accuracy).
+tile mean uncertainty and the tile error (1 − pixel accuracy). Also:
+`coverage@<t>/<map>` and `risk@<t>/<map>` (abstention operating points:
+decisions with `u ≤ t` retained, the rest sent back to the mother) and
+`ece/<map>` (calibration of the confidence `1 − u`). Options in
+`gfss.uncertainty_eval`:
+
+```yaml
+gfss:
+  uncertainty_eval:
+    abstain_thresholds: [0.25, 0.5, 0.75]
+    ece_bins: 10
+    n_bins: 1000
+```
+
+`HiSplit.abstention(features, measure, threshold)` returns the abstention
+map itself: pixels predicted as a mother whose split uncertainty exceeds the
+threshold (their label stays the mother class).
 
 `decoding: hierarchical` (default) keeps the base argmax and splits only the
 pixels predicted as a mother, so the predictions of all other classes are

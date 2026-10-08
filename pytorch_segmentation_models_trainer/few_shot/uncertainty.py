@@ -87,6 +87,14 @@ class GFSSUncertaintyMetrics(Metric):
       histogram with ``n_bins`` bins (ties inside a bin share its risk).
       Lower is better. Abstaining on uncertain pixels = sending them back
       to the mother class.
+    * ``coverage@<t>/<name>`` and ``risk@<t>/<name>``: operating points of
+      the abstention — fraction of the region retained (``u ≤ t``, at the
+      histogram resolution) and error rate among the retained decisions
+      (``nan`` when nothing is retained), for every ``t`` in
+      ``abstain_thresholds``.
+    * ``ece/<name>``: expected calibration error of the confidence
+      ``1 − u`` against the correctness of the decisions in ``region``,
+      with ``ece_bins`` equal-width bins.
     * ``tile_mean/<name>`` and ``tile_spearman/<name>``: mean uncertainty of
       each tile (over ``tile_valid`` pixels) and Spearman correlation
       between it and the tile error (1 − pixel accuracy) across tiles.
@@ -95,23 +103,36 @@ class GFSSUncertaintyMetrics(Metric):
         names: Measures that ``update`` receives.
         n_bins: Histogram bins for the AURC.
         prefix: Prepended to every key.
+        abstain_thresholds: Uncertainty thresholds of the operating points.
+        ece_bins: Bins of the ECE (fine histogram bins are grouped into them).
     """
 
     full_state_update = False
 
     def __init__(
-        self, names: Sequence[str], n_bins: int = 1000, prefix: str = "", **kwargs
+        self,
+        names: Sequence[str],
+        n_bins: int = 1000,
+        prefix: str = "",
+        abstain_thresholds: Sequence[float] = (0.25, 0.5, 0.75),
+        ece_bins: int = 10,
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.names = list(names)
         self.n_bins = int(n_bins)
         self.prefix = prefix
+        self.abstain_thresholds = [float(t) for t in abstain_thresholds]
+        self.ece_bins = int(ece_bins)
         for name in self.names:
             self.add_state(
                 f"count_{name}", torch.zeros(self.n_bins, dtype=torch.long), "sum"
             )
             self.add_state(
                 f"errors_{name}", torch.zeros(self.n_bins, dtype=torch.long), "sum"
+            )
+            self.add_state(
+                f"sum_u_{name}", torch.zeros(self.n_bins, dtype=torch.float64), "sum"
             )
             self.add_state(f"tile_u_{name}", [], dist_reduce_fx="cat")
         self.add_state("tile_err", [], dist_reduce_fx="cat")
@@ -148,6 +169,9 @@ class GFSSUncertaintyMetrics(Metric):
             getattr(self, f"errors_{name}").add_(
                 torch.bincount(sel[~correct[region]], minlength=self.n_bins)
             )
+            getattr(self, f"sum_u_{name}").add_(
+                torch.bincount(sel, weights=u[region].double(), minlength=self.n_bins)
+            )
             tile_u = (u * tile_valid).flatten(1).sum(1) / n_valid
             getattr(self, f"tile_u_{name}").append(tile_u.double())
 
@@ -171,6 +195,8 @@ class GFSSUncertaintyMetrics(Metric):
             else:
                 aurc = torch.tensor(float("nan"), dtype=torch.float64)
             out[f"aurc/{name}"] = aurc
+            out.update(self._operating_points(name, count, errors, total))
+            out[f"ece/{name}"] = self._ece(name, count, errors, total)
             tu = getattr(self, f"tile_u_{name}")
             tu = (
                 tu
@@ -182,3 +208,33 @@ class GFSSUncertaintyMetrics(Metric):
             )
             out[f"tile_spearman/{name}"] = _spearman(tu.cpu(), errs.cpu())
         return {f"{self.prefix}{k}": v.float() for k, v in out.items()}
+
+    def _operating_points(self, name, count, errors, total) -> Dict[str, Tensor]:
+        out = {}
+        nan = torch.tensor(float("nan"), dtype=torch.float64)
+        for t in self.abstain_thresholds:
+            keep = int(round(t * self.n_bins))
+            kept = count[:keep].sum()
+            out[f"coverage@{t:g}/{name}"] = kept / total if total > 0 else nan.clone()
+            out[f"risk@{t:g}/{name}"] = (
+                errors[:keep].sum() / kept if kept > 0 else nan.clone()
+            )
+        return out
+
+    def _ece(self, name, count, errors, total) -> Tensor:
+        if total == 0:
+            return torch.tensor(float("nan"), dtype=torch.float64)
+        coarse = (
+            torch.arange(self.n_bins, device=count.device)
+            * self.ece_bins
+            // self.n_bins
+        )
+        n = count.new_zeros(self.ece_bins).index_add_(0, coarse, count)
+        wrong = errors.new_zeros(self.ece_bins).index_add_(0, coarse, errors)
+        sum_u = count.new_zeros(self.ece_bins).index_add_(
+            0, coarse, getattr(self, f"sum_u_{name}").to(count.dtype)
+        )
+        filled = n > 0
+        accuracy = 1.0 - wrong[filled] / n[filled]
+        confidence = 1.0 - sum_u[filled] / n[filled]
+        return (n[filled] / total * (accuracy - confidence).abs()).sum()
