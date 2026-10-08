@@ -555,3 +555,74 @@ class TestTrainableBackbone:
     def test_invalid_trainable_value(self, base_ckpt, tmp_path):
         with pytest.raises(ValueError, match="trainable"):
             GFSSModel(self._cfg(base_ckpt, tmp_path, "head", 0.0))
+
+
+class TestTTA:
+    def test_base_only_with_d8_reproduces_base_model_tta(self, base_ckpt):
+        from pytorch_segmentation_models_trainer.tools.tta.tta import apply_tta
+
+        cfg = _cfg(base_ckpt[0], tta_mode="d8")
+        m = GFSSModel(cfg).eval()
+        batch = next(iter(m.test_dataloader()))
+        m.test_step(batch, 0)
+        images, masks = batch["image"], batch["mask"]
+        augs = m._get_tta_augmentations()
+        assert len(augs) == 8
+        expected = apply_tta(m.model.base_logits, images, augs).argmax(1)
+        cm = m.test_gfss_metrics.confmat
+        # BaseOnly never predicts the novel class and agrees with the base under TTA
+        assert cm[:, 3].sum() == 0
+        out = m.test_gfss_metrics.compute()
+        assert out["test/locality"] == pytest.approx(1.0)
+        m.test_gfss_metrics.reset()
+        m.test_gfss_metrics.update(expected, masks.long(), expected)
+        torch.testing.assert_close(cm, m.test_gfss_metrics.confmat)
+
+    def test_tta_changes_predictions_and_is_only_used_in_test(self, base_ckpt):
+        cfg = _cfg(
+            base_ckpt[0],
+            method="pytorch_segmentation_models_trainer.few_shot.methods.prototype.PrototypeImprinting",
+            tta_mode="d8",
+            val_dataset=_ds(right=1, corner=3),
+        )
+        m = GFSSModel(cfg).eval()
+        calls = []
+        orig = m._predict_logits
+
+        def spy(images, augmentations):
+            calls.append(augmentations)
+            return orig(images, augmentations)
+
+        m._predict_logits = spy
+        batch = next(iter(m.test_dataloader()))
+        m.test_step(batch, 0)
+        m.validation_step(batch, 0)
+        assert calls[0] is not None and len(calls[0]) == 8
+        assert calls[1] is None
+
+    def test_transductive_and_variants_under_tta(self, base_ckpt, tmp_path):
+        from pytorch_segmentation_models_trainer.train import train
+
+        cfg = _cfg(
+            base_ckpt[0],
+            method="pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit",
+            tta_mode="flip",
+            pl_model={
+                "_target_": "pytorch_segmentation_models_trainer.model_loader.gfss_model.GFSSModel"
+            },
+            pl_trainer={
+                "max_steps": 0,
+                "accelerator": "cpu",
+                "enable_checkpointing": False,
+                "enable_progress_bar": False,
+                "inference_mode": False,
+                "default_root_dir": str(tmp_path),
+            },
+        )
+        cfg.gfss.method.q = "trans"
+        cfg.gfss.method.adapt_iter = 2
+        cfg.gfss.method.widen = "prob"
+        cfg.gfss.method.sweep = [0.2]
+        trainer = train(cfg)
+        assert "test/var/widen_0.2/miou" in trainer.callback_metrics
+        assert "test/unc/aurc/split_entropy" in trainer.callback_metrics

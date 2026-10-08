@@ -108,6 +108,20 @@ features (`FrozenLinearHeadSegmenter.features`) and the base classifier
 - Do not add a `ModelCheckpoint` callback (`enable_checkpointing: false`): the
   adapted state lives in memory.
 
+### Test-time augmentation
+
+`GFSSModel` honours the same TTA options as the base `Model` (`tta_mode: d8`
+/ `d4` / `flip`, or `use_tta` + `tta_augmentations`), **at test time only**:
+the method's logits, every decoding variant and the unmodified base model
+(reference for `locality`/`split_ceiling`) are averaged over the
+de-augmented views with the framework's `apply_tta`. Transductive methods
+adapt once on the original view and predict on all views; uncertainty maps
+come from the original view.
+
+```yaml
+tta_mode: d8   # same as the base models, so GFSS and R1/R2 are comparable
+```
+
 ### Support label regimes
 
 - **Full labels**: support masks with every class.

@@ -41,6 +41,7 @@ from pytorch_segmentation_models_trainer.few_shot.uncertainty import (
     GFSSUncertaintyMetrics,
 )
 from pytorch_segmentation_models_trainer.model_loader.model import Model
+from pytorch_segmentation_models_trainer.tools.tta.tta import apply_tta
 from pytorch_segmentation_models_trainer.utils.checkpoint_loading import (
     load_pretrained_weights,
     resolve_checkpoint_from_runner,
@@ -312,6 +313,28 @@ class GFSSModel(Model):
         region = valid & torch.isin(target, children) & (base_pred == mother_of_target)
         unc_metrics.update(maps, region, pred == masks, valid)
 
+    _MAIN = "__main__"
+
+    def _predict_logits(self, images: Tensor, augmentations) -> dict:
+        """Logits of the method (key ``__main__``), of each decoding variant
+        and of the unmodified base model (``__base__``), averaged over the TTA
+        ``augmentations`` (``None`` = single pass) with the framework's
+        ``apply_tta`` (mean of the de-augmented logits)."""
+        ref = self._reference()
+
+        def predict(x: Tensor) -> dict:
+            feats = self.model.features(x)
+            size = x.shape[-2:]
+            out = {self._MAIN: self.model.upsample(self.method(feats), size)}
+            for name, variant in self.method.decode_variants(feats).items():
+                out[name] = self.model.upsample(variant, size)
+            out["__base__"] = ref.base_logits(x)
+            return out
+
+        if not augmentations:
+            return predict(images)
+        return apply_tta(model_fn=predict, batch=images, augmentations=augmentations)
+
     def _eval_step(self, batch, metrics: GFSSMetrics, unc_metrics=None) -> None:
         self._ensure_initialised()
         images, masks = self._unpack_batch(batch)
@@ -320,16 +343,18 @@ class GFSSModel(Model):
         if self.method.transductive:
             with torch.enable_grad():
                 self.method.adapt_to_query(*self._get_support(), feats)
-        logits = self.model.upsample(self.method(feats), images.shape[-2:])
-        pred = logits.argmax(1)
-        base_pred = self._reference().base_logits(images).argmax(1)
-        metrics.update(pred, masks, base_pred)
         stage = metrics.prefix.rstrip("/")
-        for name, variant in self.method.decode_variants(feats).items():
-            v_pred = self.model.upsample(variant, images.shape[-2:]).argmax(1)
+        # TTA (cfg.tta_mode / use_tta, as in the base models) only at test time.
+        augmentations = self._get_tta_augmentations() if stage == "test" else None
+        logits = self._predict_logits(images, augmentations)
+        pred = logits.pop(self._MAIN).argmax(1)
+        base_pred = logits.pop("__base__").argmax(1)
+        metrics.update(pred, masks, base_pred)
+        for name, variant in logits.items():
             idx = self._variant_keys.index((stage, name))
-            self.variant_metrics[idx].update(v_pred, masks, base_pred)
+            self.variant_metrics[idx].update(variant.argmax(1), masks, base_pred)
         if unc_metrics is not None:
+            # uncertainty maps come from the original (non-augmented) view
             self._update_uncertainty(feats, images, masks, pred, base_pred, unc_metrics)
 
     def val_dataloader(self):

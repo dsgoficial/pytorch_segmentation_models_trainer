@@ -1,5 +1,9 @@
 # Unreleased
 
+## GFSS: test-time augmentation
+
+- `GFSSModel` applies the base `Model`'s TTA options (`tta_mode: d8|d4|flip`, `use_tta`) at test time: method logits, decoding variants and the reference base model are averaged over the de-augmented views (`apply_tta`), so GFSS results are comparable with base models evaluated with TTA. Transductive methods adapt once on the original view; uncertainty maps use the original view.
+
 ## GFSS: diversity- and uncertainty-driven support selection
 
 - `build-fewshot-episodes` gains an optional `selection` block (`FewShotEpisodesConfig.selection`): with a frozen base model (`model`, `base_checkpoint` path or `from_runner` + `seed`) and an image `dataset` over the same windows, computes label-free tile descriptors — decoder embedding pooled over the predicted superclass (or the whole tile) and base uncertainty (`base_entropy`; `base_vacuity`, `base_dissonance` for an evidential base) — and selects supports by `method: kcenter` (greedy farthest point, random first window per draw, nested across K, optionally weighted by `uncertainty ** gamma`) or keeps `random` while measuring. New columns `selection`, `diversity` (Vendi score) and `uncertainty`.
