@@ -19,7 +19,7 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn.functional as F
@@ -122,6 +122,20 @@ class BaseGFSSMethod(nn.Module, ABC):
         decisions, per-tile Spearman with the tile error).
         """
         return []
+
+    def variant_names(self) -> List[str]:
+        """Names of extra decoding variants (default: none).
+
+        Methods with variants (e.g. a threshold sweep) override this and
+        ``decode_variants(features) -> {name: logits}``; ``GFSSModel``
+        evaluates each one with its own ``GFSSMetrics``
+        (``test/var/<name>/...``).
+        """
+        return []
+
+    def decode_variants(self, features: Tensor) -> Dict[str, Tensor]:
+        """Logits of the extra decoding variants (default: none)."""
+        return {}
 
     @abstractmethod
     def forward(self, features: Tensor) -> Tensor:

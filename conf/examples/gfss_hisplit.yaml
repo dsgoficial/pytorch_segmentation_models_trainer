@@ -22,6 +22,13 @@ gfss:
     pi_update_at: [10]
     # edl only: steps to reach full weight of the EDL KL regulariser
     kl_anneal_steps: 50
+    # boundary of the superclass (P2)
+    leak: false              # learned leak from other classes into the novel child (needs max_steps > 0)
+    leak_init: -4.0
+    widen: none              # none | prob | dissonance (evidential base)
+    widen_threshold: 0.3
+    novel_prior_weight: 1.0
+    sweep: []                # e.g. [0.1, 0.2, 0.3, 0.4] with widen: prob -> test/var/widen_<t>/...
 
 pl_trainer:
   max_steps: 0               # q: linear/trans/edl -> e.g. 100 (optimizer node)

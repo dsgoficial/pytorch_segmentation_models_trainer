@@ -98,6 +98,9 @@ class ClassTrans(BaseGFSSMethod):
         pi_update_at: Iterations (1-based) where π is re-estimated.
         fine_tune_base_classifier: Also optimise the base rows (official).
         ot_lambda: Entropic regularisation of the transport (official: 0.1).
+        hierarchical_mask: Ablation (HierTrans): the transition into each
+            novel class only comes from its mother's column (hard
+            hierarchical prior); base rows unchanged.
         not_novel_weight: CE weight of "not novel" pixels; ``None`` =
             official rule (0.01 with one support map per novel class, else 0.15).
 
@@ -130,6 +133,7 @@ class ClassTrans(BaseGFSSMethod):
         fine_tune_base_classifier: bool = True,
         ot_lambda: float = 0.1,
         not_novel_weight: Optional[float] = None,
+        hierarchical_mask: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -147,6 +151,7 @@ class ClassTrans(BaseGFSSMethod):
         self.fine_tune_base_classifier = fine_tune_base_classifier
         self.ot_lambda = float(ot_lambda)
         self.not_novel_weight = not_novel_weight
+        self.hierarchical_mask = hierarchical_mask
         self._task_params: Optional[dict] = None
 
     # ------------------------------------------------------------------
@@ -247,6 +252,13 @@ class ClassTrans(BaseGFSSMethod):
         row = _logits(f5, p["row_w"], p["row_b"])
         col = _logits(f5, p["col_w"], p["col_b"])
         matrix = torch.einsum("bochw,borhw->bocrhw", col, row)
+        if self.hierarchical_mask:
+            h = self.hierarchy
+            mask = matrix.new_ones(h.num_classes, h.num_base_classes)
+            for n in h.novel_classes:
+                mask[n] = 0.0
+                mask[n, h.mother_of(n)] = 1.0
+            matrix = matrix * mask.view(1, 1, *mask.shape, 1, 1)
         out = torch.einsum("borchw,bochw->borhw", matrix, snapshot)
         return out * p["layer_scale"].unsqueeze(1).unsqueeze(3).unsqueeze(4)
 

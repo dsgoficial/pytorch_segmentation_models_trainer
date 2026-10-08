@@ -99,6 +99,32 @@ class HiSplit(BaseGFSSMethod):
     are those of the base model (up to ties within ``decode_eps`` in logit
     space); ``flat`` takes the argmax of ``log p`` over all classes.
 
+    Boundary of the superclass (P2) — the split alone cannot recover novel
+    pixels the base model assigned to another class:
+
+    * ``leak: true`` (hierarchical leak, "HierTrans"): learned coefficients
+      ``t[n, c] = sigmoid(θ)`` move mass from every base class ``c`` other than
+      the mother into each novel child ``n``:
+      ``p'(n) = p_m q_n + Σ_c t[n,c] p_c`` and ``p'(c) = p_c (1 − Σ_n t[n,c])``
+      (normalisation preserved). ``t`` is trained on the support (in
+      ``trainer.fit``) with the likelihood of the final distribution: novel
+      labels ``−log p'(n)``, "not novel" labels ``−log(1 − Σ_n p'(n))``, base
+      labels ``−log p'(c)``. Hierarchical decoding first decides the
+      superclass (which absorbs the leaked mass), then the split.
+    * ``widen: prob | dissonance`` (superclass widened by a threshold):
+      where the mother is the base model's **second** choice and
+      ``p''(m) ≥ widen_threshold`` (``prob``) or the base dissonance is
+      ``≥ widen_threshold`` (``dissonance``, evidential base only), the pixel
+      becomes the novel child **if q prefers a novel child**; otherwise the
+      base decision is kept [adaptation: the proposal says only "q decides";
+      restricting the switch to the novel class avoids turning neighbours
+      into the kept child].
+    * ``novel_prior_weight``: multiplies the novel shares of ``q`` before
+      renormalisation (logit/prior adjustment, ``w > 1`` favours novel).
+    * ``sweep``: thresholds evaluated in the same pass as decoding variants
+      ``widen_<thr>`` (``variant_names``/``decode_variants``), giving the
+      preservation × correction curve.
+
     Args:
         q: ``proto``, ``proto_prob``, ``linear`` or ``trans``.
         tau: Cosine temperature of ``proto`` (and init of ``linear``).
@@ -111,6 +137,13 @@ class HiSplit(BaseGFSSMethod):
         lr: SGD learning rate (``trans``).
         pi_update_at: Iterations (1-based) where π is re-estimated (``trans``).
         kl_anneal_steps: Steps to reach full KL weight (``edl``).
+        leak: Learn the hierarchical leak into novel children.
+        leak_init: Initial ``θ`` of the leak (``sigmoid(-4) ≈ 0.018``).
+        widen: ``none``, ``prob`` or ``dissonance``.
+        widen_threshold: Threshold of ``widen``.
+        novel_prior_weight: Prior weight of novel children in ``q``.
+        sweep: Thresholds evaluated as extra decoding variants (needs
+            ``widen`` other than ``none``).
 
     Example YAML::
 
@@ -137,6 +170,12 @@ class HiSplit(BaseGFSSMethod):
         lr: float = 1e-3,
         pi_update_at: Sequence[int] = (10,),
         kl_anneal_steps: int = 50,
+        leak: bool = False,
+        leak_init: float = -4.0,
+        widen: str = "none",
+        widen_threshold: float = 0.3,
+        novel_prior_weight: float = 1.0,
+        sweep: Sequence[float] = (),
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -150,6 +189,20 @@ class HiSplit(BaseGFSSMethod):
             raise ValueError(
                 f"decoding must be 'hierarchical' or 'flat', got {decoding!r}."
             )
+        if widen not in {"none", "prob", "dissonance"}:
+            raise ValueError(
+                f"widen must be 'none', 'prob' or 'dissonance', got {widen!r}."
+            )
+        if (widen != "none" or sweep) and decoding != "hierarchical":
+            raise ValueError("widen/sweep require decoding: hierarchical.")
+        if sweep and widen == "none":
+            raise ValueError("sweep requires widen: prob or dissonance.")
+        self.leak = bool(leak)
+        self.leak_init = float(leak_init)
+        self.widen = widen
+        self.widen_threshold = float(widen_threshold)
+        self.novel_prior_weight = float(novel_prior_weight)
+        self.sweep = [float(t) for t in sweep]
         self.q = q
         self.tau = float(tau)
         self.variance = variance
@@ -185,6 +238,19 @@ class HiSplit(BaseGFSSMethod):
             self.register_buffer("q_weight", base_weight.new_zeros(n, dim))
             self.register_buffer("q_bias", base_weight.new_zeros(n))
         self.register_buffer("q_var", base_weight.new_ones(n, dim))
+        if self.widen == "dissonance" and self.base_output != "evidential":
+            raise ValueError("widen: dissonance requires an evidential base model.")
+        nb = hierarchy.num_base_classes
+        self.novel_rows = [i for i, c in enumerate(self.child_classes) if c >= nb]
+        mask = base_weight.new_zeros(n, nb)
+        for i in self.novel_rows:
+            mask[i] = 1.0
+            mask[i, self.child_mother[i]] = 0.0
+        self.register_buffer("leak_mask", mask)
+        if self.leak:
+            self.leak_logit = nn.Parameter(
+                base_weight.new_full((n, nb), self.leak_init)
+            )
 
     def _base_probs(self, features: Tensor) -> Tensor:
         return self.base_probabilities(self._base_logits(features))
@@ -268,6 +334,41 @@ class HiSplit(BaseGFSSMethod):
             q[:, idx] = torch.softmax(scores[:, idx], dim=1)
         return q
 
+    def _adjust_prior(self, q: Tensor) -> Tensor:
+        if self.novel_prior_weight == 1.0:
+            return q
+        w = torch.ones(q.shape[1], device=q.device, dtype=q.dtype)
+        w[self.novel_rows] = self.novel_prior_weight
+        q = q * w.view(1, -1, 1, 1)
+        out = torch.empty_like(q)
+        for _, idx in self._groups():
+            out[:, idx] = q[:, idx] / q[:, idx].sum(1, keepdim=True)
+        return out
+
+    def leak_coefficients(self) -> Optional[Tensor]:
+        """``t[child, base_class]`` (zero outside novel rows), or ``None``."""
+        if not self.leak:
+            return None
+        t = torch.sigmoid(self.leak_logit) * self.leak_mask
+        return t / t.sum(0, keepdim=True).clamp(min=1.0)  # Σ_n t[n, c] ≤ 1
+
+    def _masses(self, p_base: Tensor, q: Tensor):
+        """Superclass-level probabilities ``p''`` (B, Cb) and child masses
+        (B, n_children), with the leak (if any) and the prior weight."""
+        q = self._adjust_prior(q)
+        level = p_base.clone()
+        mass = torch.stack([p_base[:, m] for m in self.child_mother], dim=1) * q
+        t = self.leak_coefficients()
+        if t is not None:
+            inflow = torch.einsum("nc,bchw->bnhw", t, p_base)
+            level = level - p_base * t.sum(0).view(1, -1, 1, 1)
+            mass = mass + inflow
+            for i in self.novel_rows:
+                level[:, self.child_mother[i]] = (
+                    level[:, self.child_mother[i]] + inflow[:, i]
+                )
+        return level, mass
+
     def split_probabilities(
         self, features: Tensor, q: Optional[Tensor] = None
     ) -> Tensor:
@@ -276,13 +377,13 @@ class HiSplit(BaseGFSSMethod):
             q = self._q(
                 self._scores(features, *self._current_params(features.shape[0]))
             )
-        p_base = self._base_probs(features)
-        out = p_base.new_zeros(
-            p_base.shape[0], self.hierarchy.num_classes, *p_base.shape[2:]
+        level, mass = self._masses(self._base_probs(features), q)
+        out = level.new_zeros(
+            level.shape[0], self.hierarchy.num_classes, *level.shape[2:]
         )
-        out[:, : self.hierarchy.num_base_classes] = p_base
-        for i, (child, mother) in enumerate(zip(self.child_classes, self.child_mother)):
-            out[:, child] = p_base[:, mother] * q[:, i]
+        out[:, : self.hierarchy.num_base_classes] = level
+        for i, child in enumerate(self.child_classes):
+            out[:, child] = mass[:, i]
         return out
 
     def _current_params(self, n_maps: int):
@@ -322,16 +423,37 @@ class HiSplit(BaseGFSSMethod):
         return total
 
     def support_loss(self, features: Tensor, masks: Tensor) -> Optional[Tensor]:
-        """Loss of q on the support targets (trainable variants): CE
-        (``linear``/``trans``) or EDL MSE + annealed KL (``edl``)."""
-        if self.q not in _TRAINABLE:
-            return None
-        targets = self._targets(features, masks)
-        if self.q == "edl":
-            loss = self._edl_loss(features, targets)
-            self._edl_step += 1
-            return loss
-        return self._support_ce(features, targets, self.q_weight, self.q_bias)
+        """Support loss: q's loss for trainable variants (CE for
+        ``linear``/``trans``, EDL MSE + annealed KL for ``edl``) plus, with
+        ``leak``, the NLL of the final distribution; ``None`` if nothing to
+        train."""
+        loss = None
+        if self.q in _TRAINABLE:
+            targets = self._targets(features, masks)
+            if self.q == "edl":
+                loss = self._edl_loss(features, targets)
+                self._edl_step += 1
+            else:
+                loss = self._support_ce(features, targets, self.q_weight, self.q_bias)
+        if self.leak:
+            leak_loss = self._final_nll(features, masks)
+            loss = leak_loss if loss is None else loss + leak_loss
+        return loss
+
+    def _final_nll(self, features: Tensor, masks: Tensor) -> Tensor:
+        """NLL of the support labels under the final distribution (trains the
+        leak): novel/base labels ``−log p'(label)``, "not novel" labels
+        ``−log(1 − Σ_novel p')``."""
+        p = self.split_probabilities(features)
+        novel = [self.child_classes[i] for i in self.novel_rows]
+        not_novel = masks == self.not_novel_index
+        valid = (masks != 255) & (not_novel | (masks < p.shape[1]))
+        labels = torch.where(valid & ~not_novel, masks, torch.zeros_like(masks))
+        p_label = p.gather(1, labels.unsqueeze(1)).squeeze(1)
+        p_rest = 1.0 - p[:, novel].sum(1)
+        prob = torch.where(not_novel, p_rest, p_label)
+        nll = -torch.log(prob.clamp(min=_EPS))
+        return (nll * valid).sum() / valid.sum().clamp(min=1)
 
     def _superclass_terms(self, q: Tensor, p_base: Tensor, pi: Tensor):
         """Entropy of q and KL(q̄ ‖ π), weighted by ``p_base(mother)``, per map."""
@@ -443,16 +565,58 @@ class HiSplit(BaseGFSSMethod):
     # Prediction
     # ------------------------------------------------------------------
 
-    def forward(self, features: Tensor) -> Tensor:
-        """Log-probabilities (``flat``) or hierarchical decoding logits."""
+    def _decode(self, features: Tensor, threshold: Optional[float]) -> Tensor:
+        """Hierarchical-decoding logits; ``threshold`` enables widening."""
         q = self._q(self._scores(features, *self._current_params(features.shape[0])))
-        p = self.split_probabilities(features, q)
-        if self.decoding == "flat":
-            return torch.log(p + _EPS)
-        logits = torch.log(p + _EPS)
-        p_base = self._base_probs(features)
+        logits_base = self._base_logits(features)
+        level, mass = self._masses(self.base_probabilities(logits_base), q)
+        log_level = torch.log(level.clamp(min=_EPS))
+        out = log_level.new_empty(
+            level.shape[0], self.hierarchy.num_classes, *level.shape[2:]
+        )
+        out[:, : self.hierarchy.num_base_classes] = log_level
         for i, (child, mother) in enumerate(zip(self.child_classes, self.child_mother)):
-            logits[:, child] = torch.log(p_base[:, mother] + _EPS) + self.decode_eps * (
-                q[:, i] - 1.0
-            )
-        return logits
+            share = mass[:, i] / level[:, mother].clamp(min=_EPS)
+            out[:, child] = log_level[:, mother] + self.decode_eps * (share - 1.0)
+        if threshold is None:
+            return out
+        top2 = level.topk(2, dim=1).indices
+        best = log_level.max(1).values
+        if self.widen == "dissonance":
+            alpha = self.base_alpha(logits_base)
+            gate = dissonance((alpha - 1.0) / alpha.sum(1, keepdim=True)) >= threshold
+        for mother, idx in self._groups():
+            if self.widen == "prob":
+                gate = level[:, mother] >= threshold
+            winner = mass[:, idx].argmax(1)
+            for j, i in enumerate(idx):
+                if i not in self.novel_rows:
+                    continue
+                widen = (
+                    (top2[:, 0] != mother)
+                    & (top2[:, 1] == mother)
+                    & gate
+                    & (winner == j)
+                )
+                child = self.child_classes[i]
+                out[:, child] = torch.where(
+                    widen, best + self.decode_eps, out[:, child]
+                )
+        return out
+
+    def variant_names(self) -> List[str]:
+        """Decoding variants evaluated besides the main one (``sweep``)."""
+        return [f"widen_{t:g}" for t in self.sweep]
+
+    def decode_variants(self, features: Tensor) -> Dict[str, Tensor]:
+        """Logits of each ``sweep`` threshold."""
+        return {f"widen_{t:g}": self._decode(features, t) for t in self.sweep}
+
+    def forward(self, features: Tensor) -> Tensor:
+        """Log-probabilities (``flat``) or hierarchical decoding logits
+        (with widening when ``widen`` is set)."""
+        if self.decoding == "flat":
+            return torch.log(self.split_probabilities(features) + _EPS)
+        return self._decode(
+            features, None if self.widen == "none" else self.widen_threshold
+        )

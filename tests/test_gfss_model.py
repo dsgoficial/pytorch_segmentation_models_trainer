@@ -86,11 +86,12 @@ def _ds(**kw):
     return node
 
 
-@pytest.fixture
-def base_ckpt(tmp_path):
+@pytest.fixture(scope="module")
+def base_ckpt(tmp_path_factory):
+    # One checkpoint for the whole module (~45 MB each; read-only in the tests).
     torch.manual_seed(0)
     model = smp.UPerNet(**{k: v for k, v in _MODEL.items() if k != "_target_"})
-    path = tmp_path / "base.ckpt"
+    path = tmp_path_factory.mktemp("base") / "base.ckpt"
     torch.save(
         {"state_dict": {f"model.{k}": v for k, v in model.state_dict().items()}}, path
     )
@@ -454,3 +455,34 @@ class TestUncertaintyEvaluation:
         for call in m.log_dict.call_args_list:
             logged.update(call[0][0])
         assert "test/unc/aurc/dissonance" in logged and "test/miou" in logged
+
+
+def test_decoding_variants_are_evaluated_and_logged(base_ckpt, tmp_path):
+    from pytorch_segmentation_models_trainer.train import train
+
+    cfg = _cfg(
+        base_ckpt[0],
+        method="pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit",
+        pl_model={
+            "_target_": "pytorch_segmentation_models_trainer.model_loader.gfss_model.GFSSModel"
+        },
+        pl_trainer={
+            "max_steps": 2,
+            "accelerator": "cpu",
+            "enable_checkpointing": False,
+            "enable_progress_bar": False,
+            "default_root_dir": str(tmp_path),
+        },
+    )
+    cfg.gfss.method.widen = "prob"
+    cfg.gfss.method.sweep = [0.1, 0.5]
+    cfg.gfss.method.leak = True
+    trainer = train(cfg)
+    keys = set(trainer.callback_metrics)
+    assert {"test/var/widen_0.1/miou", "test/var/widen_0.5/locality"} <= keys
+    assert trainer.global_step == 2  # leak parameters trained
+
+
+def test_no_variant_metrics_by_default(base_ckpt):
+    m = GFSSModel(_cfg(base_ckpt[0]))
+    assert len(m.variant_metrics) == 0

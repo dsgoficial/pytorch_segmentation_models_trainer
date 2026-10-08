@@ -123,6 +123,25 @@ pixels labelled "not novel" that the base model predicts as the mother become
 examples of the child that keeps the mother's index ("free negatives";
 noisy where the base model is wrong).
 
+#### Boundary of the superclass (P2)
+
+The split alone cannot recover novel pixels that the base model assigned to
+another class. Options of `HiSplit`:
+
+| Option | Effect |
+|---|---|
+| `leak: true` (`leak_init`) | Hierarchical leak ("HierTrans"): learned `t[n, c] = sigmoid(θ)` moves mass from each base class `c` (not the mother) into novel child `n`: `p'(n) = p_m q_n + Σ_c t p_c`, `p'(c) = p_c (1 − Σ_n t)`. Trained in `trainer.fit` (`max_steps > 0`) with the NLL of the final distribution on the support (novel/base labels `−log p'`, "not novel" `−log(1 − Σ p'(novel))`). Hierarchical decoding first decides the superclass, which absorbs the leaked mass, then the split. |
+| `widen: prob` or `dissonance`, `widen_threshold` | Superclass widened: where the mother is the base model's second choice and `p''(m) ≥ threshold` (`prob`) or the base dissonance is `≥ threshold` (`dissonance`, evidential base), the pixel becomes the novel child if q prefers a novel child; otherwise the base decision is kept. |
+| `novel_prior_weight` | Multiplies the novel shares of q before renormalisation (`> 1` favours novel). |
+| `sweep: [τ…]` | Extra decoding variants `widen_<τ>` evaluated in the same pass (`test/var/widen_<τ>/...`): the preservation (`locality`) × correction (novel IoU/recall) curve. Requires `widen`. |
+
+`ClassTrans(hierarchical_mask=true)` is the matching ablation: the transition
+into each novel class only comes from its mother's column.
+
+Methods may expose extra decoding variants with `variant_names()` /
+`decode_variants(features)`; `GFSSModel` evaluates each with its own
+`GFSSMetrics` under `<stage>/var/<name>/`.
+
 #### Evidential base model and uncertainty
 
 With a base model trained with the lib's `EvidentialWrapper` (Dirichlet

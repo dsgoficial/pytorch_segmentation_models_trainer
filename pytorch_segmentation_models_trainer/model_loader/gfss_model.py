@@ -115,6 +115,20 @@ class GFSSModel(Model):
         self.test_unc_metrics = (
             GFSSUncertaintyMetrics(names_u, prefix="test/unc/") if names_u else None
         )
+        # ModuleList + keys: variant names may contain "." (e.g. widen_0.1),
+        # which ModuleDict rejects.
+        self._variant_keys = [
+            (stage, v) for stage in ("val", "test") for v in self.method.variant_names()
+        ]
+        self.variant_metrics = torch.nn.ModuleList(
+            GFSSMetrics(
+                self.hierarchy,
+                class_names=names,
+                ignore_index=ignore,
+                prefix=f"{stage}/var/{v}/",
+            )
+            for stage, v in self._variant_keys
+        )
         self.register_buffer("_gfss_initialised", torch.tensor(False))
         self._support: Optional[Tuple[Tensor, Tensor]] = None
 
@@ -275,6 +289,11 @@ class GFSSModel(Model):
         pred = logits.argmax(1)
         base_pred = self.model.base_logits(images).argmax(1)
         metrics.update(pred, masks, base_pred)
+        stage = metrics.prefix.rstrip("/")
+        for name, variant in self.method.decode_variants(feats).items():
+            v_pred = self.model.upsample(variant, images.shape[-2:]).argmax(1)
+            idx = self._variant_keys.index((stage, name))
+            self.variant_metrics[idx].update(v_pred, masks, base_pred)
         if unc_metrics is not None:
             self._update_uncertainty(feats, images, masks, pred, base_pred, unc_metrics)
 
@@ -294,8 +313,19 @@ class GFSSModel(Model):
                 self.log_dict(m.compute())
                 m.reset()
 
+    def _stage_variants(self, stage: str):
+        return [
+            m
+            for (st, _), m in zip(self._variant_keys, self.variant_metrics)
+            if st == stage
+        ]
+
     def on_validation_epoch_end(self) -> None:
-        self._log_and_reset(self.val_gfss_metrics, self.val_unc_metrics)
+        self._log_and_reset(
+            self.val_gfss_metrics, self.val_unc_metrics, *self._stage_variants("val")
+        )
 
     def on_test_epoch_end(self) -> None:
-        self._log_and_reset(self.test_gfss_metrics, self.test_unc_metrics)
+        self._log_and_reset(
+            self.test_gfss_metrics, self.test_unc_metrics, *self._stage_variants("test")
+        )

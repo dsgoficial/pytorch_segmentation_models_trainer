@@ -150,3 +150,16 @@ def test_sinkhorn_stops_at_max_iter():
         max_iter=3,
     )
     assert torch.isfinite(plan).all()
+
+
+@pytest.mark.parametrize("masked", [True, False])
+def test_hierarchical_mask_feeds_novel_only_from_mother(small, masked):
+    h, fs, ms, fq = small  # mother 1 -> novel 2; class 0 is not the mother
+    m = _ready(h, fs, ms, hierarchical_mask=masked)
+    p = m._initial_params(2)
+    p["layer_scale"].fill_(1.0)
+    f5 = fq.unsqueeze(1)
+    before = m._transition(f5, p)[:, :, 2]
+    m.base_weight[0] += 1.0  # change the snapshot logit of a non-mother class
+    after = m._transition(f5, p)[:, :, 2]
+    assert torch.allclose(before, after) == masked

@@ -217,3 +217,118 @@ class TestEvidential:
         assert set(u) == {"split_entropy", "base_vacuity", "dissonance"}
         torch.testing.assert_close(u["base_vacuity"], 3 / strength)
         assert ((u["dissonance"] >= 0) & (u["dissonance"] <= 1)).all()
+
+
+def _second_choice_data():
+    """Left half: base predicts class 2 with the mother (1) second, and the
+    features look like the novel class."""
+    f, masks, w, b = _data()
+    f[:, 0, :, :3] += 0.6  # mother logit 0.2 vs class 2 logit 0.5
+    f[:, 1, :, :3] += 2.0  # q prefers the novel child
+    return f, masks, w, b
+
+
+class TestBoundaryP2:
+    def test_leak_preserves_normalisation_and_moves_mass(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, leak=True, leak_init=-1.0)
+        p = m.split_probabilities(f)
+        torch.testing.assert_close(p.sum(1), torch.ones(2, 6, 6))
+        t = m.leak_coefficients()
+        assert t.shape == (2, 3)
+        assert (
+            (t[0] == 0).all() and t[1, 1] == 0 and t[1, 0] > 0
+        )  # only novel row, not from mother
+        p_base = m._base_probs(f)
+        torch.testing.assert_close(p[:, 0], p_base[:, 0] * (1 - t[1, 0]))
+
+    def test_leak_is_trained_on_novel_pixels_predicted_elsewhere(self):
+        f, masks, w, b = _data()
+        masks[:, :3, :2] = 3  # cropland inside a region the base predicts as class 0
+        m = _ready(f, masks, w, b, leak=True)
+        assert m.leak_logit.requires_grad and m.support_loss(f, masks) is not None
+        opt = torch.optim.SGD([m.leak_logit], lr=1.0)
+        before = m.leak_coefficients()[1, 0].item()
+        for _ in range(30):
+            loss = m.support_loss(f, masks)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+        assert m.leak_coefficients()[1, 0].item() > before
+
+    def test_leak_with_trainable_q_sums_losses(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="linear", leak=True)
+        both = m.support_loss(f, masks)
+        m.leak = False
+        assert both > m.support_loss(f, masks)
+
+    def test_leak_full_label_regime(self):
+        f, masks, w, b = _data()
+        full = masks.clone()
+        full[full == NN] = 0
+        m = _ready(f, full, w, b, leak=True)
+        assert torch.isfinite(m.support_loss(f, full))
+
+    def test_hierarchical_decoding_with_leak_can_take_pixels_from_neighbours(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, leak=True)
+        with torch.no_grad():
+            m.leak_logit.fill_(4.0)  # almost all mass of class 0/2 leaks into cropland
+        pred = m(f).argmax(1)
+        base = m._base_probs(f).argmax(1)
+        assert ((base == 2) & (pred == 3)).any()
+
+    def test_widen_prob_switches_only_second_choice_mother_pixels(self):
+        f, masks, w, b = _second_choice_data()
+        m = _ready(f, masks, w, b, widen="prob", widen_threshold=0.0)
+        ref = _ready(f, masks, w, b)
+        level = m._base_probs(f)
+        top2 = level.topk(2, 1).indices
+        pred, before = m(f).argmax(1), ref(f).argmax(1)
+        changed = pred != before
+        assert changed.any()
+        assert (top2[:, 1][changed] == 1).all() and (pred[changed] == 3).all()
+        # threshold 1 -> nothing widened
+        m_hi = _ready(f, masks, w, b, widen="prob", widen_threshold=1.0)
+        assert torch.equal(m_hi(f).argmax(1), before)
+
+    def test_widen_dissonance_needs_evidential_base(self):
+        f, masks, w, b = _data()
+        with pytest.raises(ValueError, match="evidential"):
+            _ready(f, masks, w, b, widen="dissonance")
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(widen="dissonance", widen_threshold=0.0)
+        m.setup(h, w, b, NN, base_output="evidential")
+        m.init_from_support(f, masks)
+        assert m(f).shape == (2, 4, 6, 6)
+
+    def test_novel_prior_weight_increases_novel_share(self):
+        f, masks, w, b = _data()
+        f = f + torch.randn_like(f)
+        m1 = _ready(f, masks, w, b)
+        m2 = _ready(f, masks, w, b, novel_prior_weight=5.0)
+        p1, p2 = m1.split_probabilities(f), m2.split_probabilities(f)
+        assert (p2[:, 3] >= p1[:, 3] - 1e-6).all() and (p2[:, 3] > p1[:, 3]).any()
+        torch.testing.assert_close(p2[:, 1] + p2[:, 3], p1[:, 1] + p1[:, 3])
+
+    def test_sweep_variants(self):
+        f, masks, w, b = _second_choice_data()
+        m = _ready(f, masks, w, b, widen="prob", sweep=[0.0, 1.0])
+        assert m.variant_names() == ["widen_0", "widen_1"]
+        v = m.decode_variants(f)
+        ref = _ready(f, masks, w, b)(f).argmax(1)
+        assert torch.equal(v["widen_1"].argmax(1), ref)
+        assert not torch.equal(v["widen_0"].argmax(1), ref)
+
+    @pytest.mark.parametrize(
+        "kw, match",
+        [
+            ({"widen": "maybe"}, "widen must"),
+            ({"widen": "prob", "decoding": "flat"}, "hierarchical"),
+            ({"sweep": [0.1]}, "sweep requires"),
+        ],
+    )
+    def test_invalid_p2_arguments(self, kw, match):
+        with pytest.raises(ValueError, match=match):
+            HiSplit(**kw)
