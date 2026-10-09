@@ -126,6 +126,28 @@ class TestPreparePreds:
         assert result is None
         assert "not a torch.tensor" in caplog.text.lower()
 
+    def test_edl_dict_with_probs_is_unwrapped(self):
+        model = _make_model()
+        probs = torch.rand(B, CLASSES, H, W)
+        edl_output = {
+            "logits": torch.randn(B, CLASSES, H, W),
+            "evidence": torch.rand(B, CLASSES, H, W),
+            "alpha": torch.rand(B, CLASSES, H, W) + 1,
+            "probs": probs,
+            "uncertainty": torch.rand(B, 1, H, W),
+        }
+        result = model._prepare_preds_for_metrics(edl_output)
+        assert torch.equal(result, probs)
+
+    def test_edl_dict_without_probs_returns_none(self, caplog):
+        model = _make_model()
+        with caplog.at_level(logging.WARNING):
+            result = model._prepare_preds_for_metrics(
+                {"alpha": torch.rand(B, CLASSES, H, W) + 1}
+            )
+        assert result is None
+        assert "not a torch.tensor" in caplog.text.lower()
+
 
 # ─── Tests: training_step / validation_step end-to-end ───────────────────────
 

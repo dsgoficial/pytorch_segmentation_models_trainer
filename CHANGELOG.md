@@ -15,6 +15,11 @@
 - New `tools/few_shot/support_selection.py`: `weighted_kcenter`, `support_diversity` (reuses `tools/coreset/vendi_score`) and `tile_descriptors`.
 - ExperimentsRunner: these columns are not copied to the per-episode support CSVs.
 
+## Bug fixes (EDL test-time metrics)
+
+- `Model._prepare_preds_for_metrics`: an EDL model (`EvidentialWrapper`) returns a dict (`logits`, `evidence`, `alpha`, `probs`, `uncertainty`) instead of a tensor. `_shared_step` already unwrapped this dict to `probs` for train/val metrics, but `test_step` and `_test_step_sliding_window` called `_prepare_preds_for_metrics` directly on the raw dict, which only accepts tensors — so `MulticlassJaccardIndex/test` and friends were silently skipped for every EDL run (only `loss/test` survived), with or without TTA (`apply_tta` also returns a dict for dict-valued models). `_prepare_preds_for_metrics` now unwraps a dict's `"probs"` key first, fixing both callers from one place.
+- Tests: `tests/test_model_training_step.py` (`_prepare_preds_for_metrics` unwraps a dict with `probs`, still returns `None` for a dict without it) and `tests/test_edl_training_smoke.py::TestEDLTestStep` (`test_step` logs `MulticlassJaccardIndex/test` for an EDL model, with and without `tta_mode`).
+
 ## GFSS: fine-tuning baselines
 
 - `few_shot/methods/finetune.FineTune`: linear head over all classes with base rows from the checkpoint and novel rows initialised from the mother (or the scaled prototype); trains only the superclass children (`train_rows: children`, B1a isolated fine-tuning), the novel rows or the whole head, with the DIaM-projected support CE (S-novel labels) and optional hierarchical KD (`kd_weight`) to the frozen base model.

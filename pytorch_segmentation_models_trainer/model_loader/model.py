@@ -1520,10 +1520,20 @@ class Model(pl.LightningModule):
     def _prepare_preds_for_metrics(self, predicted_masks):
         """Safely prepare predictions for torchmetrics.
 
+        EDL models return a dict (``logits``, ``evidence``, ``alpha``,
+        ``probs``, ``uncertainty``) — same shape ``apply_tta`` returns after
+        averaging a dict output — so a dict with a ``"probs"`` key is
+        unwrapped to that tensor first, mirroring the unwrap already done
+        for train/val in :meth:`_shared_step`. ``test_step`` and
+        :meth:`_test_step_sliding_window` both call this method, so fixing it
+        here covers both without duplicating the unwrap.
+
         Squeezes the channel dim for binary models (shape B,1,H,W → B,H,W).
         Returns ``None`` if *predicted_masks* is not a tensor so that metric
         logging is silently skipped rather than crashing.
         """
+        if isinstance(predicted_masks, dict) and "probs" in predicted_masks:
+            predicted_masks = predicted_masks["probs"]
         if not isinstance(predicted_masks, torch.Tensor):
             logger.warning(
                 "Model output is not a torch.Tensor (%s); skipping metrics. "

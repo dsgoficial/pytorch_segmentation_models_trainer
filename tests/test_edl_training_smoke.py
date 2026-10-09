@@ -198,3 +198,42 @@ class TestEvidentialWarmupCallback:
         encoder = pl_module.model._find_encoder()
         for p in encoder.parameters():
             assert p.requires_grad
+
+
+# ---------------------------------------------------------------------------
+# test_step tests — regression for the missing EDL unwrap at test time
+# ---------------------------------------------------------------------------
+
+
+def _make_edl_cfg_with_metrics(tta_mode=None):
+    cfg = _make_edl_cfg(freeze_encoder=False)
+    cfg.metrics = [
+        {
+            "_target_": "torchmetrics.JaccardIndex",
+            "task": "multiclass",
+            "num_classes": K,
+        }
+    ]
+    if tta_mode is not None:
+        cfg.tta_mode = tta_mode
+    return cfg
+
+
+class TestEDLTestStep:
+    def test_test_step_logs_test_jaccard_without_tta(self):
+        cfg = _make_edl_cfg_with_metrics()
+        model = Model(cfg, inference_mode=False)
+        logged = {}
+        model.log = lambda name, value, **kwargs: logged.update({name: value})
+        model.log_dict = lambda metrics, **kwargs: logged.update(metrics)
+        model.test_step(_make_batch(), 0)
+        assert "MulticlassJaccardIndex/test" in logged
+
+    def test_test_step_logs_test_jaccard_with_tta(self):
+        cfg = _make_edl_cfg_with_metrics(tta_mode="d8")
+        model = Model(cfg, inference_mode=False)
+        logged = {}
+        model.log = lambda name, value, **kwargs: logged.update({name: value})
+        model.log_dict = lambda metrics, **kwargs: logged.update(metrics)
+        model.test_step(_make_batch(), 0)
+        assert "MulticlassJaccardIndex/test" in logged
