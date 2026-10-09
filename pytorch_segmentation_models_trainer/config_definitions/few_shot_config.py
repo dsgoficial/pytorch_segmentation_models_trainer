@@ -197,10 +197,70 @@ class GFSSConfig:
     boundary_width: int = 0
 
 
+@dataclass
+class SeparabilityProbeConfig:
+    """Configuration of ``mode: separability-probe`` (E2 diagnostic).
+
+    Fits a probe (logistic regression and class-mean cosine) on the frozen
+    decoder features of two classes over the support tiles of each episode
+    and scores it on the test windows. The datasets must give the
+    **unmerged** labels (e.g. 6 classes, no ``mask_class_mapping``).
+
+    Example YAML::
+
+        mode: separability-probe
+        model: ${backbone_model}      # same node used to train the base model
+        separability_probe:
+          checkpoint: {from_runner: outputs/r2_pampa_resnet}
+          seeds: [42, 43, 44, 45, 46]
+          episodes_csv: outputs/episodes/pampa.csv
+          negative_class: 3            # field
+          positive_class: 5            # cultivated vegetation
+          support_dataset: {...}       # window_index_cache filled per episode
+          test_dataset: {...}
+          output_csv: outputs/probe/r2_pampa.csv
+
+    Args:
+        checkpoint: ``{path | from_runner, source_format, strict_loading}``.
+        seeds: Base seeds when ``from_runner`` is used (one block of rows each).
+        episodes_csv: Episodes of ``build-fewshot-episodes``.
+        shots: Optional subset of K. ``draws``: optional subset of draws.
+        support_dataset: Dataset node; ``window_index_cache`` is set to each
+            episode's support windows.
+        test_dataset: Dataset node of the evaluation windows.
+        negative_class: Label of the negative class of the pair.
+        positive_class: Label of the positive class of the pair.
+        max_support_pixels_per_class: Cap of support pixels per class.
+        test_keep_fraction: Fraction of test pixels kept (random) per batch.
+        max_test_pixels_per_class: Cap of test pixels per class.
+        C: Inverse L2 regularization of the logistic regression.
+        batch_size: Forward batch size. ``seed``: pixel sampling seed.
+        output_csv: Output CSV (one row per base seed × episode).
+    """
+
+    checkpoint: Dict[str, Any] = MISSING
+    episodes_csv: str = MISSING
+    support_dataset: Any = MISSING
+    test_dataset: Any = MISSING
+    negative_class: int = MISSING
+    positive_class: int = MISSING
+    output_csv: str = MISSING
+    seeds: List[int] = field(default_factory=lambda: [42])
+    shots: Optional[List[int]] = None
+    draws: Optional[List[int]] = None
+    max_support_pixels_per_class: Optional[int] = 50000
+    test_keep_fraction: float = 0.05
+    max_test_pixels_per_class: Optional[int] = 100000
+    C: float = 1.0
+    batch_size: int = 8
+    seed: int = 0
+
+
 def _register_configs() -> None:
     cs = ConfigStore.instance()
     cs.store(name="fewshot_episodes_config", node=FewShotEpisodesConfig)
     cs.store(name="gfss_config", node=GFSSConfig)
+    cs.store(name="separability_probe_config", node=SeparabilityProbeConfig)
     cs.store(name="class_counts_config", node=ClassCountsConfig)
 
 

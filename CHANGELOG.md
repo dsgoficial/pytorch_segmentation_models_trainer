@@ -1,5 +1,9 @@
 # Unreleased
 
+## Separability probe
+
+- `mode: separability-probe` (`tools/few_shot/separability_probe.py`, `SeparabilityProbeConfig`): per base seed × support episode, fits a logistic-regression and a class-mean cosine probe on the frozen decoder features of two classes (support, full labels) and writes AUROC / balanced accuracy / AP on the test windows. Example `conf/examples/separability_probe.yaml`.
+
 ## Refinement-aware base training
 
 - `custom_models.refinement_aware.RefinementAwareWrapper`: wraps an smp model and adds label-free auxiliary losses on the decoder features for category splitting — Canny edge prediction (kornia, `edge_region: all | superclass`) and superclass sub-prototypes (sharp, balanced, separated assignments). `canny_targets` helper. Example `conf/examples/refinement_aware_base.yaml`.

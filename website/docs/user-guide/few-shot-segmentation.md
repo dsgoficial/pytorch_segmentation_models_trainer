@@ -425,6 +425,26 @@ calls `gfss_unwrap()` and uses the inner model (the edge head and the
 prototypes are not used after training). Example:
 `conf/examples/refinement_aware_base.yaml`.
 
+## Separability probe
+
+`mode: separability-probe` (`tools/few_shot/separability_probe.py`) is a
+diagnostic of the frozen base features, not a GFSS method: for each base
+seed and support episode it collects the decoder features of the
+ground-truth pixels of two classes (e.g. field 3 × cultivated 5, which the
+base model saw merged) on the **fully labelled** support tiles, fits
+
+* `logreg` — standardized features + L2 logistic regression (balanced), and
+* `proto` — cosine to the two class means (training-free),
+
+and scores them on the same two classes over the test windows (random pixel
+subsample, `test_keep_fraction`, capped per class). The CSV has one row per
+base seed × (K, draw) with `n_support_*`, `n_test_*`, `auroc_*`,
+`balacc_*` and `ap_logreg`. Comparing base models (e.g. plain vs
+refinement-aware training) on the same episodes shows whether the training
+kept the structure inside the superclass. The datasets must return the
+unmerged labels (no `mask_class_mapping`). Example:
+`conf/examples/separability_probe.yaml`.
+
 ## Full example
 
 See `conf/examples/build_fewshot_episodes.yaml`,

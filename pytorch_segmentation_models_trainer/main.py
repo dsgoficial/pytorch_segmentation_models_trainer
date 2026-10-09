@@ -112,6 +112,12 @@ def main(cfg: DictConfig):
         )
 
         return count_class_pixels_from_config(cfg)
+    elif cfg.mode == "separability-probe":
+        from pytorch_segmentation_models_trainer.tools.few_shot.separability_probe import (
+            run_separability_probe,
+        )
+
+        return run_separability_probe(cfg)
     elif cfg.mode == "ddoq-vae-distill":
         from pytorch_segmentation_models_trainer.tools.dataset_distillation.vae_ddoq_distillation import (
             run_vae_ddoq_from_config,

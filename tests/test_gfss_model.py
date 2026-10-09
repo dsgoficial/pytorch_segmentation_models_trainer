@@ -333,6 +333,7 @@ def test_example_configs_match_dataclasses():
     from pytorch_segmentation_models_trainer.config_definitions.few_shot_config import (
         FewShotEpisodesConfig,
         GFSSConfig,
+        SeparabilityProbeConfig,
     )
     from pytorch_segmentation_models_trainer.few_shot.hierarchy import ClassHierarchy
 
@@ -346,6 +347,10 @@ def test_example_configs_match_dataclasses():
     episodes = OmegaConf.load(root / "build_fewshot_episodes.yaml")
     OmegaConf.merge(
         OmegaConf.structured(FewShotEpisodesConfig), episodes.fewshot_episodes
+    )
+    probe = OmegaConf.load(root / "separability_probe.yaml")
+    OmegaConf.merge(
+        OmegaConf.structured(SeparabilityProbeConfig), probe.separability_probe
     )
 
 

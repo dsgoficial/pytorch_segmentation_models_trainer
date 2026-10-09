@@ -1,0 +1,44 @@
+# Separability probe (E2): how well two classes the base model never had to
+# separate (field 3 × cultivated 5, merged into 3 for the base model) can be
+# told apart in its frozen decoder features, per number of support tiles K.
+# Datasets must return the UNMERGED labels (no mask_class_mapping).
+# Run: pytorch-smt --config-dir conf/examples --config-name separability_probe
+mode: separability-probe
+model:
+  _target_: segmentation_models_pytorch.UPerNet
+  encoder_name: resnet50
+  encoder_weights: null
+  in_channels: 3
+  classes: 5
+separability_probe:
+  checkpoint:
+    from_runner: outputs/baselines/r2_pampa   # or path: /ckpts/r2.ckpt
+  seeds: [42, 43, 44]                         # base seeds (from_runner)
+  episodes_csv: outputs/episodes/pampa.csv    # build-fewshot-episodes output
+  shots: [1, 5]                               # null = all K
+  negative_class: 3
+  positive_class: 5
+  max_support_pixels_per_class: 50000
+  test_keep_fraction: 0.05
+  max_test_pixels_per_class: 100000
+  C: 1.0
+  output_csv: outputs/probe/r2_pampa.csv
+  support_dataset:
+    _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_mask_dataset.MBTilesMaskWindowedDataset
+    mbtiles_path: /data/imagery.mbtiles
+    patch_size: 256
+    n_classes: 6
+    mask_base_path: /data/masks
+    augmentation_list:
+      - _target_: albumentations.Normalize
+      - _target_: albumentations.pytorch.ToTensorV2
+  test_dataset:
+    _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_mask_dataset.MBTilesMaskWindowedDataset
+    mbtiles_path: /data/imagery.mbtiles
+    patch_size: 256
+    n_classes: 6
+    window_index_cache: /data/tiles_data/test_pampa.csv
+    mask_base_path: /data/masks
+    augmentation_list:
+      - _target_: albumentations.Normalize
+      - _target_: albumentations.pytorch.ToTensorV2
