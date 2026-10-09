@@ -1,5 +1,9 @@
 # Unreleased
 
+## GFSS: boundary metrics
+
+- `GFSSMetrics(boundary_width=w)` / `gfss.boundary_width`: IoU per class and mIoU (all/base/novel) restricted to the trimap band within `w` px of ground-truth label changes (`boundary/...` keys); `few_shot.metrics.boundary_band` helper. Default 0 (off).
+
 ## GFSS: comparisons with BCM and H²EDL
 
 - `BCM(ensemble=True, ensemble_full_weight=5)`: shot-wise ensemble of the paper (one model per support tile + the all-tiles model); with `beta: 0.5` reproduces the paper setting. Parity test against the official code with ensemble and Tukey (`bcm_ensemble_reference.pt`).

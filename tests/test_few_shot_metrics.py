@@ -94,3 +94,59 @@ class TestCompute:
         m = GFSSMetrics(h)
         m.update(_t([2, 3]), _t([2, 3]), _t([2, 2]))
         assert torch.isnan(m.compute()["locality"])
+
+
+class TestBoundaryBand:
+    def test_disabled_by_default(self, h):
+        m = GFSSMetrics(h)
+        m.update(_t([0, 0, 1, 1]), _t([0, 0, 1, 1]))
+        assert not any(k.startswith("boundary/") for k in m.compute())
+
+    def test_band_marks_pixels_near_label_changes(self):
+        from pytorch_segmentation_models_trainer.few_shot.metrics import (
+            boundary_band,
+        )
+
+        target = _t([0, 0, 0, 1, 1, 1, 1])
+        band = boundary_band(target, width=1, ignore_index=255)
+        assert band.tolist() == [[[False, False, True, True, False, False, False]]]
+        band2 = boundary_band(target, width=2, ignore_index=255)
+        assert band2.tolist() == [[[False, True, True, True, True, False, False]]]
+
+    def test_ignore_and_tile_border_are_not_boundaries(self):
+        from pytorch_segmentation_models_trainer.few_shot.metrics import (
+            boundary_band,
+        )
+
+        target = _t([255, 255, 1, 1, 1])
+        band = boundary_band(target, width=1, ignore_index=255)
+        assert not band.any()
+
+    def test_2d_band(self):
+        from pytorch_segmentation_models_trainer.few_shot.metrics import (
+            boundary_band,
+        )
+
+        target = torch.zeros(1, 5, 5, dtype=torch.long)
+        target[:, :, 3:] = 1
+        band = boundary_band(target, width=1, ignore_index=255)
+        assert band[0, :, 2:4].all() and not band[0, :, :2].any()
+        assert not band[0, :, 4].any()
+
+    def test_boundary_iou_only_counts_band(self, h):
+        m = GFSSMetrics(h, boundary_width=1)
+        target = _t([2, 2, 2, 3, 3, 3])
+        # far-from-edge error (pos 0) must not count; edge pixel 2 wrong
+        pred = _t([0, 2, 3, 3, 3, 3])
+        m.update(pred, target)
+        out = m.compute()
+        assert m.boundary_confmat.sum() == 2
+        assert out["boundary/iou/2"] == 0.0
+        assert out["boundary/iou/3"] == pytest.approx(0.5)
+        assert out["boundary/miou_novel"] == pytest.approx(0.5)
+        assert torch.isnan(out["boundary/iou/0"])
+        assert out["iou/2"] == pytest.approx(1 / 3)
+
+    def test_negative_width_rejected(self, h):
+        with pytest.raises(ValueError):
+            GFSSMetrics(h, boundary_width=-1)

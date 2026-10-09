@@ -141,6 +141,7 @@ tta_mode: d8   # same as the base models, so GFSS and R1/R2 are comparable
 | `oem_score` | `0.4·miou_base + 0.6·miou_novel` (OpenEarthMap Few-Shot Challenge). |
 | `locality` | Accuracy of the adapted model ÷ accuracy of the base model on pixels of untouched classes (base classes that are not mothers). 1 = unchanged. |
 | `split_ceiling/<c>` | For a mother and its children: fraction of true pixels of `c` that the base model assigns to the mother — upper bound of any method that only splits the mother. |
+| `boundary/iou/<c>`, `boundary/miou{,_base,_novel}` | Only with `gfss.boundary_width: w > 0`: IoU restricted to the *trimap* band — pixels within `w` px of a ground-truth label change (ignore pixels and the tile border are not boundaries). Measures boundary quality, e.g. of the novel child against its sibling. |
 
 ## Methods
 

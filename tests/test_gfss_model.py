@@ -244,6 +244,20 @@ class TestSteps:
         m.on_validation_epoch_end()
         assert "val/miou" in m.log_dict.call_args[0][0]
 
+    def test_boundary_width_adds_boundary_metrics(self, base_ckpt):
+        cfg = _cfg(base_ckpt[0])
+        cfg.gfss.boundary_width = 2
+        m = GFSSModel(cfg)
+        assert m.test_gfss_metrics.boundary_width == 2
+        assert m.val_gfss_metrics.boundary_width == 2
+        m.log_dict = MagicMock()
+        for i, batch in enumerate(m.test_dataloader()):
+            m.test_step(batch, i)
+        m.on_test_epoch_end()
+        logged = m.log_dict.call_args[0][0]
+        assert "test/boundary/miou_novel" in logged
+        assert "test/boundary/iou/3" in logged
+
     def test_transductive_method_adapts_per_batch_with_grad(self, base_ckpt):
         m = GFSSModel(
             _cfg(base_ckpt[0], method="tests.test_gfss_model.TransductiveProbe")

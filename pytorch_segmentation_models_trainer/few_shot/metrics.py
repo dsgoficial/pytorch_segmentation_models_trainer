@@ -21,10 +21,43 @@
 from typing import Dict, List, Optional, Sequence
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor
 from torchmetrics import Metric
 
 from pytorch_segmentation_models_trainer.few_shot.hierarchy import ClassHierarchy
+
+
+def boundary_band(target: Tensor, width: int, ignore_index: int = 255) -> Tensor:
+    """Boolean mask of the pixels within ``width`` pixels of a label change.
+
+    A pixel is in the band when its ``(2·width+1)²`` window holds two different
+    valid labels (the *trimap* band around the ground-truth boundaries).
+    ``ignore_index`` pixels and the tile border are not boundaries, and
+    ``ignore_index`` pixels are never in the band.
+
+    Args:
+        target: Label map ``(..., H, W)``.
+        width: Band half-width in pixels (``>= 1``).
+        ignore_index: Label excluded from the boundaries.
+
+    Returns:
+        Boolean tensor with the shape of ``target``.
+    """
+    shape = target.shape
+    t = target.reshape(-1, 1, shape[-2], shape[-1]).float()
+    valid = t != ignore_index
+    k = 2 * width + 1
+    # max_pool2d pads with -inf, so the tile border never creates a change.
+    hi = F.max_pool2d(torch.where(valid, t, -1.0), k, stride=1, padding=width)
+    lo = -F.max_pool2d(
+        torch.where(valid, -t, -float(ignore_index) - 1.0),
+        k,
+        stride=1,
+        padding=width,
+    )
+    band = (hi >= 0) & (hi != lo) & valid
+    return band.reshape(shape)
 
 
 class GFSSMetrics(Metric):
@@ -48,13 +81,19 @@ class GFSSMetrics(Metric):
       classes that are not mothers); 1 means no change there;
     * ``split_ceiling/<c>`` for each mother and novel child: fraction of the
       true pixels of ``c`` that the base model assigns to its mother — an
-      upper bound for any method that only splits the mother.
+      upper bound for any method that only splits the mother;
+    * with ``boundary_width > 0``, ``boundary/iou/<c>``, ``boundary/miou``,
+      ``boundary/miou_base`` and ``boundary/miou_novel``: IoU restricted to
+      the pixels within ``boundary_width`` pixels of a ground-truth label
+      change (trimap band, :func:`boundary_band`).
 
     Args:
         hierarchy: Class hierarchy of the task.
         class_names: Optional names used in the keys (default: indices).
         ignore_index: Target value excluded from every matrix.
         prefix: Prepended to every key (e.g. ``"test/"``).
+        boundary_width: Half-width in pixels of the boundary band; 0
+            disables the boundary metrics.
     """
 
     full_state_update = False
@@ -65,9 +104,13 @@ class GFSSMetrics(Metric):
         class_names: Optional[Sequence[str]] = None,
         ignore_index: int = 255,
         prefix: str = "",
+        boundary_width: int = 0,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
+        if boundary_width < 0:
+            raise ValueError(f"boundary_width must be >= 0, got {boundary_width}.")
+        self.boundary_width = int(boundary_width)
         self.hierarchy = hierarchy
         n, nb = hierarchy.num_classes, hierarchy.num_base_classes
         if class_names is not None and len(class_names) != n:
@@ -85,6 +128,12 @@ class GFSSMetrics(Metric):
         self.add_state(
             "base_confmat", torch.zeros(n, nb, dtype=torch.long), dist_reduce_fx="sum"
         )
+        if self.boundary_width:
+            self.add_state(
+                "boundary_confmat",
+                torch.zeros(n, n, dtype=torch.long),
+                dist_reduce_fx="sum",
+            )
 
     @staticmethod
     def _bincount(target: Tensor, pred: Tensor, rows: int, cols: int) -> Tensor:
@@ -101,6 +150,18 @@ class GFSSMetrics(Metric):
         self.confmat += self._bincount(t, pred[valid].long(), n, n)
         if base_pred is not None:
             self.base_confmat += self._bincount(t, base_pred[valid].long(), n, nb)
+        if self.boundary_width:
+            band = boundary_band(target, self.boundary_width, self.ignore_index)
+            self.boundary_confmat += self._bincount(
+                target[band].long(), pred[band].long(), n, n
+            )
+
+    @staticmethod
+    def _iou(cm: Tensor) -> Tensor:
+        tp = cm.diag()
+        gt, pr = cm.sum(1), cm.sum(0)
+        nan = torch.tensor(float("nan"), dtype=torch.float64, device=cm.device)
+        return torch.where(gt > 0, tp / (gt + pr - tp).clamp(min=1), nan)
 
     def compute(self) -> Dict[str, Tensor]:
         """Return the metric dictionary described in the class docstring."""
@@ -108,7 +169,7 @@ class GFSSMetrics(Metric):
         tp = cm.diag()
         gt, pr = cm.sum(1), cm.sum(0)
         nan = torch.tensor(float("nan"), dtype=torch.float64, device=cm.device)
-        iou = torch.where(gt > 0, tp / (gt + pr - tp).clamp(min=1), nan)
+        iou = self._iou(cm)
         precision = torch.where(pr > 0, tp / pr.clamp(min=1), nan)
         recall = torch.where(gt > 0, tp / gt.clamp(min=1), nan)
 
@@ -123,6 +184,13 @@ class GFSSMetrics(Metric):
         out["miou_base"] = iou[base_idx].nanmean()
         out["miou_novel"] = iou[h.novel_classes].nanmean()
         out["oem_score"] = 0.4 * out["miou_base"] + 0.6 * out["miou_novel"]
+        if self.boundary_width:
+            b_iou = self._iou(self.boundary_confmat.double())
+            for i, name in enumerate(self.class_names):
+                out[f"boundary/iou/{name}"] = b_iou[i]
+            out["boundary/miou"] = b_iou.nanmean()
+            out["boundary/miou_base"] = b_iou[base_idx].nanmean()
+            out["boundary/miou_novel"] = b_iou[h.novel_classes].nanmean()
 
         bcm = self.base_confmat.double()
         if bcm.sum() > 0:

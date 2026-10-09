@@ -68,7 +68,9 @@ class GFSSModel(Model):
       need ``max_steps: 0``);
     * transductive methods are adapted again on every test batch inside
       ``test_step`` (requires ``pl_trainer.inference_mode: false``);
-    * metrics: :class:`GFSSMetrics` logged as ``test/...`` / ``val/...``.
+    * metrics: :class:`GFSSMetrics` logged as ``test/...`` / ``val/...``
+      (``gfss.boundary_width > 0`` adds the boundary-band IoU,
+      ``test/boundary/...``).
 
     Do not add a ``ModelCheckpoint`` callback: the adapted state lives in
     memory and ``train()`` would reload it from a checkpoint before testing.
@@ -104,11 +106,20 @@ class GFSSModel(Model):
         ):
             names = list(cfg.class_definitions.names)
         ignore = gfss.get("ignore_index", 255)
+        bw = int(gfss.get("boundary_width", 0) or 0)
         self.val_gfss_metrics = GFSSMetrics(
-            self.hierarchy, class_names=names, ignore_index=ignore, prefix="val/"
+            self.hierarchy,
+            class_names=names,
+            ignore_index=ignore,
+            prefix="val/",
+            boundary_width=bw,
         )
         self.test_gfss_metrics = GFSSMetrics(
-            self.hierarchy, class_names=names, ignore_index=ignore, prefix="test/"
+            self.hierarchy,
+            class_names=names,
+            ignore_index=ignore,
+            prefix="test/",
+            boundary_width=bw,
         )
         names_u = self.method.uncertainty_names()
         unc_eval = dict(gfss.get("uncertainty_eval", None) or {})
@@ -133,6 +144,7 @@ class GFSSModel(Model):
                 class_names=names,
                 ignore_index=ignore,
                 prefix=f"{stage}/var/{v}/",
+                boundary_width=bw,
             )
             for stage, v in self._variant_keys
         )

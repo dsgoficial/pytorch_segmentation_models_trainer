@@ -171,6 +171,8 @@ class GFSSConfig:
         uncertainty_eval: Options of ``GFSSUncertaintyMetrics`` for methods
             with uncertainty maps (``abstain_thresholds``, ``ece_bins``,
             ``n_bins``).
+        boundary_width: Half-width in pixels of the ground-truth boundary
+            band for the ``boundary/`` IoU metrics; 0 (default) disables them.
 
     Example YAML::
 
@@ -192,6 +194,7 @@ class GFSSConfig:
     class_names: Optional[List[str]] = None
     uncertainty_eval: Optional[Dict[str, Any]] = None
     backbone: Optional[Dict[str, Any]] = None
+    boundary_width: int = 0
 
 
 def _register_configs() -> None:
