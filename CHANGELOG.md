@@ -1,5 +1,10 @@
 # Unreleased
 
+## GFSS: comparisons with BCM and H²EDL
+
+- `BCM(ensemble=True, ensemble_full_weight=5)`: shot-wise ensemble of the paper (one model per support tile + the all-tiles model); with `beta: 0.5` reproduces the paper setting. Parity test against the official code with ensemble and Tukey (`bcm_ensemble_reference.pt`).
+- `HiSplit`: `q: logreg` (BCM's cross-validated logistic regression on the HiSplit support targets), `feature_power` (Tukey's power on the features used by q), `negatives: superclass | all` (where "not novel" support pixels become negatives of the split) and `edl_base_rate: inverse_frequency` for `q: edl` (H²EDL-style base rate from the support targets). Defaults unchanged.
+
 ## GFSS: BCM baseline
 
 - `few_shot/methods/bcm.BCM`: port of the official BCM classifier (Sakai et al., NeurIPS 2024; github.com/IBM/BCM) — base→novel mapping mined by co-occurrence (`mapping: mined`, official) or taken from the hierarchy (`mapping: hierarchy`), one cross-validated logistic regression per mapped base class on the frozen features with class balancing, base prediction overwritten only where it is the mapped class. Parity test against tensors produced by the official code (`tests/testing_data/few_shot/bcm_reference.pt`). Example `conf/examples/gfss_bcm.yaml`.

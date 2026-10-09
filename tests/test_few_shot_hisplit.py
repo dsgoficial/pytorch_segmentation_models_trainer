@@ -395,3 +395,85 @@ class TestAbstentionMap:
         m = _ready(f, masks, w, b)
         with pytest.raises(KeyError, match="dissonance"):
             m.abstention(f, "dissonance", 0.5)
+
+
+class TestComparisonOptions:
+    """Options added to compare HiSplit with BCM / H²EDL."""
+
+    def test_negatives_all_uses_every_not_novel_pixel(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, negatives="all")
+        t = m._targets(f, masks)
+        assert (t[masks == NN] == 0).all()  # also where the base predicts class 0
+        ref = _ready(f, masks, w, b)._targets(f, masks)
+        assert (ref[:, :, :3] == -1).all() and (t[:, :, :3] == 0).all()
+
+    def test_negatives_all_needs_single_mother(self):
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3], 0: [0, 4]}, num_base_classes=3)
+        with pytest.raises(ValueError, match="single mother"):
+            _ready(f, masks, w, b, hierarchy=h, negatives="all")
+
+    def test_feature_power_applies_only_to_q(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, feature_power=0.5)
+        torch.testing.assert_close(m._qfeat(f), f.clamp(min=0).sqrt())
+        torch.testing.assert_close(
+            m._base_probs(f), _ready(f, masks, w, b)._base_probs(f)
+        )
+        assert torch.isfinite(m(f)).all()
+
+    def test_logreg_q_is_bcm_classifier_on_superclass_targets(self):
+        f, masks, w, b = _data()
+        f = f + 0.3 * torch.randn_like(f)
+        m = _ready(f, masks, w, b, q="logreg", logreg_n_splits=2, logreg_n_C=3)
+        assert 1 in m.logreg_models and not m.transductive
+        assert m.support_loss(f, masks) is None
+        q = m._q(m._scores(f, m.q_weight, m.q_bias))
+        torch.testing.assert_close(q.sum(1), torch.ones(2, 6, 6))
+        pred = m(f).argmax(1)
+        assert (pred[:, :3, 3:] == 3).float().mean() > 0.8
+
+    def test_logreg_single_class_mother_falls_back_to_uniform(self, caplog):
+        f, masks, w, b = _data()
+        masks[:] = NN
+        masks[:, 0, 0] = 3
+        f[:, 0] = -5.0  # base never predicts the mother: no negatives
+        with caplog.at_level("WARNING"):
+            m = _ready(f, masks, w, b, q="logreg")
+        assert "single class" in caplog.text and m.logreg_models == {}
+        q = m._q(m._scores(f, m.q_weight, m.q_bias))
+        torch.testing.assert_close(q, torch.full_like(q, 0.5))
+
+    def test_edl_inverse_frequency_base_rate(self):
+        f, masks, w, b = _data()
+        m = _ready(
+            f,
+            masks,
+            w,
+            b,
+            q="edl",
+            edl_base_rate="inverse_frequency",
+            base_rate_tau=1.0,
+        )
+        t = m._targets(f, masks).reshape(-1)
+        n = torch.tensor([(t == 0).sum(), (t == 1).sum()], dtype=torch.float32) + 1.0
+        a = n.pow(-1.0)
+        torch.testing.assert_close(m.edl_prior, 2 * a / a.sum())
+        assert m.edl_prior.sum() == pytest.approx(2.0)
+        # uniform prior keeps alpha = softplus + 1
+        u = _ready(f, masks, w, b, q="edl")
+        torch.testing.assert_close(u.edl_prior, torch.ones(2))
+        assert torch.isfinite(m.support_loss(f, masks))
+        assert "split_vacuity" in m.uncertainty(f)
+
+    @pytest.mark.parametrize(
+        "kw, match",
+        [
+            ({"negatives": "none"}, "negatives"),
+            ({"edl_base_rate": "x"}, "edl_base_rate"),
+        ],
+    )
+    def test_invalid_options(self, kw, match):
+        with pytest.raises(ValueError, match=match):
+            HiSplit(**kw)

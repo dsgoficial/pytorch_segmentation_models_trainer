@@ -19,8 +19,10 @@
 """
 
 import logging
+import warnings
 from typing import Dict, List, Optional, Sequence
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
@@ -42,7 +44,7 @@ from pytorch_segmentation_models_trainer.few_shot.uncertainty import (
 logger = logging.getLogger(__name__)
 
 _EPS = 1e-10
-_Q_TYPES = {"proto", "proto_prob", "linear", "trans", "edl"}
+_Q_TYPES = {"proto", "proto_prob", "linear", "trans", "edl", "logreg"}
 _TRAINABLE = {"linear", "trans", "edl"}
 
 
@@ -74,6 +76,20 @@ class HiSplit(BaseGFSSMethod):
       ``softplus(w_c·f + b_c)``, ``α = e + 1`` and ``q = α / S`` within each
       mother; trained by ``trainer.fit`` with the EDL MSE loss (Sensoy et al.
       2018) plus the KL regulariser annealed linearly over ``kl_anneal_steps``.
+
+    * ``logreg``: the classifier of BCM (cross-validated logistic regression,
+      class balancing; ``sklearn``) fitted on the HiSplit support targets of
+      each mother; ``q`` = its probabilities (no gradient training).
+
+    Comparison options with BCM / H²EDL (defaults keep the original HiSplit):
+    ``feature_power`` (Tukey's ladder of powers on the features used by
+    ``q``, as BCM; negative values are clipped to 0 when ≠ 1), ``negatives:
+    superclass | all`` ("not novel" support pixels become examples of the
+    mother's kept child only where the base model predicts the mother — the
+    default — or everywhere, as BCM's g_β; ``all`` needs a single mother) and,
+    for ``edl``, ``edl_base_rate: inverse_frequency`` (H²EDL's tempered
+    inverse-frequency base rate ``a_c ∝ (n_c + s)^-τ`` from the support
+    targets, ``α = e + K·a``; the KL regulariser keeps the uniform target).
 
     With an evidential base model (``base_output: evidential``, R2-EDL),
     ``p_base`` is the Dirichlet mean and the split divides the mother's
@@ -172,6 +188,15 @@ class HiSplit(BaseGFSSMethod):
         lr: float = 1e-3,
         pi_update_at: Sequence[int] = (10,),
         kl_anneal_steps: int = 50,
+        feature_power: float = 1.0,
+        negatives: str = "superclass",
+        edl_base_rate: str = "uniform",
+        base_rate_tau: float = 1.0,
+        base_rate_smoothing: float = 1.0,
+        logreg_n_splits: int = 5,
+        logreg_n_C: int = 10,
+        logreg_sampling: str = "us",
+        seed: int = 0,
         leak: bool = False,
         leak_init: float = -4.0,
         widen: str = "none",
@@ -216,6 +241,22 @@ class HiSplit(BaseGFSSMethod):
         self.lr = float(lr)
         self.pi_update_at = [int(i) for i in pi_update_at]
         self.kl_anneal_steps = int(kl_anneal_steps)
+        if negatives not in {"superclass", "all"}:
+            raise ValueError(
+                f"negatives must be 'superclass' or 'all', got {negatives!r}."
+            )
+        if edl_base_rate not in {"uniform", "inverse_frequency"}:
+            raise ValueError(
+                f"edl_base_rate must be 'uniform' or 'inverse_frequency', got {edl_base_rate!r}."
+            )
+        self.feature_power = float(feature_power)
+        self.negatives = negatives
+        self.edl_base_rate = edl_base_rate
+        self.base_rate_tau = float(base_rate_tau)
+        self.base_rate_smoothing = float(base_rate_smoothing)
+        self.logreg_args = (int(logreg_n_splits), int(logreg_n_C), logreg_sampling)
+        self.seed = int(seed)
+        self.logreg_models: Dict[int, object] = {}
         self.transductive = q == "trans"
         self._edl_step = 0
         self._task_params: Optional[tuple] = None
@@ -240,6 +281,9 @@ class HiSplit(BaseGFSSMethod):
             self.register_buffer("q_weight", base_weight.new_zeros(n, dim))
             self.register_buffer("q_bias", base_weight.new_zeros(n))
         self.register_buffer("q_var", base_weight.new_ones(n, dim))
+        self.register_buffer("edl_prior", base_weight.new_ones(n))  # W·a (uniform: 1)
+        if self.negatives == "all" and len(hierarchy.mothers) > 1:
+            raise ValueError("negatives: all needs a single mother class.")
         if self.widen == "dissonance" and self.base_output != "evidential":
             raise ValueError("widen: dissonance requires an evidential base model.")
         nb = hierarchy.num_base_classes
@@ -269,13 +313,23 @@ class HiSplit(BaseGFSSMethod):
         for i, (child, mother) in enumerate(zip(self.child_classes, self.child_mother)):
             targets[masks == child] = i
             if child == mother:
-                targets[(masks == self.not_novel_index) & (base_pred == mother)] = i
+                not_novel = masks == self.not_novel_index
+                if self.negatives == "superclass":
+                    not_novel = not_novel & (base_pred == mother)
+                targets[not_novel] = i
         return targets
+
+    def _qfeat(self, features: Tensor) -> Tensor:
+        """Features used by q (Tukey's power transform when ≠ 1)."""
+        if self.feature_power == 1.0:
+            return features
+        return features.clamp(min=0).pow(self.feature_power)
 
     def init_from_support(self, features: Tensor, masks: Tensor) -> None:
         """Per-child prototypes (and variances) from the support targets."""
         targets = self._targets(features, masks)
-        flat = features.permute(0, 2, 3, 1).reshape(-1, features.shape[1])
+        qf = self._qfeat(features)
+        flat = qf.permute(0, 2, 3, 1).reshape(-1, qf.shape[1])
         t = targets.reshape(-1)
         weight = torch.zeros_like(self.q_weight)
         var = torch.ones_like(self.q_var)
@@ -299,6 +353,41 @@ class HiSplit(BaseGFSSMethod):
                 norm = weight / (weight.norm(dim=1, keepdim=True) + _EPS)
                 self.q_weight.copy_(self.tau * norm)
             self.q_bias.zero_()
+        t_all = targets.reshape(-1)
+        if self.q == "edl" and self.edl_base_rate == "inverse_frequency":
+            counts = torch.stack(
+                [(t_all == i).sum() for i in range(len(self.child_classes))]
+            ).to(self.edl_prior)
+            prior = torch.empty_like(self.edl_prior)
+            for _, idx in self._groups():
+                a = (counts[idx] + self.base_rate_smoothing).pow(-self.base_rate_tau)
+                prior[idx] = len(idx) * a / a.sum()
+            self.edl_prior.copy_(prior)
+        if self.q == "logreg":
+            self._fit_logreg(flat.detach().cpu().numpy(), t_all.cpu().numpy())
+
+    def _fit_logreg(self, X, t) -> None:
+        """BCM's classifier per mother on the HiSplit targets."""
+        from pytorch_segmentation_models_trainer.few_shot.methods.bcm import (
+            _LogisticRegressionCV,
+        )
+
+        rng = np.random.RandomState(self.seed)
+        self.logreg_models = {}
+        for mother, idx in self._groups():
+            sel = np.isin(t, idx)
+            y = t[sel] - min(idx)
+            if len(np.unique(y)) < 2:
+                logger.warning(
+                    "HiSplit logreg: mother %d has a single class in the support.",
+                    mother,
+                )
+                continue
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.logreg_models[mother] = _LogisticRegressionCV(
+                    *self.logreg_args, rng
+                ).fit(X[sel], y)
 
     # ------------------------------------------------------------------
     # Scores and probabilities
@@ -306,6 +395,9 @@ class HiSplit(BaseGFSSMethod):
 
     def _scores(self, features: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
         """Per-child scores ``(B, n_children, h, w)``; weight may be per map."""
+        features = self._qfeat(features)
+        if self.q == "logreg":
+            return self._logreg_scores(features)
         if self.q == "proto":
             f = F.normalize(features, dim=1)
             return torch.einsum("bfhw,cf->bchw", f, weight)
@@ -319,6 +411,31 @@ class HiSplit(BaseGFSSMethod):
             )
         return torch.einsum("bfhw,cf->bchw", features, weight) + bias.view(1, -1, 1, 1)
 
+    def _logreg_scores(self, features: Tensor) -> Tensor:
+        """Log-probabilities of the per-mother logistic regressions (uniform
+        for a mother without a fitted model)."""
+        b, _, hh, ww = features.shape
+        X = (
+            features.permute(0, 2, 3, 1)
+            .reshape(-1, features.shape[1])
+            .detach()
+            .cpu()
+            .numpy()
+        )
+        scores = features.new_zeros(b, len(self.child_classes), hh, ww)
+        for mother, idx in self._groups():
+            model = self.logreg_models.get(mother)
+            if model is None:
+                continue
+            proba, _ = model.predict_proba(X, len(idx))
+            proba = torch.from_numpy(proba).to(features).view(b, hh, ww, len(idx))
+            scores[:, idx] = torch.log(proba.clamp(min=_EPS)).permute(0, 3, 1, 2)
+        return scores
+
+    def _edl_alpha(self, scores: Tensor) -> Tensor:
+        """Dirichlet parameters of the pair head: ``softplus(s) + W·a``."""
+        return F.softplus(scores) + self.edl_prior.view(1, -1, 1, 1)
+
     def _groups(self):
         for mother in self.hierarchy.mothers:
             yield mother, [i for i, m in enumerate(self.child_mother) if m == mother]
@@ -328,7 +445,7 @@ class HiSplit(BaseGFSSMethod):
         or the Dirichlet mean ``α / S`` for ``edl``."""
         q = torch.empty_like(scores)
         if self.q == "edl":
-            alpha = F.softplus(scores) + 1.0
+            alpha = self._edl_alpha(scores)
             for _, idx in self._groups():
                 q[:, idx] = alpha[:, idx] / alpha[:, idx].sum(1, keepdim=True)
             return q
@@ -407,7 +524,7 @@ class HiSplit(BaseGFSSMethod):
 
     def _edl_loss(self, features: Tensor, targets: Tensor) -> Tensor:
         """EDL MSE + annealed KL of the evidential pair head, per mother."""
-        alpha = F.softplus(self._scores(features, self.q_weight, self.q_bias)) + 1.0
+        alpha = self._edl_alpha(self._scores(features, self.q_weight, self.q_bias))
         kl_weight = min(1.0, self._edl_step / max(self.kl_anneal_steps, 1))
         total = alpha.new_zeros(())
         for _, idx in self._groups():
@@ -562,7 +679,7 @@ class HiSplit(BaseGFSSMethod):
                 here, normalized_entropy(q[:, idx]), split_entropy
             )
             if self.q == "edl":
-                alpha_q = F.softplus(scores[:, idx]) + 1.0
+                alpha_q = self._edl_alpha(scores)[:, idx]
                 split_vacuity = torch.where(here, vacuity(alpha_q), split_vacuity)
         out = {"split_entropy": split_entropy}
         if self.q == "edl":

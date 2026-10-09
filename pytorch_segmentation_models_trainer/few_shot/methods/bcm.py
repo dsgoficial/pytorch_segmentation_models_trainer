@@ -110,11 +110,15 @@ class _LogisticRegressionCV:
         )
         return self
 
-    def predict_proba(self, X: np.ndarray, n_classes: int) -> np.ndarray:
-        """Probabilities over ``n_classes`` (zero for classes unseen in fit)."""
+    def predict_proba(self, X: np.ndarray, n_classes: int):
+        """Probabilities over ``n_classes`` (zero for classes unseen in fit)
+        and the 0/1 flags of the classes seen in fit (official
+        ``predict_proba_w_blank``)."""
         proba = np.zeros((X.shape[0], n_classes))
         proba[:, self.le.classes_] = _softmax_decision(self.clf, X)
-        return proba
+        flags = np.zeros(n_classes)
+        flags[self.le.classes_] = 1.0
+        return proba, flags
 
 
 class BCM(BaseGFSSMethod):
@@ -134,7 +138,11 @@ class BCM(BaseGFSSMethod):
     classes predicted on the novel support pixels) or taken from the
     ``hierarchy`` (each novel class's mother). Differences: ``sklearnex``
     replaced by ``sklearn`` (same API); the random generator is a seeded
-    ``RandomState`` instead of NumPy's global one; no shot-wise ensemble.
+    ``RandomState`` instead of NumPy's global one; in the ensemble, one-shot
+    datasets are single support tiles (official: the i-th shot of every novel
+    class — identical with one novel class) and the all-tiles weight is
+    ``ensemble_full_weight`` for any K (official: a fixed list that gives 5
+    only for K = 5).
 
     Args:
         mapping: ``mined`` (official) or ``hierarchy``.
@@ -145,6 +153,11 @@ class BCM(BaseGFSSMethod):
         n_splits: CV folds (official 5).
         n_C: Number of C values in ``logspace(-5, 5)`` (official 10).
         seed: Seed of the balancing sampler.
+        ensemble: Shot-wise ensemble (paper §4.5): one model per support
+            tile plus the model on all tiles, probabilities averaged with
+            weights 1 and ``ensemble_full_weight`` (per class, over the
+            models that saw it). Used only with more than one support tile.
+        ensemble_full_weight: Weight of the all-tiles model (official 5).
 
     Example YAML::
 
@@ -167,6 +180,8 @@ class BCM(BaseGFSSMethod):
         n_splits: int = 5,
         n_C: int = 10,
         seed: int = 0,
+        ensemble: bool = False,
+        ensemble_full_weight: float = 5.0,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -183,8 +198,11 @@ class BCM(BaseGFSSMethod):
             int(n_C),
             int(seed),
         )
+        self.ensemble = bool(ensemble)
+        self.ensemble_full_weight = float(ensemble_full_weight)
         self.table: Dict[int, List[int]] = {}
-        self.models: Dict[int, _LogisticRegressionCV] = {}
+        self.models: Dict[int, List[_LogisticRegressionCV]] = {}
+        self.model_weights: Dict[int, List[float]] = {}
 
     def _base_logits(self, features: Tensor) -> Tensor:
         return FrozenLinearHeadSegmenter.linear(
@@ -227,23 +245,42 @@ class BCM(BaseGFSSMethod):
         rng = np.random.RandomState(self.seed)
         X_all = self._features_np(features)
         m = masks.reshape(-1).cpu().numpy()
-        self.models = {}
+        n_tiles = features.shape[0]
+        tile = np.repeat(np.arange(n_tiles), features.shape[2] * features.shape[3])
+        use_ensemble = self.ensemble and n_tiles > 1
+        self.models, self.model_weights = {}, {}
         for base, novels in self.table.items():
             y = np.zeros_like(m)
             for j, cls in enumerate(sorted(novels), start=1):
                 y[m == cls] = j
             valid = m != 255
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", ConvergenceWarning)
-                self.models[base] = _LogisticRegressionCV(
-                    self.n_splits, self.n_C, self.sampling, rng
-                ).fit(X_all[valid], y[valid])
+            subsets = (
+                [valid & (tile == i) for i in range(n_tiles)] if use_ensemble else []
+            )
+            weights = [1.0] * len(subsets)
+            subsets.append(valid)
+            weights.append(self.ensemble_full_weight if use_ensemble else 1.0)
+            self.models[base] = []
+            for subset in subsets:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", ConvergenceWarning)
+                    model = _LogisticRegressionCV(
+                        self.n_splits, self.n_C, self.sampling, rng
+                    ).fit(X_all[subset], y[subset])
+                self.models[base].append(model)
+            self.model_weights[base] = weights
         self.table = {k: sorted(v) for k, v in self.table.items()}
 
     def _novel_probas(self, features: Tensor, base: int) -> Tensor:
         b, _, hh, ww = features.shape
         n = len(self.table[base]) + 1
-        proba = self.models[base].predict_proba(self._features_np(features), n)
+        X = self._features_np(features)
+        total, norm = 0.0, 0.0
+        for model, weight in zip(self.models[base], self.model_weights[base]):
+            proba, flags = model.predict_proba(X, n)
+            total = total + weight * proba
+            norm = norm + weight * flags
+        proba = total / np.maximum(norm, 1e-12)[None, :]
         return (
             torch.from_numpy(proba).to(features).view(b, hh, ww, n).permute(0, 3, 1, 2)
         )

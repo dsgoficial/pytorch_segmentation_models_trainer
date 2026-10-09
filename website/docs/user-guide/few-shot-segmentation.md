@@ -220,6 +220,15 @@ every other class keeps `p_base`. Variants of `q` (`q:`):
 | `linear` | `w·f + b`, initialised as `proto` | support CE in `trainer.fit` |
 | `trans` | `linear` + per-query-tile SGD on support CE + entropy and KL(q̄‖π) weighted by `p_base(m)` | fit + transductive (`inference_mode: false`) |
 | `edl` | evidential pair head: `e = softplus(w·f + b)`, `α = e + 1`, `q = α / S` within each mother | EDL MSE + KL regulariser (annealed over `kl_anneal_steps`) in `trainer.fit` |
+| `logreg` | BCM's classifier (cross-validated logistic regression, class balancing) on the HiSplit support targets of each mother | fitted at `init_from_support` (`max_steps: 0`) |
+
+Options for comparisons with BCM and H²EDL (defaults keep the original
+HiSplit): `feature_power` (Tukey's power on the features used by q),
+`negatives: superclass | all` ("not novel" support pixels are negatives of
+the split only where the base model predicts the mother — default — or
+everywhere, as BCM's g_β; `all` needs one mother) and, for `q: edl`,
+`edl_base_rate: inverse_frequency` (`a_c ∝ (n_c + s)^-τ` from the support
+targets, `α = e + K·a`, as H²EDL's base-rate variant).
 
 Support targets: pixels labelled with a child; and, in the S-novel regime,
 pixels labelled "not novel" that the base model predicts as the mother become
@@ -350,7 +359,12 @@ Semantic Segmentation", NeurIPS 2024):
   the base and g_β probabilities separately (method hook `decode_to`).
 
 Differences: `sklearnex` replaced by `sklearn` (same API), a seeded
-`RandomState` instead of NumPy's global generator, no shot-wise ensemble.
+`RandomState` instead of NumPy's global generator. Paper setting (§4.5):
+`beta: 0.5` (Tukey's ladder of powers; needs non-negative features) and
+`ensemble: true` (one model per support tile, weight 1, plus the all-tiles
+model, weight `ensemble_full_weight` = 5). The ensemble's one-shot datasets are
+single support tiles (official: the i-th shot of every novel class — the same
+with one novel class); the official weight list gives 5 only for K = 5.
 Like HiSplit's hierarchical decoding, BCM keeps every base class outside the
 mapping exactly as predicted by the base model (its Proposition 4.1).
 

@@ -19,6 +19,9 @@ from pytorch_segmentation_models_trainer.few_shot.hierarchy import ClassHierarch
 from pytorch_segmentation_models_trainer.few_shot.methods.bcm import BCM
 
 REF = Path(__file__).parent / "testing_data" / "few_shot" / "bcm_reference.pt"
+REF_ENS = (
+    Path(__file__).parent / "testing_data" / "few_shot" / "bcm_ensemble_reference.pt"
+)
 NN = 254
 
 
@@ -64,6 +67,25 @@ class TestParityWithOfficialCode:
         assert m.table == {int(k): list(v) for k, v in ref["table"].items()}
         logits = m.decode_to(fq, ref["out_size"], _upsample)
         assert torch.equal(logits.argmax(1), ref["pred_q"][:, 0])
+
+
+def test_parity_shot_wise_ensemble_with_tukey():
+    """Paper setting (§4.5): Tukey tau = 0.5 and shot-wise ensemble (5 one-shot
+    models weight 1 + the 5-shot model weight 5)."""
+    ref = torch.load(REF_ENS, weights_only=False)
+    h, fs, ms, fq = _from_official(ref)
+    a = ref["args"]
+    m = BCM(beta=a["beta"], ensemble=a["ensemble"], seed=ref["numpy_seed"])
+    m.setup(h, ref["base_weight"].T, ref["base_bias"], NN)
+    small = (
+        F.interpolate(ms.unsqueeze(1).float(), size=fs.shape[-2:], mode="nearest")
+        .squeeze(1)
+        .long()
+    )
+    m.init_from_support(fs, small)
+    assert len(m.models[1]) == 6
+    logits = m.decode_to(fq, ref["out_size"], _upsample)
+    assert torch.equal(logits.argmax(1), ref["pred_q"][:, 0])
 
 
 @pytest.fixture
