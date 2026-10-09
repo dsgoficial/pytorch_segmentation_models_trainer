@@ -1,0 +1,26 @@
+# Refinement-aware base training (R2-C): the base model is trained with a
+# merged superclass (class 5 merged into 3 by mask_class_mapping) and two
+# label-free auxiliary objectives that keep the superclass structure in the
+# decoder features for a later few-shot split:
+#   * Canny edges of the input image (1x1 edge head, no labels);
+#   * M sub-prototypes of the superclass (sharp + balanced + separated).
+# The forward returns plain logits; Model adds compute_auxiliary_losses()
+# to the segmentation loss and logs losses/<stage>_edge and _subproto.
+# GFSS loads the checkpoint with the same `model` node (gfss_unwrap()).
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.refinement_aware.RefinementAwareWrapper
+  superclass_index: 3
+  edge_weight: 0.1
+  edge_region: all          # or superclass: only boundaries inside class 3
+  edge_low_threshold: 0.1
+  edge_high_threshold: 0.2
+  subprototype_weight: 0.1
+  num_subprototypes: 4
+  temperature: 0.1
+  separation_margin: 0.0
+  model:
+    _target_: segmentation_models_pytorch.UPerNet
+    encoder_name: resnet50
+    encoder_weights: imagenet
+    in_channels: 3
+    classes: 5

@@ -1011,6 +1011,18 @@ class Model(pl.LightningModule):
                 sync_dist=True,
             )
 
+        # Auxiliary losses that need the masks (e.g. RefinementAwareWrapper)
+        if hasattr(self.model, "compute_auxiliary_losses"):
+            for name, value in self.model.compute_auxiliary_losses(hard_masks).items():
+                loss = loss + value
+                self.log(
+                    f"losses/{prefix}_{name}",
+                    value,
+                    on_step=is_train,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+
         # MoE routing diagnostics
         if hasattr(self.model, "get_moe_diagnostics"):
             should_log_moe = (not is_train) or (self.global_step % 50 == 0)

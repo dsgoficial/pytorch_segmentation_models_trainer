@@ -402,6 +402,29 @@ class MyMethod(BaseGFSSMethod):
 `self.not_novel_index` are available after `setup`. Masks reach the method
 downsampled (nearest) to the feature resolution.
 
+## Refinement-aware base training
+
+For category splitting the base model is trained with the future children
+merged into their mother. Cross-entropy then has no reason to keep the
+structure *inside* the mother, which is what the few-shot split needs.
+`RefinementAwareWrapper` (`custom_models/refinement_aware.py`) wraps an smp
+model (encoder → decoder → 1x1 head) and adds two **label-free** auxiliary
+losses on the decoder features:
+
+| Term | What it does | Options |
+|---|---|---|
+| `edge` | A 1x1 head predicts the **Canny** edge map of the input image (kornia, computed on the fly from the de-normalized image and max-pooled to the feature resolution); BCE with `pos_weight = #neg/#pos` (capped). | `edge_weight`, `edge_region: all \| superclass`, `edge_low_threshold`, `edge_high_threshold`, `edge_max_pos_weight`, `normalization_mean/std` |
+| `subproto` | `M` learnable sub-prototypes of the superclass; superclass pixels get a softmax of cosine similarities / temperature. Loss = mean per-pixel entropy (sharp) − entropy of the mean assignment (balanced) + `separation_weight`·mean `relu(cos(P_j,P_k) − margin)` (separated). | `subprototype_weight`, `num_subprototypes`, `temperature`, `separation_margin`, `separation_weight` |
+
+The forward returns plain logits, so metrics, TTA and checkpoints are those
+of the wrapped model. `Model` adds every model exposing
+`compute_auxiliary_losses(masks)` to the loss and logs
+`losses/<stage>_edge` / `losses/<stage>_subproto`. For GFSS, use the same
+`model` node when loading the base checkpoint: `FrozenLinearHeadSegmenter`
+calls `gfss_unwrap()` and uses the inner model (the edge head and the
+prototypes are not used after training). Example:
+`conf/examples/refinement_aware_base.yaml`.
+
 ## Full example
 
 See `conf/examples/build_fewshot_episodes.yaml`,

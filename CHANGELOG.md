@@ -1,5 +1,11 @@
 # Unreleased
 
+## Refinement-aware base training
+
+- `custom_models.refinement_aware.RefinementAwareWrapper`: wraps an smp model and adds label-free auxiliary losses on the decoder features for category splitting — Canny edge prediction (kornia, `edge_region: all | superclass`) and superclass sub-prototypes (sharp, balanced, separated assignments). `canny_targets` helper. Example `conf/examples/refinement_aware_base.yaml`.
+- `Model`: models exposing `compute_auxiliary_losses(masks)` get those terms added to the loss and logged (`losses/<stage>_<name>`).
+- `FrozenLinearHeadSegmenter`: unwraps models exposing `gfss_unwrap()`.
+
 ## GFSS: boundary metrics
 
 - `GFSSMetrics(boundary_width=w)` / `gfss.boundary_width`: IoU per class and mIoU (all/base/novel) restricted to the trimap band within `w` px of ground-truth label changes (`boundary/...` keys); `few_shot.metrics.boundary_band` helper. Default 0 (off).

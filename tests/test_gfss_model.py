@@ -436,6 +436,31 @@ class TestUncertaintyEvaluation:
             assert f"test/unc/tile_spearman/{name}" in keys
             assert f"test/unc/tile_mean/{name}" in keys
 
+    def test_refinement_aware_base_checkpoint(self, tmp_path):
+        from pytorch_segmentation_models_trainer.custom_models.refinement_aware import (
+            RefinementAwareWrapper,
+        )
+
+        torch.manual_seed(0)
+        inner = smp.UPerNet(**{k: v for k, v in _MODEL.items() if k != "_target_"})
+        wrapper = RefinementAwareWrapper(inner, superclass_index=2)
+        path = tmp_path / "r2c.ckpt"
+        torch.save(
+            {"state_dict": {f"model.{k}": v for k, v in wrapper.state_dict().items()}},
+            path,
+        )
+        cfg = _cfg(path)
+        cfg.model = {
+            "_target_": "pytorch_segmentation_models_trainer.custom_models.refinement_aware.RefinementAwareWrapper",
+            "superclass_index": 2,
+            "model": dict(_MODEL),
+        }
+        m = GFSSModel(cfg)
+        assert not m.model.evidential
+        torch.testing.assert_close(
+            m.method.base_weight, inner.segmentation_head[0].weight.flatten(1)
+        )
+
     def test_evidential_base_checkpoint(self, tmp_path):
         from pytorch_segmentation_models_trainer.custom_models.edl_wrapper import (
             EvidentialWrapper,

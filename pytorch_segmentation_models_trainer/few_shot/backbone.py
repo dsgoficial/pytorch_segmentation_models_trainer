@@ -60,6 +60,10 @@ class FrozenLinearHeadSegmenter(nn.Module):
 
     def __init__(self, model: nn.Module) -> None:
         super().__init__()
+        # Training-only wrappers (e.g. RefinementAwareWrapper) expose the
+        # plain segmentation model through ``gfss_unwrap()``.
+        if hasattr(model, "gfss_unwrap"):
+            model = model.gfss_unwrap()
         # EvidentialWrapper (Dirichlet head of the lib): the linear head and
         # the features are those of the wrapped model; only the mapping from
         # logits to probabilities changes (see ``BaseGFSSMethod.base_output``).
