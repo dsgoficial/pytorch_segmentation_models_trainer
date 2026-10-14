@@ -1329,6 +1329,16 @@ class Model(pl.LightningModule):
                     prog_bar=False,
                     sync_dist=True,
                 )
+                if getattr(self, "_per_class_iou", None) is not None:
+                    per_class = self._per_class_iou(preds_for_metrics, hard_masks)
+                    for i, name in enumerate(self._class_names):
+                        self.log(
+                            f"test_iou/{name}",
+                            per_class[i],
+                            on_step=False,
+                            on_epoch=True,
+                            sync_dist=True,
+                        )
 
         return loss
 
@@ -1379,6 +1389,8 @@ class Model(pl.LightningModule):
                 preds_for_metrics = self._prepare_preds_for_metrics(predicted_masks)
                 if preds_for_metrics is not None:
                     self.test_metrics.update(preds_for_metrics, hard_mask_i)
+                    if getattr(self, "_per_class_iou", None) is not None:
+                        self._per_class_iou.update(preds_for_metrics, hard_mask_i)
 
             if i < len(image_paths) and image_paths[i] is not None:
                 self._save_test_prediction(sw_output, image_paths[i])
@@ -1412,6 +1424,11 @@ class Model(pl.LightningModule):
         metrics = self.test_metrics.compute()
         self.log_dict(metrics, sync_dist=True)
         self.test_metrics.reset()
+        if getattr(self, "_per_class_iou", None) is not None:
+            per_class = self._per_class_iou.compute()
+            for i, name in enumerate(self._class_names):
+                self.log(f"test_iou/{name}", per_class[i], sync_dist=True)
+            self._per_class_iou.reset()
 
     # ------------------------------------------------------------------
     # Sliding-window helpers

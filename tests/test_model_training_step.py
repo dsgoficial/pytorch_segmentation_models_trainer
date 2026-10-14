@@ -201,6 +201,53 @@ class TestTrainingStepEndToEnd:
         assert isinstance(loss, torch.Tensor)
 
 
+# ─── Tests: test_step per-class IoU (regression — test_step never logged it) ──
+
+
+def _make_cfg_with_metrics_and_classes():
+    cfg = _make_cfg()
+    cfg.metrics = [
+        {
+            "_target_": "torchmetrics.JaccardIndex",
+            "task": "multiclass",
+            "num_classes": CLASSES,
+        }
+    ]
+    cfg.class_definitions = {"names": ["background", "foreground"]}
+    return cfg
+
+
+class TestTestStepPerClassIoU:
+    def test_logs_test_iou_per_class_when_configured(self):
+        cfg = _make_cfg_with_metrics_and_classes()
+        model = _make_model(cfg)
+        batch = _make_batch()
+        logged = {}
+        model.log = lambda name, value, **kwargs: logged.update({name: value})
+        model.log_dict = lambda metrics, **kwargs: logged.update(metrics)
+        model.test_step(batch, 0)
+        assert "test_iou/background" in logged
+        assert "test_iou/foreground" in logged
+
+    def test_no_per_class_log_when_class_definitions_absent(self):
+        cfg = _make_cfg()
+        cfg.metrics = [
+            {
+                "_target_": "torchmetrics.JaccardIndex",
+                "task": "multiclass",
+                "num_classes": CLASSES,
+            }
+        ]
+        model = _make_model(cfg)
+        assert model._per_class_iou is None
+        batch = _make_batch()
+        logged = {}
+        model.log = lambda name, value, **kwargs: logged.update({name: value})
+        model.log_dict = lambda metrics, **kwargs: logged.update(metrics)
+        model.test_step(batch, 0)  # must not raise
+        assert not any(k.startswith("test_iou/") for k in logged)
+
+
 # ─── Tests: set_encoder_trainable ─────────────────────────────────────────────
 
 

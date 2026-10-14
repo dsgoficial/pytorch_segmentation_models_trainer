@@ -176,6 +176,22 @@ class TestTestStepSlidingWindow:
         assert mock_metrics.update.call_count == B
         mock_metrics.assert_not_called()  # __call__ = update+compute must NOT run
 
+    def test_per_class_iou_update_called_per_image_when_present(self):
+        """SW mode: _per_class_iou.update() must be called once per image."""
+        model = _make_model(_sw_cfg_dict())
+        model.test_metrics = MagicMock()
+        mock_per_class = MagicMock()
+        model._per_class_iou = mock_per_class
+        self._run(model)
+        assert mock_per_class.update.call_count == B
+
+    def test_per_class_iou_not_called_when_none(self):
+        """SW mode: no AttributeError and no update() when _per_class_iou is None."""
+        model = _make_model(_sw_cfg_dict())
+        model.test_metrics = MagicMock()
+        assert getattr(model, "_per_class_iou", None) is None
+        self._run(model)  # must not raise
+
     def test_save_called_when_image_path_present(self):
         model = _make_model(_sw_cfg_dict())
         batch = _make_batch(with_image_path=True)
@@ -258,6 +274,32 @@ class TestOnTestEpochEnd:
         model.log_dict = MagicMock()
         model.on_test_epoch_end()
         assert call_order == ["compute", "reset"]
+
+    def test_per_class_iou_computed_logged_and_reset(self):
+        """Per-class IoU must be computed, logged under test_iou/<name>, and reset."""
+        model = _make_model(_sw_cfg_dict())
+        model.test_metrics = MagicMock()
+        model.test_metrics.compute.return_value = {}
+        mock_per_class = MagicMock()
+        mock_per_class.compute.return_value = torch.tensor([0.5, 0.8])
+        model._per_class_iou = mock_per_class
+        model._class_names = ["water", "forest"]
+        model.log = MagicMock()
+        model.on_test_epoch_end()
+        mock_per_class.compute.assert_called_once()
+        mock_per_class.reset.assert_called_once()
+        logged_keys = [c.args[0] for c in model.log.call_args_list]
+        assert "test_iou/water" in logged_keys
+        assert "test_iou/forest" in logged_keys
+
+    def test_per_class_iou_none_does_not_log(self):
+        model = _make_model(_sw_cfg_dict())
+        model.test_metrics = MagicMock()
+        model.test_metrics.compute.return_value = {}
+        assert getattr(model, "_per_class_iou", None) is None
+        model.log = MagicMock()
+        model.on_test_epoch_end()  # must not raise
+        model.log.assert_not_called()
 
 
 # ===========================================================================
