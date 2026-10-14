@@ -1,5 +1,9 @@
 # Unreleased
 
+## GFSS: uncertainty-gated abstention in HiSplit
+
+- `HiSplit(abstain_measure, abstain_threshold)`: wires the existing `abstention()` map into decoding — pixels it flags (base model predicts a mother whose split uncertainty, any key of `uncertainty()`, exceeds the threshold) get their novel children's logits forced to `-inf`, falling back to the mother's kept child. Independent of `widen`/`sweep`, requires `decoding: hierarchical`. `None` (default) keeps the previous behaviour unchanged. Example `conf/examples/gfss_hisplit.yaml`.
+
 ## Separability probe
 
 - `mode: separability-probe` (`tools/few_shot/separability_probe.py`, `SeparabilityProbeConfig`): per base seed × support episode, fits a logistic-regression and a class-mean cosine probe on the frozen decoder features of two classes (support, full labels) and writes AUROC / balanced accuracy / AP on the test windows. Example `conf/examples/separability_probe.yaml`.

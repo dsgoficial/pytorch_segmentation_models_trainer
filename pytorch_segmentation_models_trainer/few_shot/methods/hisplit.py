@@ -143,6 +143,15 @@ class HiSplit(BaseGFSSMethod):
       ``widen_<thr>`` (``variant_names``/``decode_variants``), giving the
       preservation × correction curve.
 
+    Uncertainty-gated abstention: ``abstain_measure`` (one of the keys of
+    ``uncertainty()``, e.g. ``split_entropy``, ``split_vacuity``,
+    ``dissonance``) makes the decoding call :meth:`abstention` and, on every
+    pixel it flags (base model predicts a mother whose split uncertainty
+    exceeds ``abstain_threshold``), forces the novel children's logits to
+    ``-inf`` — the decision falls back to the mother's own kept child, as
+    ``abstention`` already documents. Independent of ``widen``/``sweep`` and
+    applied after them; ``None`` (default) disables it.
+
     Args:
         q: ``proto``, ``proto_prob``, ``linear`` or ``trans``.
         tau: Cosine temperature of ``proto`` (and init of ``linear``).
@@ -162,6 +171,9 @@ class HiSplit(BaseGFSSMethod):
         novel_prior_weight: Prior weight of novel children in ``q``.
         sweep: Thresholds evaluated as extra decoding variants (needs
             ``widen`` other than ``none``).
+        abstain_measure: Uncertainty measure gating abstention (a key of
+            ``uncertainty()``), or ``None`` to disable it.
+        abstain_threshold: Threshold of ``abstain_measure``.
 
     Example YAML::
 
@@ -203,6 +215,8 @@ class HiSplit(BaseGFSSMethod):
         widen_threshold: float = 0.3,
         novel_prior_weight: float = 1.0,
         sweep: Sequence[float] = (),
+        abstain_measure: Optional[str] = None,
+        abstain_threshold: float = 0.3,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -220,8 +234,10 @@ class HiSplit(BaseGFSSMethod):
             raise ValueError(
                 f"widen must be 'none', 'prob' or 'dissonance', got {widen!r}."
             )
-        if (widen != "none" or sweep) and decoding != "hierarchical":
-            raise ValueError("widen/sweep require decoding: hierarchical.")
+        if (widen != "none" or sweep or abstain_measure is not None) and (
+            decoding != "hierarchical"
+        ):
+            raise ValueError("widen/sweep/abstain_measure require decoding: hierarchical.")
         if sweep and widen == "none":
             raise ValueError("sweep requires widen: prob or dissonance.")
         self.leak = bool(leak)
@@ -230,6 +246,8 @@ class HiSplit(BaseGFSSMethod):
         self.widen_threshold = float(widen_threshold)
         self.novel_prior_weight = float(novel_prior_weight)
         self.sweep = [float(t) for t in sweep]
+        self.abstain_measure = abstain_measure
+        self.abstain_threshold = float(abstain_threshold)
         self.q = q
         self.tau = float(tau)
         self.variance = variance
@@ -286,6 +304,13 @@ class HiSplit(BaseGFSSMethod):
             raise ValueError("negatives: all needs a single mother class.")
         if self.widen == "dissonance" and self.base_output != "evidential":
             raise ValueError("widen: dissonance requires an evidential base model.")
+        if self.abstain_measure is not None and self.abstain_measure not in (
+            available := self.uncertainty_names()
+        ):
+            raise ValueError(
+                f"abstain_measure {self.abstain_measure!r} not available "
+                f"for this configuration ({sorted(available)})."
+            )
         nb = hierarchy.num_base_classes
         self.novel_rows = [i for i, c in enumerate(self.child_classes) if c >= nb]
         mask = base_weight.new_zeros(n, nb)
@@ -729,6 +754,13 @@ class HiSplit(BaseGFSSMethod):
         for i, (child, mother) in enumerate(zip(self.child_classes, self.child_mother)):
             share = mass[:, i] / level[:, mother].clamp(min=_EPS)
             out[:, child] = log_level[:, mother] + self.decode_eps * (share - 1.0)
+        if self.abstain_measure is not None:
+            abstain = self.abstention(features, self.abstain_measure, self.abstain_threshold)
+            for i in self.novel_rows:
+                child = self.child_classes[i]
+                out[:, child] = torch.where(
+                    abstain, out.new_full((), float("-inf")), out[:, child]
+                )
         if threshold is None:
             return out
         top2 = level.topk(2, dim=1).indices

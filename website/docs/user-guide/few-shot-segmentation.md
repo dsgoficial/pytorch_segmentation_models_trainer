@@ -295,6 +295,21 @@ gfss:
 map itself: pixels predicted as a mother whose split uncertainty exceeds the
 threshold (their label stays the mother class).
 
+To make the decoding itself abstain (not just evaluate the would-be
+operating point), set `abstain_measure` (one of the maps above) and
+`abstain_threshold`: every pixel `abstention()` flags has its novel
+children's logits forced to `-inf`, so the prediction falls back to the
+mother's kept child. Independent of `widen`/`sweep`, requires
+`decoding: hierarchical`:
+
+```yaml
+gfss:
+  method:
+    q: edl
+    abstain_measure: split_vacuity
+    abstain_threshold: 0.1
+```
+
 `decoding: hierarchical` (default) keeps the base argmax and splits only the
 pixels predicted as a mother, so the predictions of all other classes are
 those of the base model (`locality` = 1 up to ties within `decode_eps`);

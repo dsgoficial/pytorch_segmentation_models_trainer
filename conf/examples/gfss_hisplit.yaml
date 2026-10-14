@@ -29,6 +29,11 @@ gfss:
     widen_threshold: 0.3
     novel_prior_weight: 1.0
     sweep: []                # e.g. [0.1, 0.2, 0.3, 0.4] with widen: prob -> test/var/widen_<t>/...
+    # uncertainty-gated abstention: forces the novel children to -inf where the
+    # chosen uncertainty map exceeds the threshold, falling back to the mother's
+    # kept child. Measure must be one of test/unc/... below (null disables it).
+    abstain_measure: null     # e.g. split_entropy | split_vacuity (q: edl) | dissonance (evidential base)
+    abstain_threshold: 0.3
 
 pl_trainer:
   max_steps: 0               # q: linear/trans/edl -> e.g. 100 (optimizer node)

@@ -397,6 +397,40 @@ class TestAbstentionMap:
             m.abstention(f, "dissonance", 0.5)
 
 
+class TestAbstainDecoding:
+    def test_abstain_sends_uncertain_pixels_back_to_the_kept_child(self):
+        f, masks, w, b = _data()
+        f = f + torch.randn_like(f)
+        ref = _ready(f, masks, w, b)
+        base = ref._base_probs(f).argmax(1)
+        u = ref.uncertainty(f)["split_entropy"]
+        abstained = (base == 1) & (u > 0.0)
+        assert abstained.any()
+        m = _ready(f, masks, w, b, abstain_measure="split_entropy", abstain_threshold=0.0)
+        pred = m(f).argmax(1)
+        assert (pred[abstained] == 1).all()
+        # threshold 1 -> normalised entropy never exceeds it, nothing abstains
+        m_hi = _ready(f, masks, w, b, abstain_measure="split_entropy", abstain_threshold=1.0)
+        assert torch.equal(m_hi(f).argmax(1), ref(f).argmax(1))
+
+    def test_abstain_requires_hierarchical_decoding(self):
+        with pytest.raises(ValueError, match="hierarchical"):
+            HiSplit(abstain_measure="split_entropy", decoding="flat")
+
+    def test_abstain_measure_validated_against_available_uncertainty(self):
+        f, masks, w, b = _data()
+        with pytest.raises(ValueError, match="dissonance"):
+            _ready(f, masks, w, b, abstain_measure="dissonance")  # not an evidential base
+
+    def test_abstain_dissonance_with_evidential_base(self):
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(abstain_measure="dissonance", abstain_threshold=0.0)
+        m.setup(h, w, b, NN, base_output="evidential")
+        m.init_from_support(f, masks)
+        assert m(f).shape == (2, 4, 6, 6)
+
+
 class TestComparisonOptions:
     """Options added to compare HiSplit with BCM / H²EDL."""
 
