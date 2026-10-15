@@ -1241,6 +1241,55 @@ class TestKFoldRunMethod(BasicTestCase):
             self.assertEqual(mock_instance.generate_and_save_folds.call_count, 1)
 
     @patch(_RUN_SINGLE_PATH)
+    def test_kfold_resume_detects_fold_count_change_and_recomputes_shifted_runs(
+        self, mock_rs
+    ):
+        """2 seeds x 3 folds run, then n_splits widened to 5: run_idx for
+        seed_idx=1 shifts (stride changes from 3 to 5 per seed), so the
+        stored result at those positions is for the wrong fold and must be
+        recomputed, not silently reused as if that fold were already done."""
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        fold_paths_3 = [
+            (Path(f"/fake/fold_{k}_train.csv"), Path(f"/fake/fold_{k}_val.csv"))
+            for k in range(3)
+        ]
+        with patch(_SPLITTER_PATH) as MockSplitter:
+            MockSplitter.return_value.generate_and_save_folds.return_value = (
+                fold_paths_3
+            )
+            cfg = self._make_cfg(seeds=[42, 101], n_splits=3, resume=True)
+            results = ExperimentsRunner(cfg).run()
+        assert [r.fold_idx for r in results] == [0, 1, 2, 0, 1, 2]
+        assert mock_rs.call_count == 6
+
+        mock_rs.reset_mock()
+        fold_paths_5 = [
+            (Path(f"/fake/fold_{k}_train.csv"), Path(f"/fake/fold_{k}_val.csv"))
+            for k in range(5)
+        ]
+        with patch(_SPLITTER_PATH) as MockSplitter:
+            MockSplitter.return_value.generate_and_save_folds.return_value = (
+                fold_paths_5
+            )
+            cfg = self._make_cfg(seeds=[42, 101], n_splits=5, resume=True)
+            results2 = ExperimentsRunner(cfg).run()
+
+        # seed_idx=0's folds 0-2 (run_idx 0-2) are unaffected by the stride
+        # change and must stay skipped; everything from run_idx 3 onward now
+        # means something different (seed_idx=1 starts at 1*5=5, not 3) and
+        # must be recomputed.
+        self.assertEqual(len(results2), 10)
+        recomputed_idx = sorted(c.args[0] for c in mock_rs.call_args_list)
+        self.assertEqual(recomputed_idx, [3, 4, 5, 6, 7, 8, 9])
+        by_idx = {r.run_idx: r.fold_idx for r in results2}
+        self.assertEqual(by_idx[5], 0)  # seed_idx=1, fold=0 now at run_idx 5
+        self.assertEqual(by_idx[9], 4)  # seed_idx=1, fold=4 now at run_idx 9
+
+    @patch(_RUN_SINGLE_PATH)
     def test_kfold_run_result_has_fold_idx(self, mock_rs):
         """RunResult.fold_idx contains the correct fold index for each run."""
         mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)

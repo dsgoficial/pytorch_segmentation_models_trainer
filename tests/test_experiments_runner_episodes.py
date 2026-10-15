@@ -164,6 +164,52 @@ class TestEpisodesLoop:
         assert [c["run_idx"] for c in calls2] == [5]
         assert len(results) == 8
 
+    def test_resume_detects_inserted_shots_and_recomputes_shifted_runs(
+        self, tmp_path
+    ):
+        """A shots list [1, 5] already run, then widened to [1, 3, 5]: run_idx
+        2-3 shift from meaning "shots=5" to "shots=3" — the stored result at
+        that index is for the wrong episode and must be recomputed, not
+        silently reused as if shots=3 were already done (and shots=5, now at
+        run_idx 4-5, must not be skipped as a false duplicate either)."""
+        rows = []
+        for draw in range(2):
+            for k in (1, 3, 5):
+                for w in range(k):
+                    rows.append(
+                        {
+                            "mask_path": f"k{k}_d{draw}_w{w}.tif",
+                            "row_off": 0,
+                            "col_off": 0,
+                            "width": 8,
+                            "height": 8,
+                            "shots": k,
+                            "draw": draw,
+                            "novel_class": 5,
+                            "novel_fraction": 0.5,
+                        }
+                    )
+        path = tmp_path / "episodes.csv"
+        pd.DataFrame(rows).to_csv(path, index=False)
+        cfg = _cfg(tmp_path, path)
+        cfg.experiments_runner.seeds = [42]
+
+        cfg.experiments_runner.episodes.shots = [1, 5]
+        calls = []
+        with patch(_RUN_SINGLE, side_effect=_fake_run_single(calls)):
+            results = ExperimentsRunner(cfg).run()
+        assert [r.shots for r in results] == [1, 1, 5, 5]
+
+        cfg.experiments_runner.episodes.shots = [1, 3, 5]
+        calls2 = []
+        with patch(_RUN_SINGLE, side_effect=_fake_run_single(calls2)):
+            results2 = ExperimentsRunner(cfg).run()
+
+        assert [r.shots for r in results2] == [1, 1, 3, 3, 5, 5]
+        # run_idx 2-3 (shots=3) and 4-5 (shots=5, shifted) must be recomputed;
+        # only run_idx 0-1 (shots=1, unchanged) are genuinely still valid.
+        assert sorted(c["run_idx"] for c in calls2) == [2, 3, 4, 5]
+
     def test_kfold_and_episodes_are_exclusive(self, tmp_path, episodes_csv):
         cfg = _cfg(tmp_path, episodes_csv, kfold={"n_splits": 2})
         with pytest.raises(ValueError, match="kfold.*episodes"):
