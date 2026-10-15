@@ -216,6 +216,27 @@ def test_logistic_regression_cv_skips_degenerate_training_folds():
     assert set(cv.le.classes_) == {0, 1}
 
 
+def test_logistic_regression_cv_handles_single_class_support():
+    """A K=1 support tile can be entirely covered by the novel class (no
+    "not novel" pixel at all) — the full y has a single class, not just one
+    CV fold. Must not crash LogisticRegression.fit; predict_proba should
+    always return that one class."""
+    from pytorch_segmentation_models_trainer.few_shot.methods.bcm import (
+        _LogisticRegressionCV,
+    )
+
+    X = np.arange(10).reshape(-1, 1).astype(float)
+    y = np.ones(10, dtype=int)
+    cv = _LogisticRegressionCV(
+        n_splits=5, n_C=3, sampling="us", rng=np.random.RandomState(0)
+    ).fit(X, y)
+    assert cv.clf is None
+    proba, flags = cv.predict_proba(X, n_classes=3)
+    np.testing.assert_array_equal(proba[:, 1], np.ones(10))
+    np.testing.assert_array_equal(proba[:, [0, 2]], np.zeros((10, 2)))
+    assert flags.tolist() == [0.0, 1.0, 0.0]
+
+
 def test_mapped_base_class_absent_from_query(toy):
     h, w, b, f, ms = toy
     m = _ready(toy)

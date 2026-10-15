@@ -94,6 +94,13 @@ class _LogisticRegressionCV:
     def fit(self, X: np.ndarray, y: np.ndarray) -> "_LogisticRegressionCV":
         self.le = LabelEncoder().fit(y)
         y = self.le.transform(y)
+        self.clf = None
+        if np.unique(y).size < 2:
+            # Degenerate support (e.g. a K=1 tile entirely covered by the
+            # novel class, so there is no "not novel" pixel at all): no
+            # LogisticRegression can be fit, there is nothing to
+            # discriminate. predict_proba always returns this one class.
+            return self
         Cs = np.logspace(-5, 5, self.n_C)
         scores = np.zeros((self.n_splits, self.n_C))
         for i, (tr, te) in enumerate(
@@ -123,9 +130,13 @@ class _LogisticRegressionCV:
     def predict_proba(self, X: np.ndarray, n_classes: int):
         """Probabilities over ``n_classes`` (zero for classes unseen in fit)
         and the 0/1 flags of the classes seen in fit (official
-        ``predict_proba_w_blank``)."""
+        ``predict_proba_w_blank``). ``clf is None`` (degenerate, single-class
+        support): probability 1 everywhere for that one class."""
         proba = np.zeros((X.shape[0], n_classes))
-        proba[:, self.le.classes_] = _softmax_decision(self.clf, X)
+        if self.clf is None:
+            proba[:, self.le.classes_[0]] = 1.0
+        else:
+            proba[:, self.le.classes_] = _softmax_decision(self.clf, X)
         flags = np.zeros(n_classes)
         flags[self.le.classes_] = 1.0
         return proba, flags
