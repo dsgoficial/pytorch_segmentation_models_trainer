@@ -100,6 +100,11 @@ class _LogisticRegressionCV:
             StratifiedKFold(n_splits=self.n_splits).split(X, y)
         ):
             X_tr, y_tr = _balance(X[tr], y[tr], self.sampling, self.rng)
+            if np.unique(y_tr).size < 2:
+                # Degenerate fold (e.g. K=1): no novel-class pixel survived
+                # the split, so LogisticRegression can't fit here. Leave its
+                # scores at 0 — same as "this fold has no opinion on C".
+                continue
             for j, C in enumerate(Cs):
                 clf = LogisticRegression(C=C).fit(X_tr, y_tr)
                 proba = _softmax_decision(clf, X[te])

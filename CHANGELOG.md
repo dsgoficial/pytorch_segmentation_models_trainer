@@ -3,6 +3,7 @@
 ## Bug fixes
 
 - `BCM` (`sampling: us`): `_balance` crashed with `ValueError: zero-size array to reduction operation minimum which has no identity` when a `StratifiedKFold` training split had zero novel-class pixels — possible with very small supports (`K=1`). Now a no-op (nothing to undersample) instead of raising.
+- `BCM`'s `_LogisticRegressionCV`: fixing the above surfaced a second, related crash — a fold whose training split ends up single-class (one novel-class pixel can land entirely in the held-out test portion with few positives) made `LogisticRegression.fit` raise `ValueError: ... needs samples of at least 2 classes`. That fold's scores are now left at 0 (skipped) instead of raising.
 
 ## GFSS: uncertainty-gated abstention in HiSplit
 

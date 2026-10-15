@@ -196,6 +196,26 @@ def test_balance_undersample_with_no_novel_pixels_is_a_no_op():
     np.testing.assert_array_equal(yb, y)
 
 
+def test_logistic_regression_cv_skips_degenerate_training_folds():
+    """A single novel-class pixel can land entirely in one fold's test split
+    (StratifiedKFold with few positives), leaving that fold's training data
+    with only class 0 — must not crash LogisticRegression.fit."""
+    import warnings
+
+    from pytorch_segmentation_models_trainer.few_shot.methods.bcm import (
+        _LogisticRegressionCV,
+    )
+
+    X = np.arange(10).reshape(-1, 1).astype(float)
+    y = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        cv = _LogisticRegressionCV(
+            n_splits=5, n_C=3, sampling="us", rng=np.random.RandomState(0)
+        ).fit(X, y)
+    assert set(cv.le.classes_) == {0, 1}
+
+
 def test_mapped_base_class_absent_from_query(toy):
     h, w, b, f, ms = toy
     m = _ready(toy)
