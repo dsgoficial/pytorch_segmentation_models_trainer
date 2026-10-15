@@ -184,6 +184,18 @@ def test_balance_oversamples_smaller_classes():
     assert np.bincount(yb).tolist() == [3, 3, 3]
 
 
+def test_balance_undersample_with_no_novel_pixels_is_a_no_op():
+    """K=1 CV folds can land every novel-class pixel in the held-out fold,
+    leaving a training split with only class 0 — must not crash."""
+    from pytorch_segmentation_models_trainer.few_shot.methods.bcm import _balance
+
+    X = np.arange(5).reshape(-1, 1)
+    y = np.zeros(5, dtype=int)
+    Xb, yb = _balance(X, y, "us", np.random.RandomState(0))
+    np.testing.assert_array_equal(Xb, X)
+    np.testing.assert_array_equal(yb, y)
+
+
 def test_mapped_base_class_absent_from_query(toy):
     h, w, b, f, ms = toy
     m = _ready(toy)

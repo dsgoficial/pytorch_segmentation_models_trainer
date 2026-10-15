@@ -1,5 +1,9 @@
 # Unreleased
 
+## Bug fixes
+
+- `BCM` (`sampling: us`): `_balance` crashed with `ValueError: zero-size array to reduction operation minimum which has no identity` when a `StratifiedKFold` training split had zero novel-class pixels — possible with very small supports (`K=1`). Now a no-op (nothing to undersample) instead of raising.
+
 ## GFSS: uncertainty-gated abstention in HiSplit
 
 - `HiSplit(abstain_measure, abstain_threshold)`: wires the existing `abstention()` map into decoding — pixels it flags (base model predicts a mother whose split uncertainty, any key of `uncertainty()`, exceeds the threshold) get their novel children's logits forced to `-inf`, falling back to the mother's kept child. Independent of `widen`/`sweep`, requires `decoding: hierarchical`. `None` (default) keeps the previous behaviour unchanged. Example `conf/examples/gfss_hisplit.yaml`.

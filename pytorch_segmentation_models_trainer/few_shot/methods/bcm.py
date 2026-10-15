@@ -61,7 +61,12 @@ def _balance(X, y, sampling: str, rng: np.random.RandomState):
     classes, counts = np.unique(y, return_counts=True)
     idx = []
     if sampling == "us":
-        n_min = counts[classes != 0].min()
+        pos_counts = counts[classes != 0]
+        if pos_counts.size == 0:
+            # No novel-class pixel in this split (K=1 CV folds can land every
+            # novel example in the held-out fold) — nothing to undersample.
+            return X, y
+        n_min = pos_counts.min()
         for c in classes:
             c_idx = np.where(y == c)[0]
             idx.append(c_idx[rng.permutation(len(c_idx))[:n_min]])
