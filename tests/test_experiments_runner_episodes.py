@@ -210,6 +210,30 @@ class TestEpisodesLoop:
         # only run_idx 0-1 (shots=1, unchanged) are genuinely still valid.
         assert sorted(c["run_idx"] for c in calls2) == [2, 3, 4, 5]
 
+    def test_resume_detects_widened_seeds_and_runs_new_seeds(
+        self, tmp_path, episodes_csv
+    ):
+        """seeds=[42] already run, then widened to [42, 7]: the new seed's
+        runs must actually execute on resume, not be silently skipped
+        forever because resume used to always trust the stored (narrower)
+        seed list instead of the current ``experiments_runner.seeds``."""
+        calls = []
+        with patch(_RUN_SINGLE, side_effect=_fake_run_single(calls)):
+            results = ExperimentsRunner(
+                _cfg(tmp_path, episodes_csv, seeds=[42])
+            ).run()
+        assert [r.seed for r in results] == [42, 42, 42, 42]
+
+        calls2 = []
+        with patch(_RUN_SINGLE, side_effect=_fake_run_single(calls2)):
+            results2 = ExperimentsRunner(
+                _cfg(tmp_path, episodes_csv, seeds=[42, 7])
+            ).run()
+
+        assert [r.seed for r in results2] == [42, 42, 42, 42, 7, 7, 7, 7]
+        # seed=42's runs are untouched; only the new seed=7 runs execute.
+        assert sorted(c["run_idx"] for c in calls2) == [4, 5, 6, 7]
+
     def test_kfold_and_episodes_are_exclusive(self, tmp_path, episodes_csv):
         cfg = _cfg(tmp_path, episodes_csv, kfold={"n_splits": 2})
         with pytest.raises(ValueError, match="kfold.*episodes"):

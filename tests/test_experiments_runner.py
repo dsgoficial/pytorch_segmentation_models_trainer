@@ -761,6 +761,48 @@ class TestStateFile(BasicTestCase):
         self.assertEqual(mock_rs.call_count, 2)
 
     @patch(_RUN_SINGLE_PATH)
+    def test_resume_detects_widened_seeds_and_runs_new_seeds(self, mock_rs):
+        """Widening experiments_runner.seeds on resume must actually run
+        the new seeds, not silently keep iterating the old (narrower)
+        stored seed list forever."""
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        results = ExperimentsRunner(self._make_cfg(seeds=[42], resume=True)).run()
+        self.assertEqual([r.seed for r in results], [42])
+
+        mock_rs.reset_mock()
+        results2 = ExperimentsRunner(
+            self._make_cfg(seeds=[42, 101], resume=True)
+        ).run()
+
+        self.assertEqual([r.seed for r in results2], [42, 101])
+        self.assertEqual(mock_rs.call_count, 1)  # only the new seed=101 ran
+
+    @patch(_RUN_SINGLE_PATH)
+    def test_resume_preserves_auto_generated_seeds_across_runs(self, mock_rs):
+        """n_runs (auto-generated seeds) must stay stable across resume —
+        they're random, so the stored list (not a fresh call to
+        _resolve_seeds()) is the only way to keep them identical on a
+        second invocation."""
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        ExperimentsRunner(self._make_cfg(n_runs=3, resume=True)).run()
+        with open(os.path.join(self.tmp, "runner_state.json")) as f:
+            seeds_after_first_run = json.load(f)["all_seeds"]
+
+        mock_rs.reset_mock()
+        results2 = ExperimentsRunner(self._make_cfg(n_runs=3, resume=True)).run()
+
+        self.assertEqual([r.seed for r in results2], seeds_after_first_run)
+        mock_rs.assert_not_called()  # everything already done, nothing re-ran
+
+    @patch(_RUN_SINGLE_PATH)
     def test_resume_uses_seeds_from_state_not_new_random(self, mock_rs):
         """When n_runs is used and we resume, seeds come from state file."""
         mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
@@ -1288,6 +1330,44 @@ class TestKFoldRunMethod(BasicTestCase):
         by_idx = {r.run_idx: r.fold_idx for r in results2}
         self.assertEqual(by_idx[5], 0)  # seed_idx=1, fold=0 now at run_idx 5
         self.assertEqual(by_idx[9], 4)  # seed_idx=1, fold=4 now at run_idx 9
+
+    @patch(_RUN_SINGLE_PATH)
+    def test_kfold_resume_detects_widened_seeds_and_runs_new_seeds(self, mock_rs):
+        """Widening experiments_runner.seeds on resume (fold count
+        unchanged) must actually run the new seed's folds, not silently
+        keep iterating the old (narrower) stored seed list forever."""
+        mock_rs.side_effect = _make_run_single_se(output_base_dir=self.tmp)
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.experiments_runner import (
+            ExperimentsRunner,
+        )
+
+        fold_paths = [
+            (Path(f"/fake/fold_{k}_train.csv"), Path(f"/fake/fold_{k}_val.csv"))
+            for k in range(3)
+        ]
+        with patch(_SPLITTER_PATH) as MockSplitter:
+            MockSplitter.return_value.generate_and_save_folds.return_value = (
+                fold_paths
+            )
+            cfg = self._make_cfg(seeds=[42], n_splits=3, resume=True)
+            results = ExperimentsRunner(cfg).run()
+        assert [r.fold_idx for r in results] == [0, 1, 2]
+        assert mock_rs.call_count == 3
+
+        mock_rs.reset_mock()
+        with patch(_SPLITTER_PATH) as MockSplitter:
+            MockSplitter.return_value.generate_and_save_folds.return_value = (
+                fold_paths
+            )
+            cfg2 = self._make_cfg(seeds=[42, 101], n_splits=3, resume=True)
+            results2 = ExperimentsRunner(cfg2).run()
+
+        self.assertEqual(len(results2), 6)
+        recomputed_idx = sorted(c.args[0] for c in mock_rs.call_args_list)
+        self.assertEqual(recomputed_idx, [3, 4, 5])  # only seed=101's folds
+        seeds_by_idx = {r.run_idx: r.seed for r in results2}
+        self.assertEqual(seeds_by_idx[0], 42)
+        self.assertEqual(seeds_by_idx[3], 101)
 
     @patch(_RUN_SINGLE_PATH)
     def test_kfold_run_result_has_fold_idx(self, mock_rs):

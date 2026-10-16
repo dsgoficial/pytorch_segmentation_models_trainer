@@ -270,6 +270,26 @@ class ExperimentsRunner:
             return list(seeds)
         return [secrets.randbelow(2**31) for _ in range(self._n_runs())]
 
+    def _resolve_all_seeds(self, stored_seeds: Optional[List[int]]) -> List[int]:
+        """Seed list for this run, reconciling stored state with the
+        current request.
+
+        Explicit ``experiments_runner.seeds`` always wins over whatever was
+        previously stored: resuming after widening the list (e.g. adding
+        more seeds for statistical power) must pick up the new seeds, not
+        silently keep iterating the old (shorter) list forever — the
+        per-``run_idx`` staleness checks in each loop still protect any
+        *existing* position whose seed no longer matches. Auto-generated
+        seeds (``seeds`` omitted, ``n_runs`` used) have no such "current
+        request" to prefer — they're random, so the stored list is the only
+        way to keep them stable across resumes.
+        """
+        if self.runner_cfg.get("seeds", None) is not None:
+            return self._resolve_seeds()
+        if stored_seeds is not None:
+            return list(stored_seeds)
+        return self._resolve_seeds()
+
     def _resolve_overwrite(self) -> Union[bool, Set[int]]:
         """Return the resolved ``overwrite`` setting.
 
@@ -684,30 +704,43 @@ class ExperimentsRunner:
 
         if resume and state_exists:
             state = self._load_state()
-            all_seeds = state["all_seeds"]
+            stored_seeds = state["all_seeds"]
             completed_results = [RunResult(**r) for r in state["completed_runs"]]
+            all_seeds = self._resolve_all_seeds(stored_seeds)
             logger.info(
                 "ExperimentsRunner — resuming: %d/%d runs already complete.",
                 len(completed_results),
                 len(all_seeds),
             )
         else:
-            all_seeds = self._resolve_seeds()
+            all_seeds = self._resolve_all_seeds(None)
             completed_results = []
 
-        completed_indices = {r.run_idx for r in completed_results}
+        completed_by_idx = {r.run_idx: r for r in completed_results}
         results: List[RunResult] = list(completed_results)
 
         for run_idx, seed in enumerate(all_seeds):
             force = self._should_force(run_idx, overwrite)
-            if run_idx in completed_indices and not force:
+            prior = completed_by_idx.get(run_idx)
+            stale = prior is not None and prior.seed != seed
+            if prior is not None and stale:
+                logger.info(
+                    "ExperimentsRunner — run %d now requests seed=%d but the "
+                    "stored result was seed=%s (experiments_runner.seeds "
+                    "changed) — recomputing.",
+                    run_idx,
+                    seed,
+                    prior.seed,
+                )
+                results = [r for r in results if r.run_idx != run_idx]
+            elif prior is not None and not force:
                 logger.info(
                     "ExperimentsRunner — run %d (seed=%d) already done, skipping.",
                     run_idx,
                     seed,
                 )
                 continue
-            if run_idx in completed_indices and force:
+            elif prior is not None and force:
                 logger.info(
                     "ExperimentsRunner — run %d (seed=%d) forced via overwrite, "
                     "re-running.",
@@ -756,15 +789,16 @@ class ExperimentsRunner:
 
         if resume and state_exists:
             state = self._load_state()
-            all_seeds = state["all_seeds"]
+            stored_seeds = state["all_seeds"]
             completed_results = [RunResult(**r) for r in state["completed_runs"]]
+            all_seeds = self._resolve_all_seeds(stored_seeds)
             logger.info(
                 "ExperimentsRunner — kfold resuming: %d/%d runs already complete.",
                 len(completed_results),
                 len(all_seeds) * n_folds,
             )
         else:
-            all_seeds = self._resolve_seeds()
+            all_seeds = self._resolve_all_seeds(None)
             completed_results = []
 
         completed_by_idx = {r.run_idx: r for r in completed_results}
@@ -776,14 +810,19 @@ class ExperimentsRunner:
                 run_idx = seed_idx * n_folds + fold_idx
                 force = self._should_force(run_idx, overwrite)
                 prior = completed_by_idx.get(run_idx)
-                stale = prior is not None and prior.fold_idx != fold_idx
+                stale = prior is not None and (
+                    prior.fold_idx != fold_idx or prior.seed != seed
+                )
                 if prior is not None and stale:
                     logger.info(
-                        "ExperimentsRunner — run %d now requests fold=%d but "
-                        "the stored result was fold=%s (the fold count "
+                        "ExperimentsRunner — run %d now requests seed=%d "
+                        "fold=%d but the stored result was seed=%s fold=%s "
+                        "(experiments_runner.seeds or the fold count "
                         "changed) — recomputing.",
                         run_idx,
+                        seed,
                         fold_idx,
+                        prior.seed,
                         prior.fold_idx,
                     )
                     results = [r for r in results if r.run_idx != run_idx]
@@ -900,11 +939,12 @@ class ExperimentsRunner:
         overwrite = self._resolve_overwrite()
         if resume and os.path.exists(self._state_path()):
             state = self._load_state()
-            all_seeds = state["all_seeds"]
+            stored_seeds = state["all_seeds"]
             results = [RunResult(**r) for r in state["completed_runs"]]
         else:
-            all_seeds = self._resolve_seeds()
+            stored_seeds = None
             results = []
+        all_seeds = self._resolve_all_seeds(stored_seeds)
         completed_by_idx = {r.run_idx: r for r in results}
 
         for seed_idx, seed in enumerate(all_seeds):
@@ -913,16 +953,21 @@ class ExperimentsRunner:
                 force = self._should_force(run_idx, overwrite)
                 prior = completed_by_idx.get(run_idx)
                 stale = prior is not None and (
-                    prior.shots != shots or prior.draw != draw
+                    prior.shots != shots
+                    or prior.draw != draw
+                    or prior.seed != seed
                 )
                 if prior is not None and stale:
                     logger.info(
-                        "ExperimentsRunner — run %d now requests shots=%d "
-                        "draw=%d but the stored result was shots=%s draw=%s "
-                        "(the episodes list changed) — recomputing.",
+                        "ExperimentsRunner — run %d now requests seed=%d "
+                        "shots=%d draw=%d but the stored result was seed=%s "
+                        "shots=%s draw=%s (experiments_runner.seeds or the "
+                        "episodes list changed) — recomputing.",
                         run_idx,
+                        seed,
                         shots,
                         draw,
+                        prior.seed,
                         prior.shots,
                         prior.draw,
                     )

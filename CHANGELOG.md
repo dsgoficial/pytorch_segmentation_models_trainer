@@ -1,5 +1,9 @@
 # Unreleased
 
+## Bug fix: ExperimentsRunner ignored a widened `seeds` list on resume
+
+- `_run_seed_loop`/`_run_kfold_loop`/`_run_episodes_loop`: on resume, `all_seeds` was always read from the stored `runner_state.json`, even when `experiments_runner.seeds` had been explicitly widened since (e.g. `[42]` → `[42, 123, 456, 789, 1024]` to add seeds for statistical power). The new seeds were silently never run — every resumed invocation kept iterating only the old, narrower stored list forever, with the step reporting `done` the whole time. Auto-generated seeds (`seeds` omitted, `n_runs` used) still reuse the stored list as before — they're random, so that's the only way to keep them stable across resumes. New `_resolve_all_seeds` helper picks the current explicit `seeds` over the stored list when one is given; the per-position staleness checks (already comparing `shots`/`draw`/`fold_idx`) now also compare `seed`, so a changed seed order/removal (not just an append) is recomputed instead of silently mismatched.
+
 ## Performance: PipelineRunner preflight runs config checks concurrently
 
 - `PipelineRunner._preflight`: validated every step's config with one blocking `subprocess.run(... mode=validate-config)` after another — each cold-starts a fresh `pytorch-smt` process (importing torch/lightning/hydra alone takes several seconds), so a ~100-step pipeline spent several minutes on preflight alone before the first real step could start, every time the pipeline was (re)launched. The wait is on a child process, not CPU-bound Python, so it now runs on a bounded `ThreadPoolExecutor` (8 workers) instead of sequentially; failures are still reported in step order (not completion order) so the error message stays reproducible.
