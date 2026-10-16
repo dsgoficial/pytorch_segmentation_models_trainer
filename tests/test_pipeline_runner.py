@@ -559,6 +559,98 @@ class TestPreflight(BasicTestCase):
 
         self.assertEqual(mock_preflight.call_count, 1)
 
+    @patch(_RUN_STEP_PATH)
+    @patch(_PREFLIGHT_PATH)
+    def test_preflight_runs_checks_concurrently(self, mock_preflight, mock_run):
+        """Each check cold-starts a pytorch-smt process and blocks on it —
+        a thread pool should overlap the waits instead of doing them one
+        at a time."""
+        import time
+
+        def slow_ok(cmd):
+            time.sleep(0.3)
+            return _ok()
+
+        mock_preflight.side_effect = slow_ok
+        mock_run.return_value = 0
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.pipeline_runner import (
+            PipelineRunner,
+        )
+
+        steps = [_make_step(n, config_name=f"cfg_{n}") for n in "abcdefghij"]
+        cfg = _make_pipeline_cfg(steps, self.tmp, preflight=True)
+
+        start = time.perf_counter()
+        PipelineRunner(cfg).run()
+        elapsed = time.perf_counter() - start
+
+        self.assertEqual(mock_preflight.call_count, 10)
+        # sequential would take >= 10 * 0.3s = 3.0s; overlapped (<=8 workers,
+        # two rounds) takes ~0.6s plus overhead.
+        self.assertLess(elapsed, 1.5)
+
+    @patch(_RUN_STEP_PATH)
+    @patch(_PREFLIGHT_PATH)
+    def test_preflight_errors_reported_in_original_step_order(
+        self, mock_preflight, mock_run
+    ):
+        """Errors are listed by step order, not by completion order, even
+        when a later step's check finishes before an earlier one's."""
+        import time
+
+        def side_effect(cmd):
+            if "cfg_a" in cmd:
+                time.sleep(0.2)  # finishes after "c" despite running first
+                return _fail("err-a")
+            if "cfg_c" in cmd:
+                return _fail("err-c")
+            return _ok()
+
+        mock_preflight.side_effect = side_effect
+        from pytorch_segmentation_models_trainer.tools.experiments_runner.pipeline_runner import (
+            PipelineRunner,
+        )
+
+        steps = [
+            _make_step("a", config_name="cfg_a"),
+            _make_step("b", config_name="cfg_b"),
+            _make_step("c", config_name="cfg_c"),
+        ]
+        cfg = _make_pipeline_cfg(steps, self.tmp, preflight=True)
+
+        with self.assertRaises(RuntimeError) as ctx:
+            PipelineRunner(cfg).run()
+
+        msg = str(ctx.exception)
+        self.assertIn("- a:", msg)
+        self.assertIn("- c:", msg)
+        self.assertLess(msg.index("- a:"), msg.index("- c:"))
+
+    @patch(_RUN_STEP_PATH)
+    @patch(_PREFLIGHT_PATH)
+    def test_preflight_caps_worker_count(self, mock_preflight, mock_run):
+        mock_preflight.return_value = _ok()
+        mock_run.return_value = 0
+        from pytorch_segmentation_models_trainer.tools.experiments_runner import (
+            pipeline_runner as pr_module,
+        )
+
+        steps = [_make_step(f"s{i}", config_name=f"cfg{i}") for i in range(20)]
+        cfg = _make_pipeline_cfg(steps, self.tmp, preflight=True)
+
+        real_executor = pr_module.ThreadPoolExecutor
+        captured = {}
+
+        def spy_executor(max_workers=None, **kw):
+            captured["max_workers"] = max_workers
+            return real_executor(max_workers=max_workers, **kw)
+
+        with patch.object(pr_module, "ThreadPoolExecutor", side_effect=spy_executor):
+            pr_module.PipelineRunner(cfg).run()
+
+        self.assertEqual(captured["max_workers"], pr_module._PREFLIGHT_MAX_WORKERS)
+        self.assertLess(captured["max_workers"], 20)
+
 
 class TestDagValidation(BasicTestCase):
     def _import(self):

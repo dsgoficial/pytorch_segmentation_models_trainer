@@ -24,6 +24,7 @@ import queue
 import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Union
 
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 _STATE_FILE = "pipeline_state.json"
 _LOG_DIR = "logs"
+_PREFLIGHT_MAX_WORKERS = 8
 
 
 class _ResourcePool:
@@ -399,21 +401,41 @@ class PipelineRunner:
         (non-Hydra CLIs, e.g. ``pytorch-smt-tools``) are skipped — they
         don't understand ``mode=validate-config``.
 
+        Each check is a blocking ``subprocess.run`` that cold-starts a new
+        ``pytorch-smt`` process (import of torch/lightning/hydra alone is
+        several seconds) — I/O-bound waiting on a child process, not
+        CPU-bound Python, so a thread pool parallelizes them safely without
+        needing multiprocessing. With ~100 steps this turned several minutes
+        of strictly sequential cold starts into one bounded batch.
+
         Raises:
             RuntimeError: If any enabled step fails to compose, listing
-                every failure (not just the first).
+                every failure (not just the first), in step order.
         """
-        errors = []
-        for step in steps:
-            if not step.get("enabled", True):
-                continue
-            if not self._is_hydra_step(step):
-                continue
-            cmd = self._build_command(step) + ["mode=validate-config"]
-            proc = self._run_preflight_check(cmd)
-            if proc.returncode != 0:
-                stderr = getattr(proc, "stderr", "") or ""
-                errors.append((step.name, stderr[-4000:]))
+        jobs = [
+            step
+            for step in steps
+            if step.get("enabled", True) and self._is_hydra_step(step)
+        ]
+        results: Dict[str, "subprocess.CompletedProcess"] = {}
+        if jobs:
+            max_workers = min(len(jobs), _PREFLIGHT_MAX_WORKERS)
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                future_to_name = {
+                    pool.submit(
+                        self._run_preflight_check,
+                        self._build_command(step) + ["mode=validate-config"],
+                    ): step.name
+                    for step in jobs
+                }
+                for future in as_completed(future_to_name):
+                    results[future_to_name[future]] = future.result()
+
+        errors = [
+            (step.name, (getattr(results[step.name], "stderr", "") or "")[-4000:])
+            for step in jobs
+            if results[step.name].returncode != 0
+        ]
 
         if errors:
             detail = "\n".join(f"- {name}: {err}" for name, err in errors)
