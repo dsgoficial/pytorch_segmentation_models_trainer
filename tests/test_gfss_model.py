@@ -8,7 +8,7 @@ import pytest
 import segmentation_models_pytorch as smp
 import torch
 from omegaconf import OmegaConf
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, TensorDataset
 
 from pytorch_segmentation_models_trainer.few_shot.base_method import BaseGFSSMethod
 from pytorch_segmentation_models_trainer.few_shot.methods.base_only import BaseOnly
@@ -267,6 +267,59 @@ class TestSteps:
                 m.test_step(batch, i)
         assert m.method.adapt_calls == 2
         assert m.method.init_calls == 1
+
+
+class TestFrozenBackboneCaching:
+    """``train_dataloader``/``training_step`` reuse ``_get_support``'s cached
+    backbone features instead of recomputing them every step (support has
+    no random augmentation, so the features are identical every time)."""
+
+    def test_train_dataloader_batches_match_cached_support(self, base_ckpt):
+        m = GFSSModel(_cfg(base_ckpt[0], method="tests.test_gfss_model.TrainableProbe"))
+        feats, masks = m._get_support()
+        batch = next(iter(m.train_dataloader()))
+        b_feats, b_masks = batch
+        n = b_feats.shape[0]
+        torch.testing.assert_close(b_feats, feats[:n])
+        torch.testing.assert_close(b_masks, masks[:n])
+
+    def test_training_step_does_not_recompute_backbone_per_step(self, base_ckpt):
+        m = GFSSModel(_cfg(base_ckpt[0], method="tests.test_gfss_model.TrainableProbe"))
+        calls = []
+        original = m._features_and_masks
+
+        def spy(images, masks):
+            calls.append(images.shape[0])
+            return original(images, masks)
+
+        m._features_and_masks = spy
+        loader = m.train_dataloader()
+        for _ in range(3):  # 3 "epochs" over the 2-batch loader, like max_steps
+            for i, batch in enumerate(loader):
+                m.training_step(batch, i)
+        # only _get_support's own internal loader (batch_size=2 over 4
+        # images) ever calls _features_and_masks, regardless of how many
+        # training steps/epochs run afterwards.
+        assert calls == [2, 2]
+
+    def test_training_step_uses_fast_path_when_backbone_frozen(self, base_ckpt):
+        m = GFSSModel(_cfg(base_ckpt[0], method="tests.test_gfss_model.TrainableProbe"))
+        assert m._frozen_backbone_fast_path()
+
+    def test_trainable_backbone_disables_fast_path_and_dataloader(
+        self, base_ckpt, tmp_path
+    ):
+        cfg = _cfg(
+            base_ckpt[0],
+            method="pytorch_segmentation_models_trainer.few_shot.methods.finetune.FineTune",
+            pl_trainer={"default_root_dir": str(tmp_path)},
+        )
+        cfg.gfss.backbone = {"trainable": "decoder"}
+        cfg.gfss.method.train_rows = "all"
+        cfg.gfss.method.kd_weight = 1.0
+        m = GFSSModel(cfg)
+        assert not m._frozen_backbone_fast_path()
+        assert not isinstance(m.train_dataloader().dataset, TensorDataset)
 
 
 class TestTrainIntegration:

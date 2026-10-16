@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from torch import Tensor
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 
 from pytorch_segmentation_models_trainer.config_definitions.few_shot_config import (
     GFSSCheckpointConfig,
@@ -276,6 +276,20 @@ class GFSSModel(Model):
             self.method.init_from_support(*self._get_support())
             self._gfss_initialised.fill_(True)
 
+    def _frozen_backbone_fast_path(self) -> bool:
+        """Whether ``training_step`` can reuse ``_get_support``'s cached
+        backbone features instead of recomputing them from raw images.
+
+        Only safe when the backbone is frozen (``base_reference is None``,
+        so the per-step features are identical to the cached support
+        features) and the method doesn't need a snapshot of ``ref`` on raw
+        images for KD (``requires_snapshot``, used by the fine-tuning
+        baselines, which always train the backbone anyway).
+        """
+        return self.base_reference is None and not getattr(
+            self.method, "requires_snapshot", False
+        )
+
     def forward(self, x: Tensor) -> Tensor:
         """Logits over all classes at the input resolution."""
         return self.model.upsample(self.method(self.model.features(x)), x.shape[-2:])
@@ -287,16 +301,48 @@ class GFSSModel(Model):
     def on_fit_start(self) -> None:
         self._ensure_initialised()
 
+    def train_dataloader(self):
+        """Backed by cached support features when the backbone is frozen.
+
+        The support set's augmentation is deterministic (normalize only), so
+        its backbone features are identical on every epoch; with a frozen
+        backbone (``q: linear/trans/edl/leak`` etc.) the base ``training_step``
+        otherwise re-ran the full backbone forward pass (and the raster
+        read it entails) on every one of ``max_steps`` optimizer steps even
+        though the support set itself has only a handful of images. Reusing
+        ``_get_support()``'s cache here removes that redundant work while
+        keeping the exact same batch_size/shuffle/sampler/drop_last schedule.
+        """
+        if not self._frozen_backbone_fast_path():
+            return super().train_dataloader()
+        feats, masks = self._get_support()
+        dataset = TensorDataset(feats.detach(), masks.detach())
+        dl_cfg = self.cfg.train_dataset.data_loader
+        sampler = self._make_weighted_sampler(dl_cfg)
+        shuffle = dl_cfg.shuffle if sampler is None else False
+        return DataLoader(
+            dataset,
+            batch_size=self.cfg.hyperparameters.batch_size,
+            shuffle=shuffle,
+            sampler=sampler,
+            drop_last=(dl_cfg.drop_last if "drop_last" in dl_cfg else True),
+            generator=self._make_dataloader_generator(),
+        )
+
     def training_step(self, batch, batch_idx):
-        images, masks = self._unpack_batch(batch)
-        feats, small = self._features_and_masks(images, masks)
-        if getattr(self.method, "requires_snapshot", False):
-            ref = self._reference()
-            with torch.no_grad():
-                snapshot = ref.linear(ref.features(images), ref.weight, ref.bias)
-            loss = self.method.support_loss(feats, small, snapshot_logits=snapshot)
-        else:
+        if self._frozen_backbone_fast_path():
+            feats, small = self._unpack_batch(batch)
             loss = self.method.support_loss(feats, small)
+        else:
+            images, masks = self._unpack_batch(batch)
+            feats, small = self._features_and_masks(images, masks)
+            if getattr(self.method, "requires_snapshot", False):
+                ref = self._reference()
+                with torch.no_grad():
+                    snapshot = ref.linear(ref.features(images), ref.weight, ref.bias)
+                loss = self.method.support_loss(feats, small, snapshot_logits=snapshot)
+            else:
+                loss = self.method.support_loss(feats, small)
         if loss is None:
             return None
         self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True)

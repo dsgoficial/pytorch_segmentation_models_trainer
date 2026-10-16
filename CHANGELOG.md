@@ -1,5 +1,9 @@
 # Unreleased
 
+## Performance: GFSS adaptation no longer re-runs the frozen backbone every training step
+
+- `GFSSModel.training_step`: for every method with a frozen backbone (`gfss.backbone.trainable: none`, the default — all `HiSplit` variants, `BCM`, prototype-based methods, etc.), each of the `pl_trainer.max_steps` optimizer steps re-ran the full base backbone forward pass (ResNet/UPerNet) plus the raster read on whatever mini-batch the train `DataLoader` yielded, even though the support set has no random augmentation (`Normalize` + `ToTensorV2` only) and `_get_support()` already caches those exact features for `init_from_support`. With small supports (`K` ≤ 20) looped over `max_steps: 100-200` times, this meant hundreds of redundant backbone passes per run and was the dominant cost of `q: linear/trans/edl/leak` (CPU/IO-bound, not GPU-bound — confirmed via 0% sustained GPU utilization during training). `train_dataloader` now serves batches straight from `_get_support()`'s cached tensors (same `batch_size`/`shuffle`/`sampler`/`drop_last` schedule) and `training_step` consumes them directly, skipping `_features_and_masks` entirely, whenever the backbone is frozen and the method doesn't need a raw-image KD snapshot (`requires_snapshot`, only ever true together with a trainable backbone). The fine-tuning baselines (`backbone.trainable != none`) are unaffected — they still need gradients through the backbone on raw images every step.
+
 ## Bug fixes
 
 - `BCM` (`sampling: us`): `_balance` crashed with `ValueError: zero-size array to reduction operation minimum which has no identity` when a `StratifiedKFold` training split had zero novel-class pixels — possible with very small supports (`K=1`). Now a no-op (nothing to undersample) instead of raising.
