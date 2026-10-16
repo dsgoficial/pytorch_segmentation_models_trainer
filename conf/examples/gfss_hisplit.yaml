@@ -34,6 +34,10 @@ gfss:
     # kept child. Measure must be one of test/unc/... below (null disables it).
     abstain_measure: null     # e.g. split_entropy | split_vacuity (q: edl) | dissonance (evidential base)
     abstain_threshold: 0.3
+    # continuous alternative to abstain_measure: blends q towards the kept
+    # child by (1 - measure(x)) everywhere, instead of an all-or-nothing
+    # threshold; works with decoding: flat too. null disables it.
+    confidence_weight_measure: null  # e.g. split_entropy | split_vacuity (q: edl) | dissonance (evidential base)
 
 pl_trainer:
   max_steps: 0               # q: linear/trans/edl -> e.g. 100 (optimizer node)

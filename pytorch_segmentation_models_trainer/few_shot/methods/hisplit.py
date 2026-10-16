@@ -152,6 +152,18 @@ class HiSplit(BaseGFSSMethod):
     ``abstention`` already documents. Independent of ``widen``/``sweep`` and
     applied after them; ``None`` (default) disables it.
 
+    Confidence-weighted split: ``confidence_weight_measure`` (a key of
+    ``uncertainty()``) replaces ``abstain``'s hard cutoff with a continuous
+    blend, for every pixel of every mother (not just where ``abstain``'s
+    threshold happens to fire): ``q' = w·q + (1−w)·e_kept``, ``w = 1 −
+    measure(x) ∈ [0, 1]`` and ``e_kept`` the one-hot of the mother's own
+    kept child (same semantics as ``abstention``'s fallback, but smooth
+    instead of a cliff at a threshold). Applied to every consumer of ``q``
+    (:meth:`split_probabilities`, hierarchical decoding), so it works with
+    ``decoding: flat`` too, unlike ``widen``/``abstain_measure``. Composes
+    with ``abstain_measure``/``widen`` (applied before them); ``None``
+    (default) disables it.
+
     Args:
         q: ``proto``, ``proto_prob``, ``linear`` or ``trans``.
         tau: Cosine temperature of ``proto`` (and init of ``linear``).
@@ -174,6 +186,9 @@ class HiSplit(BaseGFSSMethod):
         abstain_measure: Uncertainty measure gating abstention (a key of
             ``uncertainty()``), or ``None`` to disable it.
         abstain_threshold: Threshold of ``abstain_measure``.
+        confidence_weight_measure: Uncertainty measure continuously
+            blending ``q`` towards the mother's kept child (a key of
+            ``uncertainty()``), or ``None`` to disable it.
 
     Example YAML::
 
@@ -217,6 +232,7 @@ class HiSplit(BaseGFSSMethod):
         sweep: Sequence[float] = (),
         abstain_measure: Optional[str] = None,
         abstain_threshold: float = 0.3,
+        confidence_weight_measure: Optional[str] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -248,6 +264,7 @@ class HiSplit(BaseGFSSMethod):
         self.sweep = [float(t) for t in sweep]
         self.abstain_measure = abstain_measure
         self.abstain_threshold = float(abstain_threshold)
+        self.confidence_weight_measure = confidence_weight_measure
         self.q = q
         self.tau = float(tau)
         self.variance = variance
@@ -311,8 +328,19 @@ class HiSplit(BaseGFSSMethod):
                 f"abstain_measure {self.abstain_measure!r} not available "
                 f"for this configuration ({sorted(available)})."
             )
+        if self.confidence_weight_measure is not None and (
+            self.confidence_weight_measure not in self.uncertainty_names()
+        ):
+            raise ValueError(
+                f"confidence_weight_measure {self.confidence_weight_measure!r} not "
+                f"available for this configuration ({sorted(self.uncertainty_names())})."
+            )
         nb = hierarchy.num_base_classes
         self.novel_rows = [i for i, c in enumerate(self.child_classes) if c >= nb]
+        self.kept_row: Dict[int, int] = {
+            m: i for i, (c, m) in enumerate(zip(self.child_classes, self.child_mother))
+            if c == m
+        }
         mask = base_weight.new_zeros(n, nb)
         for i in self.novel_rows:
             mask[i] = 1.0
@@ -489,6 +517,22 @@ class HiSplit(BaseGFSSMethod):
             out[:, idx] = q[:, idx] / q[:, idx].sum(1, keepdim=True)
         return out
 
+    def _apply_confidence_weight(self, features: Tensor, q: Tensor) -> Tensor:
+        """Continuously blend ``q`` towards each mother's kept child by
+        ``1 − confidence_weight_measure(x)`` (see class doc); identity when
+        ``confidence_weight_measure`` is ``None``."""
+        if self.confidence_weight_measure is None:
+            return q
+        maps = self.uncertainty(features)
+        w = (1.0 - maps[self.confidence_weight_measure]).clamp(0.0, 1.0).unsqueeze(1)
+        out = q.clone()
+        for mother, idx in self._groups():
+            kept_local = idx.index(self.kept_row[mother])
+            e_kept = torch.zeros_like(q[:, idx])
+            e_kept[:, kept_local] = 1.0
+            out[:, idx] = w * q[:, idx] + (1.0 - w) * e_kept
+        return out
+
     def leak_coefficients(self) -> Optional[Tensor]:
         """``t[child, base_class]`` (zero outside novel rows), or ``None``."""
         if not self.leak:
@@ -521,6 +565,7 @@ class HiSplit(BaseGFSSMethod):
             q = self._q(
                 self._scores(features, *self._current_params(features.shape[0]))
             )
+            q = self._apply_confidence_weight(features, q)
         level, mass = self._masses(self._base_probs(features), q)
         out = level.new_zeros(
             level.shape[0], self.hierarchy.num_classes, *level.shape[2:]
@@ -732,6 +777,7 @@ class HiSplit(BaseGFSSMethod):
     def _decode(self, features: Tensor, threshold: Optional[float]) -> Tensor:
         """Hierarchical-decoding logits; ``threshold`` enables widening."""
         q = self._q(self._scores(features, *self._current_params(features.shape[0])))
+        q = self._apply_confidence_weight(features, q)
         logits_base = self._base_logits(features)
         p_base = self.base_probabilities(logits_base)
         level, mass = self._masses(p_base, q)

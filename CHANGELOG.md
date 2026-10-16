@@ -10,6 +10,7 @@
 ## GFSS: uncertainty-gated abstention in HiSplit
 
 - `HiSplit(abstain_measure, abstain_threshold)`: wires the existing `abstention()` map into decoding — pixels it flags (base model predicts a mother whose split uncertainty, any key of `uncertainty()`, exceeds the threshold) get their novel children's logits forced to `-inf`, falling back to the mother's kept child. Independent of `widen`/`sweep`, requires `decoding: hierarchical`. `None` (default) keeps the previous behaviour unchanged. Example `conf/examples/gfss_hisplit.yaml`.
+- `HiSplit(confidence_weight_measure)`: a continuous alternative to `abstain_measure`'s hard cutoff — every pixel's `q` is blended towards the mother's kept child by `1 − measure(x)` instead of an all-or-nothing threshold, so every pixel's confidence modulates the split instead of only the ones that cross a cliff. Applies to every consumer of `q` (`split_probabilities` and hierarchical decoding), so unlike `abstain_measure`/`widen` it also works with `decoding: flat`. Composes with `abstain_measure`/`widen` (applied before them). `None` (default) keeps the previous behaviour unchanged.
 
 ## Separability probe
 
