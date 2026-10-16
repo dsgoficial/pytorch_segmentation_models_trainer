@@ -655,6 +655,26 @@ class TestTrainableBackbone:
         with pytest.raises(ValueError, match="trainable"):
             GFSSModel(self._cfg(base_ckpt, tmp_path, "head", 0.0))
 
+    def test_base_logits_still_uses_reference_when_backbone_trainable(
+        self, base_ckpt, tmp_path
+    ):
+        """With a trainable backbone, self.model and base_reference are
+        genuinely different modules (one tuned, one frozen) -- __base__
+        must keep calling ref.base_logits, not reuse the tuned model's
+        feats."""
+        m = GFSSModel(self._cfg(base_ckpt, tmp_path, "decoder", 1.0)).eval()
+        calls = []
+        original = m.base_reference.base_logits
+
+        def spy(x):
+            calls.append(x.shape)
+            return original(x)
+
+        m.base_reference.base_logits = spy
+        images = torch.randn(2, 3, 64, 64)
+        m._predict_logits(images, None)
+        assert len(calls) == 1
+
 
 class TestTTA:
     def test_base_only_with_d8_reproduces_base_model_tta(self, base_ckpt):
@@ -677,6 +697,29 @@ class TestTTA:
         m.test_gfss_metrics.update(expected, masks.long(), expected)
         torch.testing.assert_close(cm, m.test_gfss_metrics.confmat)
 
+    def test_base_logits_reuses_feats_when_backbone_frozen(self, base_ckpt):
+        """__base__ must not trigger a second backbone forward pass when
+        the backbone is frozen (ref is self.model): feats is already the
+        exact same tensor base_logits would recompute from scratch."""
+        m = GFSSModel(_cfg(base_ckpt[0])).eval()
+        calls = []
+        original = m.model.features
+
+        def spy(x):
+            calls.append(x.shape)
+            return original(x)
+
+        m.model.features = spy
+        images = torch.randn(2, 3, 64, 64)
+        m._predict_logits(images, None)
+        assert len(calls) == 1
+
+    def test_base_logits_matches_direct_call_when_backbone_frozen(self, base_ckpt):
+        m = GFSSModel(_cfg(base_ckpt[0])).eval()
+        images = torch.randn(2, 3, 64, 64)
+        out = m._predict_logits(images, None)
+        torch.testing.assert_close(out["__base__"], m.model.base_logits(images))
+
     def test_tta_changes_predictions_and_is_only_used_in_test(self, base_ckpt):
         cfg = _cfg(
             base_ckpt[0],
@@ -688,9 +731,9 @@ class TestTTA:
         calls = []
         orig = m._predict_logits
 
-        def spy(images, augmentations):
+        def spy(images, augmentations, **kwargs):
             calls.append(augmentations)
-            return orig(images, augmentations)
+            return orig(images, augmentations, **kwargs)
 
         m._predict_logits = spy
         batch = next(iter(m.test_dataloader()))
@@ -698,6 +741,29 @@ class TestTTA:
         m.validation_step(batch, 0)
         assert calls[0] is not None and len(calls[0]) == 8
         assert calls[1] is None
+
+    def test_identity_pass_not_recomputed_under_tta(self, base_ckpt):
+        """With TTA d8, the identity ('rot0') pass reuses the feats
+        _eval_step already computed for uncertainty/adaptation instead of
+        running the backbone an 8th time."""
+        cfg = _cfg(base_ckpt[0], tta_mode="d8")
+        m = GFSSModel(cfg).eval()
+        m.on_fit_start()  # pre-populate the (separate) support cache
+        m.on_test_start()
+        calls = []
+        original = m.model.features
+
+        def spy(x):
+            calls.append(x.shape)
+            return original(x)
+
+        m.model.features = spy
+        batch = next(iter(m.test_dataloader()))
+        m.test_step(batch, 0)
+        # _eval_step's own identity pass (1) + the 7 non-identity TTA
+        # augmentations; TTA's own rot0 iteration reuses the former
+        # instead of adding a 9th call.
+        assert len(calls) == 8
 
     def test_transductive_and_variants_under_tta(self, base_ckpt, tmp_path):
         from pytorch_segmentation_models_trainer.train import train
@@ -725,3 +791,95 @@ class TestTTA:
         trainer = train(cfg)
         assert "test/var/widen_0.2/miou" in trainer.callback_metrics
         assert "test/unc/aurc/split_entropy" in trainer.callback_metrics
+
+
+class TestEvalFeatureCache:
+    """``gfss.test_feature_cache_dir`` persists eval-time backbone features
+    to disk so later runs sharing the same checkpoint/dataset/TTA (e.g.
+    other K/draw/seed combinations of the same K-sweep) skip the backbone
+    pass entirely instead of recomputing it in a fresh subprocess."""
+
+    def _run_test_epoch(self, cfg):
+        """One full test epoch (mirrors what a real Trainer.test() call
+        does: on_test_start -> test_step per batch -> on_test_epoch_end ->
+        on_test_end), returning (logged_metrics, backbone_call_shapes)."""
+        m = GFSSModel(cfg).eval()
+        m.on_fit_start()  # pre-populate the (separate) support cache
+        m.on_test_start()
+        calls = []
+        original = m.model.features
+
+        def spy(x):
+            calls.append(x.shape)
+            return original(x)
+
+        m.model.features = spy
+        m.log_dict = MagicMock()
+        for i, batch in enumerate(m.test_dataloader()):
+            m.test_step(batch, i)
+        m.on_test_epoch_end()
+        m.on_test_end()
+        return dict(m.log_dict.call_args[0][0]), calls
+
+    def test_disabled_by_default(self, base_ckpt):
+        m = GFSSModel(_cfg(base_ckpt[0])).eval()
+        assert m._feature_cache_path("some.csv", None) is None
+
+    def test_path_changes_with_augmentations(self, base_ckpt, tmp_path):
+        cfg = _cfg(base_ckpt[0])
+        cfg.gfss.test_feature_cache_dir = str(tmp_path)
+        m = GFSSModel(cfg).eval()
+        p1 = m._feature_cache_path("some.csv", ["rot0"])
+        p2 = m._feature_cache_path("some.csv", ["rot0", "rot90"])
+        assert p1 is not None and p2 is not None and p1 != p2
+
+    def test_second_run_is_served_entirely_from_disk_cache(self, base_ckpt, tmp_path):
+        """Two separate GFSSModel instances (standing in for two separate
+        ExperimentsRunner subprocesses) sharing the same checkpoint,
+        dataset and TTA: the second must make zero backbone calls and
+        reproduce the first's metrics exactly."""
+        cfg = _cfg(
+            base_ckpt[0],
+            tta_mode="d8",
+            test_dataset=_ds(right=1, corner=3, window_index_cache="query.csv"),
+        )
+        cfg.gfss.test_feature_cache_dir = str(tmp_path / "feat_cache")
+
+        metrics1, calls1 = self._run_test_epoch(cfg)
+        assert len(calls1) > 0
+
+        metrics2, calls2 = self._run_test_epoch(cfg)
+        assert calls2 == []
+        assert metrics1.keys() == metrics2.keys()
+        for key in metrics1:
+            torch.testing.assert_close(
+                metrics1[key], metrics2[key], equal_nan=True, msg=f"metric {key}"
+            )
+
+    def test_cache_miss_on_different_checkpoint(self, base_ckpt, tmp_path):
+        """A different base checkpoint must not reuse another checkpoint's
+        cached features (different weights -> different features)."""
+        cfg = _cfg(
+            base_ckpt[0],
+            tta_mode="d8",
+            test_dataset=_ds(right=1, corner=3, window_index_cache="query.csv"),
+        )
+        cfg.gfss.test_feature_cache_dir = str(tmp_path / "feat_cache")
+        _, calls1 = self._run_test_epoch(cfg)
+        assert len(calls1) > 0
+
+        torch.manual_seed(1)
+        other = smp.UPerNet(**{k: v for k, v in _MODEL.items() if k != "_target_"})
+        other_path = tmp_path / "other.ckpt"
+        torch.save(
+            {"state_dict": {f"model.{k}": v for k, v in other.state_dict().items()}},
+            other_path,
+        )
+        cfg2 = _cfg(
+            other_path,
+            tta_mode="d8",
+            test_dataset=_ds(right=1, corner=3, window_index_cache="query.csv"),
+        )
+        cfg2.gfss.test_feature_cache_dir = str(tmp_path / "feat_cache")
+        _, calls2 = self._run_test_epoch(cfg2)
+        assert len(calls2) == len(calls1)  # fresh checkpoint, no reuse

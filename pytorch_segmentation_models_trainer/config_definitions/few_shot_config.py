@@ -173,6 +173,11 @@ class GFSSConfig:
             ``n_bins``).
         boundary_width: Half-width in pixels of the ground-truth boundary
             band for the ``boundary/`` IoU metrics; 0 (default) disables them.
+        test_feature_cache_dir: Directory to persist eval-time backbone
+            features, keyed by (checkpoint, dataset CSV, TTA augmentations,
+            batch size) -- runs that share all four (e.g. other shots/draws
+            of the same seed in a K-sweep) skip the backbone pass on the
+            query set entirely. ``None`` (default) disables it.
 
     Example YAML::
 
@@ -195,6 +200,7 @@ class GFSSConfig:
     uncertainty_eval: Optional[Dict[str, Any]] = None
     backbone: Optional[Dict[str, Any]] = None
     boundary_width: int = 0
+    test_feature_cache_dir: Optional[str] = None
 
 
 @dataclass

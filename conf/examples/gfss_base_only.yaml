@@ -42,6 +42,13 @@ gfss:
   method:
     _target_: pytorch_segmentation_models_trainer.few_shot.methods.base_only.BaseOnly
   not_novel_index: 254
+  # Persists eval-time backbone features to disk, keyed by (checkpoint,
+  # test_dataset.window_index_cache, TTA augmentations, batch_size): runs
+  # that share all four (e.g. other shots/draws of the same seed in a
+  # K-sweep) skip the backbone pass on the query set entirely instead of
+  # recomputing it in their own fresh subprocess. null (default) disables
+  # it -- exactly today's behaviour.
+  test_feature_cache_dir: null
 
 hyperparameters:
   batch_size: 8

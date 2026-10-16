@@ -19,8 +19,10 @@
 """
 
 import copy
+import hashlib
 import logging
-from typing import Optional, Tuple
+import os
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -41,7 +43,7 @@ from pytorch_segmentation_models_trainer.few_shot.uncertainty import (
     GFSSUncertaintyMetrics,
 )
 from pytorch_segmentation_models_trainer.model_loader.model import Model
-from pytorch_segmentation_models_trainer.tools.tta.tta import apply_tta
+from pytorch_segmentation_models_trainer.tools.tta.tta import ROT0, apply_tta
 from pytorch_segmentation_models_trainer.utils.checkpoint_loading import (
     load_pretrained_weights,
     resolve_checkpoint_from_runner,
@@ -150,6 +152,9 @@ class GFSSModel(Model):
         )
         self.register_buffer("_gfss_initialised", torch.tensor(False))
         self._support: Optional[Tuple[Tensor, Tensor]] = None
+        self._test_feat_cache: Dict[Any, Tensor] = {}
+        self._test_feat_cache_path: Optional[str] = None
+        self._test_feat_cache_dirty: bool = False
 
     # ------------------------------------------------------------------
     # Model / method construction
@@ -179,6 +184,7 @@ class GFSSModel(Model):
         """Base model + checkpoint, frozen; also builds hierarchy and method."""
         base = instantiate(self.cfg.model, _recursive_=False)
         ckpt = self._resolve_checkpoint()
+        self._base_checkpoint_path = ckpt.path
         load_pretrained_weights(
             base, ckpt.path, ckpt.source_format, strict_loading=ckpt.strict_loading
         )
@@ -275,6 +281,115 @@ class GFSSModel(Model):
         if not bool(self._gfss_initialised):
             self.method.init_from_support(*self._get_support())
             self._gfss_initialised.fill_(True)
+
+    # ------------------------------------------------------------------
+    # Eval-time backbone feature cache
+    # ------------------------------------------------------------------
+    #
+    # Every run of a K-sweep (shots x draws x seeds) that shares a seed and
+    # biome evaluates the *same* frozen backbone on the *same* val/test
+    # tiles under the *same* TTA augmentations -- only the method's head
+    # differs. _test_feat_cache (in-memory, keyed by (stage, batch_idx,
+    # aug_name)) avoids recomputing a batch's features twice within one
+    # epoch (e.g. the identity pass done directly in _eval_step and again
+    # as TTA's "rot0" iteration). When `gfss.test_feature_cache_dir` is
+    # set, the same dict is also persisted to/loaded from disk, so later
+    # runs of other K/draw/seed combinations that hash to the same
+    # (checkpoint, dataset, augmentations, batch_size) key skip the
+    # backbone pass entirely instead of just deduplicating in-process --
+    # each run is its own subprocess (see ExperimentsRunner._run_single),
+    # so only disk persistence makes that cross-run reuse possible.
+
+    @staticmethod
+    def _stat_token(path: Optional[str]) -> str:
+        if not path:
+            return "none"
+        try:
+            real = os.path.realpath(path)
+            return f"{real}:{os.stat(real).st_mtime_ns}"
+        except OSError:
+            return str(path)
+
+    def _feature_cache_path(
+        self, csv_path: Optional[str], augmentations: Optional[list]
+    ) -> Optional[str]:
+        """Deterministic cache file path for (checkpoint, dataset CSV, TTA
+        augmentations, batch size); ``None`` when caching is disabled
+        (``gfss.test_feature_cache_dir`` unset) or there's no dataset."""
+        cache_dir = self.cfg.gfss.get("test_feature_cache_dir", None)
+        if not cache_dir or not csv_path:
+            return None
+        key = "|".join(
+            [
+                self._stat_token(getattr(self, "_base_checkpoint_path", None)),
+                self._stat_token(csv_path),
+                ",".join(augmentations or [ROT0]),
+                str(int(self.cfg.hyperparameters.batch_size)),
+            ]
+        )
+        digest = hashlib.sha1(key.encode()).hexdigest()
+        return os.path.join(cache_dir, f"{digest}.pt")
+
+    def _reset_feature_cache(
+        self, csv_path: Optional[str], augmentations: Optional[list]
+    ) -> None:
+        """Start this epoch's in-memory feature cache, seeded from disk
+        when a cache file for this exact key already exists."""
+        self._test_feat_cache = {}
+        self._test_feat_cache_dirty = False
+        self._test_feat_cache_path = self._feature_cache_path(csv_path, augmentations)
+        if self._test_feat_cache_path and os.path.exists(self._test_feat_cache_path):
+            try:
+                self._test_feat_cache = torch.load(
+                    self._test_feat_cache_path, map_location="cpu", weights_only=True
+                )
+            except Exception:
+                logger.warning(
+                    "GFSSModel: could not load feature cache %s, recomputing.",
+                    self._test_feat_cache_path,
+                )
+                self._test_feat_cache = {}
+
+    def _flush_feature_cache(self) -> None:
+        """Persist the in-memory cache when new entries were added (a hit
+        on every batch -- the common case for runs 2..N of a seed --
+        leaves it unchanged, so this is a no-op then)."""
+        if not self._test_feat_cache_path or not self._test_feat_cache_dirty:
+            return
+        os.makedirs(os.path.dirname(self._test_feat_cache_path), exist_ok=True)
+        tmp = f"{self._test_feat_cache_path}.tmp{os.getpid()}"
+        torch.save(self._test_feat_cache, tmp)
+        os.replace(tmp, self._test_feat_cache_path)
+        self._test_feat_cache_dirty = False
+
+    def _backbone_features(self, x: Tensor, key) -> Tensor:
+        cached = self._test_feat_cache.get(key)
+        if cached is not None:
+            return cached.to(x.device)
+        feats = self.model.features(x)
+        self._test_feat_cache[key] = feats.detach().to("cpu")
+        self._test_feat_cache_dirty = True
+        return feats
+
+    def on_validation_start(self) -> None:
+        csv_path = (
+            self.cfg.val_dataset.get("window_index_cache", None)
+            if self.val_ds is not None
+            else None
+        )
+        self._reset_feature_cache(csv_path, None)
+
+    def on_test_start(self) -> None:
+        self._reset_feature_cache(
+            self.cfg.test_dataset.get("window_index_cache", None),
+            self._get_tta_augmentations(),
+        )
+
+    def on_validation_end(self) -> None:
+        self._flush_feature_cache()
+
+    def on_test_end(self) -> None:
+        self._flush_feature_cache()
 
     def _frozen_backbone_fast_path(self) -> bool:
         """Whether ``training_step`` can reuse ``_get_support``'s cached
@@ -373,38 +488,81 @@ class GFSSModel(Model):
 
     _MAIN = "__main__"
 
-    def _predict_logits(self, images: Tensor, augmentations) -> dict:
+    def _predict_logits(
+        self,
+        images: Tensor,
+        augmentations,
+        batch_idx: Optional[int] = None,
+        precomputed_identity_feats: Optional[Tensor] = None,
+        stage: str = "test",
+    ) -> dict:
         """Logits of the method (key ``__main__``), of each decoding variant
         and of the unmodified base model (``__base__``), averaged over the TTA
         ``augmentations`` (``None`` = single pass) with the framework's
-        ``apply_tta`` (mean of the de-augmented logits)."""
+        ``apply_tta`` (mean of the de-augmented logits).
+
+        Two backbone passes are avoided whenever possible (see
+        ``_backbone_features``/``_test_feat_cache`` for the eval-time
+        feature cache this draws on):
+
+        * the identity (``rot0``) pass reuses ``precomputed_identity_feats``
+          (``_eval_step`` already computed it for uncertainty/transductive
+          adaptation) instead of recomputing ``features(images)``;
+        * ``__base__`` reuses ``feats`` instead of calling
+          ``ref.base_logits(x)`` (which recomputes ``features(x)`` from
+          scratch) whenever the backbone is frozen (``base_reference is
+          None``, every GFSS method except the fine-tuning baselines) —
+          ``ref is self.model`` there, so it's the exact same computation,
+          not an approximation.
+        """
         ref = self._reference()
+        frozen = self.base_reference is None
+        aug_sequence = list(augmentations) if augmentations else [ROT0]
+        state = {"i": 0}
 
         def predict(x: Tensor) -> dict:
-            feats = self.model.features(x)
+            i = state["i"]
+            aug_name = aug_sequence[i] if i < len(aug_sequence) else ROT0
+            state["i"] += 1
+            if aug_name == ROT0 and precomputed_identity_feats is not None:
+                feats = precomputed_identity_feats
+            else:
+                feats = self._backbone_features(x, (stage, batch_idx, aug_name))
             size = x.shape[-2:]
             out = {self._MAIN: self.method.decode_to(feats, size, self.model.upsample)}
             for name, variant in self.method.decode_variants(feats).items():
                 out[name] = self.model.upsample(variant, size)
-            out["__base__"] = ref.base_logits(x)
+            out["__base__"] = (
+                self.model.upsample(
+                    self.model.linear(feats, self.model.weight, self.model.bias), size
+                )
+                if frozen
+                else ref.base_logits(x)
+            )
             return out
 
         if not augmentations:
             return predict(images)
         return apply_tta(model_fn=predict, batch=images, augmentations=augmentations)
 
-    def _eval_step(self, batch, metrics: GFSSMetrics, unc_metrics=None) -> None:
+    def _eval_step(self, batch, batch_idx, metrics: GFSSMetrics, unc_metrics=None) -> None:
         self._ensure_initialised()
         images, masks = self._unpack_batch(batch)
         masks = masks.long()
-        feats = self.model.features(images)
+        stage = metrics.prefix.rstrip("/")
+        feats = self._backbone_features(images, (stage, batch_idx, ROT0))
         if self.method.transductive:
             with torch.enable_grad():
                 self.method.adapt_to_query(*self._get_support(), feats)
-        stage = metrics.prefix.rstrip("/")
         # TTA (cfg.tta_mode / use_tta, as in the base models) only at test time.
         augmentations = self._get_tta_augmentations() if stage == "test" else None
-        logits = self._predict_logits(images, augmentations)
+        logits = self._predict_logits(
+            images,
+            augmentations,
+            batch_idx=batch_idx,
+            precomputed_identity_feats=feats,
+            stage=stage,
+        )
         pred = logits.pop(self._MAIN).argmax(1)
         base_pred = logits.pop("__base__").argmax(1)
         metrics.update(pred, masks, base_pred)
@@ -420,10 +578,10 @@ class GFSSModel(Model):
         return [] if self.val_ds is None else super().val_dataloader()
 
     def validation_step(self, batch, batch_idx):
-        self._eval_step(batch, self.val_gfss_metrics, self.val_unc_metrics)
+        self._eval_step(batch, batch_idx, self.val_gfss_metrics, self.val_unc_metrics)
 
     def test_step(self, batch, batch_idx):
-        self._eval_step(batch, self.test_gfss_metrics, self.test_unc_metrics)
+        self._eval_step(batch, batch_idx, self.test_gfss_metrics, self.test_unc_metrics)
 
     def _log_and_reset(self, *metrics) -> None:
         for m in metrics:
