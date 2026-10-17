@@ -29,6 +29,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import LabelEncoder
+from threadpoolctl import threadpool_limits
 from torch import Tensor
 
 from pytorch_segmentation_models_trainer.few_shot.backbone import (
@@ -89,8 +90,17 @@ def _fit_and_score(X_tr, y_tr, X_te, y_te, C: float) -> float:
     Pure function of its arguments (no shared RNG) — safe to run in any
     order, including concurrently. Filters ConvergenceWarning itself
     (rather than relying on the caller's ``warnings.catch_warnings()``,
-    which a ``joblib`` ``loky`` worker process doesn't inherit)."""
-    with warnings.catch_warnings():
+    which a ``joblib`` ``loky`` worker process doesn't inherit).
+
+    ``threadpool_limits(1)``: OpenBLAS defaults to one thread *per core*
+    for every process, loky workers included — with ``n_jobs`` workers
+    each then trying to spawn a full machine's worth of BLAS threads,
+    oversubscription makes the parallel version *slower* than sequential
+    (measured: ~350s/run in production, worse than the ~210s/run
+    baseline, once real concurrent load was on the box). Capping each
+    worker to 1 BLAS thread makes ``n_jobs`` the only level of
+    parallelism, as intended."""
+    with threadpool_limits(limits=1), warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
         clf = LogisticRegression(C=C).fit(X_tr, y_tr)
         proba = _softmax_decision(clf, X_te)
@@ -112,10 +122,15 @@ class _LogisticRegressionCV:
             no joblib overhead; ``n_jobs>1`` only changes wall-clock time,
             never the result (the per-fold balancing that consumes ``rng``
             still happens sequentially, before any fit starts, so its
-            output is identical regardless of ``n_jobs``). Keep this small
-            on a shared machine: with GFSS's own GPU bin-packing already
-            running 2 configs at once, `n_jobs` processes x 2 queues the
-            rest of the box.
+            output is identical regardless of ``n_jobs``). Every fit (grid
+            search and the final one) runs under
+            ``threadpool_limits(limits=1)`` so OpenBLAS doesn't *also*
+            multithread each one — without that, ``n_jobs`` workers each
+            spawning a full machine's worth of BLAS threads oversubscribes
+            the box and makes this *slower* than sequential (measured).
+            Keep ``n_jobs`` small on a shared machine regardless: with
+            GFSS's own GPU bin-packing already running 2 configs at once,
+            ``n_jobs`` processes x 2 queues the rest of the box.
     """
 
     def __init__(
@@ -164,9 +179,10 @@ class _LogisticRegressionCV:
             scores[i, j] = score
 
         X_b, y_b = _balance(X, y, self.sampling, self.rng)
-        self.clf = LogisticRegression(C=Cs[int(np.argmax(scores.mean(axis=0)))]).fit(
-            X_b, y_b
-        )
+        with threadpool_limits(limits=1):
+            self.clf = LogisticRegression(
+                C=Cs[int(np.argmax(scores.mean(axis=0)))]
+            ).fit(X_b, y_b)
         return self
 
     def predict_proba(self, X: np.ndarray, n_classes: int):
