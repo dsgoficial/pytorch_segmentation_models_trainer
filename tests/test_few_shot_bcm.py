@@ -237,6 +237,40 @@ def test_logistic_regression_cv_handles_single_class_support():
     assert flags.tolist() == [0.0, 1.0, 0.0]
 
 
+def test_logistic_regression_cv_n_jobs_does_not_change_result():
+    """n_jobs only parallelizes the (fold, C) grid search -- the folds'
+    class balancing (which consumes the shared rng) still runs sequentially
+    in the original order before any parallel work starts, so the fitted
+    classifier and its predictions must be identical regardless of n_jobs."""
+    from pytorch_segmentation_models_trainer.few_shot.methods.bcm import (
+        _LogisticRegressionCV,
+    )
+
+    rng_state = np.random.RandomState(42)
+    X = rng_state.normal(size=(200, 4))
+    y = (X[:, 0] + 0.1 * rng_state.normal(size=200) > 0).astype(int)
+
+    cv1 = _LogisticRegressionCV(
+        n_splits=5, n_C=5, sampling="us", rng=np.random.RandomState(0), n_jobs=1
+    ).fit(X, y)
+    cv2 = _LogisticRegressionCV(
+        n_splits=5, n_C=5, sampling="us", rng=np.random.RandomState(0), n_jobs=3
+    ).fit(X, y)
+
+    np.testing.assert_allclose(cv1.clf.coef_, cv2.clf.coef_)
+    np.testing.assert_allclose(cv1.clf.intercept_, cv2.clf.intercept_)
+    proba1, flags1 = cv1.predict_proba(X, n_classes=2)
+    proba2, flags2 = cv2.predict_proba(X, n_classes=2)
+    np.testing.assert_allclose(proba1, proba2)
+    assert flags1.tolist() == flags2.tolist()
+
+
+def test_bcm_n_jobs_passed_through_to_logistic_regression_cv(toy):
+    """BCM.n_jobs reaches the per-base-class _LogisticRegressionCV fit."""
+    m = _ready(toy, mapping="hierarchy", n_jobs=3)
+    assert all(model.n_jobs == 3 for models in m.models.values() for model in models)
+
+
 def test_mapped_base_class_absent_from_query(toy):
     h, w, b, f, ms = toy
     m = _ready(toy)

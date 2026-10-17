@@ -80,6 +80,8 @@ class HiSplit(BaseGFSSMethod):
     * ``logreg``: the classifier of BCM (cross-validated logistic regression,
       class balancing; ``sklearn``) fitted on the HiSplit support targets of
       each mother; ``q`` = its probabilities (no gradient training).
+      ``logreg_n_jobs`` parallelizes its CV grid search (see
+      ``BCM``/``_LogisticRegressionCV``); 1 (default) is sequential.
 
     Comparison options with BCM / H²EDL (defaults keep the original HiSplit):
     ``feature_power`` (Tukey's ladder of powers on the features used by
@@ -223,6 +225,7 @@ class HiSplit(BaseGFSSMethod):
         logreg_n_splits: int = 5,
         logreg_n_C: int = 10,
         logreg_sampling: str = "us",
+        logreg_n_jobs: int = 1,
         seed: int = 0,
         leak: bool = False,
         leak_init: float = -4.0,
@@ -290,6 +293,7 @@ class HiSplit(BaseGFSSMethod):
         self.base_rate_tau = float(base_rate_tau)
         self.base_rate_smoothing = float(base_rate_smoothing)
         self.logreg_args = (int(logreg_n_splits), int(logreg_n_C), logreg_sampling)
+        self.logreg_n_jobs = int(logreg_n_jobs)
         self.seed = int(seed)
         self.logreg_models: Dict[int, object] = {}
         self.transductive = q == "trans"
@@ -439,7 +443,7 @@ class HiSplit(BaseGFSSMethod):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 self.logreg_models[mother] = _LogisticRegressionCV(
-                    *self.logreg_args, rng
+                    *self.logreg_args, rng, n_jobs=self.logreg_n_jobs
                 ).fit(X[sel], y)
 
     # ------------------------------------------------------------------

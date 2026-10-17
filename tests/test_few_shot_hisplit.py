@@ -518,6 +518,12 @@ class TestComparisonOptions:
         pred = m(f).argmax(1)
         assert (pred[:, :3, 3:] == 3).float().mean() > 0.8
 
+    def test_logreg_n_jobs_passed_through_to_logistic_regression_cv(self):
+        f, masks, w, b = _data()
+        f = f + 0.3 * torch.randn_like(f)
+        m = _ready(f, masks, w, b, q="logreg", logreg_n_jobs=3)
+        assert all(model.n_jobs == 3 for model in m.logreg_models.values())
+
     def test_logreg_single_class_mother_falls_back_to_uniform(self, caplog):
         f, masks, w, b = _data()
         masks[:] = NN

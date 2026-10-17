@@ -18,6 +18,7 @@ gfss:
     beta: 1.0
     n_splits: 5
     n_C: 10
+    n_jobs: 1             # parallelizes the n_splits x n_C grid search (joblib); 1 = sequential (default, unchanged result)
     seed: 0
 
 pl_trainer:

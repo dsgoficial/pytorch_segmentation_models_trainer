@@ -23,6 +23,7 @@ from typing import Callable, Dict, List, Sequence
 
 import numpy as np
 import torch
+from joblib import Parallel, delayed
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score
@@ -83,13 +84,45 @@ def _balance(X, y, sampling: str, rng: np.random.RandomState):
     return X[idx], y[idx]
 
 
+def _fit_and_score(X_tr, y_tr, X_te, y_te, C: float) -> float:
+    """One (fold, C) grid point: fit + mean AP of the held-out fold.
+    Pure function of its arguments (no shared RNG) — safe to run in any
+    order, including concurrently. Filters ConvergenceWarning itself
+    (rather than relying on the caller's ``warnings.catch_warnings()``,
+    which a ``joblib`` ``loky`` worker process doesn't inherit)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        clf = LogisticRegression(C=C).fit(X_tr, y_tr)
+        proba = _softmax_decision(clf, X_te)
+    return np.mean(
+        [average_precision_score(y_te == c, proba[:, c]) for c in np.unique(y_te)]
+    )
+
+
 class _LogisticRegressionCV:
     """Official ``exLogisticRegressionCV``: C chosen among
     ``logspace(-5, 5, n_C)`` by stratified K-fold mean average precision,
-    with class balancing on every training split and on the final fit."""
+    with class balancing on every training split and on the final fit.
 
-    def __init__(self, n_splits: int, n_C: int, sampling: str, rng) -> None:
+    Args:
+        n_jobs: Worker processes for the ``n_splits x n_C`` grid search
+            (``joblib``, ``loky`` backend). Each grid point is an
+            independent ``LogisticRegression.fit`` — ``n_jobs=1`` (default)
+            runs them exactly as before, sequentially in this process, with
+            no joblib overhead; ``n_jobs>1`` only changes wall-clock time,
+            never the result (the per-fold balancing that consumes ``rng``
+            still happens sequentially, before any fit starts, so its
+            output is identical regardless of ``n_jobs``). Keep this small
+            on a shared machine: with GFSS's own GPU bin-packing already
+            running 2 configs at once, `n_jobs` processes x 2 queues the
+            rest of the box.
+    """
+
+    def __init__(
+        self, n_splits: int, n_C: int, sampling: str, rng, n_jobs: int = 1
+    ) -> None:
         self.n_splits, self.n_C, self.sampling, self.rng = n_splits, n_C, sampling, rng
+        self.n_jobs = int(n_jobs)
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> "_LogisticRegressionCV":
         self.le = LabelEncoder().fit(y)
@@ -102,25 +135,34 @@ class _LogisticRegressionCV:
             # discriminate. predict_proba always returns this one class.
             return self
         Cs = np.logspace(-5, 5, self.n_C)
-        scores = np.zeros((self.n_splits, self.n_C))
+        # Fold balancing consumes self.rng -- done sequentially, in the
+        # original fold order, before any parallel work starts, so its
+        # outcome (and hence every downstream result) is independent of
+        # n_jobs.
+        folds = []
         for i, (tr, te) in enumerate(
             StratifiedKFold(n_splits=self.n_splits).split(X, y)
         ):
             X_tr, y_tr = _balance(X[tr], y[tr], self.sampling, self.rng)
-            if np.unique(y_tr).size < 2:
-                # Degenerate fold (e.g. K=1): no novel-class pixel survived
-                # the split, so LogisticRegression can't fit here. Leave its
-                # scores at 0 — same as "this fold has no opinion on C".
-                continue
-            for j, C in enumerate(Cs):
-                clf = LogisticRegression(C=C).fit(X_tr, y_tr)
-                proba = _softmax_decision(clf, X[te])
-                scores[i, j] = np.mean(
-                    [
-                        average_precision_score(y[te] == c, proba[:, c])
-                        for c in np.unique(y[te])
-                    ]
-                )
+            folds.append((i, X_tr, y_tr, te))
+
+        tasks = [
+            (i, j, X_tr, y_tr, te, C)
+            for i, X_tr, y_tr, te in folds
+            # Degenerate fold (e.g. K=1): no novel-class pixel survived the
+            # split, so LogisticRegression can't fit here. Leave its scores
+            # at 0 — same as "this fold has no opinion on C".
+            if np.unique(y_tr).size >= 2
+            for j, C in enumerate(Cs)
+        ]
+        results = Parallel(n_jobs=self.n_jobs)(
+            delayed(_fit_and_score)(X_tr, y_tr, X[te], y[te], C)
+            for _, _, X_tr, y_tr, te, C in tasks
+        )
+        scores = np.zeros((self.n_splits, self.n_C))
+        for (i, j, *_), score in zip(tasks, results):
+            scores[i, j] = score
+
         X_b, y_b = _balance(X, y, self.sampling, self.rng)
         self.clf = LogisticRegression(C=Cs[int(np.argmax(scores.mean(axis=0)))]).fit(
             X_b, y_b
@@ -173,6 +215,9 @@ class BCM(BaseGFSSMethod):
             values < 1 need non-negative features, e.g. after a ReLU).
         n_splits: CV folds (official 5).
         n_C: Number of C values in ``logspace(-5, 5)`` (official 10).
+        n_jobs: Worker processes for the CV grid search (see
+            ``_LogisticRegressionCV``); 1 (default) is sequential, exactly
+            as before this option existed.
         seed: Seed of the balancing sampler.
         ensemble: Shot-wise ensemble (paper §4.5): one model per support
             tile plus the model on all tiles, probabilities averaged with
@@ -200,6 +245,7 @@ class BCM(BaseGFSSMethod):
         beta: float = 1.0,
         n_splits: int = 5,
         n_C: int = 10,
+        n_jobs: int = 1,
         seed: int = 0,
         ensemble: bool = False,
         ensemble_full_weight: float = 5.0,
@@ -219,6 +265,7 @@ class BCM(BaseGFSSMethod):
             int(n_C),
             int(seed),
         )
+        self.n_jobs = int(n_jobs)
         self.ensemble = bool(ensemble)
         self.ensemble_full_weight = float(ensemble_full_weight)
         self.table: Dict[int, List[int]] = {}
@@ -286,7 +333,7 @@ class BCM(BaseGFSSMethod):
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", ConvergenceWarning)
                     model = _LogisticRegressionCV(
-                        self.n_splits, self.n_C, self.sampling, rng
+                        self.n_splits, self.n_C, self.sampling, rng, n_jobs=self.n_jobs
                     ).fit(X_all[subset], y[subset])
                 self.models[base].append(model)
             self.model_weights[base] = weights
