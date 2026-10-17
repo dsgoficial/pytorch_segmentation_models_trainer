@@ -675,6 +675,27 @@ class TestTrainableBackbone:
         m._predict_logits(images, None)
         assert len(calls) == 1
 
+    def test_disk_feature_cache_disabled_when_backbone_trainable(
+        self, base_ckpt, tmp_path
+    ):
+        """self.model.features depends on *this run's own* fine-tuning
+        (fit on its specific support episode), not just the checkpoint --
+        a different run sharing the same checkpoint+csv+augmentations key
+        would have genuinely different features. test_feature_cache_dir
+        must therefore be a no-op (no file ever written) whenever the
+        backbone is trainable, even if the config sets it."""
+        cfg = self._cfg(base_ckpt, tmp_path, "decoder", 1.0)
+        cache_dir = tmp_path / "feat_cache"
+        cfg.gfss.test_feature_cache_dir = str(cache_dir)
+        m = GFSSModel(cfg).eval()
+        assert m._feature_cache_path("some.csv", None) is None
+
+        m.on_test_start()
+        for i, batch in enumerate(m.test_dataloader()):
+            m.test_step(batch, i)
+        m.on_test_end()
+        assert not cache_dir.exists() or list(cache_dir.iterdir()) == []
+
 
 class TestTTA:
     def test_base_only_with_d8_reproduces_base_model_tta(self, base_ckpt):

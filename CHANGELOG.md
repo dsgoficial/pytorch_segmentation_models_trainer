@@ -1,5 +1,9 @@
 # Unreleased
 
+## Bug fix: eval feature cache could corrupt fine-tuning-baseline metrics
+
+- `GFSSModel._feature_cache_path`: `gfss.test_feature_cache_dir` (added the same day, see below) persisted `self.model.features` keyed only by (checkpoint, dataset CSV, TTA augmentations, batch size) — correct for every frozen-backbone method, but for the fine-tuning baselines (`gfss.backbone.trainable != none`, `base_reference is not None`) `self.model` is fine-tuned *during that specific run*, on that run's own support episode, so a different run sharing the same checkpoint+csv+augmentations key would have genuinely different features. Caught before any fine-tuning run actually used the cache (the pilot wired `test_feature_cache_dir` in only after the baselines had already completed under the un-cached code). Disk persistence is now skipped whenever the backbone is trainable; the in-process (non-persisted) dedup from the same change stays safe either way, since the model doesn't change within one test epoch.
+
 ## Performance: GFSS eval-time backbone passes deduplicated and optionally cached across runs
 
 - `GFSSModel._predict_logits`/`_eval_step`: the frozen backbone was run on the query set's "identity" (non-augmented) view twice per batch — once directly in `_eval_step` (for uncertainty/transductive adaptation) and again as TTA's own `rot0` iteration — now the second reuses the first's result. `__base__`'s logits also recomputed `features(x)` from scratch via `ref.base_logits(x)` even when the backbone is frozen (`base_reference is None`, every method except the fine-tuning baselines), where `ref is self.model` makes that the exact same computation as the `feats` already in hand; now reused directly. With TTA (`tta_mode: d8`, 8 augmentations), this cuts the backbone passes per eval batch from 17 (1 + 8 + 8) to 8.

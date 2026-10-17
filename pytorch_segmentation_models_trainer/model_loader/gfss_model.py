@@ -315,9 +315,17 @@ class GFSSModel(Model):
     ) -> Optional[str]:
         """Deterministic cache file path for (checkpoint, dataset CSV, TTA
         augmentations, batch size); ``None`` when caching is disabled
-        (``gfss.test_feature_cache_dir`` unset) or there's no dataset."""
+        (``gfss.test_feature_cache_dir`` unset), there's no dataset, or the
+        backbone is trainable (fine-tuning baselines, ``base_reference is
+        not None``) -- there, ``self.model.features`` depends on *this
+        run's own* fine-tuning (fit on that run's specific support episode),
+        not just the checkpoint path, so a different run sharing the same
+        checkpoint+csv+augmentations key would have genuinely different
+        features; persisting/reusing them across runs would silently
+        corrupt their eval metrics.
+        """
         cache_dir = self.cfg.gfss.get("test_feature_cache_dir", None)
-        if not cache_dir or not csv_path:
+        if not cache_dir or not csv_path or self.base_reference is not None:
             return None
         key = "|".join(
             [
