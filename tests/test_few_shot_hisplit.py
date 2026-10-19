@@ -480,6 +480,56 @@ class TestConfidenceWeight:
         with pytest.raises(ValueError, match="dissonance"):
             _ready(f, masks, w, b, confidence_weight_measure="dissonance")
 
+    def test_default_power_and_scale_are_identity(self):
+        f, masks, w, b = _data()
+        f = f + torch.randn_like(f)
+        ref = _ready(f, masks, w, b, confidence_weight_measure="split_entropy")
+        m = _ready(
+            f,
+            masks,
+            w,
+            b,
+            confidence_weight_measure="split_entropy",
+            confidence_weight_power=1.0,
+            confidence_weight_scale=1.0,
+        )
+        assert torch.equal(m(f), ref(f))
+
+    def test_power_compresses_measure_towards_zero(self):
+        f, masks, w, b = _data()
+        f = f + torch.randn_like(f)
+        ref = _ready(f, masks, w, b)
+        q = ref._q(ref._scores(f, ref.q_weight, ref.q_bias))
+        u = ref.uncertainty(f)["split_entropy"]
+        m = _ready(
+            f, masks, w, b, confidence_weight_measure="split_entropy",
+            confidence_weight_power=2.0,
+        )
+        q_w = m._apply_confidence_weight(f, q)
+        kept_local = m.child_classes.index(1)
+        novel_local = m.child_classes.index(3)
+        w_conf = (1.0 - u**2.0).clamp(0.0, 1.0)
+        expected_kept = w_conf * q[:, kept_local] + (1.0 - w_conf)
+        expected_novel = w_conf * q[:, novel_local]
+        assert torch.allclose(q_w[:, kept_local], expected_kept, atol=1e-6)
+        assert torch.allclose(q_w[:, novel_local], expected_novel, atol=1e-6)
+
+    def test_scale_multiplies_measure_and_clamps(self):
+        f, masks, w, b = _data()
+        m = _ready(
+            f, masks, w, b, confidence_weight_measure="split_entropy",
+            confidence_weight_scale=5.0,
+        )
+        q = torch.rand(2, 2, 6, 6)
+        q = q / q.sum(1, keepdim=True)
+        # split_entropy of 0.5 everywhere, scaled by 5.0 -> clamp to 1.0.
+        m.uncertainty = lambda feats: {"split_entropy": torch.full((2, 6, 6), 0.5)}
+        q_w = m._apply_confidence_weight(f, q)
+        kept_local = m.child_classes.index(1)
+        novel_local = m.child_classes.index(3)
+        assert torch.allclose(q_w[:, kept_local], torch.ones(2, 6, 6))
+        assert torch.allclose(q_w[:, novel_local], torch.zeros(2, 6, 6))
+
 
 class TestComparisonOptions:
     """Options added to compare HiSplit with BCM / H²EDL."""

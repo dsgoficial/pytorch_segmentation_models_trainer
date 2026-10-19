@@ -38,6 +38,12 @@ gfss:
     # child by (1 - measure(x)) everywhere, instead of an all-or-nothing
     # threshold; works with decoding: flat too. null disables it.
     confidence_weight_measure: null  # e.g. split_entropy | split_vacuity (q: edl) | dissonance (evidential base)
+    # transform applied to the measure before blending: clamp(scale * measure**power, 0, 1).
+    # 1.0/1.0 = no-op. Use power=2.0 (optionally with scale) to compress a measure whose
+    # typical range is mid-scale (e.g. dissonance, mean ~0.4 on a real checkpoint) instead
+    # of near an endpoint, so the blend weight doesn't pull too hard towards the kept child.
+    confidence_weight_power: 1.0
+    confidence_weight_scale: 1.0
 
 pl_trainer:
   max_steps: 0               # q: linear/trans/edl -> e.g. 100 (optimizer node)

@@ -191,6 +191,13 @@ class HiSplit(BaseGFSSMethod):
         confidence_weight_measure: Uncertainty measure continuously
             blending ``q`` towards the mother's kept child (a key of
             ``uncertainty()``), or ``None`` to disable it.
+        confidence_weight_power: Exponent applied to the measure before
+            blending (``measure ** power``), e.g. ``2.0`` compresses it
+            towards 0 for measures whose typical range is not already
+            near an endpoint. ``1.0`` (default) leaves it unchanged.
+        confidence_weight_scale: Multiplicative factor applied after the
+            exponent, clamped back to ``[0, 1]`` before computing
+            ``w = 1 − measure``. ``1.0`` (default) leaves it unchanged.
 
     Example YAML::
 
@@ -236,6 +243,8 @@ class HiSplit(BaseGFSSMethod):
         abstain_measure: Optional[str] = None,
         abstain_threshold: float = 0.3,
         confidence_weight_measure: Optional[str] = None,
+        confidence_weight_power: float = 1.0,
+        confidence_weight_scale: float = 1.0,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -268,6 +277,8 @@ class HiSplit(BaseGFSSMethod):
         self.abstain_measure = abstain_measure
         self.abstain_threshold = float(abstain_threshold)
         self.confidence_weight_measure = confidence_weight_measure
+        self.confidence_weight_power = float(confidence_weight_power)
+        self.confidence_weight_scale = float(confidence_weight_scale)
         self.q = q
         self.tau = float(tau)
         self.variance = variance
@@ -524,11 +535,20 @@ class HiSplit(BaseGFSSMethod):
     def _apply_confidence_weight(self, features: Tensor, q: Tensor) -> Tensor:
         """Continuously blend ``q`` towards each mother's kept child by
         ``1 − confidence_weight_measure(x)`` (see class doc); identity when
-        ``confidence_weight_measure`` is ``None``."""
+        ``confidence_weight_measure`` is ``None``. The measure is first
+        raised to ``confidence_weight_power`` and multiplied by
+        ``confidence_weight_scale`` (both default to ``1.0``, a no-op),
+        then clamped back to ``[0, 1]``."""
         if self.confidence_weight_measure is None:
             return q
         maps = self.uncertainty(features)
-        w = (1.0 - maps[self.confidence_weight_measure]).clamp(0.0, 1.0).unsqueeze(1)
+        measure = maps[self.confidence_weight_measure]
+        if self.confidence_weight_power != 1.0:
+            measure = measure**self.confidence_weight_power
+        if self.confidence_weight_scale != 1.0:
+            measure = measure * self.confidence_weight_scale
+        measure = measure.clamp(0.0, 1.0)
+        w = (1.0 - measure).clamp(0.0, 1.0).unsqueeze(1)
         out = q.clone()
         for mother, idx in self._groups():
             kept_local = idx.index(self.kept_row[mother])
