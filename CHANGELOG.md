@@ -1,5 +1,9 @@
 # Unreleased
 
+## Feature: `HiSplit`'s training loss can be reweighted by evidence/uncertainty
+
+- New `support_loss_weight_measure` (`None` by default, no behaviour change): a key of `uncertainty()` (e.g. `base_vacuity`/`dissonance` on an evidential base, or `split_vacuity` with `q: edl`) reweights every pixel's contribution to `q`'s training loss (`linear`/`trans`'s CE in `_support_ce`, `edl`'s MSE+KL in `_edl_loss`) by `1 - measure(x)`, computed once per `support_loss` call on the same support features — pixels where the base model's own evidence is weak count less. Complements `confidence_weight_measure` (which reweights the *decoded split* at inference) by instead reweighting *training*; the two are independent and can be combined.
+
 ## Feature: `HiSplit.confidence_weight_measure` can be compressed before blending
 
 - New `confidence_weight_power`/`confidence_weight_scale` (both `1.0` by default, no behaviour change): the measure named by `confidence_weight_measure` is now transformed as `clamp(scale * measure ** power, 0, 1)` before computing the blend weight `w = 1 - measure`. Motivated by a real case: `dissonance`'s measured distribution on a trained checkpoint (mean ≈0.41, not saturated near either endpoint — see `tile_mean`/`coverage@` already logged by `GFSSUncertaintyMetrics`) gives `w ≈ 0.59` on average, pulling every pixel ~41% of the way towards the mother's kept child regardless of the few-shot classifier's own confidence, enough to collapse the novel class entirely at K≥3-5 in both biomes. `confidence_weight_power=2.0` (optionally combined with `confidence_weight_scale`) compresses a mid-range measure like this towards 0, reducing how disruptive the gate is, without touching measures whose own range is already informative (e.g. `split_vacuity`, observed mean ≈0.012).

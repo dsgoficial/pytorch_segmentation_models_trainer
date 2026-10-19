@@ -166,6 +166,17 @@ class HiSplit(BaseGFSSMethod):
     with ``abstain_measure``/``widen`` (applied before them); ``None``
     (default) disables it.
 
+    Evidence-weighted training: ``support_loss_weight_measure`` (a key of
+    ``uncertainty()``) reweights the per-pixel training loss of ``q``
+    (``linear``/``trans``'s CE in :meth:`_support_ce`, ``edl``'s MSE+KL in
+    :meth:`_edl_loss`) by ``1 − measure(x) ∈ [0, 1]``, computed once per
+    ``support_loss`` call on the same support features already used for the
+    loss — pixels where the base model's own evidence is weak (high
+    ``measure``, e.g. ``base_vacuity``/``dissonance`` on an evidential base,
+    or ``split_vacuity`` with ``q: edl``) count less towards training ``q``.
+    ``None`` (default) disables it (every pixel weighted equally, the
+    original behaviour).
+
     Args:
         q: ``proto``, ``proto_prob``, ``linear`` or ``trans``.
         tau: Cosine temperature of ``proto`` (and init of ``linear``).
@@ -198,6 +209,10 @@ class HiSplit(BaseGFSSMethod):
         confidence_weight_scale: Multiplicative factor applied after the
             exponent, clamped back to ``[0, 1]`` before computing
             ``w = 1 − measure``. ``1.0`` (default) leaves it unchanged.
+        support_loss_weight_measure: Uncertainty measure reweighting ``q``'s
+            training loss by ``1 − measure`` (a key of ``uncertainty()``),
+            or ``None`` to disable it (default; every pixel weighted
+            equally).
 
     Example YAML::
 
@@ -245,6 +260,7 @@ class HiSplit(BaseGFSSMethod):
         confidence_weight_measure: Optional[str] = None,
         confidence_weight_power: float = 1.0,
         confidence_weight_scale: float = 1.0,
+        support_loss_weight_measure: Optional[str] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -279,6 +295,7 @@ class HiSplit(BaseGFSSMethod):
         self.confidence_weight_measure = confidence_weight_measure
         self.confidence_weight_power = float(confidence_weight_power)
         self.confidence_weight_scale = float(confidence_weight_scale)
+        self.support_loss_weight_measure = support_loss_weight_measure
         self.q = q
         self.tau = float(tau)
         self.variance = variance
@@ -348,6 +365,13 @@ class HiSplit(BaseGFSSMethod):
         ):
             raise ValueError(
                 f"confidence_weight_measure {self.confidence_weight_measure!r} not "
+                f"available for this configuration ({sorted(self.uncertainty_names())})."
+            )
+        if self.support_loss_weight_measure is not None and (
+            self.support_loss_weight_measure not in self.uncertainty_names()
+        ):
+            raise ValueError(
+                f"support_loss_weight_measure {self.support_loss_weight_measure!r} not "
                 f"available for this configuration ({sorted(self.uncertainty_names())})."
             )
         nb = hierarchy.num_base_classes
@@ -608,15 +632,27 @@ class HiSplit(BaseGFSSMethod):
     # Training / transductive adaptation
     # ------------------------------------------------------------------
 
-    def _support_ce(self, features: Tensor, targets: Tensor, weight, bias) -> Tensor:
+    def _support_ce(
+        self,
+        features: Tensor,
+        targets: Tensor,
+        weight,
+        bias,
+        sample_weight: Optional[Tensor] = None,
+    ) -> Tensor:
         q = self._q(self._scores(features, weight, bias))
         valid = targets >= 0
         idx = targets.clamp(min=0).unsqueeze(1)
         p = q.gather(1, idx).squeeze(1)
         ce = -torch.log(p + _EPS)
-        return (ce * valid).sum() / valid.sum().clamp(min=1)
+        if sample_weight is None:
+            return (ce * valid).sum() / valid.sum().clamp(min=1)
+        w = valid * sample_weight
+        return (ce * w).sum() / w.sum().clamp(min=_EPS)
 
-    def _edl_loss(self, features: Tensor, targets: Tensor) -> Tensor:
+    def _edl_loss(
+        self, features: Tensor, targets: Tensor, sample_weight: Optional[Tensor] = None
+    ) -> Tensor:
         """EDL MSE + annealed KL of the evidential pair head, per mother."""
         alpha = self._edl_alpha(self._scores(features, self.q_weight, self.q_bias))
         kl_weight = min(1.0, self._edl_step / max(self.kl_anneal_steps, 1))
@@ -632,22 +668,35 @@ class HiSplit(BaseGFSSMethod):
             p = a / s
             mse = ((y - p) ** 2 + a * (s - a) / (s**2 * (s + 1))).sum(1)
             per_pixel = mse + kl_weight * edl_kl_regulariser(a, y)
-            total = total + per_pixel[in_group].mean()
+            if sample_weight is None:
+                total = total + per_pixel[in_group].mean()
+            else:
+                w = sample_weight[in_group]
+                total = total + (per_pixel[in_group] * w).sum() / w.sum().clamp(
+                    min=_EPS
+                )
         return total
 
     def support_loss(self, features: Tensor, masks: Tensor) -> Optional[Tensor]:
         """Support loss: q's loss for trainable variants (CE for
-        ``linear``/``trans``, EDL MSE + annealed KL for ``edl``) plus, with
-        ``leak``, the NLL of the final distribution; ``None`` if nothing to
-        train."""
+        ``linear``/``trans``, EDL MSE + annealed KL for ``edl``), optionally
+        weighted per pixel by ``support_loss_weight_measure`` (see class
+        doc), plus, with ``leak``, the NLL of the final distribution;
+        ``None`` if nothing to train."""
         loss = None
+        sample_weight = None
+        if self.support_loss_weight_measure is not None:
+            measure = self.uncertainty(features)[self.support_loss_weight_measure]
+            sample_weight = (1.0 - measure).clamp(0.0, 1.0)
         if self.q in _TRAINABLE:
             targets = self._targets(features, masks)
             if self.q == "edl":
-                loss = self._edl_loss(features, targets)
+                loss = self._edl_loss(features, targets, sample_weight)
                 self._edl_step += 1
             else:
-                loss = self._support_ce(features, targets, self.q_weight, self.q_bias)
+                loss = self._support_ce(
+                    features, targets, self.q_weight, self.q_bias, sample_weight
+                )
         if self.leak:
             leak_loss = self._final_nll(features, masks)
             loss = leak_loss if loss is None else loss + leak_loss

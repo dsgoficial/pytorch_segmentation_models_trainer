@@ -531,6 +531,66 @@ class TestConfidenceWeight:
         assert torch.allclose(q_w[:, novel_local], torch.zeros(2, 6, 6))
 
 
+class TestSupportLossWeight:
+    def test_none_is_default_and_unweighted(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="linear")
+        assert m.support_loss_weight_measure is None
+        ref = m._support_ce(f, m._targets(f, masks), m.q_weight, m.q_bias)
+        torch.testing.assert_close(m.support_loss(f, masks), ref)
+
+    def test_measure_validated_against_available_uncertainty(self):
+        f, masks, w, b = _data()
+        with pytest.raises(ValueError, match="dissonance"):
+            _ready(
+                f, masks, w, b, q="linear", support_loss_weight_measure="dissonance"
+            )
+
+    def test_linear_loss_matches_weighted_formula(self):
+        f, masks, w, b = _data()
+        m = _ready(
+            f, masks, w, b, q="linear", support_loss_weight_measure="split_entropy"
+        )
+        targets = m._targets(f, masks)
+        measure = m.uncertainty(f)["split_entropy"]
+        sw = (1.0 - measure).clamp(0.0, 1.0)
+        expected = m._support_ce(f, targets, m.q_weight, m.q_bias, sample_weight=sw)
+        torch.testing.assert_close(m.support_loss(f, masks), expected)
+
+    def test_weighting_changes_the_loss_value(self):
+        f, masks, w, b = _data()
+        torch.manual_seed(1)
+        f = f + torch.randn_like(f)  # breaks perfect separation -> varying q/entropy
+        m = _ready(f, masks, w, b, q="linear")
+        unweighted = m.support_loss(f, masks)
+        m.support_loss_weight_measure = "split_entropy"
+        weighted = m.support_loss(f, masks)
+        assert not torch.allclose(unweighted, weighted)
+
+    def test_edl_loss_accepts_sample_weight_and_matches_support_loss(self):
+        f, masks, w, b = _data()
+        m = _ready(
+            f, masks, w, b, q="edl", support_loss_weight_measure="split_vacuity"
+        )
+        targets = m._targets(f, masks)
+        measure = m.uncertainty(f)["split_vacuity"]
+        sw = (1.0 - measure).clamp(0.0, 1.0)
+        expected = m._edl_loss(f, targets, sample_weight=sw)
+        torch.testing.assert_close(m.support_loss(f, masks), expected)
+
+    def test_zero_weight_pixels_do_not_contribute(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="linear")
+        targets = m._targets(f, masks)
+        sw = torch.zeros_like(targets, dtype=torch.float)
+        sw[:, :1, 3:] = 1.0  # only this sub-region contributes
+        full = m._support_ce(f, targets, m.q_weight, m.q_bias, sample_weight=sw)
+        partial_targets = targets.clone()
+        partial_targets[sw == 0] = -1
+        ref = m._support_ce(f, partial_targets, m.q_weight, m.q_bias)
+        torch.testing.assert_close(full, ref)
+
+
 class TestComparisonOptions:
     """Options added to compare HiSplit with BCM / H²EDL."""
 

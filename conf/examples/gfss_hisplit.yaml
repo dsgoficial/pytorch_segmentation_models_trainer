@@ -44,6 +44,11 @@ gfss:
     # of near an endpoint, so the blend weight doesn't pull too hard towards the kept child.
     confidence_weight_power: 1.0
     confidence_weight_scale: 1.0
+    # reweights q's own training loss (q: linear/trans/edl) per pixel by
+    # (1 - measure(x)): pixels where the base model's own evidence is weak
+    # count less towards training q. Independent of confidence_weight_measure
+    # above (that one reweights the decoded split at inference, not training).
+    support_loss_weight_measure: null  # e.g. split_vacuity (q: edl) | base_vacuity | dissonance (evidential base)
 
 pl_trainer:
   max_steps: 0               # q: linear/trans/edl -> e.g. 100 (optimizer node)
