@@ -49,6 +49,16 @@ gfss:
     # count less towards training q. Independent of confidence_weight_measure
     # above (that one reweights the decoded split at inference, not training).
     support_loss_weight_measure: null  # e.g. split_vacuity (q: edl) | base_vacuity | dissonance (evidential base)
+    # q: trans only -- self-trains on the query itself: pixels whose split
+    # entropy is below the threshold get their own (stop-gradient) argmax as
+    # a pseudo-label. 0.0 = disabled (no behaviour change).
+    pseudo_label_weight: 0.0            # weight of the CE of q against the pseudo-label
+    pseudo_label_contrast_weight: 0.0   # weight of the hinge repulsion between kept/novel pseudo-labelled features
+    pseudo_label_contrast_margin: 0.0   # margin of that hinge, relu(cos - margin)
+    pseudo_label_threshold: 0.3         # confidence threshold tau (split entropy)
+    pseudo_label_threshold_start: null  # set (< pseudo_label_threshold) for a confidence curriculum
+    pseudo_label_start_iter: 0          # first adapt_to_query iteration where these terms apply
+    pseudo_label_min_pixels: 1          # min confident pixels per side (kept/novel) for the contrast term
 
 pl_trainer:
   max_steps: 0               # q: linear/trans/edl -> e.g. 100 (optimizer node)

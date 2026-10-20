@@ -591,6 +591,118 @@ class TestSupportLossWeight:
         torch.testing.assert_close(full, ref)
 
 
+class TestPseudoLabel:
+    def test_disabled_by_default_returns_zero(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="trans")
+        q = torch.rand(2, 2, 6, 6)
+        q = q / q.sum(1, keepdim=True)
+        base_pred = m._base_probs(f).argmax(1)
+        ce, contrast = m._pseudo_label_terms(f, q, base_pred, it=5)
+        assert torch.equal(ce, torch.zeros(2))
+        assert torch.equal(contrast, torch.zeros(2))
+
+    def test_threshold_constant_without_start(self):
+        m = HiSplit(q="trans", pseudo_label_threshold=0.3)
+        assert m._pseudo_label_threshold(0) == pytest.approx(0.3)
+        assert m._pseudo_label_threshold(49) == pytest.approx(0.3)
+
+    def test_threshold_curriculum_interpolates(self):
+        m = HiSplit(
+            q="trans",
+            adapt_iter=11,
+            pseudo_label_threshold=0.3,
+            pseudo_label_threshold_start=0.1,
+        )
+        assert m._pseudo_label_threshold(0) == pytest.approx(0.1)
+        assert m._pseudo_label_threshold(10) == pytest.approx(0.3)
+        mid = m._pseudo_label_threshold(5)
+        assert 0.1 < mid < 0.3
+
+    def test_start_iter_gates_both_terms(self):
+        f, masks, w, b = _data()
+        m = _ready(
+            f,
+            masks,
+            w,
+            b,
+            q="trans",
+            pseudo_label_weight=1.0,
+            pseudo_label_contrast_weight=1.0,
+            pseudo_label_start_iter=5,
+        )
+        q = m._q(m._scores(f, m.q_weight, m.q_bias))
+        base_pred = m._base_probs(f).argmax(1)
+        ce, contrast = m._pseudo_label_terms(f, q, base_pred, it=4)
+        assert torch.equal(ce, torch.zeros(2))
+        assert torch.equal(contrast, torch.zeros(2))
+
+    def test_ce_term_matches_weighted_formula_on_confident_pixels(self):
+        f, masks, w, b = _data()
+        m = _ready(
+            f, masks, w, b, q="trans", pseudo_label_weight=1.0, pseudo_label_threshold=0.9
+        )
+        base_pred = m._base_probs(f).argmax(1)
+        # p=0.8/0.2 (entropy ~0.72, below the 0.9 threshold -> confident,
+        # but not a trivial p=1 that would make the CE exactly 0).
+        q = torch.empty(2, 2, 6, 6)
+        q[:, 0], q[:, 1] = 0.8, 0.2
+        ce, contrast = m._pseudo_label_terms(f, q, base_pred, it=0)
+        assert torch.equal(contrast, torch.zeros(2))  # contrast disabled
+        expected = -torch.log(torch.tensor(0.8))
+        torch.testing.assert_close(ce, expected.expand(2), atol=1e-4, rtol=0)
+
+    def test_ce_term_only_uses_confident_pixels(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="trans", pseudo_label_weight=1.0)
+        base_pred = m._base_probs(f).argmax(1)
+        # A uniform q (maximum entropy) has no confident pixel anywhere.
+        q_uniform = torch.full((2, 2, 6, 6), 0.5)
+        ce, _ = m._pseudo_label_terms(f, q_uniform, base_pred, it=0)
+        assert torch.equal(ce, torch.zeros(2))
+
+    def test_contrast_term_finite_and_respects_min_pixels(self):
+        f, masks, w, b = _data()
+        f = f + torch.randn_like(f) * 0.05
+        m = _ready(
+            f,
+            masks,
+            w,
+            b,
+            q="trans",
+            pseudo_label_contrast_weight=1.0,
+            pseudo_label_threshold=0.9,
+        )
+        q = m._q(m._scores(f, m.q_weight, m.q_bias))
+        base_pred = m._base_probs(f).argmax(1)
+        _, contrast = m._pseudo_label_terms(f, q, base_pred, it=0)
+        assert torch.isfinite(contrast).all()
+
+        m.pseudo_label_min_pixels = 10_000  # impossible on a 6x6 tile
+        _, contrast_gated = m._pseudo_label_terms(f, q, base_pred, it=0)
+        assert torch.equal(contrast_gated, torch.zeros(2))
+
+    def test_adapt_to_query_runs_with_pseudo_label_enabled(self):
+        f, masks, w, b = _data()
+        m = _ready(
+            f,
+            masks,
+            w,
+            b,
+            q="trans",
+            adapt_iter=6,
+            lr=0.05,
+            pseudo_label_weight=1.0,
+            pseudo_label_contrast_weight=1.0,
+            pseudo_label_threshold=0.3,
+            pseudo_label_threshold_start=0.05,
+            pseudo_label_start_iter=1,
+        )
+        m.adapt_to_query(f, masks, f)
+        assert m._task_params[0].shape == (2, 2, 4)
+        assert torch.isfinite(m._task_params[0]).all()
+
+
 class TestComparisonOptions:
     """Options added to compare HiSplit with BCM / H²EDL."""
 

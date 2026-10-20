@@ -20,7 +20,7 @@
 
 import logging
 import warnings
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -177,6 +177,36 @@ class HiSplit(BaseGFSSMethod):
     ``None`` (default) disables it (every pixel weighted equally, the
     original behaviour).
 
+    Confidence-gated pseudo-labelling (``trans`` only): on top of the usual
+    support CE + superclass entropy/KL of :meth:`adapt_to_query`, every SGD
+    iteration can also fit ``q`` to its own most confident predictions on
+    the **query** itself — the population ``support_loss_weight_measure``
+    could not help with, being just the ``K`` support pixels. For each
+    mother, pixels in the superclass (``here``) whose split entropy is
+    below a threshold ``τ`` are treated as confidently decided; their
+    (stop-gradient) arg-max becomes a pseudo-label for two terms, both
+    ``0.0`` (disabled) by default:
+
+    * ``pseudo_label_weight``: cross-entropy of ``q`` against that
+      pseudo-label, weighted by ``1 − entropy`` and averaged over the
+      confident pixels of each map.
+    * ``pseudo_label_contrast_weight``: hinge repulsion
+      ``relu(cos(P_kept, P_novel) − margin)`` between the mean ``q``-space
+      features of the confident pixels pseudo-labelled as the mother's
+      kept child vs. as any novel child (skipped, per map, when either
+      side has fewer than ``pseudo_label_min_pixels`` confident pixels) —
+      the same hinge :class:`RefinementAwareWrapper`'s sub-prototypes use,
+      but with the two sides chosen by the pseudo-label instead of an
+      unsupervised cluster assignment.
+
+    ``τ`` is ``pseudo_label_threshold`` by default, or linearly
+    interpolated from ``pseudo_label_threshold_start`` up to
+    ``pseudo_label_threshold`` over ``adapt_iter`` when the former is set
+    (a confidence curriculum: only the most unambiguous pixels count
+    early on, more are trusted as ``q`` improves). Neither term is applied
+    before ``pseudo_label_start_iter``, to let plain support CE calibrate
+    ``q`` first.
+
     Args:
         q: ``proto``, ``proto_prob``, ``linear`` or ``trans``.
         tau: Cosine temperature of ``proto`` (and init of ``linear``).
@@ -213,6 +243,25 @@ class HiSplit(BaseGFSSMethod):
             training loss by ``1 − measure`` (a key of ``uncertainty()``),
             or ``None`` to disable it (default; every pixel weighted
             equally).
+        pseudo_label_weight: Weight of the confidence-gated pseudo-label CE
+            on query pixels (``trans`` only). ``0.0`` (default) disables
+            it.
+        pseudo_label_contrast_weight: Weight of the hinge repulsion between
+            the confident pseudo-labelled kept/novel query features
+            (``trans`` only). ``0.0`` (default) disables it.
+        pseudo_label_contrast_margin: Margin of that hinge
+            (``relu(cos − margin)``), as in :class:`RefinementAwareWrapper`.
+        pseudo_label_threshold: Split-entropy threshold ``τ`` below which a
+            query pixel counts as confidently decided.
+        pseudo_label_threshold_start: If set, ``τ`` starts here and rises
+            linearly to ``pseudo_label_threshold`` over ``adapt_iter``
+            (confidence curriculum); ``None`` (default) keeps ``τ``
+            constant.
+        pseudo_label_start_iter: First ``adapt_to_query`` iteration (0-based)
+            where the pseudo-label terms are applied.
+        pseudo_label_min_pixels: Minimum confident pixels required on each
+            side (kept/novel) for ``pseudo_label_contrast_weight`` to apply
+            to a given query map.
 
     Example YAML::
 
@@ -261,6 +310,13 @@ class HiSplit(BaseGFSSMethod):
         confidence_weight_power: float = 1.0,
         confidence_weight_scale: float = 1.0,
         support_loss_weight_measure: Optional[str] = None,
+        pseudo_label_weight: float = 0.0,
+        pseudo_label_contrast_weight: float = 0.0,
+        pseudo_label_contrast_margin: float = 0.0,
+        pseudo_label_threshold: float = 0.3,
+        pseudo_label_threshold_start: Optional[float] = None,
+        pseudo_label_start_iter: int = 0,
+        pseudo_label_min_pixels: int = 1,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -296,6 +352,17 @@ class HiSplit(BaseGFSSMethod):
         self.confidence_weight_power = float(confidence_weight_power)
         self.confidence_weight_scale = float(confidence_weight_scale)
         self.support_loss_weight_measure = support_loss_weight_measure
+        self.pseudo_label_weight = float(pseudo_label_weight)
+        self.pseudo_label_contrast_weight = float(pseudo_label_contrast_weight)
+        self.pseudo_label_contrast_margin = float(pseudo_label_contrast_margin)
+        self.pseudo_label_threshold = float(pseudo_label_threshold)
+        self.pseudo_label_threshold_start = (
+            None
+            if pseudo_label_threshold_start is None
+            else float(pseudo_label_threshold_start)
+        )
+        self.pseudo_label_start_iter = int(pseudo_label_start_iter)
+        self.pseudo_label_min_pixels = int(pseudo_label_min_pixels)
         self.q = q
         self.tau = float(tau)
         self.variance = variance
@@ -740,10 +807,76 @@ class HiSplit(BaseGFSSMethod):
             pi[:, idx] = valid_mean(q[:, idx], p_base[:, mother].unsqueeze(1), (2, 3))
         return pi.detach()
 
+    def _pseudo_label_threshold(self, it: int) -> float:
+        """Confidence threshold ``τ`` at iteration ``it`` — constant at
+        ``pseudo_label_threshold``, or linearly interpolated from
+        ``pseudo_label_threshold_start`` when set."""
+        if self.pseudo_label_threshold_start is None:
+            return self.pseudo_label_threshold
+        frac = it / max(self.adapt_iter - 1, 1)
+        return self.pseudo_label_threshold_start + (
+            self.pseudo_label_threshold - self.pseudo_label_threshold_start
+        ) * frac
+
+    def _pseudo_label_terms(
+        self, feat: Tensor, q: Tensor, base_pred: Tensor, it: int
+    ) -> Tuple[Tensor, Tensor]:
+        """Confidence-gated pseudo-label CE and kept/novel contrast terms
+        on query pixels, per map (see class doc); both ``0`` when disabled
+        or before ``pseudo_label_start_iter``."""
+        n = feat.shape[0]
+        zero = feat.new_zeros(n)
+        use_ce = self.pseudo_label_weight != 0.0
+        use_contrast = self.pseudo_label_contrast_weight != 0.0
+        if (not use_ce and not use_contrast) or it < self.pseudo_label_start_iter:
+            return zero, zero
+        tau = self._pseudo_label_threshold(it)
+        ce_term = zero.clone()
+        contrast_term = zero.clone()
+        qfeat = self._qfeat(feat) if use_contrast else None
+        for mother, idx in self._groups():
+            here = base_pred == mother
+            qm = q[:, idx]
+            with torch.no_grad():
+                ent = normalized_entropy(qm)
+                confident = here & (ent < tau)
+                pseudo = qm.argmax(1)
+            kept_local = idx.index(self.kept_row[mother])
+            if use_ce:
+                p_pseudo = qm.gather(1, pseudo.unsqueeze(1)).squeeze(1)
+                ce_px = -torch.log(p_pseudo + _EPS)
+                wgt = confident.to(qm.dtype) * (1.0 - ent)
+                ce_term = ce_term + (ce_px * wgt).flatten(1).sum(1) / wgt.flatten(
+                    1
+                ).sum(1).clamp(min=_EPS)
+            if use_contrast:
+                kept_mask = confident & (pseudo == kept_local)
+                novel_mask = confident & (pseudo != kept_local)
+                n_kept = kept_mask.flatten(1).sum(1)
+                n_novel = novel_mask.flatten(1).sum(1)
+                flat = qfeat.flatten(2)
+                p_kept = (flat * kept_mask.flatten(1).unsqueeze(1)).sum(
+                    -1
+                ) / n_kept.clamp(min=1).unsqueeze(1)
+                p_novel = (flat * novel_mask.flatten(1).unsqueeze(1)).sum(
+                    -1
+                ) / n_novel.clamp(min=1).unsqueeze(1)
+                cos = F.cosine_similarity(p_kept, p_novel, dim=1)
+                hinge = (cos - self.pseudo_label_contrast_margin).clamp(min=0.0)
+                active = (n_kept >= self.pseudo_label_min_pixels) & (
+                    n_novel >= self.pseudo_label_min_pixels
+                )
+                contrast_term = contrast_term + torch.where(
+                    active, hinge, torch.zeros_like(hinge)
+                )
+        return ce_term, contrast_term
+
     def adapt_to_query(
         self, support_features: Tensor, support_masks: Tensor, query_features: Tensor
     ) -> None:
-        """``trans``: per-map SGD on support CE + superclass entropy/prior."""
+        """``trans``: per-map SGD on support CE + superclass entropy/prior
+        (+ confidence-gated pseudo-label terms on the query, see class
+        doc)."""
         w_ce, w_ent, w_kl = self.trans_weights
         n = query_features.shape[0]
         weight = self.q_weight.detach().unsqueeze(0).repeat(n, 1, 1).requires_grad_()
@@ -751,6 +884,7 @@ class HiSplit(BaseGFSSMethod):
         optimizer = torch.optim.SGD([weight, bias], lr=self.lr)
         targets = self._targets(support_features, support_masks)
         p_base = self._base_probs(query_features)
+        base_pred = p_base.argmax(1)
         with torch.no_grad():
             pi = self._prior(
                 self._q(self._scores(query_features, weight, bias)), p_base
@@ -764,7 +898,16 @@ class HiSplit(BaseGFSSMethod):
             )
             q = self._q(self._scores(query_features, weight, bias))
             ent, kl = self._superclass_terms(q, p_base, pi)
-            loss = w_ce * ce + w_ent * ent + w_kl * kl
+            pseudo_ce, pseudo_contrast = self._pseudo_label_terms(
+                query_features, q, base_pred, it
+            )
+            loss = (
+                w_ce * ce
+                + w_ent * ent
+                + w_kl * kl
+                + self.pseudo_label_weight * pseudo_ce
+                + self.pseudo_label_contrast_weight * pseudo_contrast
+            )
             optimizer.zero_grad()
             loss.sum().backward()
             optimizer.step()
