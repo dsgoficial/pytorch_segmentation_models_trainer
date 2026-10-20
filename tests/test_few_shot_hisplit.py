@@ -703,6 +703,76 @@ class TestPseudoLabel:
         assert torch.isfinite(m._task_params[0]).all()
 
 
+class TestPseudoLabelTeacher:
+    def test_default_period_zero_disabled(self):
+        m = HiSplit(q="trans")
+        assert m.pseudo_label_teacher_period == 0
+
+    def test_omitting_q_teacher_matches_passing_q_itself(self):
+        f, masks, w, b = _data()
+        m = _ready(
+            f, masks, w, b, q="trans", pseudo_label_weight=1.0, pseudo_label_threshold=0.9
+        )
+        base_pred = m._base_probs(f).argmax(1)
+        q = torch.empty(2, 2, 6, 6)
+        q[:, 0], q[:, 1] = 0.8, 0.2
+        ce_default, contrast_default = m._pseudo_label_terms(f, q, base_pred, it=0)
+        ce_explicit, contrast_explicit = m._pseudo_label_terms(
+            f, q, base_pred, it=0, q_teacher=q
+        )
+        torch.testing.assert_close(ce_default, ce_explicit)
+        torch.testing.assert_close(contrast_default, contrast_explicit)
+
+    def test_teacher_selects_pseudo_label_student_value_drives_ce(self):
+        f, masks, w, b = _data()
+        m = _ready(
+            f, masks, w, b, q="trans", pseudo_label_weight=1.0, pseudo_label_threshold=0.9
+        )
+        base_pred = m._base_probs(f).argmax(1)
+        # Teacher: confident (entropy(.9/.1) < 0.9), picks "kept" (index 0).
+        q_teacher = torch.empty(2, 2, 6, 6)
+        q_teacher[:, 0], q_teacher[:, 1] = 0.9, 0.1
+        # Student: different probability at that same (teacher-chosen) index.
+        q_student = torch.empty(2, 2, 6, 6)
+        q_student[:, 0], q_student[:, 1] = 0.6, 0.4
+        ce, _ = m._pseudo_label_terms(f, q_student, base_pred, it=0, q_teacher=q_teacher)
+        expected = -torch.log(torch.tensor(0.6))
+        torch.testing.assert_close(ce, expected.expand(2), atol=1e-4, rtol=0)
+
+    def test_teacher_confidence_decides_selection_not_student(self):
+        f, masks, w, b = _data()
+        m = _ready(
+            f, masks, w, b, q="trans", pseudo_label_weight=1.0, pseudo_label_threshold=0.5
+        )
+        base_pred = m._base_probs(f).argmax(1)
+        # Teacher is at maximum entropy (uniform) -> never confident, regardless
+        # of how confident the student itself looks.
+        q_teacher = torch.full((2, 2, 6, 6), 0.5)
+        q_student = torch.empty(2, 2, 6, 6)
+        q_student[:, 0], q_student[:, 1] = 0.99, 0.01
+        ce, _ = m._pseudo_label_terms(f, q_student, base_pred, it=0, q_teacher=q_teacher)
+        assert torch.equal(ce, torch.zeros(2))
+
+    def test_adapt_to_query_runs_with_teacher_snapshot_enabled(self):
+        f, masks, w, b = _data()
+        m = _ready(
+            f,
+            masks,
+            w,
+            b,
+            q="trans",
+            adapt_iter=9,
+            lr=0.05,
+            pseudo_label_weight=1.0,
+            pseudo_label_contrast_weight=1.0,
+            pseudo_label_threshold=0.3,
+            pseudo_label_teacher_period=3,
+        )
+        m.adapt_to_query(f, masks, f)
+        assert m._task_params[0].shape == (2, 2, 4)
+        assert torch.isfinite(m._task_params[0]).all()
+
+
 class TestComparisonOptions:
     """Options added to compare HiSplit with BCM / H²EDL."""
 

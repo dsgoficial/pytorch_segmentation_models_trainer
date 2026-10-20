@@ -59,6 +59,12 @@ gfss:
     pseudo_label_threshold_start: null  # set (< pseudo_label_threshold) for a confidence curriculum
     pseudo_label_start_iter: 0          # first adapt_to_query iteration where these terms apply
     pseudo_label_min_pixels: 1          # min confident pixels per side (kept/novel) for the contrast term
+    # periodic-snapshot teacher for the pseudo-label decision above: every N
+    # iterations, freeze the current (weight, bias) as a "teacher"; confidence
+    # and the pseudo-label itself are picked from the teacher's q (no_grad),
+    # while the live/differentiable student q still supplies the CE probability
+    # being optimised. 0 (default) disables it -- the live q is its own teacher.
+    pseudo_label_teacher_period: 0
 
 pl_trainer:
   max_steps: 0               # q: linear/trans/edl -> e.g. 100 (optimizer node)

@@ -207,6 +207,20 @@ class HiSplit(BaseGFSSMethod):
     before ``pseudo_label_start_iter``, to let plain support CE calibrate
     ``q`` first.
 
+    Teacher-student stabilisation: by default the pseudo-label/confidence
+    decision above is read off the same ``q`` being optimised this very
+    SGD step (student == teacher, degenerate). When
+    ``pseudo_label_teacher_period > 0``, :meth:`adapt_to_query` instead
+    snapshots ``(weight, bias)`` every that many iterations into a frozen
+    "teacher" and uses *its* ``q`` (``torch.no_grad()``) for the
+    confidence/pseudo-label decision, while the live "student" ``q`` is
+    still what the CE/contrast terms optimise towards that decision —
+    avoids chasing an instantaneous, noisier target (the standard
+    Mean-Teacher idea, but a periodically-refreshed snapshot instead of a
+    continuous EMA, to not couple teacher and student the way a
+    low-decay EMA of the very same weights would). ``0`` (default)
+    disables it.
+
     Args:
         q: ``proto``, ``proto_prob``, ``linear`` or ``trans``.
         tau: Cosine temperature of ``proto`` (and init of ``linear``).
@@ -262,6 +276,9 @@ class HiSplit(BaseGFSSMethod):
         pseudo_label_min_pixels: Minimum confident pixels required on each
             side (kept/novel) for ``pseudo_label_contrast_weight`` to apply
             to a given query map.
+        pseudo_label_teacher_period: Iterations between teacher snapshots
+            (see class doc). ``0`` (default) disables it — the
+            pseudo-label decision uses the live, un-stabilised ``q``.
 
     Example YAML::
 
@@ -317,6 +334,7 @@ class HiSplit(BaseGFSSMethod):
         pseudo_label_threshold_start: Optional[float] = None,
         pseudo_label_start_iter: int = 0,
         pseudo_label_min_pixels: int = 1,
+        pseudo_label_teacher_period: int = 0,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -363,6 +381,7 @@ class HiSplit(BaseGFSSMethod):
         )
         self.pseudo_label_start_iter = int(pseudo_label_start_iter)
         self.pseudo_label_min_pixels = int(pseudo_label_min_pixels)
+        self.pseudo_label_teacher_period = int(pseudo_label_teacher_period)
         self.q = q
         self.tau = float(tau)
         self.variance = variance
@@ -819,11 +838,26 @@ class HiSplit(BaseGFSSMethod):
         ) * frac
 
     def _pseudo_label_terms(
-        self, feat: Tensor, q: Tensor, base_pred: Tensor, it: int
+        self,
+        feat: Tensor,
+        q: Tensor,
+        base_pred: Tensor,
+        it: int,
+        q_teacher: Optional[Tensor] = None,
     ) -> Tuple[Tensor, Tensor]:
         """Confidence-gated pseudo-label CE and kept/novel contrast terms
         on query pixels, per map (see class doc); both ``0`` when disabled
-        or before ``pseudo_label_start_iter``."""
+        or before ``pseudo_label_start_iter``.
+
+        ``q`` is the differentiable split used by the CE term (the
+        student); ``q_teacher`` (defaults to ``q`` itself) is the
+        ``torch.no_grad()`` split whose entropy/arg-max decide which
+        pixels are confident and what their pseudo-label is — a
+        periodically-refreshed snapshot of ``q`` when
+        ``pseudo_label_teacher_period > 0`` (see :meth:`adapt_to_query`),
+        or ``q`` itself (the degenerate, un-stabilised case) otherwise."""
+        if q_teacher is None:
+            q_teacher = q
         n = feat.shape[0]
         zero = feat.new_zeros(n)
         use_ce = self.pseudo_label_weight != 0.0
@@ -837,10 +871,11 @@ class HiSplit(BaseGFSSMethod):
         for mother, idx in self._groups():
             here = base_pred == mother
             qm = q[:, idx]
+            qm_teacher = q_teacher[:, idx]
             with torch.no_grad():
-                ent = normalized_entropy(qm)
+                ent = normalized_entropy(qm_teacher)
                 confident = here & (ent < tau)
-                pseudo = qm.argmax(1)
+                pseudo = qm_teacher.argmax(1)
             kept_local = idx.index(self.kept_row[mother])
             if use_ce:
                 p_pseudo = qm.gather(1, pseudo.unsqueeze(1)).squeeze(1)
@@ -875,8 +910,8 @@ class HiSplit(BaseGFSSMethod):
         self, support_features: Tensor, support_masks: Tensor, query_features: Tensor
     ) -> None:
         """``trans``: per-map SGD on support CE + superclass entropy/prior
-        (+ confidence-gated pseudo-label terms on the query, see class
-        doc)."""
+        (+ confidence-gated pseudo-label terms on the query, optionally
+        teacher-stabilised, see class doc)."""
         w_ce, w_ent, w_kl = self.trans_weights
         n = query_features.shape[0]
         weight = self.q_weight.detach().unsqueeze(0).repeat(n, 1, 1).requires_grad_()
@@ -889,7 +924,12 @@ class HiSplit(BaseGFSSMethod):
             pi = self._prior(
                 self._q(self._scores(query_features, weight, bias)), p_base
             )
+        teacher_params: Optional[tuple] = None
         for it in range(self.adapt_iter):
+            if self.pseudo_label_teacher_period > 0 and (
+                it % self.pseudo_label_teacher_period == 0
+            ):
+                teacher_params = (weight.detach().clone(), bias.detach().clone())
             ce = torch.stack(
                 [
                     self._support_ce(support_features, targets, weight[i], bias[i])
@@ -898,8 +938,13 @@ class HiSplit(BaseGFSSMethod):
             )
             q = self._q(self._scores(query_features, weight, bias))
             ent, kl = self._superclass_terms(q, p_base, pi)
+            if teacher_params is None:
+                q_teacher = q
+            else:
+                with torch.no_grad():
+                    q_teacher = self._q(self._scores(query_features, *teacher_params))
             pseudo_ce, pseudo_contrast = self._pseudo_label_terms(
-                query_features, q, base_pred, it
+                query_features, q, base_pred, it, q_teacher=q_teacher
             )
             loss = (
                 w_ce * ce
