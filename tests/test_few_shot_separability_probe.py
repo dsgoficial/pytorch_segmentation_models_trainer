@@ -10,6 +10,7 @@ from omegaconf import OmegaConf
 from torch.utils.data import Dataset
 
 from pytorch_segmentation_models_trainer.tools.few_shot.separability_probe import (
+    alignment_scores,
     collect_pair_features,
     probe_scores,
     run_separability_probe,
@@ -81,6 +82,54 @@ class TestProbeScores:
         assert all(np.isnan(v) for v in out.values())
         out = probe_scores(X, np.r_[0, 0, 1, 1], X, np.zeros(4), C=1.0)
         assert all(np.isnan(v) for v in out.values())
+
+
+class TestAlignmentScores:
+    @staticmethod
+    def _two_blobs(n=60):
+        rng = np.random.default_rng(0)
+        X = np.vstack(
+            [rng.normal([5, 0, 0], 0.3, (n, 3)), rng.normal([0, 5, 0], 0.3, (n, 3))]
+        )
+        return X, np.r_[np.zeros(n), np.ones(n)].astype(int)
+
+    def test_aligned_subprototypes_score_one(self):
+        X, y = self._two_blobs()
+        protos = np.array([[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]])
+        out = alignment_scores(X, y, protos, kmeans_clusters=2, seed=0)
+        assert out["nmi_subproto"] == pytest.approx(1.0)
+        assert out["purity_subproto"] == pytest.approx(1.0)
+        assert out["used_subproto"] == 2 and out["num_subproto"] == 3
+        assert out["subproto_pos_frac"] == "0.000;1.000;nan"
+        assert out["subproto_share"] == "0.500;0.500;0.000"
+        assert out["nmi_kmeans"] > 0.99 and out["purity_kmeans"] > 0.99
+        assert out["kmeans_clusters"] == 2
+
+    def test_misaligned_subprototypes_score_zero(self):
+        X, y = self._two_blobs()
+        X[:, 2] = np.tile([3.0, -3.0], len(y) // 2)  # axis unrelated to y
+        protos = np.array([[0, 0, 1.0], [0, 0, -1.0]])
+        out = alignment_scores(X, y, protos, kmeans_clusters=2, seed=0)
+        assert out["nmi_subproto"] == pytest.approx(0.0, abs=1e-9)
+        assert out["purity_subproto"] == pytest.approx(0.5)
+
+    def test_without_subprototypes_only_kmeans(self):
+        X, y = self._two_blobs()
+        out = alignment_scores(X, y, None, kmeans_clusters=4, seed=0)
+        assert np.isnan(out["nmi_subproto"]) and np.isnan(out["purity_subproto"])
+        assert out["num_subproto"] == 0 and out["subproto_pos_frac"] == ""
+        assert 0.0 <= out["nmi_kmeans"] <= 1.0 and out["kmeans_clusters"] == 4
+
+    def test_missing_class_gives_nan(self):
+        X = np.ones((6, 3))
+        out = alignment_scores(X, np.zeros(6, int), np.eye(3), kmeans_clusters=2)
+        assert np.isnan(out["nmi_subproto"]) and np.isnan(out["nmi_kmeans"])
+        assert np.isnan(out["purity_kmeans"])
+
+    def test_kmeans_clusters_capped_by_pixels(self):
+        X = np.array([[1.0, 0], [0, 1.0], [1.0, 0.1]])
+        out = alignment_scores(X, np.array([0, 1, 0]), None, kmeans_clusters=10)
+        assert out["kmeans_clusters"] == 3
 
 
 class TestCollect:
@@ -197,6 +246,74 @@ class TestRun:
         cfg.separability_probe.checkpoint = {}
         with pytest.raises(ValueError):
             run_separability_probe(cfg)
+
+
+_REFINE = {
+    "_target_": "pytorch_segmentation_models_trainer.custom_models.refinement_aware.RefinementAwareWrapper",
+    "superclass_index": 3,
+    "edge_weight": 0.0,
+    "subprototype_weight": 0.1,
+    "num_subprototypes": 3,
+    "model": _MODEL,
+}
+
+
+@pytest.fixture
+def refine_ckpt(tmp_path):
+    from pytorch_segmentation_models_trainer.custom_models.refinement_aware import (
+        RefinementAwareWrapper,
+    )
+
+    torch.manual_seed(0)
+    plain = smp.UPerNet(**{k: v for k, v in _MODEL.items() if k != "_target_"})
+    model = RefinementAwareWrapper(
+        plain, superclass_index=3, edge_weight=0.0, num_subprototypes=3
+    )
+    path = tmp_path / "refine.ckpt"
+    torch.save(
+        {"state_dict": {f"model.{k}": v for k, v in model.state_dict().items()}}, path
+    )
+    return path
+
+
+class TestAlignmentRun:
+    def test_refine_model_writes_subprototype_alignment(self, tmp_path, refine_ckpt):
+        align = tmp_path / "out" / "align.csv"
+        cfg = _cfg(tmp_path, refine_ckpt, shots=[1], alignment_csv=str(align))
+        cfg.model = _REFINE
+        run_separability_probe(cfg)
+        df = pd.read_csv(align)
+        assert len(df) == 1 and df["base_seed"].isna().all()
+        assert df.loc[0, "num_subproto"] == 3
+        assert 0.0 <= df.loc[0, "nmi_subproto"] <= 1.0
+        assert df.loc[0, "n_neg"] > 0 and df.loc[0, "n_pos"] > 0
+        assert df.loc[0, "kmeans_clusters"] == 3  # default = number of sub-prototypes
+
+    def test_plain_model_writes_kmeans_only(self, tmp_path, ckpt):
+        align = tmp_path / "out" / "align.csv"
+        cfg = _cfg(
+            tmp_path,
+            ckpt,
+            shots=[1],
+            alignment_csv=str(align),
+            alignment_kmeans_clusters=2,
+        )
+        run_separability_probe(cfg)
+        df = pd.read_csv(align)
+        assert df.loc[0, "num_subproto"] == 0 and np.isnan(df.loc[0, "nmi_subproto"])
+        assert df.loc[0, "kmeans_clusters"] == 2
+        assert 0.0 <= df.loc[0, "nmi_kmeans"] <= 1.0
+
+    def test_plain_model_default_kmeans_clusters(self, tmp_path, ckpt):
+        align = tmp_path / "out" / "align.csv"
+        run_separability_probe(
+            _cfg(tmp_path, ckpt, shots=[1], alignment_csv=str(align))
+        )
+        assert pd.read_csv(align).loc[0, "kmeans_clusters"] == 4
+
+    def test_no_alignment_csv_by_default(self, tmp_path, ckpt):
+        run_separability_probe(_cfg(tmp_path, ckpt, shots=[1]))
+        assert sorted(p.name for p in (tmp_path / "out").iterdir()) == ["probe.csv"]
 
 
 def test_main_dispatches(tmp_path, ckpt):

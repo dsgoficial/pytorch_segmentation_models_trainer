@@ -242,6 +242,11 @@ class SeparabilityProbeConfig:
         C: Inverse L2 regularization of the logistic regression.
         batch_size: Forward batch size. ``seed``: pixel sampling seed.
         output_csv: Output CSV (one row per base seed × episode).
+        alignment_csv: Optional CSV of the alignment diagnostic (one row per
+            base seed): NMI/purity between the pair labels and the
+            sub-prototype assignment (R2-C) and k-means on the test pixels.
+        alignment_kmeans_clusters: k-means clusters of the diagnostic
+            (default: the number of sub-prototypes, else 4).
     """
 
     checkpoint: Dict[str, Any] = MISSING
@@ -260,6 +265,8 @@ class SeparabilityProbeConfig:
     C: float = 1.0
     batch_size: int = 8
     seed: int = 0
+    alignment_csv: Optional[str] = None
+    alignment_kmeans_clusters: Optional[int] = None
 
 
 def _register_configs() -> None:

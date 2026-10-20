@@ -460,6 +460,34 @@ kept the structure inside the superclass. The datasets must return the
 unmerged labels (no `mask_class_mapping`). Example:
 `conf/examples/separability_probe.yaml`.
 
+### Sub-prototype alignment (NMI)
+
+Setting `alignment_csv` adds a label-free diagnostic on the same test pixels of
+the pair, written as one row per base seed. It answers a question the probe
+cannot: does an **unsupervised** partition of the superclass follow the pair,
+or some other factor (brightness, season, borders)?
+
+* `nmi_subproto` / `purity_subproto` — partition by the sub-prototype each pixel
+  is closest to (cosine). Only for a `RefinementAwareWrapper` trained with
+  sub-prototypes; `nan` for other base models. `subproto_share` and
+  `subproto_pos_frac` (`;`-joined, one value per sub-prototype) give each
+  sub-prototype's share of the pixels and its fraction of the positive class.
+  `used_subproto` counts the non-empty sub-prototypes (collapse check).
+* `nmi_kmeans` / `purity_kmeans` — k-means on the L2-normalized features.
+  This is the reference for any base model, including the plain one.
+  `alignment_kmeans_clusters` defaults to the number of sub-prototypes, else 4.
+
+NMI uses arithmetic normalization (scikit-learn's default). Purity is 0.5 for
+an uninformative partition when the classes are balanced, so keep the
+per-class cap `max_test_pixels_per_class` in mind: it balances the sample.
+
+```yaml
+separability_probe:
+  # ... probe fields as above ...
+  alignment_csv: outputs/probe/r2c_ma_alignment.csv
+  alignment_kmeans_clusters: null   # = number of sub-prototypes, else 4
+```
+
 ## Full example
 
 See `conf/examples/build_fewshot_episodes.yaml`,

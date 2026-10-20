@@ -34,11 +34,21 @@ over the test windows:
   (training-free; score = cos(z, μ+) − cos(z, μ−), threshold 0).
 
 Metrics: AUROC, balanced accuracy and average precision (positive class).
+
+Optional **alignment diagnostic** (``alignment_csv``): on the same test
+pixels of the pair, does an *unsupervised* partition of the features follow
+the pair? One row per base seed with the NMI and purity between the labels
+and (i) the sub-prototype each pixel is assigned to (argmax cosine), when the
+base model is a ``RefinementAwareWrapper`` trained with sub-prototypes (R2-C),
+and (ii) k-means on the L2-normalized features (reference available for any
+base model, e.g. the plain R2). High NMI means the label-free clustering of
+the superclass splits along the pair; low NMI means it splits along some
+other factor, so pushing the clusters apart would not help the pair.
 """
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -133,6 +143,77 @@ def probe_scores(
     }
 
 
+def _partition_scores(assign: np.ndarray, y: np.ndarray) -> Tuple[float, float]:
+    """NMI (arithmetic normalization) and purity of a partition w.r.t. ``y``."""
+    from sklearn.metrics import normalized_mutual_info_score
+
+    nmi = float(normalized_mutual_info_score(y, assign))
+    hits = sum(np.bincount(y[assign == c]).max() for c in np.unique(assign))
+    return nmi, float(hits / len(y))
+
+
+def alignment_scores(
+    X: np.ndarray,
+    y: np.ndarray,
+    prototypes: Optional[np.ndarray] = None,
+    kmeans_clusters: int = 4,
+    seed: int = 0,
+) -> Dict[str, Any]:
+    """Alignment of label-free partitions of the pair pixels with the labels.
+
+    Args:
+        X: Features ``(N, F)`` of the pixels of the two classes.
+        y: Labels (1 = positive class, 0 = negative).
+        prototypes: Optional sub-prototypes ``(M, F)``; each pixel is assigned
+            to the one of highest cosine similarity.
+        kmeans_clusters: Number of k-means clusters (capped at ``N``) fitted
+            on the L2-normalized features.
+        seed: k-means seed.
+
+    Returns:
+        ``nmi_subproto``, ``purity_subproto``, ``num_subproto``,
+        ``used_subproto`` (non-empty sub-prototypes), ``subproto_share`` and
+        ``subproto_pos_frac`` (per sub-prototype, ``;``-joined: share of the
+        pixels and fraction of positives in it), ``nmi_kmeans``,
+        ``purity_kmeans`` and ``kmeans_clusters``. Scores are ``nan`` when a
+        class is missing; sub-prototype scores are ``nan`` without prototypes.
+    """
+    from sklearn.cluster import KMeans
+
+    y = np.asarray(y).astype(np.int64)
+    m = 0 if prototypes is None else int(len(prototypes))
+    k = int(min(kmeans_clusters, len(y)))
+    out: Dict[str, Any] = {
+        "nmi_subproto": float("nan"),
+        "purity_subproto": float("nan"),
+        "num_subproto": m,
+        "used_subproto": 0,
+        "subproto_share": "",
+        "subproto_pos_frac": "",
+        "nmi_kmeans": float("nan"),
+        "purity_kmeans": float("nan"),
+        "kmeans_clusters": k,
+    }
+    if len(np.unique(y)) < 2:
+        return out
+    z = X / np.maximum(np.linalg.norm(X, axis=1, keepdims=True), 1e-12)
+    if prototypes is not None:
+        p = prototypes / np.maximum(
+            np.linalg.norm(prototypes, axis=1, keepdims=True), 1e-12
+        )
+        assign = (z @ p.T).argmax(1)
+        counts = np.bincount(assign, minlength=m)
+        pos = np.bincount(assign, weights=y, minlength=m)
+        frac = np.where(counts > 0, pos / np.maximum(counts, 1), np.nan)
+        out["nmi_subproto"], out["purity_subproto"] = _partition_scores(assign, y)
+        out["used_subproto"] = int((counts > 0).sum())
+        out["subproto_share"] = ";".join(f"{c / len(y):.3f}" for c in counts)
+        out["subproto_pos_frac"] = ";".join(f"{f:.3f}" for f in frac)
+    km = KMeans(n_clusters=k, n_init=3, random_state=seed).fit(z)
+    out["nmi_kmeans"], out["purity_kmeans"] = _partition_scores(km.labels_, y)
+    return out
+
+
 @torch.no_grad()
 def collect_pair_features(
     segmenter: FrozenLinearHeadSegmenter,
@@ -187,7 +268,10 @@ def collect_pair_features(
     return X.astype(np.float32), y
 
 
-def _load_segmenter(model_cfg, ckpt, seed: Optional[int]) -> FrozenLinearHeadSegmenter:
+def _load_segmenter(
+    model_cfg, ckpt, seed: Optional[int]
+) -> Tuple[FrozenLinearHeadSegmenter, Optional[np.ndarray]]:
+    """Frozen segmenter of the checkpoint and its sub-prototypes (or ``None``)."""
     if bool(ckpt.get("path")) == bool(ckpt.get("from_runner")):
         raise ValueError(
             "separability_probe.checkpoint needs exactly one of 'path' and "
@@ -203,8 +287,10 @@ def _load_segmenter(model_cfg, ckpt, seed: Optional[int]) -> FrozenLinearHeadSeg
         ckpt.get("source_format", "pytorch_lightning"),
         strict_loading=ckpt.get("strict_loading", True),
     )
+    protos = getattr(model, "subprototypes", None)
+    protos = None if protos is None else protos.detach().float().cpu().numpy()
     segmenter = FrozenLinearHeadSegmenter(model)
-    return segmenter.cuda() if torch.cuda.is_available() else segmenter
+    return (segmenter.cuda() if torch.cuda.is_available() else segmenter), protos
 
 
 def run_separability_probe(cfg: DictConfig) -> str:
@@ -233,9 +319,9 @@ def run_separability_probe(cfg: DictConfig) -> str:
     window_cols = [c for c in df.columns if c not in _EPISODE_COLUMNS]
     seeds = list(p.seeds) if ckpt.get("from_runner") else [None]
     pair = dict(negative_class=p.negative_class, positive_class=p.positive_class)
-    rows = []
+    rows, align_rows = [], []
     for seed in seeds:
-        segmenter = _load_segmenter(cfg.model, ckpt, seed)
+        segmenter, protos = _load_segmenter(cfg.model, ckpt, seed)
         rng = np.random.default_rng(p.seed)
         test_ds = instantiate(p.test_dataset, _recursive_=False)
         test_X, test_y = collect_pair_features(
@@ -247,6 +333,20 @@ def run_separability_probe(cfg: DictConfig) -> str:
             rng=rng,
             **pair,
         )
+        if p.alignment_csv:
+            n_clusters = p.alignment_kmeans_clusters or (
+                len(protos) if protos is not None else 4
+            )
+            align = {
+                "base_seed": seed,
+                "n_neg": int((test_y == 0).sum()),
+                "n_pos": int((test_y == 1).sum()),
+            }
+            align.update(
+                alignment_scores(test_X, test_y, protos, n_clusters, seed=p.seed)
+            )
+            align_rows.append(align)
+            logger.info("Sub-prototype alignment %s", align)
         for (k, d), sub in df.groupby(["shots", "draw"], sort=True):
             index = out.parent / f"probe_support_k{int(k):02d}_d{int(d):02d}.csv"
             sub[window_cols].drop_duplicates().to_csv(index, index=False)
@@ -275,4 +375,7 @@ def run_separability_probe(cfg: DictConfig) -> str:
             rows.append(row)
             logger.info("Separability probe %s", row)
     pd.DataFrame(rows).to_csv(out, index=False)
+    if p.alignment_csv:
+        Path(p.alignment_csv).parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(align_rows).to_csv(p.alignment_csv, index=False)
     return str(out)

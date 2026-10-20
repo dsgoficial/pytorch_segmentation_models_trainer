@@ -43,6 +43,7 @@
 
 ## Separability probe
 
+- `separability_probe.alignment_csv` (optional, `alignment_scores`): label-free alignment diagnostic on the probe's test pixels. Per base seed, it gives NMI and purity between the pair labels and (i) the argmax-cosine sub-prototype assignment of a `RefinementAwareWrapper` (R2-C) and (ii) k-means on the L2-normalized features (a reference for any base model). It also gives each sub-prototype's pixel share and positive-class fraction. It shows whether the unsupervised split of the merged superclass follows the pair before anyone tunes the sub-prototype repulsion. `alignment_kmeans_clusters` defaults to the number of sub-prototypes, else 4. Off by default, so the probe CSV is unchanged.
 - `mode: separability-probe` (`tools/few_shot/separability_probe.py`, `SeparabilityProbeConfig`): per base seed × support episode, fits a logistic-regression and a class-mean cosine probe on the frozen decoder features of two classes (support, full labels) and writes AUROC / balanced accuracy / AP on the test windows. Example `conf/examples/separability_probe.yaml`.
 
 ## Refinement-aware base training

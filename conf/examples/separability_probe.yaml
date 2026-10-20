@@ -23,6 +23,8 @@ separability_probe:
   max_test_pixels_per_class: 100000
   C: 1.0
   output_csv: outputs/probe/r2_pampa.csv
+  alignment_csv: outputs/probe/r2_pampa_alignment.csv # optional: NMI of sub-prototypes / k-means vs the pair
+  alignment_kmeans_clusters: null # default: number of sub-prototypes (R2-C), else 4
   support_dataset:
     _target_: pytorch_segmentation_models_trainer.dataset_loader.mbtiles_mask_dataset.MBTilesMaskWindowedDataset
     mbtiles_path: /data/imagery.mbtiles
