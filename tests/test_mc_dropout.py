@@ -211,18 +211,22 @@ class TestComputeUncertainty:
 
 class TestMcDropoutStochasticity:
     def test_samples_differ_with_dropout(self):
+        # Dropout2d over 8 channels draws the same mask twice with probability
+        # 1/256, and the global RNG state depends on which tests ran before on
+        # the xdist worker. Seed locally and compare several samples so the
+        # test is deterministic instead of flaky.
+        torch.manual_seed(0)
         model = TinySegModelWithDropout()
         model.eval()
         enable_mc_dropout(model)
 
         x = torch.randn(1, 3, H, W)
         with torch.no_grad():
-            out1 = model(x)
-            out2 = model(x)
+            outs = [model(x) for _ in range(T)]
 
-        assert not torch.allclose(
-            out1, out2
-        ), "Two MC Dropout samples should differ (dropout is stochastic)"
+        assert any(
+            not torch.allclose(outs[0], o) for o in outs[1:]
+        ), "MC Dropout samples should differ (dropout is stochastic)"
 
     def test_samples_identical_without_dropout(self):
         model = TinySegModelNoDropout()
