@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from pytorch_segmentation_models_trainer.few_shot.hierarchy import ClassHierarchy
-from pytorch_segmentation_models_trainer.few_shot.methods.hisplit import HiSplit
+from pytorch_segmentation_models_trainer.few_shot.methods.hisplit import HiSplit, _EPS
 
 NN = 254
 
@@ -767,6 +767,122 @@ class TestPseudoLabelTeacher:
             pseudo_label_contrast_weight=1.0,
             pseudo_label_threshold=0.3,
             pseudo_label_teacher_period=3,
+        )
+        m.adapt_to_query(f, masks, f)
+        assert m._task_params[0].shape == (2, 2, 4)
+        assert torch.isfinite(m._task_params[0]).all()
+
+
+class TestTversky:
+    def test_disabled_by_default(self):
+        m = HiSplit(q="trans")
+        assert m.tversky_weight == 0.0
+        assert m.tversky_alpha == pytest.approx(0.5)
+        assert m.tversky_beta == pytest.approx(0.5)
+
+    def test_support_tversky_matches_formula(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="trans", tversky_alpha=0.3, tversky_beta=0.7)
+        targets = m._targets(f, masks)
+        # weight=0 -> scores collapse to `bias` everywhere (independent of
+        # features), giving a fully deterministic, hand-computable q.
+        weight = torch.zeros(2, 4)
+        bias = torch.tensor([2.0, -1.0])
+        tv = m._support_tversky(f, targets, weight, bias)
+
+        q = m._q(m._scores(f, weight, bias))
+        valid = targets >= 0
+        y = torch.nn.functional.one_hot(targets.clamp(min=0), 2).movedim(-1, 1).to(
+            q.dtype
+        )
+        v = valid.unsqueeze(1).to(q.dtype)
+        tp = (q * y * v).sum(dim=(0, 2, 3))
+        fp = (q * (1 - y) * v).sum(dim=(0, 2, 3))
+        fn = ((1 - q) * y * v).sum(dim=(0, 2, 3))
+        tversky = (tp + _EPS) / (tp + 0.3 * fp + 0.7 * fn + _EPS)
+        present = (y * v).sum(dim=(0, 2, 3)) > 0
+        assert present.all()  # both kept and novel are labelled in `_data()`
+        expected = 1.0 - tversky.mean()
+        torch.testing.assert_close(tv, expected)
+
+    def test_no_valid_pixels_returns_zero(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="trans")
+        targets = torch.full((2, 6, 6), -1)
+        tv = m._support_tversky(f, targets, m.q_weight, m.q_bias)
+        assert torch.equal(tv, torch.zeros(()))
+
+    def test_absent_class_excluded_from_mean(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="trans")
+        # Only the kept child (index 0) is labelled -> novel (index 1) must
+        # not contribute a spurious perfect (TP=FP=FN=0 -> Tversky=1) score.
+        targets = torch.full((2, 6, 6), -1)
+        targets[:, 3:, 3:] = 0
+        weight = torch.zeros(2, 4)
+        bias = torch.tensor([2.0, -1.0])
+        tv = m._support_tversky(f, targets, weight, bias)
+
+        q = m._q(m._scores(f, weight, bias))
+        valid = targets >= 0
+        y = torch.nn.functional.one_hot(targets.clamp(min=0), 2).movedim(-1, 1).to(
+            q.dtype
+        )
+        v = valid.unsqueeze(1).to(q.dtype)
+        tp = (q * y * v).sum(dim=(0, 2, 3))[0]
+        fp = (q * (1 - y) * v).sum(dim=(0, 2, 3))[0]
+        fn = ((1 - q) * y * v).sum(dim=(0, 2, 3))[0]
+        expected = 1.0 - (tp + _EPS) / (tp + 0.5 * fp + 0.5 * fn + _EPS)
+        torch.testing.assert_close(tv, expected)
+
+    def test_higher_beta_penalises_false_negative_more(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="trans")
+        targets = m._targets(f, masks)
+        # weight=0, bias favouring "kept" everywhere (but not so extreme
+        # that q_novel underflows float32) -> the model is confidently
+        # wrong on every novel pixel (false negative there).
+        weight = torch.zeros(2, 4)
+        bias = torch.tensor([3.0, -3.0])
+        m.tversky_alpha, m.tversky_beta = 0.1, 0.1
+        low = m._support_tversky(f, targets, weight, bias)
+        m.tversky_alpha, m.tversky_beta = 0.1, 0.9
+        high = m._support_tversky(f, targets, weight, bias)
+        assert high.item() > low.item()
+
+    def test_zero_weight_is_a_no_op_in_adapt_to_query(self):
+        f, masks, w, b = _data()
+        base = _ready(f, masks, w, b, q="trans", adapt_iter=6, lr=0.05)
+        with_tversky = _ready(
+            f,
+            masks,
+            w,
+            b,
+            q="trans",
+            adapt_iter=6,
+            lr=0.05,
+            tversky_weight=0.0,
+            tversky_alpha=0.2,
+            tversky_beta=0.8,
+        )
+        base.adapt_to_query(f, masks, f)
+        with_tversky.adapt_to_query(f, masks, f)
+        torch.testing.assert_close(base._task_params[0], with_tversky._task_params[0])
+        torch.testing.assert_close(base._task_params[1], with_tversky._task_params[1])
+
+    def test_adapt_to_query_runs_with_tversky_enabled(self):
+        f, masks, w, b = _data()
+        m = _ready(
+            f,
+            masks,
+            w,
+            b,
+            q="trans",
+            adapt_iter=6,
+            lr=0.05,
+            tversky_weight=1.0,
+            tversky_alpha=0.3,
+            tversky_beta=0.7,
         )
         m.adapt_to_query(f, masks, f)
         assert m._task_params[0].shape == (2, 2, 4)

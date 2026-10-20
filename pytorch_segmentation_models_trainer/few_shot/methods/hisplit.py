@@ -207,6 +207,22 @@ class HiSplit(BaseGFSSMethod):
     before ``pseudo_label_start_iter``, to let plain support CE calibrate
     ``q`` first.
 
+    Tversky support term (``trans`` only): ``_support_ce`` above averages
+    cross-entropy uniformly over support pixels, which on a tiny, possibly
+    imbalanced ``K``-shot support (few ``novel`` pixels against many
+    ``kept`` ones) lets the easier/majority child dominate the per-episode
+    SGD gradient. ``tversky_weight`` (``0.0``, disabled, by default) adds
+    ``1 − mean_c Tversky_c`` (over children actually present in that
+    episode's support, per :class:`RefinementAwareWrapper`-style soft
+    TP/FP/FN, computed from the same ``q`` and support targets as
+    ``_support_ce``) to the ``adapt_to_query`` loss, weighted equally
+    across children instead of pixels. ``tversky_alpha``/``tversky_beta``
+    (``0.5``/``0.5``, i.e. the Dice coefficient, by default) weight false
+    positives vs. false negatives; raising ``tversky_beta`` above
+    ``tversky_alpha`` penalises missing a child (false negative) more than
+    over-predicting it, which can be used to push confidence specifically
+    onto an under-predicted ``novel`` child.
+
     Teacher-student stabilisation: by default the pseudo-label/confidence
     decision above is read off the same ``q`` being optimised this very
     SGD step (student == teacher, degenerate). When
@@ -279,6 +295,11 @@ class HiSplit(BaseGFSSMethod):
         pseudo_label_teacher_period: Iterations between teacher snapshots
             (see class doc). ``0`` (default) disables it — the
             pseudo-label decision uses the live, un-stabilised ``q``.
+        tversky_weight: Weight of the Tversky support term (``trans``
+            only, see class doc). ``0.0`` (default) disables it.
+        tversky_alpha: False-positive weight of the Tversky index.
+        tversky_beta: False-negative weight of the Tversky index.
+            ``0.5``/``0.5`` (default) is the Dice coefficient.
 
     Example YAML::
 
@@ -335,6 +356,9 @@ class HiSplit(BaseGFSSMethod):
         pseudo_label_start_iter: int = 0,
         pseudo_label_min_pixels: int = 1,
         pseudo_label_teacher_period: int = 0,
+        tversky_weight: float = 0.0,
+        tversky_alpha: float = 0.5,
+        tversky_beta: float = 0.5,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -382,6 +406,9 @@ class HiSplit(BaseGFSSMethod):
         self.pseudo_label_start_iter = int(pseudo_label_start_iter)
         self.pseudo_label_min_pixels = int(pseudo_label_min_pixels)
         self.pseudo_label_teacher_period = int(pseudo_label_teacher_period)
+        self.tversky_weight = float(tversky_weight)
+        self.tversky_alpha = float(tversky_alpha)
+        self.tversky_beta = float(tversky_beta)
         self.q = q
         self.tau = float(tau)
         self.variance = variance
@@ -736,6 +763,32 @@ class HiSplit(BaseGFSSMethod):
         w = valid * sample_weight
         return (ce * w).sum() / w.sum().clamp(min=_EPS)
 
+    def _support_tversky(
+        self,
+        features: Tensor,
+        targets: Tensor,
+        weight,
+        bias,
+    ) -> Tensor:
+        """``1 − mean_c Tversky_c`` of ``q`` against the support targets,
+        averaged over children present in this episode's support (``trans``
+        only, see class doc); ``0`` if none are present."""
+        q = self._q(self._scores(features, weight, bias))
+        c = q.shape[1]
+        valid = targets >= 0
+        y = F.one_hot(targets.clamp(min=0), c).movedim(-1, 1).to(q.dtype)
+        v = valid.unsqueeze(1).to(q.dtype)
+        tp = (q * y * v).sum(dim=(0, 2, 3))
+        fp = (q * (1 - y) * v).sum(dim=(0, 2, 3))
+        fn = ((1 - q) * y * v).sum(dim=(0, 2, 3))
+        tversky = (tp + _EPS) / (
+            tp + self.tversky_alpha * fp + self.tversky_beta * fn + _EPS
+        )
+        present = (y * v).sum(dim=(0, 2, 3)) > 0
+        if not present.any():
+            return q.new_zeros(())
+        return 1.0 - tversky[present].mean()
+
     def _edl_loss(
         self, features: Tensor, targets: Tensor, sample_weight: Optional[Tensor] = None
     ) -> Tensor:
@@ -911,7 +964,7 @@ class HiSplit(BaseGFSSMethod):
     ) -> None:
         """``trans``: per-map SGD on support CE + superclass entropy/prior
         (+ confidence-gated pseudo-label terms on the query, optionally
-        teacher-stabilised, see class doc)."""
+        teacher-stabilised; + Tversky support term, see class doc)."""
         w_ce, w_ent, w_kl = self.trans_weights
         n = query_features.shape[0]
         weight = self.q_weight.detach().unsqueeze(0).repeat(n, 1, 1).requires_grad_()
@@ -946,12 +999,24 @@ class HiSplit(BaseGFSSMethod):
             pseudo_ce, pseudo_contrast = self._pseudo_label_terms(
                 query_features, q, base_pred, it, q_teacher=q_teacher
             )
+            if self.tversky_weight != 0.0:
+                tversky = torch.stack(
+                    [
+                        self._support_tversky(
+                            support_features, targets, weight[i], bias[i]
+                        )
+                        for i in range(n)
+                    ]
+                )
+            else:
+                tversky = ce.new_zeros(n)
             loss = (
                 w_ce * ce
                 + w_ent * ent
                 + w_kl * kl
                 + self.pseudo_label_weight * pseudo_ce
                 + self.pseudo_label_contrast_weight * pseudo_contrast
+                + self.tversky_weight * tversky
             )
             optimizer.zero_grad()
             loss.sum().backward()

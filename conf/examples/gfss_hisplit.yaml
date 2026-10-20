@@ -65,6 +65,13 @@ gfss:
     # while the live/differentiable student q still supplies the CE probability
     # being optimised. 0 (default) disables it -- the live q is its own teacher.
     pseudo_label_teacher_period: 0
+    # q: trans only -- adds a Tversky term on the same K-shot support used by
+    # the CE above, averaged uniformly over children present in the support
+    # instead of per pixel (so a tiny/imbalanced support doesn't let the
+    # easier/majority child dominate the gradient). 0.0 = disabled.
+    tversky_weight: 0.0         # weight of (1 - mean_c Tversky_c) added to the loss
+    tversky_alpha: 0.5          # false-positive weight
+    tversky_beta: 0.5           # false-negative weight; > alpha favours recall on under-predicted children
 
 pl_trainer:
   max_steps: 0               # q: linear/trans/edl -> e.g. 100 (optimizer node)
