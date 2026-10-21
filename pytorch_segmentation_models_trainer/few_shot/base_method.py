@@ -54,6 +54,13 @@ class BaseGFSSMethod(nn.Module, ABC):
 
     transductive: bool = False
 
+    #: Whether this method wants an auxiliary external signal (e.g. AEF
+    #: embeddings) alongside ``features``/``masks`` — see :meth:`set_aux`.
+    #: Default ``False`` for every method; a subclass that uses one sets
+    #: this (usually as an instance attribute in ``setup``) so ``GFSSModel``
+    #: knows to load and provide it.
+    wants_aux: bool = False
+
     def __init__(self, **kwargs) -> None:
         super().__init__()
         self.hierarchy: Optional[ClassHierarchy] = None
@@ -101,6 +108,18 @@ class BaseGFSSMethod(nn.Module, ABC):
 
     def init_from_support(self, features: Tensor, masks: Tensor) -> None:
         """Initialise from the full support set (default: nothing)."""
+        return None
+
+    def set_aux(self, aux: Optional[Tensor]) -> None:
+        """Receive one batch's auxiliary external signal (e.g. AEF
+        embeddings), spatially aligned with the ``features``/``masks`` (or
+        images) of the call that follows — ``GFSSModel`` calls this right
+        before ``init_from_support``/``support_loss``/each TTA pass of
+        ``decode_to`` whenever :attr:`wants_aux` is ``True``, re-aligning it
+        under every test-time augmentation. ``None`` when no aux is
+        configured or the current batch has none (e.g. a missing cache
+        tile) — implementations must degrade gracefully, not raise.
+        Default: no-op (most methods do not use an auxiliary signal)."""
         return None
 
     def support_loss(self, features: Tensor, masks: Tensor) -> Optional[Tensor]:

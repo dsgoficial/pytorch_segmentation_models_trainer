@@ -1095,3 +1095,109 @@ class TestComparisonOptions:
     def test_invalid_options(self, kw, match):
         with pytest.raises(ValueError, match=match):
             HiSplit(**kw)
+
+
+class TestAefGate:
+    """``q: linear_aef_gate`` -- multiplicative gate of an external
+    embedding (e.g. AEF) on the frozen features, fit jointly with the
+    linear head by :meth:`HiSplit._fit_aef_gate` (self-contained, like
+    ``logreg``'s sklearn fit -- see the class docstring)."""
+
+    def test_wants_aux_false_by_default_true_after_setup_with_gate(self):
+        assert HiSplit(q="linear").wants_aux is False
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="linear_aef_gate")
+        assert m.wants_aux is True
+
+    def test_set_aux_stores_and_clears(self):
+        m = HiSplit(q="linear_aef_gate")
+        aux = torch.randn(2, 64, 6, 6)
+        m.set_aux(aux)
+        assert m._aux is aux
+        m.set_aux(None)
+        assert m._aux is None
+
+    def test_qfeat_is_identity_without_aux(self):
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="linear_aef_gate")
+        m.setup(h, torch.zeros(3, 4), torch.zeros(3))
+        f = torch.randn(2, 4, 6, 6)
+        torch.testing.assert_close(m._qfeat(f), f)
+
+    def test_qfeat_applies_the_gate_when_aux_is_set(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="linear_aef_gate")
+        aux = torch.randn(2, 64, 6, 6)
+        m.set_aux(aux)
+        gate = torch.sigmoid(m.aef_gate_linear(aux.movedim(1, -1))).movedim(-1, 1)
+        torch.testing.assert_close(m._qfeat(f), f * gate)
+
+    def test_qfeat_untouched_for_other_q_even_with_aux_set(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="linear")
+        m.set_aux(torch.randn(2, 64, 6, 6))  # no-op: no aef_gate_linear exists
+        torch.testing.assert_close(m._qfeat(f), f)
+
+    def test_q_weight_is_a_buffer_not_touched_by_the_generic_optimizer(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="linear_aef_gate")
+        assert not m.q_weight.requires_grad
+        assert not m.q_bias.requires_grad
+        names = {n for n, _ in m.named_parameters()}
+        assert "q_weight" not in names and "q_bias" not in names
+        assert any(n.startswith("aef_gate_linear.") for n in names)
+
+    def test_fit_warns_when_aux_was_never_set(self, caplog):
+        f, masks, w, b = _data()
+        with caplog.at_level("WARNING"):
+            _ready(f, masks, w, b, q="linear_aef_gate")
+        assert "no aux (AEF) set" in caplog.text
+
+    def test_fit_warns_and_returns_without_labelled_support_pixels(self, caplog):
+        f, masks, w, b = _data()
+        masks[:] = NN
+        f[:, 0] = -5.0  # base never predicts the mother -> no negatives either
+        with caplog.at_level("WARNING"):
+            _ready(f, masks, w, b, q="linear_aef_gate")
+        assert "no labelled support pixel" in caplog.text
+
+    def test_fit_learns_to_use_an_aux_only_signal(self):
+        """``features`` alone carries no child-split signal (only the
+        base/mother split); ``aux`` does. A correct gate+head fit must
+        reach high novel-child recall using ONLY the aux channel --
+        reproduces, as a unit test, the separability gain measured by the
+        probe (see class doc)."""
+        g = torch.Generator().manual_seed(0)
+        f = torch.randn(2, 4, 8, 8, generator=g) * 0.1
+        f[:, 0, :, 4:] += 3.0  # right half -> base class 1 (mother)
+        aux = torch.zeros(2, 64, 8, 8)
+        aux[:, 0, :4, 4:] = 1.0  # top-right -> novel child 3
+        aux[:, 0, 4:, 4:] = -1.0  # bottom-right -> kept child 1
+        w = torch.zeros(3, 4)
+        w[1, 0], w[0, 0] = 2.0, -2.0
+        b = torch.tensor([0.0, -1.0, 0.5])
+        masks = torch.full((2, 8, 8), NN)
+        masks[:, :4, 4:] = 3  # S-novel: only the novel class labelled
+
+        m = HiSplit(q="linear_aef_gate", aef_gate_epochs=300)
+        m.setup(ClassHierarchy({1: [1, 3]}, num_base_classes=3), w, b, NN)
+        m.set_aux(aux)
+        m.init_from_support(f, masks)
+
+        m.set_aux(aux)  # re-provide for inference, as GFSSModel does per batch
+        q = m._q(m._scores(f, m.q_weight, m.q_bias))
+        novel = m.child_classes.index(3)
+        assert q[:, novel, :4, 4:].mean() > 0.7
+        assert q[:, novel, 4:, 4:].mean() < 0.3
+
+    def test_fit_without_aux_falls_back_to_an_ungated_linear_head(self):
+        """No aux provided (warns, see above) -- the fit must still run
+        and reduce to a plain linear-head fit on the raw features
+        (gate ~ sigmoid(bias-only) when aef_gate_linear's weight has not
+        moved the needle), not crash or leave NaNs."""
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="linear_aef_gate", aef_gate_epochs=50)
+        assert torch.isfinite(m.q_weight).all()
+        assert torch.isfinite(m.q_bias).all()
+        pred = m(f).argmax(1)
+        assert (pred[:, :3, 3:] == 3).float().mean() > 0.5

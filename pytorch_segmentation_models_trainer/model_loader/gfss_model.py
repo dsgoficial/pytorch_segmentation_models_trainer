@@ -22,7 +22,7 @@ import copy
 import hashlib
 import logging
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -34,6 +34,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from pytorch_segmentation_models_trainer.config_definitions.few_shot_config import (
     GFSSCheckpointConfig,
 )
+from pytorch_segmentation_models_trainer.few_shot.aef_cache import AefCacheLoader
 from pytorch_segmentation_models_trainer.few_shot.backbone import (
     FrozenLinearHeadSegmenter,
 )
@@ -43,7 +44,7 @@ from pytorch_segmentation_models_trainer.few_shot.uncertainty import (
     GFSSUncertaintyMetrics,
 )
 from pytorch_segmentation_models_trainer.model_loader.model import Model
-from pytorch_segmentation_models_trainer.tools.tta.tta import ROT0, apply_tta
+from pytorch_segmentation_models_trainer.tools.tta.tta import ROT0, _augment, apply_tta
 from pytorch_segmentation_models_trainer.utils.checkpoint_loading import (
     load_pretrained_weights,
     resolve_checkpoint_from_runner,
@@ -152,9 +153,12 @@ class GFSSModel(Model):
         )
         self.register_buffer("_gfss_initialised", torch.tensor(False))
         self._support: Optional[Tuple[Tensor, Tensor]] = None
+        self._support_mask_paths: Optional[List[str]] = None
         self._test_feat_cache: Dict[Any, Tensor] = {}
         self._test_feat_cache_path: Optional[str] = None
         self._test_feat_cache_dirty: bool = False
+        aef_cache_dir = gfss.get("aef_cache_dir", None)
+        self.aef_loader = AefCacheLoader(aef_cache_dir) if aef_cache_dir else None
 
     # ------------------------------------------------------------------
     # Model / method construction
@@ -261,12 +265,17 @@ class GFSSModel(Model):
         return feats, small.squeeze(1).long()
 
     def _get_support(self) -> Tuple[Tensor, Tensor]:
-        """Features and downsampled masks of the whole support set (cached)."""
+        """Features and downsampled masks of the whole support set (cached).
+
+        Also collects each image's ``mask_path`` (when the dataset returns
+        it) into ``self._support_mask_paths``, aligned with the same order
+        — used by :meth:`_load_aux` for methods with ``wants_aux``.
+        """
         if self._support is None:
             loader = DataLoader(
                 self.train_ds, batch_size=self.cfg.hyperparameters.batch_size
             )
-            feats, masks = [], []
+            feats, masks, mask_paths = [], [], []
             for batch in loader:
                 images, m = self._unpack_batch(batch)
                 f, sm = self._features_and_masks(
@@ -274,12 +283,35 @@ class GFSSModel(Model):
                 )
                 feats.append(f)
                 masks.append(sm)
+                if isinstance(batch, dict) and "mask_path" in batch:
+                    mask_paths.extend(batch["mask_path"])
             self._support = (torch.cat(feats), torch.cat(masks))
+            self._support_mask_paths = mask_paths or None
         return self._support
+
+    def _load_aux(
+        self, mask_paths: Optional[List[str]], size
+    ) -> Optional[Tensor]:
+        """The method's auxiliary external signal (e.g. AEF) for these
+        tiles, at the backbone's feature resolution ``size`` — ``None``
+        when the method doesn't want one, ``gfss.aef_cache_dir`` isn't
+        set, or ``mask_paths`` has none (e.g. ``return_metadata: false``,
+        a likely misconfiguration logged once by the caller's own
+        warning in ``HiSplit._fit_aef_gate``)."""
+        if self.aef_loader is None or not getattr(self.method, "wants_aux", False):
+            return None
+        if not mask_paths:
+            return None
+        return self.aef_loader.load_batch(mask_paths, self.device, tuple(size))
 
     def _ensure_initialised(self) -> None:
         if not bool(self._gfss_initialised):
-            self.method.init_from_support(*self._get_support())
+            feats, masks = self._get_support()
+            if getattr(self.method, "wants_aux", False):
+                self.method.set_aux(
+                    self._load_aux(self._support_mask_paths, feats.shape[-2:])
+                )
+            self.method.init_from_support(feats, masks)
             self._gfss_initialised.fill_(True)
 
     # ------------------------------------------------------------------
@@ -503,6 +535,7 @@ class GFSSModel(Model):
         batch_idx: Optional[int] = None,
         precomputed_identity_feats: Optional[Tensor] = None,
         stage: str = "test",
+        aux: Optional[Tensor] = None,
     ) -> dict:
         """Logits of the method (key ``__main__``), of each decoding variant
         and of the unmodified base model (``__base__``), averaged over the TTA
@@ -522,16 +555,26 @@ class GFSSModel(Model):
           None``, every GFSS method except the fine-tuning baselines) —
           ``ref is self.model`` there, so it's the exact same computation,
           not an approximation.
+
+        ``aux`` (the method's auxiliary signal for this batch at the
+        identity orientation, from :meth:`_load_aux`, or ``None``) is
+        re-augmented with the exact same transform as ``x`` on every TTA
+        pass before the method sees it (:meth:`set_aux`) — it must stay
+        spatially aligned with ``feats`` under rotations/flips just like
+        the image itself.
         """
         ref = self._reference()
         frozen = self.base_reference is None
         aug_sequence = list(augmentations) if augmentations else [ROT0]
         state = {"i": 0}
+        wants_aux = getattr(self.method, "wants_aux", False)
 
         def predict(x: Tensor) -> dict:
             i = state["i"]
             aug_name = aug_sequence[i] if i < len(aug_sequence) else ROT0
             state["i"] += 1
+            if wants_aux:
+                self.method.set_aux(_augment(aux, aug_name) if aux is not None else None)
             if aug_name == ROT0 and precomputed_identity_feats is not None:
                 feats = precomputed_identity_feats
             else:
@@ -564,12 +607,17 @@ class GFSSModel(Model):
                 self.method.adapt_to_query(*self._get_support(), feats)
         # TTA (cfg.tta_mode / use_tta, as in the base models) only at test time.
         augmentations = self._get_tta_augmentations() if stage == "test" else None
+        aux = None
+        if getattr(self.method, "wants_aux", False):
+            mask_paths = batch.get("mask_path") if isinstance(batch, dict) else None
+            aux = self._load_aux(mask_paths, feats.shape[-2:])
         logits = self._predict_logits(
             images,
             augmentations,
             batch_idx=batch_idx,
             precomputed_identity_feats=feats,
             stage=stage,
+            aux=aux,
         )
         pred = logits.pop(self._MAIN).argmax(1)
         base_pred = logits.pop("__base__").argmax(1)

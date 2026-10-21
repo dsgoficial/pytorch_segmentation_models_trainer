@@ -44,7 +44,7 @@ from pytorch_segmentation_models_trainer.few_shot.uncertainty import (
 logger = logging.getLogger(__name__)
 
 _EPS = 1e-10
-_Q_TYPES = {"proto", "proto_prob", "linear", "trans", "edl", "logreg"}
+_Q_TYPES = {"proto", "proto_prob", "linear", "trans", "edl", "logreg", "linear_aef_gate"}
 _TRAINABLE = {"linear", "trans", "edl"}
 
 
@@ -251,6 +251,30 @@ class HiSplit(BaseGFSSMethod):
     into ``q`` instead of adopting BCM's hard-override mechanism
     wholesale (``hard_decode_measure`` above does that instead).
 
+    AlphaEarth Foundations (AEF) multiplicative gate (``q: linear_aef_gate``
+    only): modulates the frozen base features before the linear head —
+    ``features' = features · sigmoid(Linear(aef))`` — with a 64-d external
+    embedding (AlphaEarth Foundations, 10 m, phenology-aware) at the base's
+    own native 64×64 grid (no resample needed for a 2.5 m/256 px tile).
+    Motivated by a 4-stage separability probe (not inside this repo, see
+    the companion research project's
+    ``pesquisa/analise_comparativa_hisplit_estado_da_arte_2026-10-16.md``
+    §8.14, Estágios 1-4) that measured this exact gate as the strongest
+    and most consistent non-linear interaction between AEF and the base's
+    features for a campo×cultivada-style split, confirmed in 2 biomes —
+    plain concatenation (linear) and a generic MLP on the concatenation
+    were weaker. The gate's ``nn.Linear`` and the head (``q_weight``/
+    ``q_bias``) are fit together by :meth:`_fit_aef_gate`, a self-contained
+    Adam loop inside :meth:`init_from_support` (like :meth:`_fit_logreg`'s
+    sklearn fit) — not ``pl_trainer``'s generic training loop, so
+    ``max_steps`` stays ``0`` as for ``logreg``/``proto``. The external
+    embedding itself is loaded and provided by ``GFSSModel`` (via
+    :meth:`set_aux`, re-aligned under every TTA pass) from
+    ``gfss.aef_cache_dir`` — this method only consumes whatever tensor it
+    is given, it does not know the cache format. ``K=1`` was not reliable
+    for ANY mechanism tested in the probe (single-image support) — treat
+    it with low confidence here too.
+
     Teacher-student stabilisation: by default the pseudo-label/confidence
     decision above is read off the same ``q`` being optimised this very
     SGD step (student == teacher, degenerate). When
@@ -266,7 +290,8 @@ class HiSplit(BaseGFSSMethod):
     disables it.
 
     Args:
-        q: ``proto``, ``proto_prob``, ``linear`` or ``trans``.
+        q: ``proto``, ``proto_prob``, ``linear``, ``trans``, ``edl``,
+            ``logreg`` or ``linear_aef_gate`` (see class doc).
         tau: Cosine temperature of ``proto`` (and init of ``linear``).
         variance: ``shared`` or ``per_class`` (``proto_prob``).
         var_floor: Minimum variance (``proto_prob``).
@@ -336,6 +361,13 @@ class HiSplit(BaseGFSSMethod):
             a BCM-style ``LogisticRegressionCV`` teacher on the query
             (``trans`` only, see class doc). ``0.0`` (default) disables
             it.
+        aef_dim: Channel count of the external embedding consumed by
+            ``q: linear_aef_gate`` (``64`` for AlphaEarth Foundations,
+            the only one tested).
+        aef_gate_epochs: Adam steps of :meth:`_fit_aef_gate`
+            (``linear_aef_gate`` only).
+        aef_gate_lr: Adam learning rate of :meth:`_fit_aef_gate`
+            (``linear_aef_gate`` only).
 
     Example YAML::
 
@@ -398,6 +430,9 @@ class HiSplit(BaseGFSSMethod):
         hard_decode_measure: Optional[str] = None,
         hard_decode_threshold: float = 0.3,
         bcm_teacher_weight: float = 0.0,
+        aef_dim: int = 64,
+        aef_gate_epochs: int = 200,
+        aef_gate_lr: float = 1e-2,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -451,6 +486,10 @@ class HiSplit(BaseGFSSMethod):
         self.hard_decode_measure = hard_decode_measure
         self.hard_decode_threshold = float(hard_decode_threshold)
         self.bcm_teacher_weight = float(bcm_teacher_weight)
+        self.aef_dim = int(aef_dim)
+        self.aef_gate_epochs = int(aef_gate_epochs)
+        self.aef_gate_lr = float(aef_gate_lr)
+        self._aux: Optional[Tensor] = None
         self.q = q
         self.tau = float(tau)
         self.variance = variance
@@ -551,6 +590,9 @@ class HiSplit(BaseGFSSMethod):
             self.leak_logit = nn.Parameter(
                 base_weight.new_full((n, nb), self.leak_init)
             )
+        if self.q == "linear_aef_gate":
+            self.wants_aux = True
+            self.aef_gate_linear = nn.Linear(self.aef_dim, dim).to(base_weight)
 
     def _base_probs(self, features: Tensor) -> Tensor:
         return self.base_probabilities(self._base_logits(features))
@@ -573,8 +615,24 @@ class HiSplit(BaseGFSSMethod):
                 targets[not_novel] = i
         return targets
 
+    def set_aux(self, aux: Optional[Tensor]) -> None:
+        """Stores the external embedding (e.g. AEF) of the call that
+        follows (``init_from_support``/``support_loss``/one TTA pass of
+        ``decode_to`` — see :attr:`wants_aux`), ``(B, aef_dim, h, w)`` at
+        the same spatial resolution/orientation as ``features``, or
+        ``None``. Only consumed by ``q: linear_aef_gate`` (:meth:`_qfeat`);
+        a no-op for every other ``q``."""
+        self._aux = aux
+
     def _qfeat(self, features: Tensor) -> Tensor:
-        """Features used by q (Tukey's power transform when ≠ 1)."""
+        """Features used by q: the AEF multiplicative gate (``q:
+        linear_aef_gate``, when :meth:`set_aux` was last given a tensor),
+        then Tukey's power transform when ``feature_power`` ≠ 1."""
+        if self.q == "linear_aef_gate" and self._aux is not None:
+            gate = torch.sigmoid(
+                self.aef_gate_linear(self._aux.movedim(1, -1))
+            ).movedim(-1, 1)
+            features = features * gate
         if self.feature_power == 1.0:
             return features
         return features.clamp(min=0).pow(self.feature_power)
@@ -619,6 +677,47 @@ class HiSplit(BaseGFSSMethod):
             self.edl_prior.copy_(prior)
         if self.q == "logreg" or self.bcm_teacher_weight != 0.0:
             self._fit_logreg(flat.detach().cpu().numpy(), t_all.cpu().numpy())
+        if self.q == "linear_aef_gate":
+            self._fit_aef_gate(features, targets)
+
+    def _fit_aef_gate(self, features: Tensor, targets: Tensor) -> None:
+        """Jointly fits the AEF gate's ``nn.Linear`` and the linear head
+        (``q_weight``/``q_bias``) by Adam, minimising the same
+        per-mother cross-entropy as ``q: linear``'s ``pl_trainer``-driven
+        path (:meth:`_support_ce`, called here directly) — self-contained
+        like :meth:`_fit_logreg`, so these parameters are never touched by
+        the generic training loop (``pl_trainer.max_steps`` stays ``0``,
+        as for ``logreg``/``proto``). Uses whatever :meth:`set_aux` was
+        last given (``None`` means an un-gated linear head, with a
+        warning — a silent degradation that should not happen in a
+        correctly configured run)."""
+        if self._aux is None:
+            logger.warning(
+                "HiSplit linear_aef_gate: no aux (AEF) set, fitting an "
+                "un-gated linear head instead."
+            )
+        if (targets >= 0).sum() == 0:
+            logger.warning("HiSplit linear_aef_gate: no labelled support pixel.")
+            return
+        weight = nn.Parameter(self.q_weight.detach().clone())
+        bias = nn.Parameter(self.q_bias.detach().clone())
+        params = list(self.aef_gate_linear.parameters()) + [weight, bias]
+        opt = torch.optim.Adam(params, lr=self.aef_gate_lr)
+        for _ in range(self.aef_gate_epochs):
+            opt.zero_grad()
+            loss = self._support_ce(features, targets, weight, bias)
+            if not torch.isfinite(loss):
+                logger.warning(
+                    "HiSplit linear_aef_gate: non-finite support loss, "
+                    "stopping the fit early."
+                )
+                break
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
+            opt.step()
+        with torch.no_grad():
+            self.q_weight.copy_(weight)
+            self.q_bias.copy_(bias)
 
     def _fit_logreg(self, X, t) -> None:
         """BCM's classifier per mother on the HiSplit targets."""

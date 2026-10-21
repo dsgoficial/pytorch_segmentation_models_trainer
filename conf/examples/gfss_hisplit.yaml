@@ -9,9 +9,13 @@ experiments_runner:
   output_base_dir: outputs/gfss/hisplit_proto_pampa
 
 gfss:
+  # q: linear_aef_gate only -- directory of per-tile <id>.npz AlphaEarth
+  # Foundations embeddings (key 'aef', (n_bands, h, w) int8, -128 = nodata).
+  # null (default) disables it; required by any method with wants_aux.
+  # aef_cache_dir: /path/to/aef_cache
   method:
     _target_: pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit
-    q: proto                 # proto | proto_prob | linear | trans | edl
+    q: proto                 # proto | proto_prob | linear | trans | edl | logreg | linear_aef_gate
     tau: 10.0                # cosine temperature (proto, init of linear/trans)
     variance: shared         # proto_prob: shared | per_class
     decoding: hierarchical   # hierarchical | flat
@@ -81,6 +85,17 @@ gfss:
     # (same classifier as hisplit_logreg/BCM) and distils its decision into q
     # via a confidence-weighted CE on the query. 0.0 = disabled (default).
     bcm_teacher_weight: 0.0
+    # q: linear_aef_gate only -- modulates the base features by
+    # sigmoid(Linear(aux)) before the linear head, with an external per-pixel
+    # embedding (e.g. AlphaEarth Foundations) at the base's own feature grid;
+    # the gate + head are fit together by a self-contained Adam loop inside
+    # init_from_support (like logreg's sklearn fit), not pl_trainer's loop.
+    # Needs gfss.aef_cache_dir set below AND train_dataset/test_dataset.
+    # return_metadata: true (the method reads each tile's mask_path to find
+    # its cached embedding).
+    aef_dim: 64               # channel count of the external embedding
+    aef_gate_epochs: 200      # Adam steps of the self-contained fit
+    aef_gate_lr: 1.0e-2
 
 pl_trainer:
   max_steps: 0               # q: linear/trans/edl -> e.g. 100 (optimizer node)

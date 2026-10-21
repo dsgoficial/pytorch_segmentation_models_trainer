@@ -27,19 +27,25 @@ class TinySegDataset(Dataset):
     """4 images 64x64; mask: left half class 0, right half ``right`` class,
     top-right quadrant class ``corner``."""
 
-    def __init__(self, n=4, right=1, corner=2, seed=None, **kwargs):
+    def __init__(
+        self, n=4, right=1, corner=2, seed=None, return_metadata=False, **kwargs
+    ):
         g = torch.Generator().manual_seed(0)
         self.images = torch.randn(n, 3, 64, 64, generator=g)
         mask = torch.zeros(64, 64, dtype=torch.long)
         mask[:, 32:] = right
         mask[:32, 32:] = corner
         self.mask = mask
+        self.return_metadata = return_metadata
 
     def __len__(self):
         return len(self.images)
 
     def __getitem__(self, i):
-        return {"image": self.images[i], "mask": self.mask.clone()}
+        item = {"image": self.images[i], "mask": self.mask.clone()}
+        if self.return_metadata:
+            item["mask_path"] = f"{i}.tif"
+        return item
 
 
 class TrainableProbe(BaseGFSSMethod):
@@ -459,6 +465,79 @@ def test_hisplit_runs_through_train(base_ckpt, tmp_path, q, steps, extra):
     cfg.gfss.method.adapt_iter = 2
     trainer = train(cfg)
     assert trainer.global_step == steps
+    assert "test/locality" in trainer.callback_metrics
+
+
+def test_hisplit_aef_gate_runs_through_train_with_real_aux_cache(base_ckpt, tmp_path):
+    """End-to-end: ``q: linear_aef_gate`` through the real ``train()`` path
+    (support + TTA'd query), with a real (fake-content) AEF ``.npz`` cache
+    on disk -- exercises ``_get_support``'s ``mask_path`` collection,
+    ``_ensure_initialised``'s ``set_aux`` before ``init_from_support``, and
+    ``_predict_logits``'s per-TTA-pass re-augmented ``set_aux`` together,
+    not each in isolation (see ``tests/test_few_shot_hisplit.py::TestAefGate``
+    for the gate's own numerical correctness)."""
+    import numpy as np
+
+    from pytorch_segmentation_models_trainer.train import train
+
+    aef_dir = tmp_path / "aef_cache"
+    aef_dir.mkdir()
+    rng = np.random.default_rng(0)
+    for i in range(4):
+        arr = rng.integers(-100, 100, size=(64, 8, 8), dtype=np.int8)
+        np.savez(aef_dir / f"{i}.npz", aef=arr)
+
+    cfg = _cfg(
+        base_ckpt[0],
+        method="pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit",
+        pl_model={
+            "_target_": "pytorch_segmentation_models_trainer.model_loader.gfss_model.GFSSModel"
+        },
+        pl_trainer={
+            "max_steps": 0,
+            "accelerator": "cpu",
+            "enable_checkpointing": False,
+            "enable_progress_bar": False,
+            "default_root_dir": str(tmp_path),
+        },
+        train_dataset=_ds(right=1, corner=3, return_metadata=True),
+        test_dataset=_ds(right=1, corner=3, return_metadata=True),
+    )
+    cfg.gfss.method.q = "linear_aef_gate"
+    cfg.gfss.method.aef_gate_epochs = 10  # keep the test fast, not a convergence check
+    cfg.gfss.aef_cache_dir = str(aef_dir)
+
+    trainer = train(cfg)
+    assert trainer.global_step == 0
+    assert "test/locality" in trainer.callback_metrics
+    assert torch.isfinite(trainer.lightning_module.method.q_weight).all()
+
+
+def test_hisplit_aef_gate_without_cache_dir_warns_but_still_runs(base_ckpt, tmp_path):
+    """``gfss.aef_cache_dir`` unset (or the method never given a tile's
+    metadata): ``_load_aux`` returns ``None``, the gate's own warning in
+    ``_fit_aef_gate`` fires, and the run still completes (no crash) --
+    the documented graceful degradation, exercised through ``train()``."""
+    from pytorch_segmentation_models_trainer.train import train
+
+    cfg = _cfg(
+        base_ckpt[0],
+        method="pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit",
+        pl_model={
+            "_target_": "pytorch_segmentation_models_trainer.model_loader.gfss_model.GFSSModel"
+        },
+        pl_trainer={
+            "max_steps": 0,
+            "accelerator": "cpu",
+            "enable_checkpointing": False,
+            "enable_progress_bar": False,
+            "default_root_dir": str(tmp_path),
+        },
+    )
+    cfg.gfss.method.q = "linear_aef_gate"
+    cfg.gfss.method.aef_gate_epochs = 5
+    trainer = train(cfg)
+    assert trainer.global_step == 0
     assert "test/locality" in trainer.callback_metrics
 
 

@@ -178,6 +178,11 @@ class GFSSConfig:
             batch size) -- runs that share all four (e.g. other shots/draws
             of the same seed in a K-sweep) skip the backbone pass on the
             query set entirely. ``None`` (default) disables it.
+        aef_cache_dir: Directory of per-tile AlphaEarth Foundations ``.npz``
+            embeddings (see ``few_shot/aef_cache.py``), only read when
+            ``method.wants_aux`` is ``True`` (e.g. ``hisplit``'s
+            ``q: linear_aef_gate``). ``None`` (default) disables it --
+            required by any method that declares ``wants_aux``.
 
     Example YAML::
 
@@ -201,6 +206,7 @@ class GFSSConfig:
     backbone: Optional[Dict[str, Any]] = None
     boundary_width: int = 0
     test_feature_cache_dir: Optional[str] = None
+    aef_cache_dir: Optional[str] = None
 
 
 @dataclass
