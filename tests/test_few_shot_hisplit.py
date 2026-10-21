@@ -6,6 +6,7 @@ import torch
 
 from pytorch_segmentation_models_trainer.few_shot.hierarchy import ClassHierarchy
 from pytorch_segmentation_models_trainer.few_shot.methods.hisplit import HiSplit, _EPS
+from pytorch_segmentation_models_trainer.few_shot.uncertainty import normalized_entropy
 
 NN = 254
 
@@ -883,6 +884,125 @@ class TestTversky:
             tversky_weight=1.0,
             tversky_alpha=0.3,
             tversky_beta=0.7,
+        )
+        m.adapt_to_query(f, masks, f)
+        assert m._task_params[0].shape == (2, 2, 4)
+        assert torch.isfinite(m._task_params[0]).all()
+
+
+class TestHardDecode:
+    def test_disabled_by_default(self):
+        m = HiSplit(q="trans")
+        assert m.hard_decode_measure is None
+        assert m.hard_decode_threshold == pytest.approx(0.3)
+
+    def test_none_is_identity(self):
+        f, masks, w, b = _data()
+        f = f + torch.randn_like(f)
+        ref = _ready(f, masks, w, b)
+        m = _ready(f, masks, w, b, hard_decode_measure=None)
+        assert torch.equal(m(f), ref(f))
+
+    def test_confident_pixels_snap_to_own_argmax(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, hard_decode_measure="split_entropy")
+        q = torch.empty(2, 2, 6, 6)
+        q[:, 0], q[:, 1] = 0.3, 0.7  # novel child wins the arg-max
+        m.uncertainty = lambda feats: {"split_entropy": torch.zeros(2, 6, 6)}
+        out = m._apply_hard_decode(f, q)
+        kept_local = m.child_classes.index(1)
+        novel_local = m.child_classes.index(3)
+        assert torch.equal(out[:, novel_local], torch.ones(2, 6, 6))
+        assert torch.equal(out[:, kept_local], torch.zeros(2, 6, 6))
+
+    def test_uncertain_pixels_keep_original_q(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, hard_decode_measure="split_entropy")
+        q = torch.empty(2, 2, 6, 6)
+        q[:, 0], q[:, 1] = 0.3, 0.7
+        m.uncertainty = lambda feats: {"split_entropy": torch.ones(2, 6, 6)}
+        out = m._apply_hard_decode(f, q)
+        assert torch.equal(out, q)
+
+    def test_measure_validated_against_available_uncertainty(self):
+        f, masks, w, b = _data()
+        with pytest.raises(ValueError, match="dissonance"):
+            _ready(f, masks, w, b, hard_decode_measure="dissonance")
+
+    def test_works_with_flat_decoding(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, hard_decode_measure="split_entropy", decoding="flat")
+        assert m(f).shape == (2, 4, 6, 6)
+
+    def test_decode_runs_end_to_end(self):
+        f, masks, w, b = _data()
+        m = _ready(
+            f, masks, w, b, hard_decode_measure="split_entropy", hard_decode_threshold=0.9
+        )
+        out = m(f)
+        assert out.shape == (2, 4, 6, 6)
+        assert torch.isfinite(out).all()
+
+
+class TestBcmTeacher:
+    def test_disabled_by_default(self):
+        m = HiSplit(q="trans")
+        assert m.bcm_teacher_weight == 0.0
+
+    def test_logreg_fit_during_init_when_enabled_even_if_q_is_not_logreg(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="trans", bcm_teacher_weight=1.0)
+        assert m.logreg_models  # fit happened despite q="trans"
+
+    def test_no_fit_when_disabled(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="trans")
+        assert not m.logreg_models
+
+    def test_zero_without_logreg_models(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="trans", bcm_teacher_weight=1.0)
+        m.logreg_models = {}
+        q = m._q(m._scores(f, m.q_weight, m.q_bias))
+        ce = m._bcm_teacher_term(f, q)
+        assert torch.equal(ce, torch.zeros(2))
+
+    def test_bcm_teacher_term_matches_formula(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="trans", bcm_teacher_weight=1.0)
+        m.logreg_models = {1: object()}  # truthy stand-in, bypassed below
+        teacher_scores = torch.empty(2, 2, 6, 6)
+        teacher_scores[:, 0], teacher_scores[:, 1] = 2.0, 0.0  # favours "kept"
+        m._logreg_scores = lambda feats: teacher_scores
+        q = torch.empty(2, 2, 6, 6)
+        q[:, 0], q[:, 1] = 0.6, 0.4
+        ce = m._bcm_teacher_term(f, q)
+
+        tq = torch.softmax(teacher_scores, dim=1)
+        conf = 1.0 - normalized_entropy(tq)
+        pseudo = tq.argmax(1)
+        p = q.gather(1, pseudo.unsqueeze(1)).squeeze(1)
+        ce_px = -torch.log(p + _EPS)
+        expected = (ce_px * conf).flatten(1).sum(1) / conf.flatten(1).sum(1).clamp(
+            min=_EPS
+        )
+        torch.testing.assert_close(ce, expected, atol=1e-4, rtol=0)
+
+    def test_zero_weight_is_a_no_op_in_adapt_to_query(self):
+        f, masks, w, b = _data()
+        base = _ready(f, masks, w, b, q="trans", adapt_iter=6, lr=0.05)
+        with_teacher = _ready(
+            f, masks, w, b, q="trans", adapt_iter=6, lr=0.05, bcm_teacher_weight=0.0
+        )
+        base.adapt_to_query(f, masks, f)
+        with_teacher.adapt_to_query(f, masks, f)
+        torch.testing.assert_close(base._task_params[0], with_teacher._task_params[0])
+        torch.testing.assert_close(base._task_params[1], with_teacher._task_params[1])
+
+    def test_adapt_to_query_runs_with_bcm_teacher_enabled(self):
+        f, masks, w, b = _data()
+        m = _ready(
+            f, masks, w, b, q="trans", adapt_iter=6, lr=0.05, bcm_teacher_weight=1.0
         )
         m.adapt_to_query(f, masks, f)
         assert m._task_params[0].shape == (2, 2, 4)

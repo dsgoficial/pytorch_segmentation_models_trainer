@@ -72,6 +72,15 @@ gfss:
     tversky_weight: 0.0         # weight of (1 - mean_c Tversky_c) added to the loss
     tversky_alpha: 0.5          # false-positive weight
     tversky_beta: 0.5           # false-negative weight; > alpha favours recall on under-predicted children
+    # any q: snaps q to a hard one-hot (BCM-style override) wherever the named
+    # uncertainty measure is below the threshold (confident); keeps the usual
+    # soft q elsewhere. null disables it (default).
+    hard_decode_measure: null    # e.g. split_entropy | split_vacuity (q: edl) | dissonance (evidential base)
+    hard_decode_threshold: 0.3
+    # q: trans only -- fits a LogisticRegressionCV teacher on the support
+    # (same classifier as hisplit_logreg/BCM) and distils its decision into q
+    # via a confidence-weighted CE on the query. 0.0 = disabled (default).
+    bcm_teacher_weight: 0.0
 
 pl_trainer:
   max_steps: 0               # q: linear/trans/edl -> e.g. 100 (optimizer node)

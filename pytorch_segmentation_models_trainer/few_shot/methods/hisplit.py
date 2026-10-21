@@ -223,6 +223,34 @@ class HiSplit(BaseGFSSMethod):
     over-predicting it, which can be used to push confidence specifically
     onto an under-predicted ``novel`` child.
 
+    Uncertainty-gated hard decoding (any ``q``): BCM overrides the base
+    model's prediction with a hard arg-max inside the mapped base class,
+    instead of HiSplit's usual soft multiplicative factorization
+    (``p(filha) = p_base(mãe)·q``); on the Mata Atlântica biome BCM beats
+    every HiSplit variant tested (including ``hisplit_logreg``, the same
+    classifier as BCM inside HiSplit's soft decoding — see
+    ``pesquisa/analise_comparativa_hisplit_estado_da_arte_2026-10-16.md``
+    §8.3), so the hard-vs-soft decision itself, not just the classifier,
+    is a candidate explanation. ``hard_decode_measure`` (``None``,
+    disabled, by default) snaps ``q`` to a one-hot at its own arg-max,
+    per mother, wherever the named uncertainty measure (a key of
+    :meth:`uncertainty`) is below ``hard_decode_threshold`` (confident) —
+    a BCM-style hard override gated by uncertainty instead of applied
+    unconditionally, applied in :meth:`split_probabilities` and
+    :meth:`_decode` right after ``confidence_weight_measure`` (identity
+    when both are ``None``). Uncertain pixels keep the usual soft ``q``
+    unchanged.
+
+    BCM-as-teacher distillation (``trans`` only): fits a
+    ``LogisticRegressionCV`` teacher on the same ``K``-shot support as
+    ``hisplit_logreg``/BCM (reusing :meth:`_fit_logreg`, regardless of
+    ``q``) and, when ``bcm_teacher_weight`` (``0.0``, disabled, by
+    default) is set, adds a cross-entropy of ``q`` against that
+    teacher's (stop-gradient) arg-max on the query, weighted by the
+    teacher's own confidence (``1 − entropy``) — distils BCM's decision
+    into ``q`` instead of adopting BCM's hard-override mechanism
+    wholesale (``hard_decode_measure`` above does that instead).
+
     Teacher-student stabilisation: by default the pseudo-label/confidence
     decision above is read off the same ``q`` being optimised this very
     SGD step (student == teacher, degenerate). When
@@ -300,6 +328,14 @@ class HiSplit(BaseGFSSMethod):
         tversky_alpha: False-positive weight of the Tversky index.
         tversky_beta: False-negative weight of the Tversky index.
             ``0.5``/``0.5`` (default) is the Dice coefficient.
+        hard_decode_measure: Uncertainty measure gating the BCM-style
+            hard override (a key of ``uncertainty()``, see class doc),
+            or ``None`` to disable it (default).
+        hard_decode_threshold: Threshold of ``hard_decode_measure``.
+        bcm_teacher_weight: Weight of the cross-entropy of ``q`` against
+            a BCM-style ``LogisticRegressionCV`` teacher on the query
+            (``trans`` only, see class doc). ``0.0`` (default) disables
+            it.
 
     Example YAML::
 
@@ -359,6 +395,9 @@ class HiSplit(BaseGFSSMethod):
         tversky_weight: float = 0.0,
         tversky_alpha: float = 0.5,
         tversky_beta: float = 0.5,
+        hard_decode_measure: Optional[str] = None,
+        hard_decode_threshold: float = 0.3,
+        bcm_teacher_weight: float = 0.0,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -409,6 +448,9 @@ class HiSplit(BaseGFSSMethod):
         self.tversky_weight = float(tversky_weight)
         self.tversky_alpha = float(tversky_alpha)
         self.tversky_beta = float(tversky_beta)
+        self.hard_decode_measure = hard_decode_measure
+        self.hard_decode_threshold = float(hard_decode_threshold)
+        self.bcm_teacher_weight = float(bcm_teacher_weight)
         self.q = q
         self.tau = float(tau)
         self.variance = variance
@@ -478,6 +520,13 @@ class HiSplit(BaseGFSSMethod):
         ):
             raise ValueError(
                 f"confidence_weight_measure {self.confidence_weight_measure!r} not "
+                f"available for this configuration ({sorted(self.uncertainty_names())})."
+            )
+        if self.hard_decode_measure is not None and (
+            self.hard_decode_measure not in self.uncertainty_names()
+        ):
+            raise ValueError(
+                f"hard_decode_measure {self.hard_decode_measure!r} not "
                 f"available for this configuration ({sorted(self.uncertainty_names())})."
             )
         if self.support_loss_weight_measure is not None and (
@@ -568,7 +617,7 @@ class HiSplit(BaseGFSSMethod):
                 a = (counts[idx] + self.base_rate_smoothing).pow(-self.base_rate_tau)
                 prior[idx] = len(idx) * a / a.sum()
             self.edl_prior.copy_(prior)
-        if self.q == "logreg":
+        if self.q == "logreg" or self.bcm_teacher_weight != 0.0:
             self._fit_logreg(flat.detach().cpu().numpy(), t_all.cpu().numpy())
 
     def _fit_logreg(self, X, t) -> None:
@@ -694,6 +743,24 @@ class HiSplit(BaseGFSSMethod):
             out[:, idx] = w * q[:, idx] + (1.0 - w) * e_kept
         return out
 
+    def _apply_hard_decode(self, features: Tensor, q: Tensor) -> Tensor:
+        """Snap ``q`` to a one-hot at its own arg-max, per mother, wherever
+        ``hard_decode_measure`` is below ``hard_decode_threshold``
+        (confident) — a BCM-style hard override gated by uncertainty
+        instead of HiSplit's usual soft factorization (see class doc);
+        identity when ``hard_decode_measure`` is ``None``."""
+        if self.hard_decode_measure is None:
+            return q
+        maps = self.uncertainty(features)
+        measure = maps[self.hard_decode_measure]
+        confident = (measure < self.hard_decode_threshold).unsqueeze(1)
+        out = q.clone()
+        for _, idx in self._groups():
+            qm = q[:, idx]
+            hard = F.one_hot(qm.argmax(1), len(idx)).movedim(-1, 1).to(qm.dtype)
+            out[:, idx] = torch.where(confident, hard, qm)
+        return out
+
     def leak_coefficients(self) -> Optional[Tensor]:
         """``t[child, base_class]`` (zero outside novel rows), or ``None``."""
         if not self.leak:
@@ -727,6 +794,7 @@ class HiSplit(BaseGFSSMethod):
                 self._scores(features, *self._current_params(features.shape[0]))
             )
             q = self._apply_confidence_weight(features, q)
+            q = self._apply_hard_decode(features, q)
         level, mass = self._masses(self._base_probs(features), q)
         out = level.new_zeros(
             level.shape[0], self.hierarchy.num_classes, *level.shape[2:]
@@ -959,12 +1027,38 @@ class HiSplit(BaseGFSSMethod):
                 )
         return ce_term, contrast_term
 
+    def _bcm_teacher_term(self, query_features: Tensor, q: Tensor) -> Tensor:
+        """Cross-entropy of ``q`` against a BCM-style ``LogisticRegressionCV``
+        teacher (fit on the support by :meth:`init_from_support`, see class
+        doc), weighted by the teacher's own confidence (``1 − entropy``);
+        ``0`` when disabled or no teacher was fit (``trans`` only)."""
+        n = query_features.shape[0]
+        if self.bcm_teacher_weight == 0.0 or not self.logreg_models:
+            return q.new_zeros(n)
+        with torch.no_grad():
+            teacher_scores = self._logreg_scores(self._qfeat(query_features))
+            teacher_q = self._q(teacher_scores)
+        ce_term = q.new_zeros(n)
+        for _, idx in self._groups():
+            qm = q[:, idx]
+            tm = teacher_q[:, idx]
+            with torch.no_grad():
+                conf = 1.0 - normalized_entropy(tm)
+                pseudo = tm.argmax(1)
+            p = qm.gather(1, pseudo.unsqueeze(1)).squeeze(1)
+            ce_px = -torch.log(p + _EPS)
+            ce_term = ce_term + (ce_px * conf).flatten(1).sum(1) / conf.flatten(
+                1
+            ).sum(1).clamp(min=_EPS)
+        return ce_term
+
     def adapt_to_query(
         self, support_features: Tensor, support_masks: Tensor, query_features: Tensor
     ) -> None:
         """``trans``: per-map SGD on support CE + superclass entropy/prior
         (+ confidence-gated pseudo-label terms on the query, optionally
-        teacher-stabilised; + Tversky support term, see class doc)."""
+        teacher-stabilised; + Tversky support term; + BCM-as-teacher
+        distillation term, see class doc)."""
         w_ce, w_ent, w_kl = self.trans_weights
         n = query_features.shape[0]
         weight = self.q_weight.detach().unsqueeze(0).repeat(n, 1, 1).requires_grad_()
@@ -1010,6 +1104,7 @@ class HiSplit(BaseGFSSMethod):
                 )
             else:
                 tversky = ce.new_zeros(n)
+            bcm_teacher_ce = self._bcm_teacher_term(query_features, q)
             loss = (
                 w_ce * ce
                 + w_ent * ent
@@ -1017,6 +1112,7 @@ class HiSplit(BaseGFSSMethod):
                 + self.pseudo_label_weight * pseudo_ce
                 + self.pseudo_label_contrast_weight * pseudo_contrast
                 + self.tversky_weight * tversky
+                + self.bcm_teacher_weight * bcm_teacher_ce
             )
             optimizer.zero_grad()
             loss.sum().backward()
@@ -1104,6 +1200,7 @@ class HiSplit(BaseGFSSMethod):
         """Hierarchical-decoding logits; ``threshold`` enables widening."""
         q = self._q(self._scores(features, *self._current_params(features.shape[0])))
         q = self._apply_confidence_weight(features, q)
+        q = self._apply_hard_decode(features, q)
         logits_base = self._base_logits(features)
         p_base = self.base_probabilities(logits_base)
         level, mass = self._masses(p_base, q)
