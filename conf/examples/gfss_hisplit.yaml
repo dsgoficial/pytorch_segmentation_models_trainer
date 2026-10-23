@@ -102,6 +102,12 @@ gfss:
     # R2-EDL model override at the end of this file). false = disabled
     # (default, aef_dim-only gate as above).
     aef_gate_uncertainty: false
+    # q: linear_aef_gate only -- alternative to aef_gate_uncertainty above
+    # (not its composition): blends the gate's OUTPUT deterministically
+    # towards 1 (no modulation) by 1 - base_vacuity, instead of giving it
+    # to the gate's Linear as an input. No new learned parameters. Also
+    # requires base_output: evidential.
+    aef_gate_uncertainty_blend: false
 
 pl_trainer:
   max_steps: 0               # q: linear/trans/edl -> e.g. 100 (optimizer node)

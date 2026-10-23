@@ -1295,3 +1295,59 @@ class TestAefGateUncertainty:
         novel = m.child_classes.index(3)
         assert q[:, novel, :4, 4:].mean() > 0.7
         assert q[:, novel, 4:, 4:].mean() < 0.3
+
+
+class TestAefGateUncertaintyBlend:
+    """``aef_gate_uncertainty_blend: true`` -- deterministically blends the
+    gate's OUTPUT towards 1 (no modulation) by ``1 - base_vacuity``, instead
+    of concatenating ``base_vacuity`` as an input to the gate's Linear (see
+    class doc: an alternative to ``aef_gate_uncertainty``, not its
+    composition -- motivated by ``aef_gate_uncertainty``'s concat variant
+    empirically making no measurable difference, i.e. the Adam fit learning
+    to ignore that input channel; this rule is fixed instead)."""
+
+    def test_requires_evidential_base(self):
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="linear_aef_gate", aef_gate_uncertainty_blend=True)
+        with pytest.raises(ValueError, match="evidential"):
+            m.setup(h, w, b, NN)  # default base_output: softmax
+
+    def test_gate_linear_input_dim_unchanged(self):
+        """Unlike ``aef_gate_uncertainty`` (concat), the blend adds no new
+        learned parameters -- ``aef_gate_linear``'s input dim stays
+        ``aef_dim``."""
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="linear_aef_gate", aef_gate_uncertainty_blend=True)
+        m.setup(h, w, b, NN, base_output="evidential")
+        assert m.aef_gate_linear.in_features == 64
+
+    def test_qfeat_applies_blend_formula(self):
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="linear_aef_gate", aef_gate_uncertainty_blend=True)
+        m.setup(h, w, b, NN, base_output="evidential")
+        m.init_from_support(f, masks)
+        aux = torch.randn(2, 64, 6, 6)
+        m.set_aux(aux)
+        gate_plain = torch.sigmoid(m.aef_gate_linear(aux.movedim(1, -1))).movedim(-1, 1)
+        wgt = (1.0 - m._base_vacuity(f)).unsqueeze(1)
+        expected_gate = wgt * gate_plain + (1.0 - wgt)
+        torch.testing.assert_close(m._qfeat(f), f * expected_gate)
+
+    def test_qfeat_identity_without_aux_even_with_blend_flag(self):
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="linear_aef_gate", aef_gate_uncertainty_blend=True)
+        m.setup(h, torch.zeros(3, 4), torch.zeros(3), base_output="evidential")
+        f = torch.randn(2, 4, 6, 6)
+        torch.testing.assert_close(m._qfeat(f), f)
+
+    def test_default_flag_false_keeps_aef_gate_unchanged(self):
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="linear_aef_gate")
+        assert m.aef_gate_uncertainty_blend is False
+        aux = torch.randn(2, 64, 6, 6)
+        m.set_aux(aux)
+        gate = torch.sigmoid(m.aef_gate_linear(aux.movedim(1, -1))).movedim(-1, 1)
+        torch.testing.assert_close(m._qfeat(f), f * gate)

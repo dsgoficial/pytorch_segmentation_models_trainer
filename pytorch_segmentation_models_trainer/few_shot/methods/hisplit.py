@@ -296,6 +296,24 @@ class HiSplit(BaseGFSSMethod):
     Requires ``base_output: evidential`` (``setup`` raises ``ValueError``
     otherwise, like ``widen: dissonance``).
 
+    Post-gate uncertainty blend (``aef_gate_uncertainty_blend: true``,
+    combined with ``q: linear_aef_gate`` and an evidential base — an
+    alternative to ``aef_gate_uncertainty`` above, not its composition):
+    instead of giving the base model's ``base_vacuity`` to the gate's
+    ``nn.Linear`` as an extra *input* (where the Adam fit is free to learn
+    around/ignore it — exactly what happened empirically: in the companion
+    research project, that channel's weight made no measurable difference,
+    see §8.14 "gate+R2-EDL+incerteza (concat)"), this blends the gate's
+    *output* deterministically back towards ``1`` (no modulation, raw
+    features) wherever the base model itself is uncertain:
+    ``gate' = w · gate + (1 − w)``, ``w = 1 − base_vacuity`` — reusing
+    :meth:`_apply_confidence_weight`'s exact blend semantics
+    (``w · q + (1 − w) · kept``), applied to the gate's multiplicative
+    factor instead of to ``q``. No new learned parameters (unlike the
+    concat variant, ``aef_gate_linear``'s input dim stays ``aef_dim``) —
+    the rule is fixed, not something the fit can route around. Also
+    requires ``base_output: evidential``.
+
     Teacher-student stabilisation: by default the pseudo-label/confidence
     decision above is read off the same ``q`` being optimised this very
     SGD step (student == teacher, degenerate). When
@@ -392,6 +410,11 @@ class HiSplit(BaseGFSSMethod):
         aef_gate_uncertainty: Concatenate the base model's ``base_vacuity``
             to the AEF embedding before the gate (see class doc,
             ``linear_aef_gate`` only). Requires ``base_output: evidential``.
+        aef_gate_uncertainty_blend: Deterministically blend the gate's
+            output towards ``1`` (no modulation) by ``base_vacuity`` (see
+            class doc, ``linear_aef_gate`` only; an alternative to
+            ``aef_gate_uncertainty``, not its composition). Requires
+            ``base_output: evidential``.
 
     Example YAML::
 
@@ -458,6 +481,7 @@ class HiSplit(BaseGFSSMethod):
         aef_gate_epochs: int = 200,
         aef_gate_lr: float = 1e-2,
         aef_gate_uncertainty: bool = False,
+        aef_gate_uncertainty_blend: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -515,6 +539,7 @@ class HiSplit(BaseGFSSMethod):
         self.aef_gate_epochs = int(aef_gate_epochs)
         self.aef_gate_lr = float(aef_gate_lr)
         self.aef_gate_uncertainty = bool(aef_gate_uncertainty)
+        self.aef_gate_uncertainty_blend = bool(aef_gate_uncertainty_blend)
         self._aux: Optional[Tensor] = None
         self.q = q
         self.tau = float(tau)
@@ -618,10 +643,12 @@ class HiSplit(BaseGFSSMethod):
             )
         if self.q == "linear_aef_gate":
             self.wants_aux = True
-            if self.aef_gate_uncertainty and self.base_output != "evidential":
+            if (
+                self.aef_gate_uncertainty or self.aef_gate_uncertainty_blend
+            ) and self.base_output != "evidential":
                 raise ValueError(
-                    "aef_gate_uncertainty requires an evidential base model "
-                    "(base_output: evidential)."
+                    "aef_gate_uncertainty/aef_gate_uncertainty_blend require an "
+                    "evidential base model (base_output: evidential)."
                 )
             gate_in_dim = self.aef_dim + (1 if self.aef_gate_uncertainty else 0)
             self.aef_gate_linear = nn.Linear(gate_in_dim, dim).to(base_weight)
@@ -670,8 +697,11 @@ class HiSplit(BaseGFSSMethod):
         """Features used by q: the AEF multiplicative gate (``q:
         linear_aef_gate``, when :meth:`set_aux` was last given a tensor;
         with ``aef_gate_uncertainty``, the AEF embedding is concatenated
-        with :meth:`_base_vacuity` before the gate's linear layer), then
-        Tukey's power transform when ``feature_power`` ≠ 1."""
+        with :meth:`_base_vacuity` before the gate's linear layer; with
+        ``aef_gate_uncertainty_blend``, the gate's output is instead
+        deterministically blended towards ``1`` by :meth:`_base_vacuity`
+        afterwards — see class doc, the two are alternatives, not
+        composed), then Tukey's power transform when ``feature_power`` ≠ 1."""
         if self.q == "linear_aef_gate" and self._aux is not None:
             gate_in = self._aux
             if self.aef_gate_uncertainty:
@@ -680,6 +710,9 @@ class HiSplit(BaseGFSSMethod):
             gate = torch.sigmoid(
                 self.aef_gate_linear(gate_in.movedim(1, -1))
             ).movedim(-1, 1)
+            if self.aef_gate_uncertainty_blend:
+                w = (1.0 - self._base_vacuity(features)).unsqueeze(1).to(gate)
+                gate = w * gate + (1.0 - w)
             features = features * gate
         if self.feature_power == 1.0:
             return features
