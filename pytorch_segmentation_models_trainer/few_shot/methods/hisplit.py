@@ -742,6 +742,14 @@ class HiSplit(BaseGFSSMethod):
         composed), then Tukey's power transform when ``feature_power`` ≠ 1."""
         if (self.q == "linear_aef_gate" or self.aef_gate) and self._aux is not None:
             gate_in = self._aux
+            if gate_in.shape[1] != self.aef_dim:
+                raise ValueError(
+                    f"HiSplit linear_aef_gate: aux has {gate_in.shape[1]} channels "
+                    f"but aef_dim={self.aef_dim} -- the external-embedding loader "
+                    f"(e.g. gfss.aef_cache_loader's n_bands) and the method's "
+                    f"aef_dim are independent config values with nothing syncing "
+                    f"them automatically; set both to the same width."
+                )
             if self.aef_gate_uncertainty:
                 unc = self._base_vacuity(features).unsqueeze(1).to(gate_in)
                 gate_in = torch.cat([gate_in, unc], dim=1)

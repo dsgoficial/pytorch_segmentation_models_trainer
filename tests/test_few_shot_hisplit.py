@@ -1138,6 +1138,20 @@ class TestAefGate:
         m.set_aux(torch.randn(2, 64, 6, 6))  # no-op: no aef_gate_linear exists
         torch.testing.assert_close(m._qfeat(f), f)
 
+    def test_qfeat_raises_a_clear_error_on_aux_channel_mismatch(self):
+        """aef_dim (HiSplit, sizes aef_gate_linear) and whatever channel
+        count an external loader actually hands to set_aux (e.g.
+        gfss.aef_cache_loader's own n_bands) are independent config values
+        with nothing syncing them -- a real risk when two different
+        embedding products have different native widths (AEF 64,
+        OlmoEarth up to 128). A width mismatch must fail with a clear
+        message here, not PyTorch's opaque matmul shape error."""
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="linear_aef_gate")  # aef_dim defaults to 64
+        m.set_aux(torch.randn(2, 128, 6, 6))  # wrong width (e.g. OlmoEarth's 128)
+        with pytest.raises(ValueError, match="aux has 128 channels but aef_dim=64"):
+            m._qfeat(f)
+
     def test_q_weight_is_a_buffer_not_touched_by_the_generic_optimizer(self):
         f, masks, w, b = _data()
         m = _ready(f, masks, w, b, q="linear_aef_gate")
