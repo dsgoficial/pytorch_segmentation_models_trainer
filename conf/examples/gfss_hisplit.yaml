@@ -13,6 +13,14 @@ gfss:
   # Foundations embeddings (key 'aef', (n_bands, h, w) int8, -128 = nodata).
   # null (default) disables it; required by any method with wants_aux.
   # aef_cache_dir: /path/to/aef_cache
+  # Alternative external-embedding source instead of aef_cache_dir above --
+  # any Hydra target with a load_batch(mask_paths, device, size) matching
+  # AefCacheLoader's. Example: OlmoEarth v1.3 embeddings (few_shot/
+  # olmoearth_cache.py) instead of AlphaEarth Foundations.
+  # aef_cache_loader:
+  #   _target_: pytorch_segmentation_models_trainer.few_shot.olmoearth_cache.OlmoEarthCacheLoader
+  #   cache_dir: /path/to/olmoearth_cache
+  #   n_bands: 64
   method:
     _target_: pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit
     q: proto                 # proto | proto_prob | linear | trans | edl | logreg | linear_aef_gate

@@ -183,6 +183,14 @@ class GFSSConfig:
             ``method.wants_aux`` is ``True`` (e.g. ``hisplit``'s
             ``q: linear_aef_gate``). ``None`` (default) disables it --
             required by any method that declares ``wants_aux``.
+        aef_cache_loader: Hydra target (``_target_`` + kwargs) of an
+            alternative external-embedding loader, instantiated instead of
+            the default ``AefCacheLoader(aef_cache_dir)`` — e.g.
+            ``few_shot/olmoearth_cache.py``'s ``OlmoEarthCacheLoader``, a
+            drop-in alternative with the same ``load_batch`` signature but
+            reading OlmoEarth v1.3 embeddings instead of AlphaEarth
+            Foundations. ``None`` (default) keeps the ``aef_cache_dir``
+            behaviour above.
 
     Example YAML::
 
@@ -207,6 +215,7 @@ class GFSSConfig:
     boundary_width: int = 0
     test_feature_cache_dir: Optional[str] = None
     aef_cache_dir: Optional[str] = None
+    aef_cache_loader: Optional[Dict[str, Any]] = None
 
 
 @dataclass

@@ -12,6 +12,7 @@ from torch.utils.data import Dataset, TensorDataset
 
 from pytorch_segmentation_models_trainer.few_shot.base_method import BaseGFSSMethod
 from pytorch_segmentation_models_trainer.few_shot.methods.base_only import BaseOnly
+from pytorch_segmentation_models_trainer.few_shot.olmoearth_cache import OlmoEarthCacheLoader
 from pytorch_segmentation_models_trainer.model_loader.gfss_model import GFSSModel
 
 _MODEL = {
@@ -539,6 +540,56 @@ def test_hisplit_aef_gate_without_cache_dir_warns_but_still_runs(base_ckpt, tmp_
     trainer = train(cfg)
     assert trainer.global_step == 0
     assert "test/locality" in trainer.callback_metrics
+
+
+def test_hisplit_aef_gate_runs_through_train_with_olmoearth_cache_loader(
+    base_ckpt, tmp_path
+):
+    """``gfss.aef_cache_loader`` (an alternative to ``aef_cache_dir``) wires
+    in ``OlmoEarthCacheLoader`` instead of the default ``AefCacheLoader`` --
+    end-to-end through the real ``train()`` path, with a real (fake-content)
+    OlmoEarth-format ``.npz`` cache (key ``'olmoearth'``, not ``'aef'``) on
+    disk. Proves ``GFSSModel.__init__``'s new ``instantiate(aef_cache_loader_cfg)``
+    branch actually gets used by the rest of the pipeline, not just
+    constructed."""
+    import numpy as np
+
+    from pytorch_segmentation_models_trainer.train import train
+
+    cache_dir = tmp_path / "olmoearth_cache"
+    cache_dir.mkdir()
+    rng = np.random.default_rng(0)
+    for i in range(4):
+        arr = rng.integers(-100, 100, size=(64, 8, 8), dtype=np.int8)
+        np.savez(cache_dir / f"{i}.npz", olmoearth=arr)
+
+    cfg = _cfg(
+        base_ckpt[0],
+        method="pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit",
+        pl_model={
+            "_target_": "pytorch_segmentation_models_trainer.model_loader.gfss_model.GFSSModel"
+        },
+        pl_trainer={
+            "max_steps": 0,
+            "accelerator": "cpu",
+            "enable_checkpointing": False,
+            "enable_progress_bar": False,
+            "default_root_dir": str(tmp_path),
+        },
+        train_dataset=_ds(right=1, corner=3, return_metadata=True),
+        test_dataset=_ds(right=1, corner=3, return_metadata=True),
+    )
+    cfg.gfss.method.q = "linear_aef_gate"
+    cfg.gfss.method.aef_gate_epochs = 10
+    cfg.gfss.aef_cache_loader = {
+        "_target_": "pytorch_segmentation_models_trainer.few_shot.olmoearth_cache.OlmoEarthCacheLoader",
+        "cache_dir": str(cache_dir),
+    }
+
+    trainer = train(cfg)
+    assert trainer.global_step == 0
+    assert "test/locality" in trainer.callback_metrics
+    assert isinstance(trainer.lightning_module.aef_loader, OlmoEarthCacheLoader)
 
 
 class TestUncertaintyEvaluation:

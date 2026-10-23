@@ -158,7 +158,16 @@ class GFSSModel(Model):
         self._test_feat_cache_path: Optional[str] = None
         self._test_feat_cache_dirty: bool = False
         aef_cache_dir = gfss.get("aef_cache_dir", None)
-        self.aef_loader = AefCacheLoader(aef_cache_dir) if aef_cache_dir else None
+        aef_cache_loader_cfg = gfss.get("aef_cache_loader", None)
+        if aef_cache_loader_cfg is not None:
+            # Alternative external-embedding source (e.g. OlmoEarthCacheLoader
+            # instead of the default AefCacheLoader) -- any class with the
+            # same load_batch(mask_paths, device, size) signature.
+            self.aef_loader = instantiate(aef_cache_loader_cfg, _recursive_=False)
+        elif aef_cache_dir:
+            self.aef_loader = AefCacheLoader(aef_cache_dir)
+        else:
+            self.aef_loader = None
 
     # ------------------------------------------------------------------
     # Model / method construction
