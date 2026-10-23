@@ -275,6 +275,27 @@ class HiSplit(BaseGFSSMethod):
     for ANY mechanism tested in the probe (single-image support) — treat
     it with low confidence here too.
 
+    Uncertainty-augmented AEF gate (``aef_gate_uncertainty: true``, combined
+    with ``q: linear_aef_gate`` and an evidential base, ``base_output:
+    evidential``/R2-EDL): concatenates the frozen base model's own
+    per-pixel ``base_vacuity`` (:meth:`_base_vacuity`, the same quantity
+    :meth:`uncertainty` reports under that name) as an extra channel to the
+    AEF embedding before the gate's ``nn.Linear`` — ``features' = features
+    · sigmoid(Linear([aef; base_vacuity]))``, input dim ``aef_dim + 1``
+    instead of ``aef_dim``. ``base_vacuity`` is the only uncertainty
+    measure usable here without a circular dependency: unlike
+    ``split_vacuity``/``dissonance`` (which need ``q``, i.e. :meth:`_qfeat`
+    itself, to compute), it is a function of the frozen base model's own
+    Dirichlet output alone (:meth:`_base_vacuity`), so it is safe to read
+    from inside :meth:`_qfeat`. Motivated by the user's question, in the
+    companion research project's session, of whether the EDL checkpoint's
+    effect on the gate (already shown to be biome-asymmetric when swapping
+    the frozen checkpoint wholesale, §8.14 "Gate + checkpoint R2-EDL")
+    could instead be an explicit, learned signal the gate itself consumes,
+    rather than only an indirect effect of which checkpoint feeds it.
+    Requires ``base_output: evidential`` (``setup`` raises ``ValueError``
+    otherwise, like ``widen: dissonance``).
+
     Teacher-student stabilisation: by default the pseudo-label/confidence
     decision above is read off the same ``q`` being optimised this very
     SGD step (student == teacher, degenerate). When
@@ -368,6 +389,9 @@ class HiSplit(BaseGFSSMethod):
             (``linear_aef_gate`` only).
         aef_gate_lr: Adam learning rate of :meth:`_fit_aef_gate`
             (``linear_aef_gate`` only).
+        aef_gate_uncertainty: Concatenate the base model's ``base_vacuity``
+            to the AEF embedding before the gate (see class doc,
+            ``linear_aef_gate`` only). Requires ``base_output: evidential``.
 
     Example YAML::
 
@@ -433,6 +457,7 @@ class HiSplit(BaseGFSSMethod):
         aef_dim: int = 64,
         aef_gate_epochs: int = 200,
         aef_gate_lr: float = 1e-2,
+        aef_gate_uncertainty: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -489,6 +514,7 @@ class HiSplit(BaseGFSSMethod):
         self.aef_dim = int(aef_dim)
         self.aef_gate_epochs = int(aef_gate_epochs)
         self.aef_gate_lr = float(aef_gate_lr)
+        self.aef_gate_uncertainty = bool(aef_gate_uncertainty)
         self._aux: Optional[Tensor] = None
         self.q = q
         self.tau = float(tau)
@@ -592,7 +618,13 @@ class HiSplit(BaseGFSSMethod):
             )
         if self.q == "linear_aef_gate":
             self.wants_aux = True
-            self.aef_gate_linear = nn.Linear(self.aef_dim, dim).to(base_weight)
+            if self.aef_gate_uncertainty and self.base_output != "evidential":
+                raise ValueError(
+                    "aef_gate_uncertainty requires an evidential base model "
+                    "(base_output: evidential)."
+                )
+            gate_in_dim = self.aef_dim + (1 if self.aef_gate_uncertainty else 0)
+            self.aef_gate_linear = nn.Linear(gate_in_dim, dim).to(base_weight)
 
     def _base_probs(self, features: Tensor) -> Tensor:
         return self.base_probabilities(self._base_logits(features))
@@ -624,13 +656,29 @@ class HiSplit(BaseGFSSMethod):
         a no-op for every other ``q``."""
         self._aux = aux
 
+    def _base_vacuity(self, features: Tensor) -> Tensor:
+        """Per-pixel vacuity ``(B, h, w)`` of the frozen base model's own
+        Dirichlet output (``base_output: evidential`` only) — the same
+        quantity :meth:`uncertainty` reports as ``base_vacuity``, but
+        computed directly from ``features``/``base_weight``/``base_bias``
+        without going through ``q``/:meth:`_scores`, so it is safe to call
+        from inside :meth:`_qfeat` itself (unlike ``split_vacuity``/
+        ``dissonance``, which need ``q`` and would recurse)."""
+        return vacuity(self.base_alpha(self._base_logits(features)))
+
     def _qfeat(self, features: Tensor) -> Tensor:
         """Features used by q: the AEF multiplicative gate (``q:
-        linear_aef_gate``, when :meth:`set_aux` was last given a tensor),
-        then Tukey's power transform when ``feature_power`` ≠ 1."""
+        linear_aef_gate``, when :meth:`set_aux` was last given a tensor;
+        with ``aef_gate_uncertainty``, the AEF embedding is concatenated
+        with :meth:`_base_vacuity` before the gate's linear layer), then
+        Tukey's power transform when ``feature_power`` ≠ 1."""
         if self.q == "linear_aef_gate" and self._aux is not None:
+            gate_in = self._aux
+            if self.aef_gate_uncertainty:
+                unc = self._base_vacuity(features).unsqueeze(1).to(gate_in)
+                gate_in = torch.cat([gate_in, unc], dim=1)
             gate = torch.sigmoid(
-                self.aef_gate_linear(self._aux.movedim(1, -1))
+                self.aef_gate_linear(gate_in.movedim(1, -1))
             ).movedim(-1, 1)
             features = features * gate
         if self.feature_power == 1.0:

@@ -1201,3 +1201,97 @@ class TestAefGate:
         assert torch.isfinite(m.q_bias).all()
         pred = m(f).argmax(1)
         assert (pred[:, :3, 3:] == 3).float().mean() > 0.5
+
+
+class TestAefGateUncertainty:
+    """``aef_gate_uncertainty: true`` -- concatenates the base model's own
+    ``base_vacuity`` to the AEF embedding before the gate (combines the AEF
+    gate with the EDL uncertainty signal; requires an evidential base)."""
+
+    def test_requires_evidential_base(self):
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="linear_aef_gate", aef_gate_uncertainty=True)
+        with pytest.raises(ValueError, match="evidential"):
+            m.setup(h, w, b, NN)  # default base_output: softmax
+
+    def test_gate_linear_input_dim_grows_by_one(self):
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        plain = HiSplit(q="linear_aef_gate")
+        plain.setup(h, w, b, NN)
+        gated = HiSplit(q="linear_aef_gate", aef_gate_uncertainty=True)
+        gated.setup(h, w, b, NN, base_output="evidential")
+        assert plain.aef_gate_linear.in_features == 64
+        assert gated.aef_gate_linear.in_features == 65
+
+    def test_base_vacuity_matches_uncertainty_dict(self):
+        """:meth:`_base_vacuity` must agree with ``uncertainty()``'s
+        ``base_vacuity`` (same formula, computed without going through q)."""
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="proto")
+        m.setup(h, w, b, NN, base_output="evidential")
+        m.init_from_support(f, masks)
+        torch.testing.assert_close(m._base_vacuity(f), m.uncertainty(f)["base_vacuity"])
+
+    def test_qfeat_concatenates_vacuity_channel(self):
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="linear_aef_gate", aef_gate_uncertainty=True)
+        m.setup(h, w, b, NN, base_output="evidential")
+        m.init_from_support(f, masks)
+        aux = torch.randn(2, 64, 6, 6)
+        m.set_aux(aux)
+        unc = m._base_vacuity(f).unsqueeze(1)
+        gate_in = torch.cat([aux, unc], dim=1)
+        gate = torch.sigmoid(m.aef_gate_linear(gate_in.movedim(1, -1))).movedim(-1, 1)
+        torch.testing.assert_close(m._qfeat(f), f * gate)
+
+    def test_qfeat_identity_without_aux_even_with_uncertainty_flag(self):
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="linear_aef_gate", aef_gate_uncertainty=True)
+        m.setup(h, torch.zeros(3, 4), torch.zeros(3), base_output="evidential")
+        f = torch.randn(2, 4, 6, 6)
+        torch.testing.assert_close(m._qfeat(f), f)
+
+    def test_default_flag_false_keeps_aef_gate_unchanged(self):
+        """Backward compatibility: default (``aef_gate_uncertainty=False``)
+        must behave exactly as before this feature, including with a
+        softmax base (no evidential requirement triggered)."""
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="linear_aef_gate")
+        assert m.aef_gate_linear.in_features == 64
+
+    def test_fit_learns_to_use_aux_and_uncertainty_jointly(self):
+        """End-to-end: gate+head fit (:meth:`_fit_aef_gate`) converges with
+        the wider (aef_dim + 1) input and an evidential base, same recall
+        check as the AEF-only synthetic test above."""
+        g = torch.Generator().manual_seed(0)
+        f = torch.randn(2, 4, 8, 8, generator=g) * 0.1
+        f[:, 0, :, 4:] += 3.0  # right half -> base class 1 (mother)
+        aux = torch.zeros(2, 64, 8, 8)
+        aux[:, 0, :4, 4:] = 1.0  # top-right -> novel child 3
+        aux[:, 0, 4:, 4:] = -1.0  # bottom-right -> kept child 1
+        w = torch.zeros(3, 4)
+        w[1, 0], w[0, 0] = 2.0, -2.0
+        b = torch.tensor([0.0, -1.0, 0.5])
+        masks = torch.full((2, 8, 8), NN)
+        masks[:, :4, 4:] = 3  # S-novel: only the novel class labelled
+
+        m = HiSplit(q="linear_aef_gate", aef_gate_epochs=300, aef_gate_uncertainty=True)
+        m.setup(
+            ClassHierarchy({1: [1, 3]}, num_base_classes=3),
+            w,
+            b,
+            NN,
+            base_output="evidential",
+        )
+        m.set_aux(aux)
+        m.init_from_support(f, masks)
+
+        m.set_aux(aux)  # re-provide for inference, as GFSSModel does per batch
+        q = m._q(m._scores(f, m.q_weight, m.q_bias))
+        novel = m.child_classes.index(3)
+        assert q[:, novel, :4, 4:].mean() > 0.7
+        assert q[:, novel, 4:, 4:].mean() < 0.3

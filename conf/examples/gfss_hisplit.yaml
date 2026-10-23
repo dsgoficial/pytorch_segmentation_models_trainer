@@ -96,6 +96,12 @@ gfss:
     aef_dim: 64               # channel count of the external embedding
     aef_gate_epochs: 200      # Adam steps of the self-contained fit
     aef_gate_lr: 1.0e-2
+    # q: linear_aef_gate only -- concatenates the frozen base model's own
+    # base_vacuity to the AEF embedding before the gate's Linear (input dim
+    # becomes aef_dim + 1). Requires base_output: evidential below (the
+    # R2-EDL model override at the end of this file). false = disabled
+    # (default, aef_dim-only gate as above).
+    aef_gate_uncertainty: false
 
 pl_trainer:
   max_steps: 0               # q: linear/trans/edl -> e.g. 100 (optimizer node)
