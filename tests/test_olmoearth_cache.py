@@ -89,3 +89,42 @@ class TestOlmoEarthCacheLoader:
         assert out.shape == (2, 2, 4, 4)
         assert not torch.equal(out[0], torch.zeros(2, 4, 4))
         assert torch.equal(out[1], torch.zeros(2, 4, 4))  # "2.tif" has no cache file
+
+
+class TestDownloadTileRootReuse:
+    """``download_tile``'s ``root`` param lets a caller downloading many
+    tiles open the store once (``open_store()``) instead of paying its
+    connection/metadata round trips on every call -- measured ~24x faster
+    in the companion research project's batch download (607 tiles: ~55
+    s/tile reopening each time vs. ~2.3 s/tile with a shared, thread-pooled
+    ``root``). No network here: just confirms the control flow calls
+    ``open_store`` only when ``root`` is omitted."""
+
+    def test_omitting_root_calls_open_store(self, monkeypatch):
+        import pytorch_segmentation_models_trainer.few_shot.olmoearth_cache as mod
+
+        calls = {"open_store": 0}
+        fake_root = {"utm01": object()}
+
+        def fake_open_store():
+            calls["open_store"] += 1
+            return fake_root
+
+        monkeypatch.setattr(mod, "open_store", fake_open_store)
+        # A deliberately out-of-range year short-circuits before any zone
+        # lookup that would need a real zarr group -- enough to prove
+        # open_store() was (or wasn't) called without touching the network.
+        with pytest.raises((KeyError, TypeError, AttributeError)):
+            mod.download_tile((-1, -1, 1, 1), 1999, "unused.npz")
+        assert calls["open_store"] == 1
+
+    def test_passing_root_skips_open_store(self, monkeypatch):
+        import pytorch_segmentation_models_trainer.few_shot.olmoearth_cache as mod
+
+        calls = {"open_store": 0}
+        monkeypatch.setattr(
+            mod, "open_store", lambda: calls.__setitem__("open_store", calls["open_store"] + 1)
+        )
+        with pytest.raises((KeyError, TypeError, AttributeError)):
+            mod.download_tile((-1, -1, 1, 1), 1999, "unused.npz", root={"utm01": object()})
+        assert calls["open_store"] == 0

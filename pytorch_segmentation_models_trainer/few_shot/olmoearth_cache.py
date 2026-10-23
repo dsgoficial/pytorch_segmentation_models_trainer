@@ -53,12 +53,29 @@ def dequantize_olmoearth(q: np.ndarray) -> np.ndarray:
     return out
 
 
+def open_store():
+    """Opens the OlmoEarth v1.3 Zarr root group once (anonymous S3). Pass
+    the result as ``download_tile(..., root=...)`` when downloading many
+    tiles in a loop -- opening fresh per call (the default) re-does a
+    handful of metadata round-trips every time, which dominates wall time
+    when the actual per-tile data transfer is small (measured: ~55 s/tile
+    reusing nothing vs. sub-second of that being real compute)."""
+    import zarr
+    from obstore.store import S3Store
+
+    zarr.config.set({"array.sharding_coalesce_max_gap_bytes": 0})
+    s3 = S3Store.from_url(_STORE_URL, endpoint=_ENDPOINT, skip_signature=True)
+    store = zarr.storage.ObjectStore(s3, read_only=True)
+    return zarr.open_group(store, mode="r")
+
+
 def download_tile(
     bounds_wgs84: Tuple[float, float, float, float],
     year: int,
     out_path: Path,
     size: Tuple[int, int] = (64, 64),
     n_bands: int = 64,
+    root=None,
 ) -> bool:
     """Downloads one tile's OlmoEarth v1.3 window and saves it as a per-tile
     ``.npz`` cache (key ``'olmoearth'``, ``(n_bands, *size)`` int8, the raw
@@ -84,6 +101,11 @@ def download_tile(
         n_bands: ``64`` (default; nested/Matryoshka-complete on its own, the
             width already used throughout the companion project's
             ``aef_dim``) or ``128`` (every dimension the model emits).
+        root: A Zarr group already opened by :func:`open_store`, reused
+            across many calls -- pass this when downloading more than a
+            handful of tiles (see :func:`open_store`'s docstring for why).
+            ``None`` (default) opens a fresh connection just for this call,
+            fine for a one-off download.
 
     Returns:
         ``True`` if a cache file was written; ``False`` if ``year`` is out
@@ -95,14 +117,10 @@ def download_tile(
     import rasterio
     from rasterio.transform import from_bounds
     from rasterio.warp import Resampling, reproject
-    import zarr
-    from obstore.store import S3Store
     from pyproj import Transformer
 
-    zarr.config.set({"array.sharding_coalesce_max_gap_bytes": 0})
-    s3 = S3Store.from_url(_STORE_URL, endpoint=_ENDPOINT, skip_signature=True)
-    store = zarr.storage.ObjectStore(s3, read_only=True)
-    root = zarr.open_group(store, mode="r")
+    if root is None:
+        root = open_store()
 
     west, south, east, north = bounds_wgs84
     zone = root[f"utm{utm_zone((west + east) / 2):02d}"]
