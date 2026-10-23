@@ -108,6 +108,12 @@ gfss:
     # to the gate's Linear as an input. No new learned parameters. Also
     # requires base_output: evidential.
     aef_gate_uncertainty_blend: false
+    # Aplica o gate junto de q: linear/trans/edl (nao so' q: linear_aef_gate)
+    # -- treinado pelo loop generico de q (pl_trainer.max_steps > 0), nao
+    # pelo self-fit. false = desligado (default). Ex.: q: edl acima +
+    # aef_gate: true combina o ganho do q=edl com o gate AEF, nunca testado
+    # antes porque os dois eram valores mutuamente exclusivos de q.
+    aef_gate: false
 
 pl_trainer:
   max_steps: 0               # q: linear/trans/edl -> e.g. 100 (optimizer node)

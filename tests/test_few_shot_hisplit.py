@@ -1351,3 +1351,128 @@ class TestAefGateUncertaintyBlend:
         m.set_aux(aux)
         gate = torch.sigmoid(m.aef_gate_linear(aux.movedim(1, -1))).movedim(-1, 1)
         torch.testing.assert_close(m._qfeat(f), f * gate)
+
+
+class TestAefGateComposedWithQ:
+    """``aef_gate: true`` -- composes the AEF multiplicative gate with any
+    trainable ``q`` (``linear``/``trans``/``edl``), independent of
+    ``q: linear_aef_gate`` -- in particular lets the gate combine with
+    ``q: edl``'s evidential pair head, whose own small, checkpoint-
+    independent gain (companion research project, confirmed real in both
+    biomes) had never been tested together with the gate (the two used
+    to be mutually exclusive values of the same ``q`` parameter)."""
+
+    def test_requires_trainable_q_or_linear_aef_gate(self):
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="proto", aef_gate=True)
+        with pytest.raises(ValueError, match="aef_gate=True needs q"):
+            m.setup(h, w, b, NN)
+
+    def test_logreg_also_rejected(self):
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="logreg", aef_gate=True)
+        with pytest.raises(ValueError, match="aef_gate=True needs q"):
+            m.setup(h, w, b, NN)
+
+    def test_edl_with_aef_gate_creates_gate_and_wants_aux(self):
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="edl", aef_gate=True)
+        m.setup(h, w, b, NN)
+        assert m.wants_aux is True
+        assert m.aef_gate_linear.in_features == 64
+
+    def test_qfeat_applies_gate_with_edl_q(self):
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="edl", aef_gate=True)
+        m.setup(h, w, b, NN)
+        m.init_from_support(f, masks)
+        aux = torch.randn(2, 64, 6, 6)
+        m.set_aux(aux)
+        gate = torch.sigmoid(m.aef_gate_linear(aux.movedim(1, -1))).movedim(-1, 1)
+        torch.testing.assert_close(m._qfeat(f), f * gate)
+
+    def test_self_fit_not_triggered_for_edl(self):
+        """``_fit_aef_gate`` stays scoped to ``q == 'linear_aef_gate'`` --
+        with ``q='edl'``, ``aef_gate_linear`` must still be at its random
+        init right after ``init_from_support`` (no self-fit ran)."""
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="edl", aef_gate=True)
+        m.setup(h, w, b, NN)
+        aux = torch.randn(2, 64, 6, 6)
+        m.set_aux(aux)
+        before = m.aef_gate_linear.weight.detach().clone()
+        m.init_from_support(f, masks)
+        torch.testing.assert_close(m.aef_gate_linear.weight, before)
+
+    def test_gradient_flows_to_aef_gate_linear_via_edl_loss(self):
+        """``aef_gate_linear`` is a real ``nn.Linear`` submodule -- the
+        caller's generic optimizer (``GFSSModel._trainable_parameters``)
+        picks it up automatically; here 1 Adam step is driven directly
+        over ``support_loss()`` (the EDL MSE+KL loss ``q: edl`` already
+        uses), and the gate's weight must actually move."""
+        f, masks, w, b = _data()
+        h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
+        m = HiSplit(q="edl", aef_gate=True, kl_anneal_steps=4)
+        m.setup(h, w, b, NN)
+        aux = torch.randn(2, 64, 6, 6)
+        m.set_aux(aux)
+        m.init_from_support(f, masks)
+        before = m.aef_gate_linear.weight.detach().clone()
+        opt = torch.optim.Adam(m.parameters(), lr=0.05)
+        m.set_aux(aux)
+        loss = m.support_loss(f, masks)
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+        assert not torch.allclose(m.aef_gate_linear.weight, before)
+
+    def test_fit_learns_to_use_aux_with_edl_q(self):
+        """End-to-end: ``q=edl`` + ``aef_gate=True``, trained by a manual
+        Adam loop over ``support_loss()`` (mirrors what ``pl_trainer``'s
+        ``max_steps`` loop does) on an aux-only signal -- same synthetic
+        setup as ``TestAefGate``'s analogous test, proving the composed
+        mechanism actually learns to split using the AEF channel."""
+        g = torch.Generator().manual_seed(0)
+        f = torch.randn(2, 4, 8, 8, generator=g) * 0.1
+        f[:, 0, :, 4:] += 3.0  # right half -> base class 1 (mother)
+        aux = torch.zeros(2, 64, 8, 8)
+        aux[:, 0, :4, 4:] = 1.0  # top-right -> novel child 3
+        aux[:, 0, 4:, 4:] = -1.0  # bottom-right -> kept child 1
+        w = torch.zeros(3, 4)
+        w[1, 0], w[0, 0] = 2.0, -2.0
+        b = torch.tensor([0.0, -1.0, 0.5])
+        masks = torch.full((2, 8, 8), NN)
+        masks[:, :4, 4:] = 3  # S-novel: only the novel class labelled
+
+        m = HiSplit(q="edl", aef_gate=True, kl_anneal_steps=200)
+        m.setup(ClassHierarchy({1: [1, 3]}, num_base_classes=3), w, b, NN)
+        m.set_aux(aux)
+        m.init_from_support(f, masks)
+
+        opt = torch.optim.Adam(m.parameters(), lr=0.05)
+        for _ in range(400):
+            m.set_aux(aux)
+            loss = m.support_loss(f, masks)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+
+        m.set_aux(aux)
+        q = m._q(m._scores(f, m.q_weight, m.q_bias))
+        novel = m.child_classes.index(3)
+        assert q[:, novel, :4, 4:].mean() > 0.7
+        assert q[:, novel, 4:, 4:].mean() < 0.3
+
+    def test_linear_aef_gate_backward_compat_unaffected(self):
+        """``aef_gate`` defaults ``False`` and ``q='linear_aef_gate'``
+        already OR's it in regardless -- existing configs/behaviour
+        untouched."""
+        f, masks, w, b = _data()
+        m = _ready(f, masks, w, b, q="linear_aef_gate")
+        assert m.aef_gate is False
+        assert m.wants_aux is True

@@ -314,6 +314,29 @@ class HiSplit(BaseGFSSMethod):
     the rule is fixed, not something the fit can route around. Also
     requires ``base_output: evidential``.
 
+    AEF gate composed with any trainable ``q`` (``aef_gate: true``,
+    independent of ``q: linear_aef_gate``): the gate was originally its
+    own ``q`` value, mutually exclusive with every other one — in
+    particular with ``q: edl`` (the evidential pair head), whose own
+    small, real, checkpoint-independent gain (companion research
+    project, §8.4) had therefore never been combined with the gate's.
+    Setting ``aef_gate: true`` applies the exact same multiplicative gate
+    (:meth:`_qfeat`, unchanged) regardless of ``q``, as long as ``q`` is
+    ``linear``, ``trans`` or ``edl`` (:data:`_TRAINABLE`) — the gate's
+    ``aef_gate_linear`` is a real ``nn.Linear`` submodule, so it is
+    automatically included in whatever the caller's generic training
+    loop already optimises for that ``q`` (``GFSSModel``'s
+    ``_trainable_parameters``), gradients flowing through
+    :meth:`_scores` exactly like ``q_weight``/``q_bias`` do — **not**
+    :meth:`_fit_aef_gate`'s self-contained Adam loop, which stays scoped
+    to ``q == "linear_aef_gate"`` only (``pl_trainer.max_steps`` must
+    therefore be ``> 0`` here, as it already is for any trainable ``q``,
+    instead of staying ``0`` as ``linear_aef_gate``'s self-fit allows).
+    ``aef_gate: true`` with a non-trainable, non-``linear_aef_gate`` ``q``
+    (``proto``, ``proto_prob``, ``logreg``) raises ``ValueError`` in
+    :meth:`setup` — the gate would never be fit, silently staying at its
+    random initialisation.
+
     Teacher-student stabilisation: by default the pseudo-label/confidence
     decision above is read off the same ``q`` being optimised this very
     SGD step (student == teacher, degenerate). When
@@ -415,6 +438,12 @@ class HiSplit(BaseGFSSMethod):
             class doc, ``linear_aef_gate`` only; an alternative to
             ``aef_gate_uncertainty``, not its composition). Requires
             ``base_output: evidential``.
+        aef_gate: Apply the AEF multiplicative gate together with any
+            trainable ``q`` (``linear``, ``trans`` or ``edl`` — see class
+            doc), instead of only through ``q: linear_aef_gate``. Trained
+            by the caller's generic loop (``pl_trainer.max_steps > 0``),
+            not :meth:`_fit_aef_gate`'s self-fit. ``False`` (default) —
+            no behaviour change for existing configs.
 
     Example YAML::
 
@@ -482,6 +511,7 @@ class HiSplit(BaseGFSSMethod):
         aef_gate_lr: float = 1e-2,
         aef_gate_uncertainty: bool = False,
         aef_gate_uncertainty_blend: bool = False,
+        aef_gate: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -540,6 +570,7 @@ class HiSplit(BaseGFSSMethod):
         self.aef_gate_lr = float(aef_gate_lr)
         self.aef_gate_uncertainty = bool(aef_gate_uncertainty)
         self.aef_gate_uncertainty_blend = bool(aef_gate_uncertainty_blend)
+        self.aef_gate = bool(aef_gate)
         self._aux: Optional[Tensor] = None
         self.q = q
         self.tau = float(tau)
@@ -641,7 +672,13 @@ class HiSplit(BaseGFSSMethod):
             self.leak_logit = nn.Parameter(
                 base_weight.new_full((n, nb), self.leak_init)
             )
-        if self.q == "linear_aef_gate":
+        if self.q == "linear_aef_gate" or self.aef_gate:
+            if self.aef_gate and self.q not in (_TRAINABLE | {"linear_aef_gate"}):
+                raise ValueError(
+                    f"aef_gate=True needs q to be trainable ({sorted(_TRAINABLE)}) "
+                    f"or 'linear_aef_gate' (self-fit covers it already); got "
+                    f"q={self.q!r}, whose aef_gate_linear would never be fit."
+                )
             self.wants_aux = True
             if (
                 self.aef_gate_uncertainty or self.aef_gate_uncertainty_blend
@@ -695,14 +732,15 @@ class HiSplit(BaseGFSSMethod):
 
     def _qfeat(self, features: Tensor) -> Tensor:
         """Features used by q: the AEF multiplicative gate (``q:
-        linear_aef_gate``, when :meth:`set_aux` was last given a tensor;
+        linear_aef_gate``, or any trainable ``q`` with ``aef_gate: true``
+        — see class doc — when :meth:`set_aux` was last given a tensor;
         with ``aef_gate_uncertainty``, the AEF embedding is concatenated
         with :meth:`_base_vacuity` before the gate's linear layer; with
         ``aef_gate_uncertainty_blend``, the gate's output is instead
         deterministically blended towards ``1`` by :meth:`_base_vacuity`
         afterwards — see class doc, the two are alternatives, not
         composed), then Tukey's power transform when ``feature_power`` ≠ 1."""
-        if self.q == "linear_aef_gate" and self._aux is not None:
+        if (self.q == "linear_aef_gate" or self.aef_gate) and self._aux is not None:
             gate_in = self._aux
             if self.aef_gate_uncertainty:
                 unc = self._base_vacuity(features).unsqueeze(1).to(gate_in)
