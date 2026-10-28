@@ -89,7 +89,7 @@ class TestBaseOnly:
     def test_novel_never_predicted_and_base_logits_kept(self):
         h = ClassHierarchy({1: [1, 2]}, num_base_classes=2)
         w, b = torch.randn(2, 8), torch.randn(2)
-        m = BaseOnly(**{"unused": 1})
+        m = BaseOnly()
         m.setup(h, w, b)
         feats = torch.randn(3, 8, 4, 4)
         logits = m(feats)

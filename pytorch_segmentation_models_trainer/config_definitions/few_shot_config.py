@@ -178,19 +178,19 @@ class GFSSConfig:
             batch size) -- runs that share all four (e.g. other shots/draws
             of the same seed in a K-sweep) skip the backbone pass on the
             query set entirely. ``None`` (default) disables it.
-        aef_cache_dir: Directory of per-tile AlphaEarth Foundations ``.npz``
-            embeddings (see ``few_shot/aef_cache.py``), only read when
-            ``method.wants_aux`` is ``True`` (e.g. ``hisplit``'s
-            ``q: linear_aef_gate``). ``None`` (default) disables it --
-            required by any method that declares ``wants_aux``.
-        aef_cache_loader: Hydra target (``_target_`` + kwargs) of an
-            alternative external-embedding loader, instantiated instead of
-            the default ``AefCacheLoader(aef_cache_dir)`` — e.g.
-            ``few_shot/olmoearth_cache.py``'s ``OlmoEarthCacheLoader``, a
-            drop-in alternative with the same ``load_batch`` signature but
-            reading OlmoEarth v1.3 embeddings instead of AlphaEarth
-            Foundations. ``None`` (default) keeps the ``aef_cache_dir``
-            behaviour above.
+        aux_cache_loaders: Named external-embedding sources, keyed by the
+            name a method declares in ``method.aux_names`` (e.g.
+            ``hisplit``'s ``q: linear_aef_gate`` declares ``("aef",)``).
+            Each value is either a bare directory string (the default
+            ``AefCacheLoader(that_string)``, per-tile AlphaEarth
+            Foundations ``.npz`` embeddings, see ``few_shot/aef_cache.py``)
+            or a Hydra target (``_target_`` + kwargs) of an alternative
+            loader with the same ``load_batch(mask_paths, device, size)``
+            signature — e.g. ``few_shot/olmoearth_cache.py``'s
+            ``OlmoEarthCacheLoader`` (OlmoEarth v1.3 embeddings). A method
+            that composes 2 gates (``GateEnsemble``) declares 2 names and
+            this dict has 2 entries. ``None``/``{}`` (default) provides no
+            aux — an error for any method whose ``aux_names`` is non-empty.
 
     Example YAML::
 
@@ -214,8 +214,7 @@ class GFSSConfig:
     backbone: Optional[Dict[str, Any]] = None
     boundary_width: int = 0
     test_feature_cache_dir: Optional[str] = None
-    aef_cache_dir: Optional[str] = None
-    aef_cache_loader: Optional[Dict[str, Any]] = None
+    aux_cache_loaders: Optional[Dict[str, Any]] = None
 
 
 @dataclass

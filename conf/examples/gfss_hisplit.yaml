@@ -9,31 +9,68 @@ experiments_runner:
   output_base_dir: outputs/gfss/hisplit_proto_pampa
 
 gfss:
-  # q: linear_aef_gate only -- directory of per-tile <id>.npz AlphaEarth
-  # Foundations embeddings (key 'aef', (n_bands, h, w) int8, -128 = nodata).
-  # null (default) disables it; required by any method with wants_aux.
-  # aef_cache_dir: /path/to/aef_cache
-  # Alternative external-embedding source instead of aef_cache_dir above --
-  # any Hydra target with a load_batch(mask_paths, device, size) matching
-  # AefCacheLoader's. Example: OlmoEarth v1.3 embeddings (few_shot/
-  # olmoearth_cache.py) instead of AlphaEarth Foundations.
-  # aef_cache_loader:
-  #   _target_: pytorch_segmentation_models_trainer.few_shot.olmoearth_cache.OlmoEarthCacheLoader
-  #   cache_dir: /path/to/olmoearth_cache
-  #   n_bands: 64
+  # q: linear_aef_gate only -- named external-embedding sources, keyed to
+  # match the method's own aux_names (HiSplit's AEF gate wants "aef").
+  # null/{} (default) disables it; required by any method with a
+  # non-empty aux_names. A value can be a bare directory string (per-tile
+  # <id>.npz AlphaEarth Foundations embeddings, key 'aef', (n_bands, h, w)
+  # int8, -128 = nodata) or a Hydra target with a load_batch(mask_paths,
+  # device, size) matching AefCacheLoader's -- e.g. OlmoEarth v1.3
+  # embeddings (few_shot/olmoearth_cache.py) instead of AlphaEarth
+  # Foundations.
+  # aux_cache_loaders:
+  #   aef: /path/to/aef_cache
+  #   # or, for an alternative loader:
+  #   # aef:
+  #   #   _target_: pytorch_segmentation_models_trainer.few_shot.olmoearth_cache.OlmoEarthCacheLoader
+  #   #   cache_dir: /path/to/olmoearth_cache
+  #   #   n_bands: 64
+  #   # or, to fuse 2+ products into ONE gate (early fusion -- aef_dim
+  #   # below must then equal the sum of the sub-loaders' own n_bands;
+  #   # compare against GateEnsemble's late fusion, 2 separate gates
+  #   # averaged after their own q):
+  #   # aef:
+  #   #   _target_: pytorch_segmentation_models_trainer.few_shot.concat_aux_loader.ConcatAuxLoader
+  #   #   loaders:
+  #   #     - /path/to/aef_cache
+  #   #     - _target_: pytorch_segmentation_models_trainer.few_shot.olmoearth_cache.OlmoEarthCacheLoader
+  #   #       cache_dir: /path/to/olmoearth_cache
+  #   #       n_bands: 128
   method:
     _target_: pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit
-    q: proto                 # proto | proto_prob | linear | trans | edl | logreg | linear_aef_gate
+    # q: a bare string ("proto" | "proto_prob" | "linear" | "trans" | "edl" |
+    # "logreg" | "linear_aef_gate") picks the strategy with its defaults; a
+    # nested Hydra target overrides its own (lean, q-specific) params, e.g.:
+    #   q:
+    #     _target_: pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.ProtoProbStrategy
+    #     variance: shared          # shared | per_class
+    #   q:
+    #     _target_: pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.TransStrategy
+    #     trans_weights: [1.0, 1.0, 1.0]  # CE support, entropy, KL(q̄||π) in the superclass
+    #     adapt_iter: 50
+    #     lr: 1.0e-3
+    #     pi_update_at: [10]
+    #     pseudo_label_weight: 0.0            # weight of the CE of q against the pseudo-label
+    #     pseudo_label_contrast_weight: 0.0   # weight of the hinge repulsion between kept/novel pseudo-labelled features
+    #     pseudo_label_contrast_margin: 0.0   # margin of that hinge, relu(cos - margin)
+    #     pseudo_label_threshold: 0.3         # confidence threshold tau (split entropy)
+    #     pseudo_label_threshold_start: null  # set (< pseudo_label_threshold) for a confidence curriculum
+    #     pseudo_label_start_iter: 0          # first adapt_to_query iteration where these terms apply
+    #     pseudo_label_min_pixels: 1          # min confident pixels per side (kept/novel) for the contrast term
+    #     pseudo_label_teacher_period: 0      # periodic-snapshot teacher; 0 = live q is its own teacher
+    #     tversky_weight: 0.0         # weight of (1 - mean_c Tversky_c) added to the loss
+    #     tversky_alpha: 0.5          # false-positive weight
+    #     tversky_beta: 0.5           # false-negative weight; > alpha favours recall on under-predicted children
+    #   q:
+    #     _target_: pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.EDLStrategy
+    #     kl_anneal_steps: 50   # steps to reach full weight of the EDL KL regulariser
+    #   q:
+    #     _target_: pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.LinearAefGateStrategy
+    #     aef_gate_epochs: 200  # Adam steps of the self-contained fit
+    #     aef_gate_lr: 1.0e-2
+    q: proto
     tau: 10.0                # cosine temperature (proto, init of linear/trans)
-    variance: shared         # proto_prob: shared | per_class
     decoding: hierarchical   # hierarchical | flat
-    # trans only:
-    trans_weights: [1.0, 1.0, 1.0]   # CE support, entropy, KL(q̄||π) in the superclass
-    adapt_iter: 50
-    lr: 1.0e-3
-    pi_update_at: [10]
-    # edl only: steps to reach full weight of the EDL KL regulariser
-    kl_anneal_steps: 50
     # boundary of the superclass (P2)
     leak: false              # learned leak from other classes into the novel child (needs max_steps > 0)
     leak_init: -4.0
@@ -61,29 +98,6 @@ gfss:
     # count less towards training q. Independent of confidence_weight_measure
     # above (that one reweights the decoded split at inference, not training).
     support_loss_weight_measure: null  # e.g. split_vacuity (q: edl) | base_vacuity | dissonance (evidential base)
-    # q: trans only -- self-trains on the query itself: pixels whose split
-    # entropy is below the threshold get their own (stop-gradient) argmax as
-    # a pseudo-label. 0.0 = disabled (no behaviour change).
-    pseudo_label_weight: 0.0            # weight of the CE of q against the pseudo-label
-    pseudo_label_contrast_weight: 0.0   # weight of the hinge repulsion between kept/novel pseudo-labelled features
-    pseudo_label_contrast_margin: 0.0   # margin of that hinge, relu(cos - margin)
-    pseudo_label_threshold: 0.3         # confidence threshold tau (split entropy)
-    pseudo_label_threshold_start: null  # set (< pseudo_label_threshold) for a confidence curriculum
-    pseudo_label_start_iter: 0          # first adapt_to_query iteration where these terms apply
-    pseudo_label_min_pixels: 1          # min confident pixels per side (kept/novel) for the contrast term
-    # periodic-snapshot teacher for the pseudo-label decision above: every N
-    # iterations, freeze the current (weight, bias) as a "teacher"; confidence
-    # and the pseudo-label itself are picked from the teacher's q (no_grad),
-    # while the live/differentiable student q still supplies the CE probability
-    # being optimised. 0 (default) disables it -- the live q is its own teacher.
-    pseudo_label_teacher_period: 0
-    # q: trans only -- adds a Tversky term on the same K-shot support used by
-    # the CE above, averaged uniformly over children present in the support
-    # instead of per pixel (so a tiny/imbalanced support doesn't let the
-    # easier/majority child dominate the gradient). 0.0 = disabled.
-    tversky_weight: 0.0         # weight of (1 - mean_c Tversky_c) added to the loss
-    tversky_alpha: 0.5          # false-positive weight
-    tversky_beta: 0.5           # false-negative weight; > alpha favours recall on under-predicted children
     # any q: snaps q to a hard one-hot (BCM-style override) wherever the named
     # uncertainty measure is below the threshold (confident); keeps the usual
     # soft q elsewhere. null disables it (default).
@@ -98,12 +112,10 @@ gfss:
     # embedding (e.g. AlphaEarth Foundations) at the base's own feature grid;
     # the gate + head are fit together by a self-contained Adam loop inside
     # init_from_support (like logreg's sklearn fit), not pl_trainer's loop.
-    # Needs gfss.aef_cache_dir set below AND train_dataset/test_dataset.
+    # Needs gfss.aux_cache_loaders.aef set above AND train_dataset/test_dataset.
     # return_metadata: true (the method reads each tile's mask_path to find
     # its cached embedding).
     aef_dim: 64               # channel count of the external embedding
-    aef_gate_epochs: 200      # Adam steps of the self-contained fit
-    aef_gate_lr: 1.0e-2
     # q: linear_aef_gate only -- concatenates the frozen base model's own
     # base_vacuity to the AEF embedding before the gate's Linear (input dim
     # becomes aef_dim + 1). Requires base_output: evidential below (the

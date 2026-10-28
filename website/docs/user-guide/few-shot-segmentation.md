@@ -154,6 +154,8 @@ tta_mode: d8   # same as the base models, so GFSS and R1/R2 are comparable
 | `pytorch_segmentation_models_trainer.few_shot.methods.bcm.BCM` | BCM (NeurIPS 2024), port of the official classifier: per mapped base class, a logistic regression on the frozen features; the base prediction is overwritten only where it is that class. |
 | `pytorch_segmentation_models_trainer.few_shot.methods.finetune.FineTune` | Fine-tuning baselines (B1a isolated head, B1b full ± KD, LoRA) on the support. |
 | `pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit` | Hierarchical split of each mother among its children over the frozen base (category splitting). |
+| `pytorch_segmentation_models_trainer.few_shot.methods.gate_ensemble.GateEnsemble` | Average of 2 independently-gated `HiSplit` experts (e.g. one per external embedding product). |
+| `pytorch_segmentation_models_trainer.few_shot.methods.triple_gate_ensemble.TripleGateEnsemble` | Average of 3 independently-gated `HiSplit` experts (`1/3` weight each). |
 
 ### Fine-tuning baselines (`FineTune` + `gfss.backbone`)
 
@@ -222,6 +224,31 @@ every other class keeps `p_base`. Variants of `q` (`q:`):
 | `trans` | `linear` + per-query-tile SGD on support CE + entropy and KL(q̄‖π) weighted by `p_base(m)` | fit + transductive (`inference_mode: false`) |
 | `edl` | evidential pair head: `e = softplus(w·f + b)`, `α = e + 1`, `q = α / S` within each mother | EDL MSE + KL regulariser (annealed over `kl_anneal_steps`) in `trainer.fit` |
 | `logreg` | BCM's classifier (cross-validated logistic regression, class balancing) on the HiSplit support targets of each mother | fitted at `init_from_support` (`max_steps: 0`) |
+| `linear_aef_gate` | `w·f'+b`, `f' = f · sigmoid(Linear(aux))` — multiplicative gate on an external per-pixel embedding (e.g. AlphaEarth Foundations), see "External embedding gate" below | gate + head fit together by a self-contained Adam loop in `init_from_support` (`max_steps: 0`, like `logreg`) |
+
+Each `q` is a `QStrategy` subclass (`few_shot/methods/q_strategies.py`)
+owning only the parameters that mechanism actually uses. `q:` accepts a
+bare string (that strategy's own defaults) or a nested Hydra sub-config
+overriding its mechanism-specific params:
+
+```yaml
+gfss:
+  method:
+    q:
+      _target_: pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.TransStrategy
+      adapt_iter: 10
+      lr: 1.0e-2
+```
+
+Mechanism-specific params live on their own strategy, not on `HiSplit`
+itself: `TransStrategy` (`adapt_iter`, `lr`, `pi_update_at`,
+`trans_weights`, `pseudo_label_*`, `tversky_*`), `EDLStrategy`
+(`kl_anneal_steps`, `edl_base_rate`, `base_rate_tau`,
+`base_rate_smoothing`), `ProtoProbStrategy` (`variance`, `var_floor`),
+`LinearAefGateStrategy` (`aef_gate_epochs`, `aef_gate_lr`) — see each
+class's own docstring for the full list. Params that compose with
+*any* `q` (e.g. `leak`, `widen`, `abstain_measure`, `bcm_teacher_weight`,
+`aef_gate`) stay flat on `HiSplit` (below).
 
 Options for comparisons with BCM and H²EDL (defaults keep the original
 HiSplit): `feature_power` (Tukey's power on the features used by q),
@@ -230,6 +257,55 @@ the split only where the base model predicts the mother — default — or
 everywhere, as BCM's g_β; `all` needs one mother) and, for `q: edl`,
 `edl_base_rate: inverse_frequency` (`a_c ∝ (n_c + s)^-τ` from the support
 targets, `α = e + K·a`, as H²EDL's base-rate variant).
+
+#### External embedding gate (AEF/OlmoEarth)
+
+`q: linear_aef_gate` modulates the frozen base features with an external
+per-pixel embedding (e.g. AlphaEarth Foundations, 64-d, 10 m) before the
+linear head — the gate's `nn.Linear` and the head are fit together inside
+`init_from_support`, not `pl_trainer`'s generic loop (`max_steps: 0`).
+
+The external signal itself is loaded by `GFSSModel`, not the method: a
+method declares the named signals it wants via `aux_names` (e.g.
+`("aef",)`), and `gfss.aux_cache_loaders` maps those names to loaders —
+either a bare cache-directory string (the default `AefCacheLoader`, a
+per-tile `.npz` cache, key `'aef'`, `(n_bands, h, w)` int8) or a Hydra
+target with a matching `load_batch(mask_paths, device, size)` signature,
+e.g. `OlmoEarthCacheLoader` (OlmoEarth v1.3 embeddings, key `'olmoearth'`,
+its own quantization scheme — not a drop-in byte format, just a drop-in
+*interface*):
+
+```yaml
+gfss:
+  method:
+    _target_: pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit
+    q:
+      _target_: pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.LinearAefGateStrategy
+      aef_gate_epochs: 200
+      aef_gate_lr: 1.0e-2
+    aef_dim: 64
+  aux_cache_loaders:
+    aef: /path/to/aef_cache
+    # or an alternative embedding product:
+    # aef:
+    #   _target_: pytorch_segmentation_models_trainer.few_shot.olmoearth_cache.OlmoEarthCacheLoader
+    #   cache_dir: /path/to/olmoearth_cache
+    #   n_bands: 128
+train_dataset:
+  return_metadata: true  # the method reads each tile's mask_path to find its cache entry
+test_dataset:
+  return_metadata: true
+```
+
+`aef_gate: true` applies the same multiplicative gate together with any
+*trainable* `q` (`linear`/`trans`/`edl`), trained by the generic
+`pl_trainer` loop instead of the self-fit (`pl_trainer.max_steps > 0`
+then). `aef_gate_uncertainty`/`aef_gate_uncertainty_blend` feed the
+frozen base model's own `base_vacuity` into the gate (requires
+`base_output: evidential`) — see `HiSplit`'s own docstring for both.
+
+**`GateEnsemble`** (below) composes 2 `linear_aef_gate` experts — one per
+embedding product — averaging their `q` instead of picking one.
 
 Support targets: pixels labelled with a child; and, in the S-novel regime,
 pixels labelled "not novel" that the base model predicts as the mother become
@@ -315,6 +391,66 @@ pixels predicted as a mother, so the predictions of all other classes are
 those of the base model (`locality` = 1 up to ties within `decode_eps`);
 `decoding: flat` takes the argmax of `log p` over all classes, where the split
 mass can lose to neighbour classes.
+
+### GateEnsemble
+
+Averages 2 independently-gated `HiSplit` experts instead of picking one
+external embedding product: each expert self-fits its own gate+head on the
+same support (`q: linear_aef_gate`, one product per expert — e.g. AlphaEarth
+Foundations and OlmoEarth v1.3), and their post-gate split distributions
+`q` are combined `0.5/0.5` before a single decode. Decode-time options
+(`decoding`, `widen`, `leak`, `sweep`, `abstain_measure`, ...) are taken
+from `expert_a` only — `expert_b` only contributes its own `q`.
+
+```yaml
+gfss:
+  method:
+    _target_: pytorch_segmentation_models_trainer.few_shot.methods.gate_ensemble.GateEnsemble
+    expert_a:
+      _target_: pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit
+      q: {_target_: ...q_strategies.LinearAefGateStrategy}
+      aef_dim: 64
+    expert_b:
+      _target_: pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit
+      q: {_target_: ...q_strategies.LinearAefGateStrategy}
+      aef_dim: 128
+  aux_cache_loaders:
+    aef: /path/to/aef_cache
+    olmoearth:
+      _target_: pytorch_segmentation_models_trainer.few_shot.olmoearth_cache.OlmoEarthCacheLoader
+      cache_dir: /path/to/olmoearth_cache
+      n_bands: 128
+```
+
+See `conf/examples/gfss_gate_ensemble.yaml` for a full, runnable example and
+`GateEnsemble`'s own docstring for why a plain average (over concatenating
+both embeddings into one gate, or routing per pixel by confidence).
+
+### TripleGateEnsemble
+
+Same idea as `GateEnsemble`, extended to 3 experts (`1/3` weight each) — e.g.
+AlphaEarth Foundations, OlmoEarth v1.3, and [Tessera](https://geotessera.org/)
+(`TesseraCacheLoader`, key `'tessera'`, 128-dim per-pixel embeddings with a
+per-pixel scale factor — dequantize with `dequantize_tessera`, **not**
+`AefCacheLoader`'s linear `/127` nor OlmoEarth's sign-sqrt scheme). Decode-time
+options are taken from `expert_a` only, same as `GateEnsemble`.
+
+```yaml
+gfss:
+  method:
+    _target_: pytorch_segmentation_models_trainer.few_shot.methods.triple_gate_ensemble.TripleGateEnsemble
+    expert_a: {...}  # AlphaEarth, aef_dim: 64
+    expert_b: {...}  # OlmoEarth, aef_dim: 128
+    expert_c: {...}  # Tessera, aef_dim: 128
+  aux_cache_loaders:
+    aef: /path/to/aef_cache
+    olmoearth: {_target_: ...olmoearth_cache.OlmoEarthCacheLoader, cache_dir: /path/to/olmoearth_cache, n_bands: 128}
+    tessera: {_target_: ...tessera_cache.TesseraCacheLoader, cache_dir: /path/to/tessera_cache, n_bands: 128}
+```
+
+See `conf/examples/gfss_triple_gate_ensemble.yaml` for a full, runnable example
+and `TripleGateEnsemble`'s own docstring for why this is a separate class rather
+than a generalized N-expert `GateEnsemble`.
 
 ### DIaM
 

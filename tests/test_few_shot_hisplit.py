@@ -6,6 +6,13 @@ import torch
 
 from pytorch_segmentation_models_trainer.few_shot.hierarchy import ClassHierarchy
 from pytorch_segmentation_models_trainer.few_shot.methods.hisplit import HiSplit, _EPS
+from pytorch_segmentation_models_trainer.few_shot.methods.q_strategies import (
+    EDLStrategy,
+    LinearAefGateStrategy,
+    LogregStrategy,
+    ProtoProbStrategy,
+    TransStrategy,
+)
 from pytorch_segmentation_models_trainer.few_shot.uncertainty import normalized_entropy
 
 NN = 254
@@ -84,7 +91,13 @@ class TestProbabilities:
     @pytest.mark.parametrize("variance", ["shared", "per_class"])
     def test_separable_children_are_recovered(self, q, variance):
         f, masks, w, b = _data()
-        m = _ready(f, masks, w, b, q=q, variance=variance)
+        # variance is proto_prob-only (ProtoStrategy has no use for it,
+        # the shared prototype-variance computation it would otherwise
+        # gate is only ever consumed by ProtoProbStrategy.scores) -- kept
+        # parametrized over both q's anyway since it was always a no-op
+        # for "proto" before this param moved out of HiSplit itself.
+        strategy = ProtoProbStrategy(variance=variance) if q == "proto_prob" else "proto"
+        m = _ready(f, masks, w, b, q=strategy)
         pred = m(f).argmax(1)
         assert (pred[:, :3, 3:] == 3).all()
         assert (pred[:, 3:, 3:] == 1).all()
@@ -140,7 +153,7 @@ class TestTraining:
 
     def test_trans_adapts_per_map(self):
         f, masks, w, b = _data()
-        m = _ready(f, masks, w, b, q="trans", adapt_iter=12, lr=0.05)
+        m = _ready(f, masks, w, b, q=TransStrategy(adapt_iter=12, lr=0.05))
         m.q_weight.data.zero_()
         assert m.transductive
         before = m(f)
@@ -156,7 +169,6 @@ class TestTraining:
     "kw, match",
     [
         ({"q": "knn"}, "q must"),
-        ({"variance": "full"}, "variance"),
         ({"decoding": "x"}, "decoding"),
     ],
 )
@@ -165,10 +177,15 @@ def test_invalid_arguments(kw, match):
         HiSplit(**kw)
 
 
+def test_invalid_variance_argument():
+    with pytest.raises(ValueError, match="variance"):
+        ProtoProbStrategy(variance="full")
+
+
 class TestEvidential:
     def test_edl_q_is_dirichlet_mean_and_trains(self):
         f, masks, w, b = _data()
-        m = _ready(f, masks, w, b, q="edl", kl_anneal_steps=4)
+        m = _ready(f, masks, w, b, q=EDLStrategy(kl_anneal_steps=4))
         assert m.q_weight.requires_grad
         scores = m._scores(f, m.q_weight, m.q_bias)
         alpha = torch.nn.functional.softplus(scores) + 1
@@ -576,7 +593,7 @@ class TestSupportLossWeight:
         targets = m._targets(f, masks)
         measure = m.uncertainty(f)["split_vacuity"]
         sw = (1.0 - measure).clamp(0.0, 1.0)
-        expected = m._edl_loss(f, targets, sample_weight=sw)
+        expected = m._edl_loss(f, targets, sw, m._q_strategy.kl_anneal_steps)
         torch.testing.assert_close(m.support_loss(f, masks), expected)
 
     def test_zero_weight_pixels_do_not_contribute(self):
@@ -599,25 +616,26 @@ class TestPseudoLabel:
         q = torch.rand(2, 2, 6, 6)
         q = q / q.sum(1, keepdim=True)
         base_pred = m._base_probs(f).argmax(1)
-        ce, contrast = m._pseudo_label_terms(f, q, base_pred, it=5)
+        ce, contrast = m._q_strategy._pseudo_label_terms(f, q, base_pred, it=5)
         assert torch.equal(ce, torch.zeros(2))
         assert torch.equal(contrast, torch.zeros(2))
 
     def test_threshold_constant_without_start(self):
-        m = HiSplit(q="trans", pseudo_label_threshold=0.3)
-        assert m._pseudo_label_threshold(0) == pytest.approx(0.3)
-        assert m._pseudo_label_threshold(49) == pytest.approx(0.3)
+        m = HiSplit(q=TransStrategy(pseudo_label_threshold=0.3))
+        assert m._q_strategy._pseudo_label_threshold(0) == pytest.approx(0.3)
+        assert m._q_strategy._pseudo_label_threshold(49) == pytest.approx(0.3)
 
     def test_threshold_curriculum_interpolates(self):
         m = HiSplit(
-            q="trans",
-            adapt_iter=11,
-            pseudo_label_threshold=0.3,
-            pseudo_label_threshold_start=0.1,
+            q=TransStrategy(
+                adapt_iter=11,
+                pseudo_label_threshold=0.3,
+                pseudo_label_threshold_start=0.1,
+            )
         )
-        assert m._pseudo_label_threshold(0) == pytest.approx(0.1)
-        assert m._pseudo_label_threshold(10) == pytest.approx(0.3)
-        mid = m._pseudo_label_threshold(5)
+        assert m._q_strategy._pseudo_label_threshold(0) == pytest.approx(0.1)
+        assert m._q_strategy._pseudo_label_threshold(10) == pytest.approx(0.3)
+        mid = m._q_strategy._pseudo_label_threshold(5)
         assert 0.1 < mid < 0.3
 
     def test_start_iter_gates_both_terms(self):
@@ -627,39 +645,44 @@ class TestPseudoLabel:
             masks,
             w,
             b,
-            q="trans",
-            pseudo_label_weight=1.0,
-            pseudo_label_contrast_weight=1.0,
-            pseudo_label_start_iter=5,
+            q=TransStrategy(
+                pseudo_label_weight=1.0,
+                pseudo_label_contrast_weight=1.0,
+                pseudo_label_start_iter=5,
+            ),
         )
         q = m._q(m._scores(f, m.q_weight, m.q_bias))
         base_pred = m._base_probs(f).argmax(1)
-        ce, contrast = m._pseudo_label_terms(f, q, base_pred, it=4)
+        ce, contrast = m._q_strategy._pseudo_label_terms(f, q, base_pred, it=4)
         assert torch.equal(ce, torch.zeros(2))
         assert torch.equal(contrast, torch.zeros(2))
 
     def test_ce_term_matches_weighted_formula_on_confident_pixels(self):
         f, masks, w, b = _data()
         m = _ready(
-            f, masks, w, b, q="trans", pseudo_label_weight=1.0, pseudo_label_threshold=0.9
+            f,
+            masks,
+            w,
+            b,
+            q=TransStrategy(pseudo_label_weight=1.0, pseudo_label_threshold=0.9),
         )
         base_pred = m._base_probs(f).argmax(1)
         # p=0.8/0.2 (entropy ~0.72, below the 0.9 threshold -> confident,
         # but not a trivial p=1 that would make the CE exactly 0).
         q = torch.empty(2, 2, 6, 6)
         q[:, 0], q[:, 1] = 0.8, 0.2
-        ce, contrast = m._pseudo_label_terms(f, q, base_pred, it=0)
+        ce, contrast = m._q_strategy._pseudo_label_terms(f, q, base_pred, it=0)
         assert torch.equal(contrast, torch.zeros(2))  # contrast disabled
         expected = -torch.log(torch.tensor(0.8))
         torch.testing.assert_close(ce, expected.expand(2), atol=1e-4, rtol=0)
 
     def test_ce_term_only_uses_confident_pixels(self):
         f, masks, w, b = _data()
-        m = _ready(f, masks, w, b, q="trans", pseudo_label_weight=1.0)
+        m = _ready(f, masks, w, b, q=TransStrategy(pseudo_label_weight=1.0))
         base_pred = m._base_probs(f).argmax(1)
         # A uniform q (maximum entropy) has no confident pixel anywhere.
         q_uniform = torch.full((2, 2, 6, 6), 0.5)
-        ce, _ = m._pseudo_label_terms(f, q_uniform, base_pred, it=0)
+        ce, _ = m._q_strategy._pseudo_label_terms(f, q_uniform, base_pred, it=0)
         assert torch.equal(ce, torch.zeros(2))
 
     def test_contrast_term_finite_and_respects_min_pixels(self):
@@ -670,17 +693,15 @@ class TestPseudoLabel:
             masks,
             w,
             b,
-            q="trans",
-            pseudo_label_contrast_weight=1.0,
-            pseudo_label_threshold=0.9,
+            q=TransStrategy(pseudo_label_contrast_weight=1.0, pseudo_label_threshold=0.9),
         )
         q = m._q(m._scores(f, m.q_weight, m.q_bias))
         base_pred = m._base_probs(f).argmax(1)
-        _, contrast = m._pseudo_label_terms(f, q, base_pred, it=0)
+        _, contrast = m._q_strategy._pseudo_label_terms(f, q, base_pred, it=0)
         assert torch.isfinite(contrast).all()
 
-        m.pseudo_label_min_pixels = 10_000  # impossible on a 6x6 tile
-        _, contrast_gated = m._pseudo_label_terms(f, q, base_pred, it=0)
+        m._q_strategy.pseudo_label_min_pixels = 10_000  # impossible on a 6x6 tile
+        _, contrast_gated = m._q_strategy._pseudo_label_terms(f, q, base_pred, it=0)
         assert torch.equal(contrast_gated, torch.zeros(2))
 
     def test_adapt_to_query_runs_with_pseudo_label_enabled(self):
@@ -690,14 +711,15 @@ class TestPseudoLabel:
             masks,
             w,
             b,
-            q="trans",
-            adapt_iter=6,
-            lr=0.05,
-            pseudo_label_weight=1.0,
-            pseudo_label_contrast_weight=1.0,
-            pseudo_label_threshold=0.3,
-            pseudo_label_threshold_start=0.05,
-            pseudo_label_start_iter=1,
+            q=TransStrategy(
+                adapt_iter=6,
+                lr=0.05,
+                pseudo_label_weight=1.0,
+                pseudo_label_contrast_weight=1.0,
+                pseudo_label_threshold=0.3,
+                pseudo_label_threshold_start=0.05,
+                pseudo_label_start_iter=1,
+            ),
         )
         m.adapt_to_query(f, masks, f)
         assert m._task_params[0].shape == (2, 2, 4)
@@ -707,18 +729,22 @@ class TestPseudoLabel:
 class TestPseudoLabelTeacher:
     def test_default_period_zero_disabled(self):
         m = HiSplit(q="trans")
-        assert m.pseudo_label_teacher_period == 0
+        assert m._q_strategy.pseudo_label_teacher_period == 0
 
     def test_omitting_q_teacher_matches_passing_q_itself(self):
         f, masks, w, b = _data()
         m = _ready(
-            f, masks, w, b, q="trans", pseudo_label_weight=1.0, pseudo_label_threshold=0.9
+            f,
+            masks,
+            w,
+            b,
+            q=TransStrategy(pseudo_label_weight=1.0, pseudo_label_threshold=0.9),
         )
         base_pred = m._base_probs(f).argmax(1)
         q = torch.empty(2, 2, 6, 6)
         q[:, 0], q[:, 1] = 0.8, 0.2
-        ce_default, contrast_default = m._pseudo_label_terms(f, q, base_pred, it=0)
-        ce_explicit, contrast_explicit = m._pseudo_label_terms(
+        ce_default, contrast_default = m._q_strategy._pseudo_label_terms(f, q, base_pred, it=0)
+        ce_explicit, contrast_explicit = m._q_strategy._pseudo_label_terms(
             f, q, base_pred, it=0, q_teacher=q
         )
         torch.testing.assert_close(ce_default, ce_explicit)
@@ -727,7 +753,11 @@ class TestPseudoLabelTeacher:
     def test_teacher_selects_pseudo_label_student_value_drives_ce(self):
         f, masks, w, b = _data()
         m = _ready(
-            f, masks, w, b, q="trans", pseudo_label_weight=1.0, pseudo_label_threshold=0.9
+            f,
+            masks,
+            w,
+            b,
+            q=TransStrategy(pseudo_label_weight=1.0, pseudo_label_threshold=0.9),
         )
         base_pred = m._base_probs(f).argmax(1)
         # Teacher: confident (entropy(.9/.1) < 0.9), picks "kept" (index 0).
@@ -736,14 +766,20 @@ class TestPseudoLabelTeacher:
         # Student: different probability at that same (teacher-chosen) index.
         q_student = torch.empty(2, 2, 6, 6)
         q_student[:, 0], q_student[:, 1] = 0.6, 0.4
-        ce, _ = m._pseudo_label_terms(f, q_student, base_pred, it=0, q_teacher=q_teacher)
+        ce, _ = m._q_strategy._pseudo_label_terms(
+            f, q_student, base_pred, it=0, q_teacher=q_teacher
+        )
         expected = -torch.log(torch.tensor(0.6))
         torch.testing.assert_close(ce, expected.expand(2), atol=1e-4, rtol=0)
 
     def test_teacher_confidence_decides_selection_not_student(self):
         f, masks, w, b = _data()
         m = _ready(
-            f, masks, w, b, q="trans", pseudo_label_weight=1.0, pseudo_label_threshold=0.5
+            f,
+            masks,
+            w,
+            b,
+            q=TransStrategy(pseudo_label_weight=1.0, pseudo_label_threshold=0.5),
         )
         base_pred = m._base_probs(f).argmax(1)
         # Teacher is at maximum entropy (uniform) -> never confident, regardless
@@ -751,7 +787,9 @@ class TestPseudoLabelTeacher:
         q_teacher = torch.full((2, 2, 6, 6), 0.5)
         q_student = torch.empty(2, 2, 6, 6)
         q_student[:, 0], q_student[:, 1] = 0.99, 0.01
-        ce, _ = m._pseudo_label_terms(f, q_student, base_pred, it=0, q_teacher=q_teacher)
+        ce, _ = m._q_strategy._pseudo_label_terms(
+            f, q_student, base_pred, it=0, q_teacher=q_teacher
+        )
         assert torch.equal(ce, torch.zeros(2))
 
     def test_adapt_to_query_runs_with_teacher_snapshot_enabled(self):
@@ -761,13 +799,14 @@ class TestPseudoLabelTeacher:
             masks,
             w,
             b,
-            q="trans",
-            adapt_iter=9,
-            lr=0.05,
-            pseudo_label_weight=1.0,
-            pseudo_label_contrast_weight=1.0,
-            pseudo_label_threshold=0.3,
-            pseudo_label_teacher_period=3,
+            q=TransStrategy(
+                adapt_iter=9,
+                lr=0.05,
+                pseudo_label_weight=1.0,
+                pseudo_label_contrast_weight=1.0,
+                pseudo_label_threshold=0.3,
+                pseudo_label_teacher_period=3,
+            ),
         )
         m.adapt_to_query(f, masks, f)
         assert m._task_params[0].shape == (2, 2, 4)
@@ -777,19 +816,19 @@ class TestPseudoLabelTeacher:
 class TestTversky:
     def test_disabled_by_default(self):
         m = HiSplit(q="trans")
-        assert m.tversky_weight == 0.0
-        assert m.tversky_alpha == pytest.approx(0.5)
-        assert m.tversky_beta == pytest.approx(0.5)
+        assert m._q_strategy.tversky_weight == 0.0
+        assert m._q_strategy.tversky_alpha == pytest.approx(0.5)
+        assert m._q_strategy.tversky_beta == pytest.approx(0.5)
 
     def test_support_tversky_matches_formula(self):
         f, masks, w, b = _data()
-        m = _ready(f, masks, w, b, q="trans", tversky_alpha=0.3, tversky_beta=0.7)
+        m = _ready(f, masks, w, b, q=TransStrategy(tversky_alpha=0.3, tversky_beta=0.7))
         targets = m._targets(f, masks)
         # weight=0 -> scores collapse to `bias` everywhere (independent of
         # features), giving a fully deterministic, hand-computable q.
         weight = torch.zeros(2, 4)
         bias = torch.tensor([2.0, -1.0])
-        tv = m._support_tversky(f, targets, weight, bias)
+        tv = m._support_tversky(f, targets, weight, bias, 0.3, 0.7)
 
         q = m._q(m._scores(f, weight, bias))
         valid = targets >= 0
@@ -810,7 +849,7 @@ class TestTversky:
         f, masks, w, b = _data()
         m = _ready(f, masks, w, b, q="trans")
         targets = torch.full((2, 6, 6), -1)
-        tv = m._support_tversky(f, targets, m.q_weight, m.q_bias)
+        tv = m._support_tversky(f, targets, m.q_weight, m.q_bias, 0.5, 0.5)
         assert torch.equal(tv, torch.zeros(()))
 
     def test_absent_class_excluded_from_mean(self):
@@ -822,7 +861,7 @@ class TestTversky:
         targets[:, 3:, 3:] = 0
         weight = torch.zeros(2, 4)
         bias = torch.tensor([2.0, -1.0])
-        tv = m._support_tversky(f, targets, weight, bias)
+        tv = m._support_tversky(f, targets, weight, bias, 0.5, 0.5)
 
         q = m._q(m._scores(f, weight, bias))
         valid = targets >= 0
@@ -845,26 +884,25 @@ class TestTversky:
         # wrong on every novel pixel (false negative there).
         weight = torch.zeros(2, 4)
         bias = torch.tensor([3.0, -3.0])
-        m.tversky_alpha, m.tversky_beta = 0.1, 0.1
-        low = m._support_tversky(f, targets, weight, bias)
-        m.tversky_alpha, m.tversky_beta = 0.1, 0.9
-        high = m._support_tversky(f, targets, weight, bias)
+        low = m._support_tversky(f, targets, weight, bias, 0.1, 0.1)
+        high = m._support_tversky(f, targets, weight, bias, 0.1, 0.9)
         assert high.item() > low.item()
 
     def test_zero_weight_is_a_no_op_in_adapt_to_query(self):
         f, masks, w, b = _data()
-        base = _ready(f, masks, w, b, q="trans", adapt_iter=6, lr=0.05)
+        base = _ready(f, masks, w, b, q=TransStrategy(adapt_iter=6, lr=0.05))
         with_tversky = _ready(
             f,
             masks,
             w,
             b,
-            q="trans",
-            adapt_iter=6,
-            lr=0.05,
-            tversky_weight=0.0,
-            tversky_alpha=0.2,
-            tversky_beta=0.8,
+            q=TransStrategy(
+                adapt_iter=6,
+                lr=0.05,
+                tversky_weight=0.0,
+                tversky_alpha=0.2,
+                tversky_beta=0.8,
+            ),
         )
         base.adapt_to_query(f, masks, f)
         with_tversky.adapt_to_query(f, masks, f)
@@ -878,12 +916,9 @@ class TestTversky:
             masks,
             w,
             b,
-            q="trans",
-            adapt_iter=6,
-            lr=0.05,
-            tversky_weight=1.0,
-            tversky_alpha=0.3,
-            tversky_beta=0.7,
+            q=TransStrategy(
+                adapt_iter=6, lr=0.05, tversky_weight=1.0, tversky_alpha=0.3, tversky_beta=0.7
+            ),
         )
         m.adapt_to_query(f, masks, f)
         assert m._task_params[0].shape == (2, 2, 4)
@@ -990,9 +1025,9 @@ class TestBcmTeacher:
 
     def test_zero_weight_is_a_no_op_in_adapt_to_query(self):
         f, masks, w, b = _data()
-        base = _ready(f, masks, w, b, q="trans", adapt_iter=6, lr=0.05)
+        base = _ready(f, masks, w, b, q=TransStrategy(adapt_iter=6, lr=0.05))
         with_teacher = _ready(
-            f, masks, w, b, q="trans", adapt_iter=6, lr=0.05, bcm_teacher_weight=0.0
+            f, masks, w, b, q=TransStrategy(adapt_iter=6, lr=0.05), bcm_teacher_weight=0.0
         )
         base.adapt_to_query(f, masks, f)
         with_teacher.adapt_to_query(f, masks, f)
@@ -1002,7 +1037,7 @@ class TestBcmTeacher:
     def test_adapt_to_query_runs_with_bcm_teacher_enabled(self):
         f, masks, w, b = _data()
         m = _ready(
-            f, masks, w, b, q="trans", adapt_iter=6, lr=0.05, bcm_teacher_weight=1.0
+            f, masks, w, b, q=TransStrategy(adapt_iter=6, lr=0.05), bcm_teacher_weight=1.0
         )
         m.adapt_to_query(f, masks, f)
         assert m._task_params[0].shape == (2, 2, 4)
@@ -1070,9 +1105,7 @@ class TestComparisonOptions:
             masks,
             w,
             b,
-            q="edl",
-            edl_base_rate="inverse_frequency",
-            base_rate_tau=1.0,
+            q=EDLStrategy(edl_base_rate="inverse_frequency", base_rate_tau=1.0),
         )
         t = m._targets(f, masks).reshape(-1)
         n = torch.tensor([(t == 0).sum(), (t == 1).sum()], dtype=torch.float32) + 1.0
@@ -1085,16 +1118,13 @@ class TestComparisonOptions:
         assert torch.isfinite(m.support_loss(f, masks))
         assert "split_vacuity" in m.uncertainty(f)
 
-    @pytest.mark.parametrize(
-        "kw, match",
-        [
-            ({"negatives": "none"}, "negatives"),
-            ({"edl_base_rate": "x"}, "edl_base_rate"),
-        ],
-    )
-    def test_invalid_options(self, kw, match):
-        with pytest.raises(ValueError, match=match):
-            HiSplit(**kw)
+    def test_invalid_negatives(self):
+        with pytest.raises(ValueError, match="negatives"):
+            HiSplit(negatives="none")
+
+    def test_invalid_edl_base_rate(self):
+        with pytest.raises(ValueError, match="edl_base_rate"):
+            EDLStrategy(edl_base_rate="x")
 
 
 class TestAefGate:
@@ -1103,18 +1133,18 @@ class TestAefGate:
     linear head by :meth:`HiSplit._fit_aef_gate` (self-contained, like
     ``logreg``'s sklearn fit -- see the class docstring)."""
 
-    def test_wants_aux_false_by_default_true_after_setup_with_gate(self):
-        assert HiSplit(q="linear").wants_aux is False
+    def test_aux_names_empty_by_default_nonempty_after_setup_with_gate(self):
+        assert HiSplit(q="linear").aux_names == ()
         f, masks, w, b = _data()
         m = _ready(f, masks, w, b, q="linear_aef_gate")
-        assert m.wants_aux is True
+        assert m.aux_names != ()
 
     def test_set_aux_stores_and_clears(self):
         m = HiSplit(q="linear_aef_gate")
         aux = torch.randn(2, 64, 6, 6)
-        m.set_aux(aux)
+        m.set_aux({"aef": aux})
         assert m._aux is aux
-        m.set_aux(None)
+        m.set_aux({})
         assert m._aux is None
 
     def test_qfeat_is_identity_without_aux(self):
@@ -1128,14 +1158,14 @@ class TestAefGate:
         f, masks, w, b = _data()
         m = _ready(f, masks, w, b, q="linear_aef_gate")
         aux = torch.randn(2, 64, 6, 6)
-        m.set_aux(aux)
+        m.set_aux({"aef": aux})
         gate = torch.sigmoid(m.aef_gate_linear(aux.movedim(1, -1))).movedim(-1, 1)
         torch.testing.assert_close(m._qfeat(f), f * gate)
 
     def test_qfeat_untouched_for_other_q_even_with_aux_set(self):
         f, masks, w, b = _data()
         m = _ready(f, masks, w, b, q="linear")
-        m.set_aux(torch.randn(2, 64, 6, 6))  # no-op: no aef_gate_linear exists
+        m.set_aux({"aef": torch.randn(2, 64, 6, 6)})  # no-op: no aef_gate_linear exists
         torch.testing.assert_close(m._qfeat(f), f)
 
     def test_qfeat_raises_a_clear_error_on_aux_channel_mismatch(self):
@@ -1148,7 +1178,7 @@ class TestAefGate:
         message here, not PyTorch's opaque matmul shape error."""
         f, masks, w, b = _data()
         m = _ready(f, masks, w, b, q="linear_aef_gate")  # aef_dim defaults to 64
-        m.set_aux(torch.randn(2, 128, 6, 6))  # wrong width (e.g. OlmoEarth's 128)
+        m.set_aux({"aef": torch.randn(2, 128, 6, 6)})  # wrong width (e.g. OlmoEarth's 128)
         with pytest.raises(ValueError, match="aux has 128 channels but aef_dim=64"):
             m._qfeat(f)
 
@@ -1193,12 +1223,12 @@ class TestAefGate:
         masks = torch.full((2, 8, 8), NN)
         masks[:, :4, 4:] = 3  # S-novel: only the novel class labelled
 
-        m = HiSplit(q="linear_aef_gate", aef_gate_epochs=300)
+        m = HiSplit(q=LinearAefGateStrategy(aef_gate_epochs=300))
         m.setup(ClassHierarchy({1: [1, 3]}, num_base_classes=3), w, b, NN)
-        m.set_aux(aux)
+        m.set_aux({"aef": aux})
         m.init_from_support(f, masks)
 
-        m.set_aux(aux)  # re-provide for inference, as GFSSModel does per batch
+        m.set_aux({"aef": aux})  # re-provide for inference, as GFSSModel does per batch
         q = m._q(m._scores(f, m.q_weight, m.q_bias))
         novel = m.child_classes.index(3)
         assert q[:, novel, :4, 4:].mean() > 0.7
@@ -1210,7 +1240,7 @@ class TestAefGate:
         (gate ~ sigmoid(bias-only) when aef_gate_linear's weight has not
         moved the needle), not crash or leave NaNs."""
         f, masks, w, b = _data()
-        m = _ready(f, masks, w, b, q="linear_aef_gate", aef_gate_epochs=50)
+        m = _ready(f, masks, w, b, q=LinearAefGateStrategy(aef_gate_epochs=50))
         assert torch.isfinite(m.q_weight).all()
         assert torch.isfinite(m.q_bias).all()
         pred = m(f).argmax(1)
@@ -1256,7 +1286,7 @@ class TestAefGateUncertainty:
         m.setup(h, w, b, NN, base_output="evidential")
         m.init_from_support(f, masks)
         aux = torch.randn(2, 64, 6, 6)
-        m.set_aux(aux)
+        m.set_aux({"aef": aux})
         unc = m._base_vacuity(f).unsqueeze(1)
         gate_in = torch.cat([aux, unc], dim=1)
         gate = torch.sigmoid(m.aef_gate_linear(gate_in.movedim(1, -1))).movedim(-1, 1)
@@ -1293,7 +1323,7 @@ class TestAefGateUncertainty:
         masks = torch.full((2, 8, 8), NN)
         masks[:, :4, 4:] = 3  # S-novel: only the novel class labelled
 
-        m = HiSplit(q="linear_aef_gate", aef_gate_epochs=300, aef_gate_uncertainty=True)
+        m = HiSplit(q=LinearAefGateStrategy(aef_gate_epochs=300), aef_gate_uncertainty=True)
         m.setup(
             ClassHierarchy({1: [1, 3]}, num_base_classes=3),
             w,
@@ -1301,10 +1331,10 @@ class TestAefGateUncertainty:
             NN,
             base_output="evidential",
         )
-        m.set_aux(aux)
+        m.set_aux({"aef": aux})
         m.init_from_support(f, masks)
 
-        m.set_aux(aux)  # re-provide for inference, as GFSSModel does per batch
+        m.set_aux({"aef": aux})  # re-provide for inference, as GFSSModel does per batch
         q = m._q(m._scores(f, m.q_weight, m.q_bias))
         novel = m.child_classes.index(3)
         assert q[:, novel, :4, 4:].mean() > 0.7
@@ -1344,7 +1374,7 @@ class TestAefGateUncertaintyBlend:
         m.setup(h, w, b, NN, base_output="evidential")
         m.init_from_support(f, masks)
         aux = torch.randn(2, 64, 6, 6)
-        m.set_aux(aux)
+        m.set_aux({"aef": aux})
         gate_plain = torch.sigmoid(m.aef_gate_linear(aux.movedim(1, -1))).movedim(-1, 1)
         wgt = (1.0 - m._base_vacuity(f)).unsqueeze(1)
         expected_gate = wgt * gate_plain + (1.0 - wgt)
@@ -1362,7 +1392,7 @@ class TestAefGateUncertaintyBlend:
         m = _ready(f, masks, w, b, q="linear_aef_gate")
         assert m.aef_gate_uncertainty_blend is False
         aux = torch.randn(2, 64, 6, 6)
-        m.set_aux(aux)
+        m.set_aux({"aef": aux})
         gate = torch.sigmoid(m.aef_gate_linear(aux.movedim(1, -1))).movedim(-1, 1)
         torch.testing.assert_close(m._qfeat(f), f * gate)
 
@@ -1390,12 +1420,12 @@ class TestAefGateComposedWithQ:
         with pytest.raises(ValueError, match="aef_gate=True needs q"):
             m.setup(h, w, b, NN)
 
-    def test_edl_with_aef_gate_creates_gate_and_wants_aux(self):
+    def test_edl_with_aef_gate_creates_gate_and_aux_names(self):
         f, masks, w, b = _data()
         h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
         m = HiSplit(q="edl", aef_gate=True)
         m.setup(h, w, b, NN)
-        assert m.wants_aux is True
+        assert m.aux_names != ()
         assert m.aef_gate_linear.in_features == 64
 
     def test_qfeat_applies_gate_with_edl_q(self):
@@ -1405,7 +1435,7 @@ class TestAefGateComposedWithQ:
         m.setup(h, w, b, NN)
         m.init_from_support(f, masks)
         aux = torch.randn(2, 64, 6, 6)
-        m.set_aux(aux)
+        m.set_aux({"aef": aux})
         gate = torch.sigmoid(m.aef_gate_linear(aux.movedim(1, -1))).movedim(-1, 1)
         torch.testing.assert_close(m._qfeat(f), f * gate)
 
@@ -1418,7 +1448,7 @@ class TestAefGateComposedWithQ:
         m = HiSplit(q="edl", aef_gate=True)
         m.setup(h, w, b, NN)
         aux = torch.randn(2, 64, 6, 6)
-        m.set_aux(aux)
+        m.set_aux({"aef": aux})
         before = m.aef_gate_linear.weight.detach().clone()
         m.init_from_support(f, masks)
         torch.testing.assert_close(m.aef_gate_linear.weight, before)
@@ -1431,14 +1461,14 @@ class TestAefGateComposedWithQ:
         uses), and the gate's weight must actually move."""
         f, masks, w, b = _data()
         h = ClassHierarchy({1: [1, 3]}, num_base_classes=3)
-        m = HiSplit(q="edl", aef_gate=True, kl_anneal_steps=4)
+        m = HiSplit(q=EDLStrategy(kl_anneal_steps=4), aef_gate=True)
         m.setup(h, w, b, NN)
         aux = torch.randn(2, 64, 6, 6)
-        m.set_aux(aux)
+        m.set_aux({"aef": aux})
         m.init_from_support(f, masks)
         before = m.aef_gate_linear.weight.detach().clone()
         opt = torch.optim.Adam(m.parameters(), lr=0.05)
-        m.set_aux(aux)
+        m.set_aux({"aef": aux})
         loss = m.support_loss(f, masks)
         opt.zero_grad()
         loss.backward()
@@ -1463,20 +1493,20 @@ class TestAefGateComposedWithQ:
         masks = torch.full((2, 8, 8), NN)
         masks[:, :4, 4:] = 3  # S-novel: only the novel class labelled
 
-        m = HiSplit(q="edl", aef_gate=True, kl_anneal_steps=200)
+        m = HiSplit(q=EDLStrategy(kl_anneal_steps=200), aef_gate=True)
         m.setup(ClassHierarchy({1: [1, 3]}, num_base_classes=3), w, b, NN)
-        m.set_aux(aux)
+        m.set_aux({"aef": aux})
         m.init_from_support(f, masks)
 
         opt = torch.optim.Adam(m.parameters(), lr=0.05)
         for _ in range(400):
-            m.set_aux(aux)
+            m.set_aux({"aef": aux})
             loss = m.support_loss(f, masks)
             opt.zero_grad()
             loss.backward()
             opt.step()
 
-        m.set_aux(aux)
+        m.set_aux({"aef": aux})
         q = m._q(m._scores(f, m.q_weight, m.q_bias))
         novel = m.child_classes.index(3)
         assert q[:, novel, :4, 4:].mean() > 0.7
@@ -1489,4 +1519,4 @@ class TestAefGateComposedWithQ:
         f, masks, w, b = _data()
         m = _ready(f, masks, w, b, q="linear_aef_gate")
         assert m.aef_gate is False
-        assert m.wants_aux is True
+        assert m.aux_names != ()

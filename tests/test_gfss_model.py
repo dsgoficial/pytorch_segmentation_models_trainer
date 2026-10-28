@@ -423,6 +423,8 @@ def test_example_configs_match_dataclasses():
         ("gfss_hisplit", "HiSplit"),
         ("gfss_finetune", "FineTune"),
         ("gfss_bcm", "BCM"),
+        ("gfss_gate_ensemble", "GateEnsemble"),
+        ("gfss_triple_gate_ensemble", "TripleGateEnsemble"),
     ],
 )
 def test_method_example_configs_compose_and_instantiate(name, target):
@@ -462,8 +464,17 @@ def test_hisplit_runs_through_train(base_ckpt, tmp_path, q, steps, extra):
             **extra,
         },
     )
-    cfg.gfss.method.q = q
-    cfg.gfss.method.adapt_iter = 2
+    if q == "trans":
+        # adapt_iter is TransStrategy's own (moved out of HiSplit's flat
+        # kwargs) -- a nested Hydra sub-config, same shape GFSSModel's
+        # instantiate(..., _recursive_=False) resolves by hand in
+        # HiSplit._resolve_q_strategy.
+        cfg.gfss.method.q = {
+            "_target_": "pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.TransStrategy",
+            "adapt_iter": 2,
+        }
+    else:
+        cfg.gfss.method.q = q
     trainer = train(cfg)
     assert trainer.global_step == steps
     assert "test/locality" in trainer.callback_metrics
@@ -504,9 +515,11 @@ def test_hisplit_aef_gate_runs_through_train_with_real_aux_cache(base_ckpt, tmp_
         train_dataset=_ds(right=1, corner=3, return_metadata=True),
         test_dataset=_ds(right=1, corner=3, return_metadata=True),
     )
-    cfg.gfss.method.q = "linear_aef_gate"
-    cfg.gfss.method.aef_gate_epochs = 10  # keep the test fast, not a convergence check
-    cfg.gfss.aef_cache_dir = str(aef_dir)
+    cfg.gfss.method.q = {
+        "_target_": "pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.LinearAefGateStrategy",
+        "aef_gate_epochs": 10,  # keep the test fast, not a convergence check
+    }
+    cfg.gfss.aux_cache_loaders = {"aef": str(aef_dir)}
 
     trainer = train(cfg)
     assert trainer.global_step == 0
@@ -515,10 +528,11 @@ def test_hisplit_aef_gate_runs_through_train_with_real_aux_cache(base_ckpt, tmp_
 
 
 def test_hisplit_aef_gate_without_cache_dir_warns_but_still_runs(base_ckpt, tmp_path):
-    """``gfss.aef_cache_dir`` unset (or the method never given a tile's
-    metadata): ``_load_aux`` returns ``None``, the gate's own warning in
-    ``_fit_aef_gate`` fires, and the run still completes (no crash) --
-    the documented graceful degradation, exercised through ``train()``."""
+    """``gfss.aux_cache_loaders`` unset (or the method never given a
+    tile's metadata): ``_load_aux`` returns ``{}``, the gate's own
+    warning in ``_fit_aef_gate`` fires, and the run still completes (no
+    crash) -- the documented graceful degradation, exercised through
+    ``train()``."""
     from pytorch_segmentation_models_trainer.train import train
 
     cfg = _cfg(
@@ -535,8 +549,10 @@ def test_hisplit_aef_gate_without_cache_dir_warns_but_still_runs(base_ckpt, tmp_
             "default_root_dir": str(tmp_path),
         },
     )
-    cfg.gfss.method.q = "linear_aef_gate"
-    cfg.gfss.method.aef_gate_epochs = 5
+    cfg.gfss.method.q = {
+        "_target_": "pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.LinearAefGateStrategy",
+        "aef_gate_epochs": 5,
+    }
     trainer = train(cfg)
     assert trainer.global_step == 0
     assert "test/locality" in trainer.callback_metrics
@@ -545,13 +561,13 @@ def test_hisplit_aef_gate_without_cache_dir_warns_but_still_runs(base_ckpt, tmp_
 def test_hisplit_aef_gate_runs_through_train_with_olmoearth_cache_loader(
     base_ckpt, tmp_path
 ):
-    """``gfss.aef_cache_loader`` (an alternative to ``aef_cache_dir``) wires
-    in ``OlmoEarthCacheLoader`` instead of the default ``AefCacheLoader`` --
-    end-to-end through the real ``train()`` path, with a real (fake-content)
-    OlmoEarth-format ``.npz`` cache (key ``'olmoearth'``, not ``'aef'``) on
-    disk. Proves ``GFSSModel.__init__``'s new ``instantiate(aef_cache_loader_cfg)``
-    branch actually gets used by the rest of the pipeline, not just
-    constructed."""
+    """``gfss.aux_cache_loaders``'s ``"aef"`` entry as a Hydra target
+    (instead of a bare cache-dir string) wires in ``OlmoEarthCacheLoader``
+    instead of the default ``AefCacheLoader`` -- end-to-end through the
+    real ``train()`` path, with a real (fake-content) OlmoEarth-format
+    ``.npz`` cache (key ``'olmoearth'``, not ``'aef'``) on disk. Proves
+    ``GFSSModel.__init__``'s ``instantiate(loader_cfg)`` branch actually
+    gets used by the rest of the pipeline, not just constructed."""
     import numpy as np
 
     from pytorch_segmentation_models_trainer.train import train
@@ -579,17 +595,94 @@ def test_hisplit_aef_gate_runs_through_train_with_olmoearth_cache_loader(
         train_dataset=_ds(right=1, corner=3, return_metadata=True),
         test_dataset=_ds(right=1, corner=3, return_metadata=True),
     )
-    cfg.gfss.method.q = "linear_aef_gate"
-    cfg.gfss.method.aef_gate_epochs = 10
-    cfg.gfss.aef_cache_loader = {
-        "_target_": "pytorch_segmentation_models_trainer.few_shot.olmoearth_cache.OlmoEarthCacheLoader",
-        "cache_dir": str(cache_dir),
+    cfg.gfss.method.q = {
+        "_target_": "pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.LinearAefGateStrategy",
+        "aef_gate_epochs": 10,
+    }
+    cfg.gfss.aux_cache_loaders = {
+        "aef": {
+            "_target_": "pytorch_segmentation_models_trainer.few_shot.olmoearth_cache.OlmoEarthCacheLoader",
+            "cache_dir": str(cache_dir),
+        }
     }
 
     trainer = train(cfg)
     assert trainer.global_step == 0
     assert "test/locality" in trainer.callback_metrics
-    assert isinstance(trainer.lightning_module.aef_loader, OlmoEarthCacheLoader)
+    assert isinstance(trainer.lightning_module.aux_loaders["aef"], OlmoEarthCacheLoader)
+
+
+def test_gate_ensemble_runs_through_train_with_two_named_aux_caches(base_ckpt, tmp_path):
+    """End-to-end: ``GateEnsemble`` (2 independently-gated ``linear_aef_gate``
+    experts, one per named aux source) through the real ``train()`` path --
+    exercises ``aux_names`` with 2 entries, ``_load_aux`` building both,
+    ``set_aux`` routing each to its own expert under every TTA pass, and
+    the averaged decode, together (see ``tests/test_gate_ensemble.py`` for
+    the composite's own unit-level correctness)."""
+    import numpy as np
+
+    from pytorch_segmentation_models_trainer.train import train
+
+    aef_dir = tmp_path / "aef_cache"
+    aef_dir.mkdir()
+    olmo_dir = tmp_path / "olmoearth_cache"
+    olmo_dir.mkdir()
+    rng = np.random.default_rng(0)
+    for i in range(4):
+        np.savez(
+            aef_dir / f"{i}.npz",
+            aef=rng.integers(-100, 100, size=(8, 8, 8), dtype=np.int8),
+        )
+        np.savez(
+            olmo_dir / f"{i}.npz",
+            olmoearth=rng.integers(-100, 100, size=(5, 8, 8), dtype=np.int8),
+        )
+
+    cfg = _cfg(
+        base_ckpt[0],
+        method="pytorch_segmentation_models_trainer.few_shot.methods.gate_ensemble.GateEnsemble",
+        pl_model={
+            "_target_": "pytorch_segmentation_models_trainer.model_loader.gfss_model.GFSSModel"
+        },
+        pl_trainer={
+            "max_steps": 0,
+            "accelerator": "cpu",
+            "enable_checkpointing": False,
+            "enable_progress_bar": False,
+            "default_root_dir": str(tmp_path),
+        },
+        train_dataset=_ds(right=1, corner=3, return_metadata=True),
+        test_dataset=_ds(right=1, corner=3, return_metadata=True),
+    )
+    gate_cfg = lambda aef_dim: {
+        "_target_": "pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit",
+        "q": {
+            "_target_": "pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.LinearAefGateStrategy",
+            "aef_gate_epochs": 5,
+        },
+        "aef_dim": aef_dim,
+    }
+    cfg.gfss.method.expert_a = gate_cfg(8)
+    cfg.gfss.method.expert_b = gate_cfg(5)
+    cfg.gfss.aux_cache_loaders = {
+        "aef": {
+            "_target_": "pytorch_segmentation_models_trainer.few_shot.aef_cache.AefCacheLoader",
+            "cache_dir": str(aef_dir),
+            "n_bands": 8,
+        },
+        "olmoearth": {
+            "_target_": "pytorch_segmentation_models_trainer.few_shot.olmoearth_cache.OlmoEarthCacheLoader",
+            "cache_dir": str(olmo_dir),
+            "n_bands": 5,
+        },
+    }
+
+    trainer = train(cfg)
+    assert trainer.global_step == 0
+    assert "test/locality" in trainer.callback_metrics
+    method = trainer.lightning_module.method
+    assert torch.isfinite(method.expert_a.q_weight).all()
+    assert torch.isfinite(method.expert_b.q_weight).all()
 
 
 class TestUncertaintyEvaluation:
@@ -935,8 +1028,10 @@ class TestTTA:
                 "default_root_dir": str(tmp_path),
             },
         )
-        cfg.gfss.method.q = "trans"
-        cfg.gfss.method.adapt_iter = 2
+        cfg.gfss.method.q = {
+            "_target_": "pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.TransStrategy",
+            "adapt_iter": 2,
+        }
         cfg.gfss.method.widen = "prob"
         cfg.gfss.method.sweep = [0.2]
         trainer = train(cfg)

@@ -20,7 +20,7 @@
 
 import logging
 import warnings
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
@@ -35,6 +35,10 @@ from pytorch_segmentation_models_trainer.custom_losses.edl_utils import (
     edl_kl_regulariser,
 )
 from pytorch_segmentation_models_trainer.few_shot.losses import valid_mean
+from pytorch_segmentation_models_trainer.few_shot.methods.q_strategies import (
+    QStrategy,
+    _Q_STRATEGIES,
+)
 from pytorch_segmentation_models_trainer.few_shot.uncertainty import (
     dissonance,
     normalized_entropy,
@@ -44,8 +48,7 @@ from pytorch_segmentation_models_trainer.few_shot.uncertainty import (
 logger = logging.getLogger(__name__)
 
 _EPS = 1e-10
-_Q_TYPES = {"proto", "proto_prob", "linear", "trans", "edl", "logreg", "linear_aef_gate"}
-_TRAINABLE = {"linear", "trans", "edl"}
+_Q_TYPES = set(_Q_STRATEGIES)
 
 
 class HiSplit(BaseGFSSMethod):
@@ -322,7 +325,8 @@ class HiSplit(BaseGFSSMethod):
     project, §8.4) had therefore never been combined with the gate's.
     Setting ``aef_gate: true`` applies the exact same multiplicative gate
     (:meth:`_qfeat`, unchanged) regardless of ``q``, as long as ``q`` is
-    ``linear``, ``trans`` or ``edl`` (:data:`_TRAINABLE`) — the gate's
+    ``linear``, ``trans`` or ``edl`` (any :attr:`QStrategy.trainable`
+    strategy, see ``q_strategies.py``) — the gate's
     ``aef_gate_linear`` is a real ``nn.Linear`` submodule, so it is
     automatically included in whatever the caller's generic training
     loop already optimises for that ``q`` (``GFSSModel``'s
@@ -351,19 +355,44 @@ class HiSplit(BaseGFSSMethod):
     low-decay EMA of the very same weights would). ``0`` (default)
     disables it.
 
+    Each ``q`` mechanism (``proto``, ``proto_prob``, ``linear``, ``trans``,
+    ``edl``, ``logreg``, ``linear_aef_gate``) is a :class:`QStrategy`
+    subclass in ``q_strategies.py``, owning its own lean, mechanism-specific
+    parameters (e.g. ``trans``'s ``adapt_iter``/``lr``/``pseudo_label_*``/
+    ``tversky_*``, ``edl``'s ``kl_anneal_steps``, ``proto_prob``'s
+    ``variance``/``var_floor``, ``linear_aef_gate``'s ``aef_gate_epochs``/
+    ``aef_gate_lr`` — see each subclass's own docstring for its full
+    parameter list). ``Args`` below are only the params that stay on
+    ``HiSplit`` itself: either cross-cutting (apply regardless of ``q``) or
+    shared infrastructure more than one mechanism can trigger (e.g.
+    ``logreg_n_*``/:meth:`_fit_logreg`, used by ``q: logreg`` **and** by
+    ``bcm_teacher_weight`` with any other ``q``).
+
     Args:
-        q: ``proto``, ``proto_prob``, ``linear``, ``trans``, ``edl``,
-            ``logreg`` or ``linear_aef_gate`` (see class doc).
-        tau: Cosine temperature of ``proto`` (and init of ``linear``).
-        variance: ``shared`` or ``per_class`` (``proto_prob``).
-        var_floor: Minimum variance (``proto_prob``).
+        q: ``"proto"`` / ``"proto_prob"`` / ``"linear"`` / ``"trans"`` /
+            ``"edl"`` / ``"logreg"`` / ``"linear_aef_gate"`` picks that
+            :class:`QStrategy` subclass with its own defaults; a
+            :class:`QStrategy` instance (e.g. ``TransStrategy(adapt_iter=10)``)
+            or a Hydra sub-config (``{"_target_": "...TransStrategy",
+            "adapt_iter": 10}``) overrides its mechanism-specific params —
+            see class doc and ``q_strategies.py``.
+        tau: Cosine temperature of ``proto`` (and init of ``linear``/``trans``).
         decoding: ``hierarchical`` or ``flat``.
         decode_eps: Tie-break scale of the hierarchical decoding.
-        trans_weights: ``[w_ce, w_ent, w_kl]`` (``trans``).
-        adapt_iter: SGD iterations per query map (``trans``).
-        lr: SGD learning rate (``trans``).
-        pi_update_at: Iterations (1-based) where π is re-estimated (``trans``).
-        kl_anneal_steps: Steps to reach full KL weight (``edl``).
+        feature_power: Tukey's ladder of powers applied to the features used
+            by ``q`` (as BCM); negative values are clipped to 0 when ``!= 1``.
+        negatives: ``superclass`` (default) or ``all`` — where "not novel"
+            support pixels become examples of the mother's kept child (see
+            class doc; ``all`` needs a single mother).
+        logreg_n_splits: CV folds of the ``LogisticRegressionCV`` fitted by
+            :meth:`_fit_logreg` (``q: logreg``, or any ``q`` with
+            ``bcm_teacher_weight != 0``).
+        logreg_n_C: Grid size of ``LogisticRegressionCV``'s ``C`` search.
+        logreg_sampling: Class-balancing strategy of ``_fit_logreg``
+            (see ``BCM``/``_LogisticRegressionCV``).
+        logreg_n_jobs: Parallelism of the CV grid search; ``1`` (default)
+            is sequential.
+        seed: RNG seed for ``_fit_logreg``'s sampling.
         leak: Learn the hierarchical leak into novel children.
         leak_init: Initial ``θ`` of the leak (``sigmoid(-4) ≈ 0.018``).
         widen: ``none``, ``prob`` or ``dissonance``.
@@ -388,33 +417,6 @@ class HiSplit(BaseGFSSMethod):
             training loss by ``1 − measure`` (a key of ``uncertainty()``),
             or ``None`` to disable it (default; every pixel weighted
             equally).
-        pseudo_label_weight: Weight of the confidence-gated pseudo-label CE
-            on query pixels (``trans`` only). ``0.0`` (default) disables
-            it.
-        pseudo_label_contrast_weight: Weight of the hinge repulsion between
-            the confident pseudo-labelled kept/novel query features
-            (``trans`` only). ``0.0`` (default) disables it.
-        pseudo_label_contrast_margin: Margin of that hinge
-            (``relu(cos − margin)``), as in :class:`RefinementAwareWrapper`.
-        pseudo_label_threshold: Split-entropy threshold ``τ`` below which a
-            query pixel counts as confidently decided.
-        pseudo_label_threshold_start: If set, ``τ`` starts here and rises
-            linearly to ``pseudo_label_threshold`` over ``adapt_iter``
-            (confidence curriculum); ``None`` (default) keeps ``τ``
-            constant.
-        pseudo_label_start_iter: First ``adapt_to_query`` iteration (0-based)
-            where the pseudo-label terms are applied.
-        pseudo_label_min_pixels: Minimum confident pixels required on each
-            side (kept/novel) for ``pseudo_label_contrast_weight`` to apply
-            to a given query map.
-        pseudo_label_teacher_period: Iterations between teacher snapshots
-            (see class doc). ``0`` (default) disables it — the
-            pseudo-label decision uses the live, un-stabilised ``q``.
-        tversky_weight: Weight of the Tversky support term (``trans``
-            only, see class doc). ``0.0`` (default) disables it.
-        tversky_alpha: False-positive weight of the Tversky index.
-        tversky_beta: False-negative weight of the Tversky index.
-            ``0.5``/``0.5`` (default) is the Dice coefficient.
         hard_decode_measure: Uncertainty measure gating the BCM-style
             hard override (a key of ``uncertainty()``, see class doc),
             or ``None`` to disable it (default).
@@ -426,10 +428,6 @@ class HiSplit(BaseGFSSMethod):
         aef_dim: Channel count of the external embedding consumed by
             ``q: linear_aef_gate`` (``64`` for AlphaEarth Foundations,
             the only one tested).
-        aef_gate_epochs: Adam steps of :meth:`_fit_aef_gate`
-            (``linear_aef_gate`` only).
-        aef_gate_lr: Adam learning rate of :meth:`_fit_aef_gate`
-            (``linear_aef_gate`` only).
         aef_gate_uncertainty: Concatenate the base model's ``base_vacuity``
             to the AEF embedding before the gate (see class doc,
             ``linear_aef_gate`` only). Requires ``base_output: evidential``.
@@ -459,22 +457,12 @@ class HiSplit(BaseGFSSMethod):
 
     def __init__(
         self,
-        q: str = "proto",
+        q: Union[str, QStrategy, Dict[str, Any]] = "proto",
         tau: float = 10.0,
-        variance: str = "shared",
-        var_floor: float = 1e-4,
         decoding: str = "hierarchical",
         decode_eps: float = 1e-4,
-        trans_weights: Sequence[float] = (1.0, 1.0, 1.0),
-        adapt_iter: int = 50,
-        lr: float = 1e-3,
-        pi_update_at: Sequence[int] = (10,),
-        kl_anneal_steps: int = 50,
         feature_power: float = 1.0,
         negatives: str = "superclass",
-        edl_base_rate: str = "uniform",
-        base_rate_tau: float = 1.0,
-        base_rate_smoothing: float = 1.0,
         logreg_n_splits: int = 5,
         logreg_n_C: int = 10,
         logreg_sampling: str = "us",
@@ -492,35 +480,16 @@ class HiSplit(BaseGFSSMethod):
         confidence_weight_power: float = 1.0,
         confidence_weight_scale: float = 1.0,
         support_loss_weight_measure: Optional[str] = None,
-        pseudo_label_weight: float = 0.0,
-        pseudo_label_contrast_weight: float = 0.0,
-        pseudo_label_contrast_margin: float = 0.0,
-        pseudo_label_threshold: float = 0.3,
-        pseudo_label_threshold_start: Optional[float] = None,
-        pseudo_label_start_iter: int = 0,
-        pseudo_label_min_pixels: int = 1,
-        pseudo_label_teacher_period: int = 0,
-        tversky_weight: float = 0.0,
-        tversky_alpha: float = 0.5,
-        tversky_beta: float = 0.5,
         hard_decode_measure: Optional[str] = None,
         hard_decode_threshold: float = 0.3,
         bcm_teacher_weight: float = 0.0,
         aef_dim: int = 64,
-        aef_gate_epochs: int = 200,
-        aef_gate_lr: float = 1e-2,
         aef_gate_uncertainty: bool = False,
         aef_gate_uncertainty_blend: bool = False,
         aef_gate: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        if q not in _Q_TYPES:
-            raise ValueError(f"q must be one of {sorted(_Q_TYPES)}, got {q!r}.")
-        if variance not in {"shared", "per_class"}:
-            raise ValueError(
-                f"variance must be 'shared' or 'per_class', got {variance!r}."
-            )
         if decoding not in {"hierarchical", "flat"}:
             raise ValueError(
                 f"decoding must be 'hierarchical' or 'flat', got {decoding!r}."
@@ -547,62 +516,51 @@ class HiSplit(BaseGFSSMethod):
         self.confidence_weight_power = float(confidence_weight_power)
         self.confidence_weight_scale = float(confidence_weight_scale)
         self.support_loss_weight_measure = support_loss_weight_measure
-        self.pseudo_label_weight = float(pseudo_label_weight)
-        self.pseudo_label_contrast_weight = float(pseudo_label_contrast_weight)
-        self.pseudo_label_contrast_margin = float(pseudo_label_contrast_margin)
-        self.pseudo_label_threshold = float(pseudo_label_threshold)
-        self.pseudo_label_threshold_start = (
-            None
-            if pseudo_label_threshold_start is None
-            else float(pseudo_label_threshold_start)
-        )
-        self.pseudo_label_start_iter = int(pseudo_label_start_iter)
-        self.pseudo_label_min_pixels = int(pseudo_label_min_pixels)
-        self.pseudo_label_teacher_period = int(pseudo_label_teacher_period)
-        self.tversky_weight = float(tversky_weight)
-        self.tversky_alpha = float(tversky_alpha)
-        self.tversky_beta = float(tversky_beta)
         self.hard_decode_measure = hard_decode_measure
         self.hard_decode_threshold = float(hard_decode_threshold)
         self.bcm_teacher_weight = float(bcm_teacher_weight)
         self.aef_dim = int(aef_dim)
-        self.aef_gate_epochs = int(aef_gate_epochs)
-        self.aef_gate_lr = float(aef_gate_lr)
         self.aef_gate_uncertainty = bool(aef_gate_uncertainty)
         self.aef_gate_uncertainty_blend = bool(aef_gate_uncertainty_blend)
         self.aef_gate = bool(aef_gate)
         self._aux: Optional[Tensor] = None
-        self.q = q
         self.tau = float(tau)
-        self.variance = variance
-        self.var_floor = float(var_floor)
         self.decoding = decoding
         self.decode_eps = float(decode_eps)
-        self.trans_weights = [float(w) for w in trans_weights]
-        self.adapt_iter = int(adapt_iter)
-        self.lr = float(lr)
-        self.pi_update_at = [int(i) for i in pi_update_at]
-        self.kl_anneal_steps = int(kl_anneal_steps)
         if negatives not in {"superclass", "all"}:
             raise ValueError(
                 f"negatives must be 'superclass' or 'all', got {negatives!r}."
             )
-        if edl_base_rate not in {"uniform", "inverse_frequency"}:
-            raise ValueError(
-                f"edl_base_rate must be 'uniform' or 'inverse_frequency', got {edl_base_rate!r}."
-            )
         self.feature_power = float(feature_power)
         self.negatives = negatives
-        self.edl_base_rate = edl_base_rate
-        self.base_rate_tau = float(base_rate_tau)
-        self.base_rate_smoothing = float(base_rate_smoothing)
         self.logreg_args = (int(logreg_n_splits), int(logreg_n_C), logreg_sampling)
         self.logreg_n_jobs = int(logreg_n_jobs)
         self.seed = int(seed)
         self.logreg_models: Dict[int, object] = {}
-        self.transductive = q == "trans"
+        self._q_strategy = self._resolve_q_strategy(q)
+        self._q_strategy.bind(self)
+        self.q = self._q_strategy.name
+        self.transductive = self._q_strategy.transductive
         self._edl_step = 0
         self._task_params: Optional[tuple] = None
+
+    @staticmethod
+    def _resolve_q_strategy(q: Union[str, QStrategy, Dict[str, Any]]) -> QStrategy:
+        """``q="trans"`` (every default) | an already-built
+        ``QStrategy(...)`` (non-default parameters, plain Python) | a
+        Hydra sub-config with its own ``_target_`` (YAML: ``HiSplit`` is
+        instantiated with ``_recursive_=False`` by ``GFSSModel``, so a
+        nested ``_target_`` block arrives un-instantiated and must be
+        resolved by hand here)."""
+        if isinstance(q, str):
+            if q not in _Q_STRATEGIES:
+                raise ValueError(f"q must be one of {sorted(_Q_TYPES)}, got {q!r}.")
+            return _Q_STRATEGIES[q]()
+        if isinstance(q, QStrategy):
+            return q
+        from hydra.utils import instantiate
+
+        return instantiate(q, _recursive_=False)
 
     # ------------------------------------------------------------------
     # Setup / support
@@ -617,7 +575,7 @@ class HiSplit(BaseGFSSMethod):
             hierarchy.mother_of(c) for c in self.child_classes
         ]
         n, dim = len(self.child_classes), base_weight.shape[1]
-        if self.q in _TRAINABLE:
+        if self._q_strategy.trainable:
             self.q_weight = nn.Parameter(base_weight.new_zeros(n, dim))
             self.q_bias = nn.Parameter(base_weight.new_zeros(n))
         else:
@@ -672,14 +630,16 @@ class HiSplit(BaseGFSSMethod):
             self.leak_logit = nn.Parameter(
                 base_weight.new_full((n, nb), self.leak_init)
             )
-        if self.q == "linear_aef_gate" or self.aef_gate:
-            if self.aef_gate and self.q not in (_TRAINABLE | {"linear_aef_gate"}):
+        if self._q_strategy.uses_aef_gate or self.aef_gate:
+            if self.aef_gate and not (
+                self._q_strategy.trainable or self._q_strategy.uses_aef_gate
+            ):
                 raise ValueError(
-                    f"aef_gate=True needs q to be trainable ({sorted(_TRAINABLE)}) "
+                    f"aef_gate=True needs q to be trainable (pl_trainer-driven) "
                     f"or 'linear_aef_gate' (self-fit covers it already); got "
                     f"q={self.q!r}, whose aef_gate_linear would never be fit."
                 )
-            self.wants_aux = True
+            self.aux_names = ("aef",)
             if (
                 self.aef_gate_uncertainty or self.aef_gate_uncertainty_blend
             ) and self.base_output != "evidential":
@@ -711,14 +671,15 @@ class HiSplit(BaseGFSSMethod):
                 targets[not_novel] = i
         return targets
 
-    def set_aux(self, aux: Optional[Tensor]) -> None:
-        """Stores the external embedding (e.g. AEF) of the call that
-        follows (``init_from_support``/``support_loss``/one TTA pass of
-        ``decode_to`` — see :attr:`wants_aux`), ``(B, aef_dim, h, w)`` at
-        the same spatial resolution/orientation as ``features``, or
-        ``None``. Only consumed by ``q: linear_aef_gate`` (:meth:`_qfeat`);
-        a no-op for every other ``q``."""
-        self._aux = aux
+    def set_aux(self, aux: Dict[str, Tensor]) -> None:
+        """Stores the ``"aef"`` entry (e.g. AEF or OlmoEarth embeddings)
+        of the call that follows (``init_from_support``/``support_loss``/
+        one TTA pass of ``decode_to`` — see :attr:`aux_names`), ``(B,
+        aef_dim, h, w)`` at the same spatial resolution/orientation as
+        ``features``, or ``None`` when missing. Only consumed by the AEF
+        gate (:meth:`_qfeat`, :attr:`aux_names` empty for every other
+        configuration)."""
+        self._aux = aux.get("aef") if aux else None
 
     def _base_vacuity(self, features: Tensor) -> Tensor:
         """Per-pixel vacuity ``(B, h, w)`` of the frozen base model's own
@@ -740,7 +701,7 @@ class HiSplit(BaseGFSSMethod):
         deterministically blended towards ``1`` by :meth:`_base_vacuity`
         afterwards — see class doc, the two are alternatives, not
         composed), then Tukey's power transform when ``feature_power`` ≠ 1."""
-        if (self.q == "linear_aef_gate" or self.aef_gate) and self._aux is not None:
+        if (self._q_strategy.uses_aef_gate or self.aef_gate) and self._aux is not None:
             gate_in = self._aux
             if gate_in.shape[1] != self.aef_dim:
                 raise ValueError(
@@ -780,34 +741,22 @@ class HiSplit(BaseGFSSMethod):
             mu = x.mean(0)
             weight[i] = mu
             var[i] = x.var(0, unbiased=False) if x.shape[0] > 1 else var[i]
-        if self.variance == "shared":
+        if self._q_strategy.variance == "shared":
             for mother in self.hierarchy.mothers:
                 idx = [i for i, m in enumerate(self.child_mother) if m == mother]
                 var[idx] = var[idx].mean(0, keepdim=True)
-        self.q_var.copy_(var.clamp(min=self.var_floor))
+        self.q_var.copy_(var.clamp(min=self._q_strategy.var_floor))
         with torch.no_grad():
-            if self.q == "proto_prob":
-                self.q_weight.copy_(weight)
-            else:
-                norm = weight / (weight.norm(dim=1, keepdim=True) + _EPS)
-                self.q_weight.copy_(self.tau * norm)
+            self.q_weight.copy_(self._q_strategy.init_weight(weight))
             self.q_bias.zero_()
         t_all = targets.reshape(-1)
-        if self.q == "edl" and self.edl_base_rate == "inverse_frequency":
-            counts = torch.stack(
-                [(t_all == i).sum() for i in range(len(self.child_classes))]
-            ).to(self.edl_prior)
-            prior = torch.empty_like(self.edl_prior)
-            for _, idx in self._groups():
-                a = (counts[idx] + self.base_rate_smoothing).pow(-self.base_rate_tau)
-                prior[idx] = len(idx) * a / a.sum()
-            self.edl_prior.copy_(prior)
-        if self.q == "logreg" or self.bcm_teacher_weight != 0.0:
+        if self._q_strategy.needs_logreg_fit or self.bcm_teacher_weight != 0.0:
             self._fit_logreg(flat.detach().cpu().numpy(), t_all.cpu().numpy())
-        if self.q == "linear_aef_gate":
-            self._fit_aef_gate(features, targets)
+        self._q_strategy.init_from_support(features, targets)
 
-    def _fit_aef_gate(self, features: Tensor, targets: Tensor) -> None:
+    def _fit_aef_gate(
+        self, features: Tensor, targets: Tensor, epochs: int, lr: float
+    ) -> None:
         """Jointly fits the AEF gate's ``nn.Linear`` and the linear head
         (``q_weight``/``q_bias``) by Adam, minimising the same
         per-mother cross-entropy as ``q: linear``'s ``pl_trainer``-driven
@@ -817,7 +766,8 @@ class HiSplit(BaseGFSSMethod):
         as for ``logreg``/``proto``). Uses whatever :meth:`set_aux` was
         last given (``None`` means an un-gated linear head, with a
         warning — a silent degradation that should not happen in a
-        correctly configured run)."""
+        correctly configured run). ``epochs``/``lr`` come from
+        ``LinearAefGateStrategy``, the only caller."""
         if self._aux is None:
             logger.warning(
                 "HiSplit linear_aef_gate: no aux (AEF) set, fitting an "
@@ -829,8 +779,8 @@ class HiSplit(BaseGFSSMethod):
         weight = nn.Parameter(self.q_weight.detach().clone())
         bias = nn.Parameter(self.q_bias.detach().clone())
         params = list(self.aef_gate_linear.parameters()) + [weight, bias]
-        opt = torch.optim.Adam(params, lr=self.aef_gate_lr)
-        for _ in range(self.aef_gate_epochs):
+        opt = torch.optim.Adam(params, lr=lr)
+        for _ in range(epochs):
             opt.zero_grad()
             loss = self._support_ce(features, targets, weight, bias)
             if not torch.isfinite(loss):
@@ -874,22 +824,11 @@ class HiSplit(BaseGFSSMethod):
     # ------------------------------------------------------------------
 
     def _scores(self, features: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
-        """Per-child scores ``(B, n_children, h, w)``; weight may be per map."""
+        """Per-child scores ``(B, n_children, h, w)``; weight may be per map.
+        Dispatches to :attr:`_q_strategy` (see ``q_strategies.py``) after
+        the shared gate/Tukey-power step (:meth:`_qfeat`)."""
         features = self._qfeat(features)
-        if self.q == "logreg":
-            return self._logreg_scores(features)
-        if self.q == "proto":
-            f = F.normalize(features, dim=1)
-            return torch.einsum("bfhw,cf->bchw", f, weight)
-        if self.q == "proto_prob":
-            diff = features.unsqueeze(1) - weight.view(1, *weight.shape, 1, 1)
-            var = self.q_var.view(1, *self.q_var.shape, 1, 1)
-            return -0.5 * (diff.pow(2) / var + torch.log(var)).sum(2)
-        if weight.dim() == 3:
-            return torch.einsum("bfhw,bcf->bchw", features, weight) + bias.view(
-                bias.shape[0], -1, 1, 1
-            )
-        return torch.einsum("bfhw,cf->bchw", features, weight) + bias.view(1, -1, 1, 1)
+        return self._q_strategy.scores(features, weight, bias)
 
     def _logreg_scores(self, features: Tensor) -> Tensor:
         """Log-probabilities of the per-mother logistic regressions (uniform
@@ -922,16 +861,8 @@ class HiSplit(BaseGFSSMethod):
 
     def _q(self, scores: Tensor) -> Tensor:
         """Split within the children of each mother: softmax of the scores,
-        or the Dirichlet mean ``α / S`` for ``edl``."""
-        q = torch.empty_like(scores)
-        if self.q == "edl":
-            alpha = self._edl_alpha(scores)
-            for _, idx in self._groups():
-                q[:, idx] = alpha[:, idx] / alpha[:, idx].sum(1, keepdim=True)
-            return q
-        for _, idx in self._groups():
-            q[:, idx] = torch.softmax(scores[:, idx], dim=1)
-        return q
+        or the Dirichlet mean ``α / S`` for ``edl`` (:attr:`_q_strategy`)."""
+        return self._q_strategy.normalize(scores)
 
     def _adjust_prior(self, q: Tensor) -> Tensor:
         if self.novel_prior_weight == 1.0:
@@ -1011,16 +942,23 @@ class HiSplit(BaseGFSSMethod):
                 )
         return level, mass
 
+    def _compute_q(self, features: Tensor) -> Tensor:
+        """``q(child|x)`` after confidence-weighting/hard-decode -- the
+        same 3 lines :meth:`split_probabilities` and :meth:`_decode` each
+        used to repeat inline, extracted so a caller (either of them, or
+        :class:`GateEnsemble`, which averages this across 2 independently
+        gated ``HiSplit`` instances before decoding) can get the raw ``q``
+        without duplicating the confidence-weight/hard-decode steps."""
+        q = self._q(self._scores(features, *self._current_params(features.shape[0])))
+        q = self._apply_confidence_weight(features, q)
+        return self._apply_hard_decode(features, q)
+
     def split_probabilities(
         self, features: Tensor, q: Optional[Tensor] = None
     ) -> Tensor:
         """``p(c)`` over all classes ``(B, num_classes, h, w)``."""
         if q is None:
-            q = self._q(
-                self._scores(features, *self._current_params(features.shape[0]))
-            )
-            q = self._apply_confidence_weight(features, q)
-            q = self._apply_hard_decode(features, q)
+            q = self._compute_q(features)
         level, mass = self._masses(self._base_probs(features), q)
         out = level.new_zeros(
             level.shape[0], self.hierarchy.num_classes, *level.shape[2:]
@@ -1063,10 +1001,13 @@ class HiSplit(BaseGFSSMethod):
         targets: Tensor,
         weight,
         bias,
+        alpha: float,
+        beta: float,
     ) -> Tensor:
         """``1 − mean_c Tversky_c`` of ``q`` against the support targets,
         averaged over children present in this episode's support (``trans``
-        only, see class doc); ``0`` if none are present."""
+        only, see class doc, whose ``tversky_alpha``/``tversky_beta`` are
+        passed in here); ``0`` if none are present."""
         q = self._q(self._scores(features, weight, bias))
         c = q.shape[1]
         valid = targets >= 0
@@ -1075,20 +1016,23 @@ class HiSplit(BaseGFSSMethod):
         tp = (q * y * v).sum(dim=(0, 2, 3))
         fp = (q * (1 - y) * v).sum(dim=(0, 2, 3))
         fn = ((1 - q) * y * v).sum(dim=(0, 2, 3))
-        tversky = (tp + _EPS) / (
-            tp + self.tversky_alpha * fp + self.tversky_beta * fn + _EPS
-        )
+        tversky = (tp + _EPS) / (tp + alpha * fp + beta * fn + _EPS)
         present = (y * v).sum(dim=(0, 2, 3)) > 0
         if not present.any():
             return q.new_zeros(())
         return 1.0 - tversky[present].mean()
 
     def _edl_loss(
-        self, features: Tensor, targets: Tensor, sample_weight: Optional[Tensor] = None
+        self,
+        features: Tensor,
+        targets: Tensor,
+        sample_weight: Optional[Tensor],
+        kl_anneal_steps: int,
     ) -> Tensor:
-        """EDL MSE + annealed KL of the evidential pair head, per mother."""
+        """EDL MSE + annealed KL of the evidential pair head, per mother
+        (``kl_anneal_steps`` comes from ``EDLStrategy``, the only caller)."""
         alpha = self._edl_alpha(self._scores(features, self.q_weight, self.q_bias))
-        kl_weight = min(1.0, self._edl_step / max(self.kl_anneal_steps, 1))
+        kl_weight = min(1.0, self._edl_step / max(kl_anneal_steps, 1))
         total = alpha.new_zeros(())
         for _, idx in self._groups():
             in_group = (targets >= min(idx)) & (targets <= max(idx))
@@ -1121,15 +1065,9 @@ class HiSplit(BaseGFSSMethod):
         if self.support_loss_weight_measure is not None:
             measure = self.uncertainty(features)[self.support_loss_weight_measure]
             sample_weight = (1.0 - measure).clamp(0.0, 1.0)
-        if self.q in _TRAINABLE:
+        if self._q_strategy.trainable:
             targets = self._targets(features, masks)
-            if self.q == "edl":
-                loss = self._edl_loss(features, targets, sample_weight)
-                self._edl_step += 1
-            else:
-                loss = self._support_ce(
-                    features, targets, self.q_weight, self.q_bias, sample_weight
-                )
+            loss = self._q_strategy.training_loss(features, targets, sample_weight)
         if self.leak:
             leak_loss = self._final_nll(features, masks)
             loss = leak_loss if loss is None else loss + leak_loss
@@ -1173,86 +1111,6 @@ class HiSplit(BaseGFSSMethod):
             pi[:, idx] = valid_mean(q[:, idx], p_base[:, mother].unsqueeze(1), (2, 3))
         return pi.detach()
 
-    def _pseudo_label_threshold(self, it: int) -> float:
-        """Confidence threshold ``τ`` at iteration ``it`` — constant at
-        ``pseudo_label_threshold``, or linearly interpolated from
-        ``pseudo_label_threshold_start`` when set."""
-        if self.pseudo_label_threshold_start is None:
-            return self.pseudo_label_threshold
-        frac = it / max(self.adapt_iter - 1, 1)
-        return self.pseudo_label_threshold_start + (
-            self.pseudo_label_threshold - self.pseudo_label_threshold_start
-        ) * frac
-
-    def _pseudo_label_terms(
-        self,
-        feat: Tensor,
-        q: Tensor,
-        base_pred: Tensor,
-        it: int,
-        q_teacher: Optional[Tensor] = None,
-    ) -> Tuple[Tensor, Tensor]:
-        """Confidence-gated pseudo-label CE and kept/novel contrast terms
-        on query pixels, per map (see class doc); both ``0`` when disabled
-        or before ``pseudo_label_start_iter``.
-
-        ``q`` is the differentiable split used by the CE term (the
-        student); ``q_teacher`` (defaults to ``q`` itself) is the
-        ``torch.no_grad()`` split whose entropy/arg-max decide which
-        pixels are confident and what their pseudo-label is — a
-        periodically-refreshed snapshot of ``q`` when
-        ``pseudo_label_teacher_period > 0`` (see :meth:`adapt_to_query`),
-        or ``q`` itself (the degenerate, un-stabilised case) otherwise."""
-        if q_teacher is None:
-            q_teacher = q
-        n = feat.shape[0]
-        zero = feat.new_zeros(n)
-        use_ce = self.pseudo_label_weight != 0.0
-        use_contrast = self.pseudo_label_contrast_weight != 0.0
-        if (not use_ce and not use_contrast) or it < self.pseudo_label_start_iter:
-            return zero, zero
-        tau = self._pseudo_label_threshold(it)
-        ce_term = zero.clone()
-        contrast_term = zero.clone()
-        qfeat = self._qfeat(feat) if use_contrast else None
-        for mother, idx in self._groups():
-            here = base_pred == mother
-            qm = q[:, idx]
-            qm_teacher = q_teacher[:, idx]
-            with torch.no_grad():
-                ent = normalized_entropy(qm_teacher)
-                confident = here & (ent < tau)
-                pseudo = qm_teacher.argmax(1)
-            kept_local = idx.index(self.kept_row[mother])
-            if use_ce:
-                p_pseudo = qm.gather(1, pseudo.unsqueeze(1)).squeeze(1)
-                ce_px = -torch.log(p_pseudo + _EPS)
-                wgt = confident.to(qm.dtype) * (1.0 - ent)
-                ce_term = ce_term + (ce_px * wgt).flatten(1).sum(1) / wgt.flatten(
-                    1
-                ).sum(1).clamp(min=_EPS)
-            if use_contrast:
-                kept_mask = confident & (pseudo == kept_local)
-                novel_mask = confident & (pseudo != kept_local)
-                n_kept = kept_mask.flatten(1).sum(1)
-                n_novel = novel_mask.flatten(1).sum(1)
-                flat = qfeat.flatten(2)
-                p_kept = (flat * kept_mask.flatten(1).unsqueeze(1)).sum(
-                    -1
-                ) / n_kept.clamp(min=1).unsqueeze(1)
-                p_novel = (flat * novel_mask.flatten(1).unsqueeze(1)).sum(
-                    -1
-                ) / n_novel.clamp(min=1).unsqueeze(1)
-                cos = F.cosine_similarity(p_kept, p_novel, dim=1)
-                hinge = (cos - self.pseudo_label_contrast_margin).clamp(min=0.0)
-                active = (n_kept >= self.pseudo_label_min_pixels) & (
-                    n_novel >= self.pseudo_label_min_pixels
-                )
-                contrast_term = contrast_term + torch.where(
-                    active, hinge, torch.zeros_like(hinge)
-                )
-        return ce_term, contrast_term
-
     def _bcm_teacher_term(self, query_features: Tensor, q: Tensor) -> Tensor:
         """Cross-entropy of ``q`` against a BCM-style ``LogisticRegressionCV``
         teacher (fit on the support by :meth:`init_from_support`, see class
@@ -1281,74 +1139,11 @@ class HiSplit(BaseGFSSMethod):
     def adapt_to_query(
         self, support_features: Tensor, support_masks: Tensor, query_features: Tensor
     ) -> None:
-        """``trans``: per-map SGD on support CE + superclass entropy/prior
-        (+ confidence-gated pseudo-label terms on the query, optionally
-        teacher-stabilised; + Tversky support term; + BCM-as-teacher
-        distillation term, see class doc)."""
-        w_ce, w_ent, w_kl = self.trans_weights
-        n = query_features.shape[0]
-        weight = self.q_weight.detach().unsqueeze(0).repeat(n, 1, 1).requires_grad_()
-        bias = self.q_bias.detach().unsqueeze(0).repeat(n, 1).requires_grad_()
-        optimizer = torch.optim.SGD([weight, bias], lr=self.lr)
-        targets = self._targets(support_features, support_masks)
-        p_base = self._base_probs(query_features)
-        base_pred = p_base.argmax(1)
-        with torch.no_grad():
-            pi = self._prior(
-                self._q(self._scores(query_features, weight, bias)), p_base
-            )
-        teacher_params: Optional[tuple] = None
-        for it in range(self.adapt_iter):
-            if self.pseudo_label_teacher_period > 0 and (
-                it % self.pseudo_label_teacher_period == 0
-            ):
-                teacher_params = (weight.detach().clone(), bias.detach().clone())
-            ce = torch.stack(
-                [
-                    self._support_ce(support_features, targets, weight[i], bias[i])
-                    for i in range(n)
-                ]
-            )
-            q = self._q(self._scores(query_features, weight, bias))
-            ent, kl = self._superclass_terms(q, p_base, pi)
-            if teacher_params is None:
-                q_teacher = q
-            else:
-                with torch.no_grad():
-                    q_teacher = self._q(self._scores(query_features, *teacher_params))
-            pseudo_ce, pseudo_contrast = self._pseudo_label_terms(
-                query_features, q, base_pred, it, q_teacher=q_teacher
-            )
-            if self.tversky_weight != 0.0:
-                tversky = torch.stack(
-                    [
-                        self._support_tversky(
-                            support_features, targets, weight[i], bias[i]
-                        )
-                        for i in range(n)
-                    ]
-                )
-            else:
-                tversky = ce.new_zeros(n)
-            bcm_teacher_ce = self._bcm_teacher_term(query_features, q)
-            loss = (
-                w_ce * ce
-                + w_ent * ent
-                + w_kl * kl
-                + self.pseudo_label_weight * pseudo_ce
-                + self.pseudo_label_contrast_weight * pseudo_contrast
-                + self.tversky_weight * tversky
-                + self.bcm_teacher_weight * bcm_teacher_ce
-            )
-            optimizer.zero_grad()
-            loss.sum().backward()
-            optimizer.step()
-            if (it + 1) in self.pi_update_at:
-                with torch.no_grad():
-                    pi = self._prior(
-                        self._q(self._scores(query_features, weight, bias)), p_base
-                    )
-        self._task_params = (weight.detach(), bias.detach())
+        """Transductive per-task adaptation -- dispatches to
+        :attr:`_q_strategy` (only ``trans`` implements it, see
+        ``q_strategies.py``; every other q's :attr:`transductive` is
+        ``False`` so ``GFSSModel`` never calls this)."""
+        self._q_strategy.adapt_to_query(support_features, support_masks, query_features)
 
     # ------------------------------------------------------------------
     # Uncertainty
@@ -1422,11 +1217,15 @@ class HiSplit(BaseGFSSMethod):
     # Prediction
     # ------------------------------------------------------------------
 
-    def _decode(self, features: Tensor, threshold: Optional[float]) -> Tensor:
-        """Hierarchical-decoding logits; ``threshold`` enables widening."""
-        q = self._q(self._scores(features, *self._current_params(features.shape[0])))
-        q = self._apply_confidence_weight(features, q)
-        q = self._apply_hard_decode(features, q)
+    def _decode(
+        self, features: Tensor, threshold: Optional[float], q: Optional[Tensor] = None
+    ) -> Tensor:
+        """Hierarchical-decoding logits; ``threshold`` enables widening.
+        ``q`` lets a caller (:class:`GateEnsemble`) supply an already-averaged
+        ``q`` instead of this instance's own -- same role as the ``q``
+        parameter of :meth:`split_probabilities`."""
+        if q is None:
+            q = self._compute_q(features)
         logits_base = self._base_logits(features)
         p_base = self.base_probabilities(logits_base)
         level, mass = self._masses(p_base, q)
@@ -1490,11 +1289,13 @@ class HiSplit(BaseGFSSMethod):
         """Logits of each ``sweep`` threshold."""
         return {f"widen_{t:g}": self._decode(features, t) for t in self.sweep}
 
-    def forward(self, features: Tensor) -> Tensor:
+    def forward(self, features: Tensor, q: Optional[Tensor] = None) -> Tensor:
         """Log-probabilities (``flat``) or hierarchical decoding logits
-        (with widening when ``widen`` is set)."""
+        (with widening when ``widen`` is set). ``q`` -- see
+        :meth:`split_probabilities`/:meth:`_decode` -- lets
+        :class:`GateEnsemble` drive the decode with an averaged ``q``."""
         if self.decoding == "flat":
-            return torch.log(self.split_probabilities(features) + _EPS)
+            return torch.log(self.split_probabilities(features, q=q) + _EPS)
         return self._decode(
-            features, None if self.widen == "none" else self.widen_threshold
+            features, None if self.widen == "none" else self.widen_threshold, q=q
         )

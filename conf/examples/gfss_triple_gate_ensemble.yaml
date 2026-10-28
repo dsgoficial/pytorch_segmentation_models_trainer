@@ -1,0 +1,68 @@
+# TripleGateEnsemble — average of 3 independently-gated HiSplit (q: linear_aef_gate)
+# experts, one per external embedding product (AlphaEarth Foundations +
+# OlmoEarth v1.3 + Tessera): each self-fits its own gate+head on the same
+# K-shot support (set_aux routes the named aux to each expert's own "aef"
+# slot), and their post-gate q is averaged 1/3 each before decoding. See
+# TripleGateEnsemble's own class docstring -- the 3-expert extension of
+# GateEnsemble, investigated to test whether a third embedding product beats
+# the 2-source average with statistical significance.
+defaults:
+  - gfss_base_only
+  - _self_
+
+experiments_runner:
+  output_base_dir: outputs/gfss/triple_gate_ensemble_pampa
+
+gfss:
+  # Decode-time settings (decoding/widen/leak/sweep/abstain_measure/...) are
+  # taken from expert_a ONLY -- expert_b/expert_c only contribute their own q.
+  method:
+    _target_: pytorch_segmentation_models_trainer.few_shot.methods.triple_gate_ensemble.TripleGateEnsemble
+    expert_a:
+      _target_: pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit
+      q:
+        _target_: pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.LinearAefGateStrategy
+        aef_gate_epochs: 200
+        aef_gate_lr: 1.0e-2
+      tau: 10.0
+      decoding: hierarchical
+      aef_dim: 64
+    expert_b:
+      _target_: pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit
+      q:
+        _target_: pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.LinearAefGateStrategy
+        aef_gate_epochs: 200
+        aef_gate_lr: 1.0e-2
+      tau: 10.0
+      decoding: hierarchical
+      aef_dim: 128
+    expert_c:
+      _target_: pytorch_segmentation_models_trainer.few_shot.methods.hisplit.HiSplit
+      q:
+        _target_: pytorch_segmentation_models_trainer.few_shot.methods.q_strategies.LinearAefGateStrategy
+        aef_gate_epochs: 200
+        aef_gate_lr: 1.0e-2
+      tau: 10.0
+      decoding: hierarchical
+      aef_dim: 128
+    # aux_name_a: aef        # gfss.aux_cache_loaders key routed to expert_a (default)
+    # aux_name_b: olmoearth  # gfss.aux_cache_loaders key routed to expert_b (default)
+    # aux_name_c: tessera    # gfss.aux_cache_loaders key routed to expert_c (default)
+  aux_cache_loaders:
+    aef: /path/to/aef_cache
+    olmoearth:
+      _target_: pytorch_segmentation_models_trainer.few_shot.olmoearth_cache.OlmoEarthCacheLoader
+      cache_dir: /path/to/olmoearth_cache
+      n_bands: 128
+    tessera:
+      _target_: pytorch_segmentation_models_trainer.few_shot.tessera_cache.TesseraCacheLoader
+      cache_dir: /path/to/tessera_cache
+      n_bands: 128
+
+pl_trainer:
+  max_steps: 0
+
+train_dataset:
+  return_metadata: true # precisa do mask_path pra casar o tile com os caches
+test_dataset:
+  return_metadata: true

@@ -19,7 +19,7 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -54,15 +54,31 @@ class BaseGFSSMethod(nn.Module, ABC):
 
     transductive: bool = False
 
-    #: Whether this method wants an auxiliary external signal (e.g. AEF
-    #: embeddings) alongside ``features``/``masks`` — see :meth:`set_aux`.
-    #: Default ``False`` for every method; a subclass that uses one sets
-    #: this (usually as an instance attribute in ``setup``) so ``GFSSModel``
-    #: knows to load and provide it.
-    wants_aux: bool = False
+    #: Named auxiliary external signals this method wants alongside
+    #: ``features``/``masks`` (e.g. ``("aef",)``, or ``("aef",
+    #: "olmoearth")`` for a method composing 2 embedding products) — see
+    #: :meth:`set_aux`. Default ``()`` (wants nothing); a subclass that
+    #: uses one or more sets this (usually a property, or an instance
+    #: attribute set in ``setup``) so ``GFSSModel`` knows which named
+    #: ``gfss.aux_cache_loaders`` entries to load and provide.
+    aux_names: Tuple[str, ...] = ()
 
     def __init__(self, **kwargs) -> None:
         super().__init__()
+        if kwargs:
+            # Every subclass's own __init__ forwards whatever it doesn't
+            # recognise here via **kwargs, all the way down this same
+            # chain -- so anything still left over at this point is not
+            # a real parameter of ANY class in the chain, almost always a
+            # typo or a stale/renamed config key (e.g. a parameter moved
+            # from HiSplit itself into one of its QStrategy subclasses --
+            # see q_strategies.py -- silently vanishing instead of
+            # raising is exactly the kind of bug that refactor needs this
+            # check to catch). Raise loudly instead of discarding them.
+            raise TypeError(
+                f"{type(self).__name__} got unexpected keyword argument(s): "
+                f"{sorted(kwargs)}."
+            )
         self.hierarchy: Optional[ClassHierarchy] = None
         self.not_novel_index: int = 254
         self.base_output: str = "softmax"
@@ -110,15 +126,16 @@ class BaseGFSSMethod(nn.Module, ABC):
         """Initialise from the full support set (default: nothing)."""
         return None
 
-    def set_aux(self, aux: Optional[Tensor]) -> None:
-        """Receive one batch's auxiliary external signal (e.g. AEF
-        embeddings), spatially aligned with the ``features``/``masks`` (or
-        images) of the call that follows — ``GFSSModel`` calls this right
-        before ``init_from_support``/``support_loss``/each TTA pass of
-        ``decode_to`` whenever :attr:`wants_aux` is ``True``, re-aligning it
-        under every test-time augmentation. ``None`` when no aux is
-        configured or the current batch has none (e.g. a missing cache
-        tile) — implementations must degrade gracefully, not raise.
+    def set_aux(self, aux: Dict[str, Tensor]) -> None:
+        """Receive one batch's named auxiliary external signals (e.g.
+        ``{"aef": ...}``), spatially aligned with the ``features``/
+        ``masks`` (or images) of the call that follows — ``GFSSModel``
+        calls this right before ``init_from_support``/``support_loss``/
+        each TTA pass of ``decode_to`` whenever :attr:`aux_names` is
+        non-empty, re-aligning every entry under every test-time
+        augmentation. A name in :attr:`aux_names` may be missing from
+        ``aux`` (e.g. a missing cache tile) — implementations must
+        degrade gracefully (``aux.get(name)`` → ``None``), not raise.
         Default: no-op (most methods do not use an auxiliary signal)."""
         return None
 

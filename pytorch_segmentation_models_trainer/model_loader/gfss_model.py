@@ -157,17 +157,18 @@ class GFSSModel(Model):
         self._test_feat_cache: Dict[Any, Tensor] = {}
         self._test_feat_cache_path: Optional[str] = None
         self._test_feat_cache_dirty: bool = False
-        aef_cache_dir = gfss.get("aef_cache_dir", None)
-        aef_cache_loader_cfg = gfss.get("aef_cache_loader", None)
-        if aef_cache_loader_cfg is not None:
-            # Alternative external-embedding source (e.g. OlmoEarthCacheLoader
-            # instead of the default AefCacheLoader) -- any class with the
-            # same load_batch(mask_paths, device, size) signature.
-            self.aef_loader = instantiate(aef_cache_loader_cfg, _recursive_=False)
-        elif aef_cache_dir:
-            self.aef_loader = AefCacheLoader(aef_cache_dir)
-        else:
-            self.aef_loader = None
+        # Named external-embedding sources (gfss.aux_cache_loaders: {name:
+        # <dir string, the default AefCacheLoader> | <Hydra target, e.g.
+        # OlmoEarthCacheLoader>}), keyed to match whatever names a method
+        # declares in its own `aux_names` (e.g. HiSplit's AEF gate wants
+        # "aef"; GateEnsemble wants "aef" + "olmoearth"). See _load_aux.
+        self.aux_loaders: Dict[str, Any] = {}
+        for name, loader_cfg in (gfss.get("aux_cache_loaders", None) or {}).items():
+            self.aux_loaders[name] = (
+                AefCacheLoader(loader_cfg)
+                if isinstance(loader_cfg, str)
+                else instantiate(loader_cfg, _recursive_=False)
+            )
 
     # ------------------------------------------------------------------
     # Model / method construction
@@ -278,7 +279,8 @@ class GFSSModel(Model):
 
         Also collects each image's ``mask_path`` (when the dataset returns
         it) into ``self._support_mask_paths``, aligned with the same order
-        — used by :meth:`_load_aux` for methods with ``wants_aux``.
+        — used by :meth:`_load_aux` for methods with a non-empty
+        ``aux_names``.
         """
         if self._support is None:
             loader = DataLoader(
@@ -298,25 +300,30 @@ class GFSSModel(Model):
             self._support_mask_paths = mask_paths or None
         return self._support
 
-    def _load_aux(
-        self, mask_paths: Optional[List[str]], size
-    ) -> Optional[Tensor]:
-        """The method's auxiliary external signal (e.g. AEF) for these
-        tiles, at the backbone's feature resolution ``size`` — ``None``
-        when the method doesn't want one, ``gfss.aef_cache_dir`` isn't
-        set, or ``mask_paths`` has none (e.g. ``return_metadata: false``,
-        a likely misconfiguration logged once by the caller's own
-        warning in ``HiSplit._fit_aef_gate``)."""
-        if self.aef_loader is None or not getattr(self.method, "wants_aux", False):
-            return None
-        if not mask_paths:
-            return None
-        return self.aef_loader.load_batch(mask_paths, self.device, tuple(size))
+    def _load_aux(self, mask_paths: Optional[List[str]], size) -> Dict[str, Tensor]:
+        """The method's named auxiliary external signals (e.g.
+        ``{"aef": ...}``) for these tiles, at the backbone's feature
+        resolution ``size`` -- ``{}`` when the method wants none
+        (``aux_names`` empty), ``mask_paths`` has none (e.g.
+        ``return_metadata: false``, a likely misconfiguration logged once
+        by the caller's own warning in ``HiSplit._fit_aef_gate``), or a
+        requested name has no configured loader (``gfss.aux_cache_
+        loaders`` missing that key -- also a likely misconfiguration, left
+        for the method's own ``set_aux`` to warn about via a missing key,
+        same as a missing cache tile)."""
+        names = getattr(self.method, "aux_names", ())
+        if not names or not mask_paths:
+            return {}
+        return {
+            name: self.aux_loaders[name].load_batch(mask_paths, self.device, tuple(size))
+            for name in names
+            if name in self.aux_loaders
+        }
 
     def _ensure_initialised(self) -> None:
         if not bool(self._gfss_initialised):
             feats, masks = self._get_support()
-            if getattr(self.method, "wants_aux", False):
+            if getattr(self.method, "aux_names", ()):
                 self.method.set_aux(
                     self._load_aux(self._support_mask_paths, feats.shape[-2:])
                 )
@@ -544,7 +551,7 @@ class GFSSModel(Model):
         batch_idx: Optional[int] = None,
         precomputed_identity_feats: Optional[Tensor] = None,
         stage: str = "test",
-        aux: Optional[Tensor] = None,
+        aux: Optional[Dict[str, Tensor]] = None,
     ) -> dict:
         """Logits of the method (key ``__main__``), of each decoding variant
         and of the unmodified base model (``__base__``), averaged over the TTA
@@ -565,25 +572,25 @@ class GFSSModel(Model):
           ``ref is self.model`` there, so it's the exact same computation,
           not an approximation.
 
-        ``aux`` (the method's auxiliary signal for this batch at the
-        identity orientation, from :meth:`_load_aux`, or ``None``) is
-        re-augmented with the exact same transform as ``x`` on every TTA
-        pass before the method sees it (:meth:`set_aux`) — it must stay
-        spatially aligned with ``feats`` under rotations/flips just like
-        the image itself.
+        ``aux`` (the method's named auxiliary signals for this batch at
+        the identity orientation, from :meth:`_load_aux`, ``{}`` when
+        none) is re-augmented entry-by-entry with the exact same
+        transform as ``x`` on every TTA pass before the method sees it
+        (:meth:`set_aux`) — each entry must stay spatially aligned with
+        ``feats`` under rotations/flips just like the image itself.
         """
         ref = self._reference()
         frozen = self.base_reference is None
         aug_sequence = list(augmentations) if augmentations else [ROT0]
         state = {"i": 0}
-        wants_aux = getattr(self.method, "wants_aux", False)
+        wants_aux = bool(getattr(self.method, "aux_names", ()))
 
         def predict(x: Tensor) -> dict:
             i = state["i"]
             aug_name = aug_sequence[i] if i < len(aug_sequence) else ROT0
             state["i"] += 1
             if wants_aux:
-                self.method.set_aux(_augment(aux, aug_name) if aux is not None else None)
+                self.method.set_aux({k: _augment(v, aug_name) for k, v in aux.items()})
             if aug_name == ROT0 and precomputed_identity_feats is not None:
                 feats = precomputed_identity_feats
             else:
@@ -616,8 +623,8 @@ class GFSSModel(Model):
                 self.method.adapt_to_query(*self._get_support(), feats)
         # TTA (cfg.tta_mode / use_tta, as in the base models) only at test time.
         augmentations = self._get_tta_augmentations() if stage == "test" else None
-        aux = None
-        if getattr(self.method, "wants_aux", False):
+        aux = {}
+        if getattr(self.method, "aux_names", ()):
             mask_paths = batch.get("mask_path") if isinstance(batch, dict) else None
             aux = self._load_aux(mask_paths, feats.shape[-2:])
         logits = self._predict_logits(
