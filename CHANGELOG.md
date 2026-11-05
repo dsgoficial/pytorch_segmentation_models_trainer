@@ -1,4 +1,4 @@
-# Unreleased
+# Version 1.5.0 - 2026-11-05
 
 ## Feature: `TripleGateEnsemble` — fixed-weight ensemble of 3 independently-gated `HiSplit` experts
 
