@@ -287,15 +287,20 @@ class GFSSModel(Model):
                 self.train_ds, batch_size=self.cfg.hyperparameters.batch_size
             )
             feats, masks, mask_paths = [], [], []
-            for batch in loader:
-                images, m = self._unpack_batch(batch)
-                f, sm = self._features_and_masks(
-                    images.to(self.device), m.to(self.device)
-                )
-                feats.append(f)
-                masks.append(sm)
-                if isinstance(batch, dict) and "mask_path" in batch:
-                    mask_paths.extend(batch["mask_path"])
+            # no_grad: the cache only feeds init_from_support and the frozen
+            # fast path (which detaches it); with a trainable backbone the
+            # autograd graph of every support image was kept alive, which
+            # ran out of memory on the full training set (307 MA tiles).
+            with torch.no_grad():
+                for batch in loader:
+                    images, m = self._unpack_batch(batch)
+                    f, sm = self._features_and_masks(
+                        images.to(self.device), m.to(self.device)
+                    )
+                    feats.append(f)
+                    masks.append(sm)
+                    if isinstance(batch, dict) and "mask_path" in batch:
+                        mask_paths.extend(batch["mask_path"])
             self._support = (torch.cat(feats), torch.cat(masks))
             self._support_mask_paths = mask_paths or None
         return self._support
