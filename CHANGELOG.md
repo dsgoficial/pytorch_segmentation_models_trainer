@@ -1,3 +1,11 @@
+# Unreleased
+
+## HRNet-OCR of any width and branch-injection hook
+
+- New `build_hrnet_ocr(width=18, n_classes, imagenet_timm=False)` in `custom_models/hrnet_models/seg_hrnet_ocr.py`. It scales the W48 config to branch channels `[w, 2w, 4w, 8w]`, so HRNet-W18-OCR (~12.1M params) is available next to `HRNetOCRW48` (~70M). With `imagenet_timm=True` it copies the timm `hrnet_w{width}` ImageNet weights into every backbone tensor with matching name and shape (`model.loaded_imagenet_keys` reports how many). Needed by the D_Hier architecture-generalisation study, which keeps every model at ~12-15M parameters.
+- `HRNetOCR.forward(x, branch_hook=None)`: optional callable applied to the branch tensors entering stage 3. It injects external context into one resolution branch. `None` keeps the previous behaviour bit for bit.
+- Docs: `website/docs/api/model.md` ("HRNet-OCR of any width"); example `conf/examples/hrnet_ocr_w18.yaml`. Tests: `tests/test_hrnet_ocr_width.py` (100% of the new code).
+
 # Version 1.5.0 - 2026-11-05
 
 ## Feature: `TripleGateEnsemble` — fixed-weight ensemble of 3 independently-gated `HiSplit` experts

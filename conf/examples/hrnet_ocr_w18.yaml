@@ -1,0 +1,7 @@
+# HRNet-OCR W18 (~12.1M params) with ImageNet weights from timm hrnet_w18.
+# See website/docs/api/model.md, "HRNet-OCR of any width".
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.hrnet_models.seg_hrnet_ocr.build_hrnet_ocr
+  width: 18
+  n_classes: 6
+  imagenet_timm: true

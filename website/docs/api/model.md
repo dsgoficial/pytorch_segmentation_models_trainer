@@ -91,6 +91,35 @@ model:
 A full working example with datasets, metrics, and scheduler is available at
 `conf/examples/multichannel_zero_init_segmentation.yaml`.
 
+### HRNet-OCR of any width (`build_hrnet_ocr`)
+
+`custom_models.hrnet_models.seg_hrnet_ocr.build_hrnet_ocr(width, n_classes, imagenet_timm)`
+builds HRNet-OCR with branch channels `[w, 2w, 4w, 8w]`. `width: 18` gives
+HRNet-W18-OCR (~12.1M parameters, against ~70M for the W48 of `HRNetOCRW48`),
+which suits small training sets. `imagenet_timm: true` copies the ImageNet
+weights of timm `hrnet_w{width}` into every backbone tensor with the same
+name and shape (all 1830 backbone tensors for W18). The OCR and auxiliary
+heads stay randomly initialised. The model returns `{"out", "aux"}` logits at
+stride 4.
+
+```yaml
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.hrnet_models.seg_hrnet_ocr.build_hrnet_ocr
+  width: 18
+  n_classes: 6
+  imagenet_timm: true
+```
+
+`HRNetOCR.forward(x, branch_hook=None)` accepts an optional callable applied to
+the list of branch tensors entering stage 3 (strides 4, 8 and 16). It is the
+hook for injecting external context into one resolution branch: stages 3 and
+4 fuse all branches, so the injected signal reaches every resolution.
+
+```python
+model = build_hrnet_ocr(width=18, n_classes=6, imagenet_timm=True)
+out = model(x, branch_hook=lambda xs: [xs[0], xs[1] + context_correction, xs[2]])
+```
+
 ---
 
 ## `VariationalAutoencoderModel`

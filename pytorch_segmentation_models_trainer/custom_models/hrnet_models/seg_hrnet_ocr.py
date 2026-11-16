@@ -18,6 +18,7 @@ import torch
 import torch.nn as nn
 import torch._utils
 import torch.nn.functional as F
+import timm
 
 from .bn_helper import relu_inplace
 
@@ -723,7 +724,21 @@ class HRNetOCR(nn.Module):
 
         return nn.Sequential(*modules), num_inchannels
 
-    def forward(self, x):
+    def forward(self, x, branch_hook=None):
+        """Run HRNet + OCR.
+
+        Args:
+            x: (B, 3, H, W) image batch.
+            branch_hook: optional callable ``f(x_list) -> x_list`` applied to
+                the list of branch tensors that enter stage 3 (strides 4, 8
+                and 16 of the input). Used to inject external context into a
+                resolution branch; because HRNet fuses all branches inside
+                stages 3 and 4, the injected signal reaches every resolution.
+                ``None`` keeps the original behaviour.
+
+        Returns:
+            dict with ``"out"`` and ``"aux"`` logits at stride 4.
+        """
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -749,6 +764,8 @@ class HRNetOCR(nn.Module):
                     x_list.append(self.transition2[i](y_list[-1]))
             else:
                 x_list.append(y_list[i])
+        if branch_hook is not None:
+            x_list = list(branch_hook(x_list))
         y_list = self.stage3(x_list)
 
         x_list = []
@@ -819,3 +836,51 @@ class HRNetOCR(nn.Module):
             self.load_state_dict(model_dict)
         elif pretrained:
             raise RuntimeError("No such file {}".format(pretrained))
+
+
+_W48_CFG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "hrnet_ocr_w48.yml")
+
+
+def build_hrnet_ocr(width=18, n_classes=1, imagenet_timm=False, **kwargs):
+    """Build an HRNet-OCR of any width (W18, W32, W48, ...).
+
+    Reuses the W48 config and scales the branch channels to
+    ``[w, 2w, 4w, 8w]`` (stem and stage 1 unchanged), the same rule of the
+    official HRNetV2 family.
+
+    Args:
+        width: branch width ``w`` (18 gives HRNet-W18-OCR, ~12.1M params).
+        n_classes: number of output classes.
+        imagenet_timm: copy ImageNet weights of timm ``hrnet_w{width}`` into
+            every backbone tensor whose name and shape match (OCR/aux heads
+            stay randomly initialised). The count is stored in
+            ``model.loaded_imagenet_keys``.
+        **kwargs: forwarded to :class:`HRNetOCR` (``align_corners``, ``ocr``...).
+
+    Returns:
+        HRNetOCR
+
+    Example (YAML)::
+
+        model:
+          _target_: pytorch_segmentation_models_trainer.custom_models.hrnet_models.seg_hrnet_ocr.build_hrnet_ocr
+          width: 18
+          n_classes: 6
+          imagenet_timm: true
+    """
+    if width <= 0:
+        raise ValueError(f"width must be positive, got {width}")
+    cfg = OmegaConf.load(_W48_CFG)
+    for k, stage in enumerate(("stage2", "stage3", "stage4")):
+        cfg.extra[stage].num_channels = [width * 2 ** i for i in range(k + 2)]
+    model = HRNetOCR(extra=cfg.extra, n_classes=n_classes, **kwargs)
+    model.init_weights("")
+    model.loaded_imagenet_keys = 0
+    if imagenet_timm:
+        src = timm.create_model(f"hrnet_w{width}", pretrained=True).state_dict()
+        own = model.state_dict()
+        match = {k: v for k, v in src.items() if k in own and own[k].shape == v.shape}
+        own.update(match)
+        model.load_state_dict(own)
+        model.loaded_imagenet_keys = len(match)
+    return model
