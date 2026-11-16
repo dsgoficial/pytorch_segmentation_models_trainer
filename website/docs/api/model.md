@@ -91,6 +91,32 @@ model:
 A full working example with datasets, metrics, and scheduler is available at
 `conf/examples/multichannel_zero_init_segmentation.yaml`.
 
+### UNetFormer (`UNetFormerBackbone`)
+
+`custom_models.unetformer.UNetFormerBackbone` ports the UNetFormer decoder
+(Wang et al., 2022, GeoSeg) onto any smp encoder, with the smp 3-step
+interface (`encoder(x)` -> `decoder(feats)` -> `segmentation_head(decoded)`).
+Code that edits `feats` between the encoder and the decoder (for example,
+context injection) works unchanged. ResNet-18 gives ~11.7M parameters.
+
+- Inputs: any multiple of 32 (128, 160, 224, 256, ...). The window
+  attention pads each map to a multiple of `window_size` with reflect
+  padding, and falls back to replicate padding when the map is smaller than
+  the window (the 1/32 map of a 128 px input is 4x4 for an 8x8 window). In
+  that case the window covers the whole map, so attention at that stage is
+  global rather than local.
+- `use_aux_head=True` enables the GeoSeg deep-supervision head in training;
+  its logits are left in `decoder._last_aux`.
+
+```yaml
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.unetformer.UNetFormerBackbone
+  encoder_name: resnet18
+  encoder_weights: imagenet
+  classes: 6
+  window_size: 8
+```
+
 ### HRNet-OCR of any width (`build_hrnet_ocr`)
 
 `custom_models.hrnet_models.seg_hrnet_ocr.build_hrnet_ocr(width, n_classes, imagenet_timm)`

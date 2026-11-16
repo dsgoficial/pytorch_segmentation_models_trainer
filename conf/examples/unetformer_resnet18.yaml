@@ -1,0 +1,8 @@
+# UNetFormer decoder (GeoSeg) on a smp ResNet-18 encoder (~11.7M params).
+# See website/docs/api/model.md, "UNetFormer".
+model:
+  _target_: pytorch_segmentation_models_trainer.custom_models.unetformer.UNetFormerBackbone
+  encoder_name: resnet18
+  encoder_weights: imagenet
+  classes: 6
+  window_size: 8

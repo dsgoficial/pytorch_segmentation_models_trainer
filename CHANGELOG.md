@@ -1,5 +1,11 @@
 # Unreleased
 
+## UNetFormer decoder on smp encoders (`UNetFormerBackbone`)
+
+- New `custom_models/unetformer.py`: UNetFormer decoder (Wang et al., 2022; ported from GeoSeg, GPL-3.0) on any smp encoder, exposing the smp `encoder`/`decoder`/`segmentation_head` interface so context can be injected into the encoder features before decoding. Optional GeoSeg auxiliary head (`use_aux_head`).
+- Window padding fix: GeoSeg called `F.pad(x, (0, p), mode="reflect")`, which torch rejects on 4D tensors, and it only worked because the pad never triggers at 256 px. The pad is now a 4-tuple, reflect when possible and replicate when the map is smaller than the window. Inputs of 128-224 px now run (they crashed); at 256 px nothing changes.
+- Docs: `website/docs/api/model.md` ("UNetFormer"); example `conf/examples/unetformer_resnet18.yaml`. Tests: `tests/test_unetformer.py` (100% of the module).
+
 ## HRNet-OCR of any width and branch-injection hook
 
 - New `build_hrnet_ocr(width=18, n_classes, imagenet_timm=False)` in `custom_models/hrnet_models/seg_hrnet_ocr.py`. It scales the W48 config to branch channels `[w, 2w, 4w, 8w]`, so HRNet-W18-OCR (~12.1M params) is available next to `HRNetOCRW48` (~70M). With `imagenet_timm=True` it copies the timm `hrnet_w{width}` ImageNet weights into every backbone tensor with matching name and shape (`model.loaded_imagenet_keys` reports how many). Needed by the D_Hier architecture-generalisation study, which keeps every model at ~12-15M parameters.
