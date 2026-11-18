@@ -10,7 +10,7 @@ Covers:
   - test_step() loss value, logging keys, compound loss, metrics
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import torch
 from omegaconf import OmegaConf
@@ -234,13 +234,15 @@ class TestTestStep:
                 {"loss_params": {"compound_loss": {"normalize_losses": False}}}
             ),
         )
-        type(model).current_epoch = PropertyMock(return_value=0)
-        model.log = MagicMock()
+        # patch.object restores the class attribute; assigning it on the class leaked a
+        # constant current_epoch=0 into every later Model subclass in the same worker.
+        with patch.object(type(model), "current_epoch", new_callable=PropertyMock, return_value=0):
+            model.log = MagicMock()
 
-        model.test_step(_make_batch(), 0)
-        logged_keys = [call.args[0] for call in model.log.call_args_list]
-        assert "losses/test_seg" in logged_keys
-        assert "losses/test_crossfield" in logged_keys
+            model.test_step(_make_batch(), 0)
+            logged_keys = [call.args[0] for call in model.log.call_args_list]
+            assert "losses/test_seg" in logged_keys
+            assert "losses/test_crossfield" in logged_keys
 
     def test_logs_extra_info_with_test_prefix(self):
         from pytorch_segmentation_models_trainer.custom_losses.base_loss import (
@@ -263,12 +265,14 @@ class TestTestStep:
                 {"loss_params": {"compound_loss": {"normalize_losses": False}}}
             ),
         )
-        type(model).current_epoch = PropertyMock(return_value=0)
-        model.log = MagicMock()
+        # patch.object restores the class attribute; assigning it on the class leaked a
+        # constant current_epoch=0 into every later Model subclass in the same worker.
+        with patch.object(type(model), "current_epoch", new_callable=PropertyMock, return_value=0):
+            model.log = MagicMock()
 
-        model.test_step(_make_batch(), 0)
-        logged_keys = [call.args[0] for call in model.log.call_args_list]
-        assert "extra/test_seg_iou" in logged_keys
+            model.test_step(_make_batch(), 0)
+            logged_keys = [call.args[0] for call in model.log.call_args_list]
+            assert "extra/test_seg_iou" in logged_keys
 
     def test_computes_metrics_with_test_prefix(self):
         cfg = _make_cfg(

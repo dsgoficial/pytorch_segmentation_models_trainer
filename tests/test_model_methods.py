@@ -423,13 +423,14 @@ class TestComputeLoss:
                 {"loss_params": {"compound_loss": {"normalize_losses": True}}}
             ),
         )
-        type(model).current_epoch = PropertyMock(return_value=0)
-
-        pred = torch.randn(2, 1, 4, 4)
-        gt = torch.randint(0, 2, (2, 1, 4, 4)).float()
-        loss, ind, extra = model._compute_loss(pred, gt)
-        assert isinstance(loss, torch.Tensor)
-        assert "seg" in ind
+        # patch.object restores the class attribute; assigning it on the class leaked a
+        # constant current_epoch=0 into every later Model subclass in the same worker.
+        with patch.object(type(model), "current_epoch", new_callable=PropertyMock, return_value=0):
+            pred = torch.randn(2, 1, 4, 4)
+            gt = torch.randint(0, 2, (2, 1, 4, 4)).float()
+            loss, ind, extra = model._compute_loss(pred, gt)
+            assert isinstance(loss, torch.Tensor)
+            assert "seg" in ind
 
 
 # ---------------------------------------------------------------------------
