@@ -148,14 +148,49 @@ experiments_runner:
 ```
 
 The runner reads `runner_state.json`, identifies which runs already have
-results, and starts from the first pending run.  For within-run resumption
-(interrupted mid-epoch), configure PyTorch Lightning's `ModelCheckpoint`
-callback and set `resume_from_checkpoint` in `hyperparameters` as usual.
+results, and starts from the first pending run.
 
 A run whose `output_dir` exists but is **not** recorded as complete (e.g. it
 crashed mid-training) has that leftover directory wiped before it is
 retried, so stale checkpoints from the failed attempt never mix with the
-new one.
+new one — unless the config sets `resumable: true` (below).
+
+### Resuming inside a run (`resumable: true`)
+
+By default an interrupted run restarts from epoch 0. On a shared GPU, where
+a guard may kill a job at any moment, that can cost a whole run. Set the
+top-level key
+
+```yaml
+resumable: true          # next to seed / pl_trainer, not inside experiments_runner
+experiments_runner:
+  seeds: [42, 101, 28]
+  output_base_dir: outputs/my_study
+```
+
+and each run:
+
+- saves its full training state (weights, optimizer, scheduler, epoch,
+  `EarlyStopping` / `ModelCheckpoint` state) after every validation to
+  `<run_dir>/resume_ckpt/fit_last.ckpt` — one file, overwritten each epoch;
+- when retried after an interruption, keeps its directory and resumes with
+  `trainer.fit(ckpt_path=...)` in the **same** `lightning_logs/version_N`
+  directory, so the best checkpoint and early stopping's patience survive
+  (with a new version dir, Lightning would drop `best_model_score` and a
+  worse later epoch would overwrite the true best);
+- deletes `resume_ckpt/` once fit + test completed.
+
+At most the epoch in progress is lost. A run forced with `overwrite` (or
+whose seed changed) is still wiped and restarted. A `fit_last.ckpt`
+truncated by the kill itself is reported and ignored (the run restarts).
+Resumed runs are not bit-identical to uninterrupted ones (DataLoader shuffle
+state is not restored), the same caveat as non-deterministic CuDNN. The
+default logger is pinned to the interrupted version; a configured `logger`
+keeps the version the runner injects. For `MeanTeacherModel` (AIO2), see
+[Resuming an interrupted AIO2 run](mean-teacher-aio2.md#resuming-an-interrupted-run).
+
+`hyperparameters.resume_from_checkpoint` is different: it only loads model
+weights into a fresh fit.
 
 Set `resume: false` to disable this entirely and always start every run
 fresh, ignoring any existing state.

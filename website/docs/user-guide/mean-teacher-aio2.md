@@ -154,34 +154,111 @@ committing to the full run matrix).
 
 Unlike a normal single `Trainer.fit()` run, AIO2 needs **two** — mirroring
 the official reference implementation's two separate CLI invocations
-(`--resume`/`--resume_from_detection`), not an in-run weight rewind:
+(`--resume`/`--resume_from_detection`), not an in-run weight rewind.
+
+**`train()` does this automatically** whenever `pl_model` is
+`MeanTeacherModel` — a plain `mode: train` run, or `mode: run-experiments`
+(one two-phase run per seed), needs no driver script:
+
+1. **Warm-up** (`lightning_logs/version_0`): trains on the noisy label with
+   the config's callbacks **minus `EarlyStopping`** — when to stop warming
+   up is ACT's decision, not validation patience's. Saves
+   `epoch_{N}.ckpt` every `checkpoint_every_n_epochs` and stops itself
+   once ACT reports `I_r`.
+2. **Correction** (`lightning_logs/version_1`): resumes from the warm-up
+   checkpoint holding the state after `I_r` epochs (or the nearest one
+   *before* it — never after), with `o2c_active = True` and the config's
+   callbacks **unchanged**, so it stops like any other condition (early
+   stopping, `max_epochs`).
+3. `trainer.test()` uses phase 2's best checkpoint.
+
+Under the hood this is `fit_two_phase(model, make_trainer)`, usable from
+your own script too:
 
 ```python
-from pytorch_lightning import Trainer
 from pytorch_segmentation_models_trainer.model_loader.mean_teacher_model import (
     MeanTeacherModel,
-    find_nearest_checkpoint,
+    fit_two_phase,
 )
 
 model = MeanTeacherModel(cfg)
-
-# Phase 1 — warm-up. Stops itself once ACT triggers.
-trainer1 = Trainer(max_epochs=cfg.hyperparameters.epochs, ...)
-trainer1.fit(model)
-assert model.resume_epoch is not None  # ACT triggered; otherwise raise max_epochs
-
-# Phase 2 — correction, from the nearest warm-up checkpoint.
-ckpt = find_nearest_checkpoint(cfg.act_checkpoint_dir, model.resume_epoch)
-model.o2c_active = True
-trainer2 = Trainer(max_epochs=cfg.hyperparameters.epochs, ...)
-trainer2.fit(model, ckpt_path=str(ckpt))
+trainer, info = fit_two_phase(model, lambda phase: Trainer(...))
+# info: {"aio2/act_triggered": 1.0, "aio2/warmup_epochs": ...,
+#        "aio2/resume_epoch": I_r, "aio2/resume_checkpoint_epoch": ...}
 ```
 
-`Trainer.fit(model, ckpt_path=...)` restores optimizer state natively —
-more correct than a manual weights-only reload would be.
+Details worth knowing:
 
-A single `train.py` invocation on `conf/examples/mean_teacher_aio2.yaml`
-only runs phase 1; write the driver script above for the full two-phase run.
+- **Callback state is not carried across.** The warm-up checkpoint is
+  copied without its `callbacks` entry (`prepare_phase2_checkpoint`)
+  before phase 2 resumes from it. Otherwise phase 2's `ModelCheckpoint`
+  would inherit the warm-up's best score and `trainer.test()` could end up
+  evaluating a warm-up (pre-correction) model. Weights (student + EMA
+  teacher), optimizer, LR scheduler and epoch/step counters *are* restored
+  (`Trainer.fit(ckpt_path=...)`).
+- **Epoch conventions.** `I_r` is a 1-indexed count of completed epochs;
+  checkpoint files are named by Lightning's 0-indexed `current_epoch`
+  (`epoch_9.ckpt` = state after 10 epochs). The driver converts between the
+  two; `aio2/resume_checkpoint_epoch` is reported in the same convention as
+  `aio2/resume_epoch`.
+- **`act_checkpoint_dir` is optional.** When unset, warm-up checkpoints go
+  to `<pl_trainer.default_root_dir>/act_warmup_checkpoints` — per seed under
+  `ExperimentsRunner`, which is what you want for multi-seed runs (a fixed
+  directory shared by all seeds would let one seed resume from another's
+  warm-up).
+- **If ACT never triggers** within `max_epochs`, phase 2 is skipped, the run
+  is a plain mean-teacher model, and `aio2/act_triggered` is `0`. The
+  `aio2/*` values land in each seed's `_seed_result.json` and in
+  `summary.csv` next to the test metrics, so such runs are visible.
+- **Epoch budget.** With `act_window_sizes: [10, 20, 30, 40]` ACT cannot
+  fire before ~65 epochs of history (largest window + its `mean(W)` buffer),
+  so `max_epochs` must be well above that.
+- **Use a constant learning rate with ACT.** ACT waits for the slope of the
+  teacher's training IoU to rise again (memorization starting). A decaying
+  schedule such as `CosineAnnealingLR` makes that slope fall monotonically,
+  so ACT never fires; the official code trains with a fixed learning rate.
+
+### Alternative trigger: `phase2_trigger: val_best`
+
+`phase2_trigger: act` (default) is the paper. Some label noise never
+produces the curve shape ACT looks for: with class-swap noise in a
+multiclass land-cover set, the teacher's training IoU kept rising smoothly,
+memorization was gradual, and ACT did not fire within 116 epochs at a
+constant learning rate while validation IoU had peaked at epoch 35.
+
+`phase2_trigger: val_best` replaces ACT with the validation set:
+
+- the warm-up **keeps `EarlyStopping`** and stops like any other run;
+- phase 2 restarts from the warm-up `ModelCheckpoint`'s **best model**
+  (callback state stripped as above) with O2C on;
+- ACT is not consulted and no `act_warmup_checkpoints/` are written
+  (`act/teacher_train_iou` is still logged).
+
+This is an adaptation, not AIO2 as published: AIO2 assumes no clean labels,
+and this mode uses the validation labels to decide when to start correcting.
+It is fair within an experiment where every condition already uses the same
+validation set for early stopping and checkpoint selection; report it as such.
+Diagnostics: `aio2/phase2_started` (both modes), `aio2/phase2_trigger_val_best`,
+`aio2/resume_checkpoint_epoch` (completed epochs at the restart checkpoint).
+
+### Resuming an interrupted run
+
+With `resumable: true` (see
+[Experiments Runner](experiments_runner.md#resuming-inside-a-run-resumable-true))
+and `phase2_trigger: val_best`, each phase saves
+`resume_ckpt/warmup_last.ckpt` / `resume_ckpt/correction_last.ckpt`, and once
+the warm-up is done the phase-2 hand-off (init checkpoint + `aio2/*` info) is
+recorded in `resume_ckpt/aio2_state.json`. On retry:
+
+| Interrupted during | Resumes |
+|---|---|
+| warm-up | the warm-up from its last epoch (`version_0`), then phase 2 as usual |
+| phase 2, before its first epoch was saved | phase 2 from the recorded init checkpoint; warm-up not redone |
+| phase 2 | phase 2 from its last epoch (`version_1`); warm-up not redone |
+
+`phase2_trigger: act` is **not** resumed: `ACTTracker`'s slope history is not
+part of the checkpoint, so ACT mode writes no resume state and an
+interrupted run restarts from scratch, as before.
 
 ---
 
@@ -199,7 +276,8 @@ conflict_resolution: priority_order # or: teacher_confidence
 o2c_filter_size: -1                 # odd int > 0 to enable boundary erosion
 act_window_sizes: [10, 20, 30, 40]
 checkpoint_every_n_epochs: 5
-act_checkpoint_dir: /data/outputs/mean_teacher_aio2/warmup_checkpoints
+# act_checkpoint_dir: optional — defaults to <default_root_dir>/act_warmup_checkpoints
+# phase2_trigger: act               # or: val_best — see "Alternative trigger" above
 
 loss:
   _target_: pytorch_segmentation_models_trainer.custom_losses.loss.WeightedDiceCrossEntropyLoss

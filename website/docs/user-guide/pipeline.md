@@ -197,27 +197,22 @@ pipeline:
       gpus: 1
       vram_gb: 12
 
-    - name: aio2_phase1_warmup
+    - name: aio2 # warm-up + O2C correction, both phases in one step
       config_dir: conf/examples
       config_name: mean_teacher_aio2
       gpus: 2 # takes both GPUs exclusively — zhu2019_baseline above must
       # finish (and free its GPU) before this can start, even though
-      # aio2_phase1_warmup has no depends_on on it — that's resource
-      # contention, not a dependency.
-
-    - name: aio2_phase2_correction
-      config_dir: conf/examples
-      config_name: mean_teacher_aio2 # same act_checkpoint_dir as phase 1
-      overrides: [model.o2c_active=true]
-      depends_on: [aio2_phase1_warmup]
-      gpus: 2
+      # aio2 has no depends_on on it — that's resource contention, not a
+      # dependency.
 ```
 
-This version does not capture and inject values dynamically between steps
-(e.g. resolving AIO2's warm-up checkpoint path automatically) — `depends_on`
-gets the ordering right, and `act_checkpoint_dir` being a fixed, known
-location in the step's own config is what lets phase 2 find phase 1's
-checkpoint without the pipeline needing to pass anything between them.
+AIO2's two phases are **not** two pipeline steps: `train()` runs both
+(warm-up until ACT triggers, then correction from the nearest warm-up
+checkpoint) inside one invocation — see
+[Mean-Teacher AIO2 → Two-phase orchestration](mean-teacher-aio2.md#two-phase-orchestration).
+This version does not capture and inject values dynamically between
+steps; keeping the phase hand-off inside the training process is what
+makes that unnecessary here.
 
 ---
 

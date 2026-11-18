@@ -78,6 +78,7 @@ def _minimal_instance(**overrides):
     obj.classes_to_correct = [0, 1]
     obj.conflict_resolution = "priority_order"
     obj.o2c_filter_size = -1
+    obj.phase2_trigger = "act"
     obj.o2c_active = False
     obj.resume_epoch = None
     obj.act_tracker = ACTTracker(window_sizes=[2, 3])
@@ -415,6 +416,21 @@ class TestOnTrainEpochEnd:
         obj.on_train_epoch_end()
         obj._teacher_train_iou.reset.assert_called_once()
 
+    def test_val_best_logs_iou_but_skips_act_and_checkpoints(self):
+        obj = _minimal_instance(phase2_trigger="val_best")
+        obj._teacher_train_iou = MagicMock()
+        obj._teacher_train_iou.compute.return_value = torch.tensor(0.5)
+        obj.act_tracker = MagicMock()
+        obj._trainer.current_epoch = 4  # would hit the checkpoint interval
+        with patch.object(obj, "log") as mock_log, patch.object(
+            obj, "_save_act_checkpoint"
+        ) as mock_save:
+            obj.on_train_epoch_end()
+        mock_log.assert_called_once()
+        obj.act_tracker.update.assert_not_called()
+        mock_save.assert_not_called()
+        assert obj._trainer.should_stop is False
+
     def test_checkpoint_saved_on_interval(self):
         obj = _minimal_instance(checkpoint_every_n_epochs=5)
         obj._act_checkpoint_dir = MagicMock()
@@ -434,12 +450,35 @@ class TestOnTrainEpochEnd:
         obj._trainer.save_checkpoint.assert_not_called()
 
     def test_missing_checkpoint_dir_warns_and_does_not_crash(self):
+        # Neither cfg.act_checkpoint_dir nor trainer.default_root_dir set.
         obj = _minimal_instance(checkpoint_every_n_epochs=1, _act_checkpoint_dir=None)
         obj._teacher_train_iou = MagicMock()
         obj._teacher_train_iou.compute.return_value = torch.tensor(0.5)
         obj._trainer.current_epoch = 0
+        obj._trainer.default_root_dir = None
         obj.on_train_epoch_end()  # must not raise
         obj._trainer.save_checkpoint.assert_not_called()
+
+    def test_checkpoint_dir_falls_back_to_default_root_dir(self, tmp_path):
+        """Per-seed default: <default_root_dir>/act_warmup_checkpoints, pinned."""
+        obj = _minimal_instance(checkpoint_every_n_epochs=1, _act_checkpoint_dir=None)
+        obj._teacher_train_iou = MagicMock()
+        obj._teacher_train_iou.compute.return_value = torch.tensor(0.5)
+        obj._trainer.current_epoch = 0
+        obj._trainer.default_root_dir = str(tmp_path)
+        obj.on_train_epoch_end()
+        expected = tmp_path / "act_warmup_checkpoints"
+        obj._trainer.save_checkpoint.assert_called_once_with(
+            str(expected / "epoch_0.ckpt")
+        )
+        assert obj._act_checkpoint_dir == expected  # pinned for phase 2
+        obj._trainer.default_root_dir = None  # a different trainer later...
+        assert obj.act_checkpoint_dir == expected  # ...still finds phase-1 files
+
+    def test_act_checkpoint_dir_none_without_trainer(self):
+        obj = _minimal_instance(_act_checkpoint_dir=None)
+        object.__setattr__(obj, "_trainer", None)
+        assert obj.act_checkpoint_dir is None
 
     def test_trigger_sets_resume_epoch_and_stops_trainer(self):
         obj = _minimal_instance()

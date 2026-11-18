@@ -35,6 +35,7 @@ import pandas as pd
 from omegaconf import DictConfig, OmegaConf
 
 from pytorch_segmentation_models_trainer.utils.spatial_kfold import SpatialKFoldSplitter
+from pytorch_segmentation_models_trainer.utils.resume_utils import has_resume_state
 
 # train is imported inside _seed_subprocess_worker so it runs in the subprocess,
 # not in the parent ER process.  The _collect_metrics method is also unused now
@@ -101,7 +102,12 @@ def _seed_subprocess_worker(yaml_cfg: str, output_dir: str, result_path: str) ->
         test_m = {
             k: v
             for k, v in all_metrics.items()
-            if k.startswith("test/") or k.endswith("/test")
+            if k.startswith("test/")
+            or k.endswith("/test")
+            # AIO2 run diagnostics (act_triggered, resume_epoch, ...): kept with
+            # the test metrics so they land in summary.csv next to the score
+            # they qualify — a run where ACT never fired is not an AIO2 result.
+            or k.startswith("aio2/")
         }
 
         ckpt_cb = getattr(trainer, "checkpoint_callback", None) if trainer else None
@@ -310,13 +316,29 @@ class ExperimentsRunner:
             isinstance(overwrite, set) and run_idx in overwrite
         )
 
-    def _clean_output_dir(self, output_dir: str) -> None:
+    def _clean_output_dir(self, output_dir: str, redo: bool = False) -> None:
         """Remove ``output_dir`` if it already exists.
 
         Called right before (re)executing a run, so that a forced overwrite
         or a retry of a previously interrupted run never mixes stale files
         (old checkpoints, logs) from a prior attempt with the new one.
+
+        Exception: with ``resumable: true`` in the config, a run that was
+        interrupted (never completed, ``redo=False``) and left resume state
+        (``utils.resume_utils.has_resume_state``) keeps its directory, so
+        ``train()`` resumes it instead of starting over.
+
+        Args:
+            output_dir: The run's directory.
+            redo: ``True`` when re-running a *completed* run (``overwrite``
+                or a stale seed) — always cleaned.
         """
+        if not redo and self.cfg.get("resumable", False) and has_resume_state(output_dir):
+            logger.info(
+                "ExperimentsRunner — %s was interrupted; keeping it to resume.",
+                output_dir,
+            )
+            return
         if os.path.exists(output_dir):
             shutil.rmtree(output_dir)
 
@@ -750,7 +772,7 @@ class ExperimentsRunner:
                 results = [r for r in results if r.run_idx != run_idx]
 
             _, output_dir = self._build_run_cfg(run_idx, seed)
-            self._clean_output_dir(output_dir)
+            self._clean_output_dir(output_dir, redo=prior is not None)
             result = self._run_single(run_idx, seed)
             results.append(result)
             results_sorted = sorted(results, key=lambda r: r.run_idx)
@@ -847,7 +869,7 @@ class ExperimentsRunner:
                 _, output_dir = self._build_run_cfg(
                     run_idx, seed, fold_idx=fold_idx, fold_paths=paths
                 )
-                self._clean_output_dir(output_dir)
+                self._clean_output_dir(output_dir, redo=prior is not None)
                 result = self._run_single(
                     run_idx, seed, fold_idx=fold_idx, fold_paths=paths
                 )
@@ -996,7 +1018,7 @@ class ExperimentsRunner:
                     OmegaConf.update(
                         run_cfg, "pl_trainer.default_root_dir", output_dir, merge=True
                     )
-                self._clean_output_dir(output_dir)
+                self._clean_output_dir(output_dir, redo=prior is not None)
                 result = self._run_single(
                     run_idx, seed, run_cfg=run_cfg, output_dir=output_dir
                 )

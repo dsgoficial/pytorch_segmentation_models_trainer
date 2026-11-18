@@ -20,7 +20,9 @@
 """
 
 import logging
+import os
 import re
+from pathlib import Path
 
 
 from pytorch_segmentation_models_trainer.custom_callbacks.training_callbacks import (
@@ -31,13 +33,25 @@ from pytorch_segmentation_models_trainer.model_loader.model import Model
 from pytorch_segmentation_models_trainer.model_loader.frame_field_model import (
     FrameFieldSegmentationPLModel,
 )
+from pytorch_segmentation_models_trainer.model_loader.mean_teacher_model import (
+    MeanTeacherModel,
+    fit_two_phase,
+    stamp_aio2_info,
+)
 
 import hydra
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import EarlyStopping
 
 from pytorch_segmentation_models_trainer.utils.os_utils import import_module_from_cfg
+from pytorch_segmentation_models_trainer.utils.resume_utils import (
+    clear_resume_state,
+    load_resume_checkpoint,
+    resume_checkpoint_callback,
+    resume_logger,
+)
 from pytorch_segmentation_models_trainer.utils.seed_utils import set_training_seed
 
 logger = logging.getLogger(__name__)
@@ -106,7 +120,12 @@ def train(cfg: DictConfig):
             the DataLoader shuffle sampler) are seeded before any model or
             dataset is created.  Set ``cfg.deterministic_cudnn: true`` to
             also force deterministic CuDNN algorithms (slower but fully
-            reproducible on GPU).
+            reproducible on GPU). Set ``cfg.resumable: true`` to save the full
+            training state every epoch under
+            ``<default_root_dir>/resume_ckpt`` and resume from it when the
+            run is retried after an interruption (see
+            ``utils.resume_utils``); the state is removed once fit + test
+            complete.
 
     Returns:
         Trainer: trainer monitoring object
@@ -160,8 +179,11 @@ def train(cfg: DictConfig):
     pl_trainer_cfg = OmegaConf.to_container(cfg.pl_trainer, resolve=True)
     if deterministic_cudnn:
         pl_trainer_cfg.setdefault("deterministic", True)
-    trainer = Trainer(**pl_trainer_cfg, logger=trainer_logger, callbacks=callback_list)
-    trainer.fit(model)
+    aio2_info = None
+    if isinstance(model, MeanTeacherModel):
+        trainer, aio2_info = _fit_aio2(cfg, model, pl_trainer_cfg, trainer_logger)
+    else:
+        trainer = _fit_single(cfg, model, pl_trainer_cfg, trainer_logger, callback_list)
     if "test_dataset" in cfg:
         logger.info("test_dataset found in config — running trainer.test()")
         checkpoint_callbacks = getattr(trainer, "checkpoint_callbacks", None)
@@ -188,7 +210,94 @@ def train(cfg: DictConfig):
                 best_ckpt, cfg=cfg, weights_only=False
             )
         trainer.test(model)
+    if aio2_info:
+        stamp_aio2_info(trainer, aio2_info)  # trainer.test() reset callback_metrics
+    if cfg.get("resumable", False):
+        clear_resume_state(_resume_root(pl_trainer_cfg))
     return trainer
+
+
+def _resume_root(pl_trainer_cfg: dict) -> Path:
+    """Run root holding ``resume_ckpt/``: ``default_root_dir`` (Lightning's default: cwd)."""
+    return Path(pl_trainer_cfg.get("default_root_dir") or os.getcwd())
+
+
+def _fit_single(
+    cfg: DictConfig, model, pl_trainer_cfg: dict, trainer_logger, callback_list: list
+) -> Trainer:
+    """Fit a single-phase model, resuming an interrupted run when ``cfg.resumable``.
+
+    With ``resumable: true`` a ``resume_checkpoint_callback("fit")`` is added
+    and, if ``resume_ckpt/fit_last.ckpt`` exists, the fit resumes from it in
+    the interrupted run's ``version_N`` directory (default logger only).
+    """
+    point = None
+    if cfg.get("resumable", False):
+        root = _resume_root(pl_trainer_cfg)
+        callback_list = callback_list + [resume_checkpoint_callback(root, "fit")]
+        point = load_resume_checkpoint(root, "fit")
+        trainer_logger = resume_logger(trainer_logger, point, root)
+    trainer = Trainer(**pl_trainer_cfg, logger=trainer_logger, callbacks=callback_list)
+    if point is None:
+        trainer.fit(model)
+    else:
+        logger.info("Resuming interrupted run from %s", point.path)
+        # weights_only=False: our own checkpoint, with the Hydra config pickled in.
+        trainer.fit(model, ckpt_path=str(point.path), weights_only=False)
+    return trainer
+
+
+def _build_callbacks(cfg: DictConfig, drop_early_stopping: bool = False) -> list:
+    """Instantiate ``cfg.callbacks`` (+ ``FinalMetricsCallback``), fresh objects."""
+    callbacks = (
+        [instantiate(i, _recursive_=False) for i in cfg.callbacks]
+        if "callbacks" in cfg
+        else []
+    )
+    if drop_early_stopping:
+        callbacks = [cb for cb in callbacks if not isinstance(cb, EarlyStopping)]
+    if cfg.get("add_final_metrics_callback", True):
+        if not any(isinstance(cb, FinalMetricsCallback) for cb in callbacks):
+            callbacks.append(FinalMetricsCallback())
+    return callbacks
+
+
+def _fit_aio2(cfg: DictConfig, model, pl_trainer_cfg: dict, trainer_logger):
+    """AIO2 (``MeanTeacherModel``): warm-up fit, then O2C fit from ``I_r``.
+
+    Each phase gets its own ``Trainer`` and freshly instantiated callbacks.
+    With ``phase2_trigger="act"`` (default) the warm-up trainer has no
+    ``EarlyStopping`` — ACT decides when warm-up ends; with ``"val_best"`` it
+    keeps it (see ``mean_teacher_model.fit_two_phase``). The correction phase uses
+    the config's callbacks unchanged, so it stops like every other condition.
+    ``trainer_logger`` is shared: with the default (``True``) each phase gets
+    its own ``lightning_logs/version_N`` (0 = warm-up, 1 = correction), which
+    keeps phase-1 checkpoints out of phase 2's ``ModelCheckpoint`` directory.
+
+    ``cfg.resumable`` with ``phase2_trigger="val_best"``: each phase also
+    saves ``resume_ckpt/<phase>_last.ckpt`` and ``fit_two_phase`` resumes the
+    interrupted phase. ACT mode is never resumed (``ACTTracker``'s history is
+    not checkpointed), so it saves no resume state and the runner retries it
+    from scratch as before.
+    """
+    resume_root = None
+    if cfg.get("resumable", False) and model.phase2_trigger == "val_best":
+        resume_root = _resume_root(pl_trainer_cfg)
+
+    def make_trainer(phase: str, point=None) -> Trainer:
+        callbacks = _build_callbacks(
+            cfg,
+            drop_early_stopping=(phase == "warmup" and model.phase2_trigger == "act"),
+        )
+        if resume_root is not None:
+            callbacks.append(resume_checkpoint_callback(resume_root, phase))
+        return Trainer(
+            **pl_trainer_cfg,
+            logger=resume_logger(trainer_logger, point, resume_root),
+            callbacks=callbacks,
+        )
+
+    return fit_two_phase(model, make_trainer, resume_root=resume_root)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,129 @@
+# AIO2 — mean-teacher + ACT + O2C noisy-label baseline.
+# Reference: Liu et al. (2024, IEEE TGRS), "AIO2: Online Correction of Object
+# Labels for Deep Learning with Incomplete Annotation in Remote Sensing Image
+# Segmentation"; official code https://github.com/zhu-xlab/AIO2.
+#
+# One `mode: train` invocation runs BOTH phases (see
+# website/docs/user-guide/mean-teacher-aio2.md, "Two-phase orchestration"):
+#   1. warm-up until ACT triggers (EarlyStopping below is left out here),
+#   2. O2C correction from the warm-up checkpoint nearest to I_r (with
+#      EarlyStopping), then trainer.test() on phase 2's best checkpoint.
+# Under `mode: run-experiments`, every seed gets its own two-phase run.
+mode: train
+
+pl_model:
+  _target_: pytorch_segmentation_models_trainer.model_loader.mean_teacher_model.MeanTeacherModel
+
+# --- AIO2 ---------------------------------------------------------------
+alpha: 0.999                        # teacher EMA decay (paper)
+correct_model: teacher              # or: student
+correct_base: iter                  # or: epoch
+classes_to_correct: [1, 2]          # source classes allowed to change (others fixed)
+conflict_resolution: priority_order # or: teacher_confidence
+o2c_filter_size: -1                 # odd int > 0 enables boundary erosion
+act_window_sizes: [10, 20, 30, 40]  # official example; buffer z = mean(W)
+checkpoint_every_n_epochs: 5        # official --save_interval
+# act_checkpoint_dir: optional — defaults to <default_root_dir>/act_warmup_checkpoints
+phase2_trigger: act                 # or: val_best (adaptation: start O2C from warm-up's best-val checkpoint)
+# resumable: true                   # save resume_ckpt/<phase>_last.ckpt every epoch and resume an
+#                                   # interrupted run (val_best only; ACT mode always restarts)
+# ACT needs a CONSTANT learning rate (no scheduler_list): a decaying schedule
+# keeps the training-IoU slope falling and ACT never fires.
+
+hyperparameters:
+  # ACT needs ~65 epochs of history before it can fire with W above
+  # (largest window + mean(W) buffer); this is the ceiling for both phases.
+  epochs: 200
+  batch_size: 16
+  max_lr: 4.0e-4
+
+class_definitions:
+  num_classes: 6
+  names: [water, built_up, bare_land, grassland, forest, cropland]
+
+model:
+  _target_: segmentation_models_pytorch.Unet
+  encoder_name: resnet50
+  encoder_weights: imagenet
+  in_channels: 3
+  classes: ${class_definitions.num_classes}
+
+loss:
+  _target_: pytorch_segmentation_models_trainer.custom_losses.loss.WeightedDiceCrossEntropyLoss
+  num_classes: ${class_definitions.num_classes}
+  ignore_index: 255
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: ${hyperparameters.max_lr}
+  weight_decay: 1.0e-4
+
+metrics:
+  - _target_: torchmetrics.JaccardIndex
+    task: multiclass
+    num_classes: ${class_definitions.num_classes}
+    average: macro
+    ignore_index: 255
+
+callbacks:
+  # Used in phase 2 only; train() drops EarlyStopping from the warm-up.
+  - _target_: pytorch_lightning.callbacks.EarlyStopping
+    monitor: MulticlassJaccardIndex/val
+    patience: 10
+    mode: max
+  - _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    monitor: MulticlassJaccardIndex/val
+    mode: max
+    save_top_k: 1
+    filename: "best-{epoch:02d}"
+
+pl_trainer:
+  max_epochs: ${hyperparameters.epochs}
+  accelerator: gpu
+  devices: 1
+  precision: "16-mixed"
+  default_root_dir: /data/outputs/mean_teacher_aio2
+
+train_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/splits/train.csv   # hard (long) noisy labels — O2C requires them
+  augmentation_list:
+    - _target_: albumentations.HorizontalFlip
+      p: 0.5
+    - _target_: albumentations.VerticalFlip
+      p: 0.5
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: true
+    drop_last: true
+
+val_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/splits/val.csv
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: false
+
+test_dataset:
+  _target_: pytorch_segmentation_models_trainer.dataset_loader.dataset.SegmentationDataset
+  input_csv_path: /data/splits/test.csv
+  augmentation_list:
+    - _target_: albumentations.Normalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    - _target_: albumentations.pytorch.ToTensorV2
+  data_loader:
+    batch_size: ${hyperparameters.batch_size}
+    num_workers: 8
+    shuffle: false

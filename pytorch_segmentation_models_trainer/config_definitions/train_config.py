@@ -131,3 +131,6 @@ class TrainConfig:
     seed: Optional[int] = None
     deterministic_cudnn: bool = False
     add_final_metrics_callback: bool = True
+    # Save the full training state every epoch (resume_ckpt/) and resume an
+    # interrupted run from it; see utils.resume_utils.
+    resumable: bool = False
