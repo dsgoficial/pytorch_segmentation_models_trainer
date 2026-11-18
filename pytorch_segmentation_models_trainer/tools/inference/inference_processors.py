@@ -1397,7 +1397,7 @@ class PolygonRNNInferenceProcessor(AbstractInferenceProcessor):
         output_list = []
         norm_func = self.get_normalization_function()
         for box in bboxes:
-            croped_image = image.crop(box=box)
+            croped_image = image.crop(box=tuple(box))
             image_tile = croped_image.resize(
                 (self.image_size, self.image_size), Image.BILINEAR
             )

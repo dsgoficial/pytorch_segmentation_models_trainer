@@ -173,19 +173,19 @@ class Test_BuildMask(BasicTestCase):
                 os.path.join(expected_output_path, "dsg_dataset.csv"), csv_output
             )
 
-    @patch(
-        "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.PostgisGeoDF"
-    )
-    def test_build_masks_from_postgis(self, mock_postgis_geodf):
-        # Mocking PostgisGeoDF to return data from buildings.geojson
-        mask_geo_df = FileGeoDF(
-            os.path.join(root_dir, "data", "build_masks_data", "buildings.geojson")
-        )
-        mock_instance = MagicMock()
-        mock_instance.gdf = mask_geo_df.gdf
-        mock_postgis_geodf.return_value = mock_instance
+    def test_build_masks_from_postgis(self):
+        # PostgisGeoDF is replaced by a plain function returning the data of
+        # buildings.geojson. Not a MagicMock: hydra-core 1.3.8 refuses to
+        # instantiate unittest.mock targets.
+        def fake_postgis_geodf(**kwargs):
+            return FileGeoDF(
+                os.path.join(root_dir, "data", "build_masks_data", "buildings.geojson")
+            )
 
-        with initialize(config_path="./test_configs"):
+        with patch(
+            "pytorch_segmentation_models_trainer.tools.data_handlers.vector_reader.PostgisGeoDF",
+            new=fake_postgis_geodf,
+        ), initialize(config_path="./test_configs"):
             image_dir = os.path.join(root_dir, "data", "build_masks_data", "images")
             expected_output_path = os.path.join(
                 root_dir, "expected_outputs", "build_masks"

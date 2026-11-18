@@ -1,5 +1,12 @@
 # Unreleased
 
+## Security: dependency updates for open Dependabot alerts
+
+- `uv.lock`: aiohttp 3.14.5, certifi 2026.10.23, filelock 4.2.12, hydra-core 1.3.8, mako 1.4.3, multidict 7.2.1, pillow 13.0.0, pyasn1 0.6.5, setuptools 84.2.1, urllib3 2.8.0 (yarl 1.25.1 follows multidict). torch is unchanged: the main resolution already has 2.13.0, and the remaining alerts refer to 2.4.1 in the `gpu-ml` fork, which the CUDA 12 RAPIDS stack holds back.
+- `web/`: vitest and `@vitest/coverage-v8` to ^4.1.12 and `npm audit fix` of the lockfile; `website/`: `npm audit fix` of the lockfile (no `package.json` change). No `--force` upgrades.
+- Pillow 13 compares the crop box with a tuple, so `PolygonRNNInferenceProcessor.crop_and_resize_image_to_bboxes` now passes the numpy box as a tuple (it raised "truth value of an array is ambiguous").
+- hydra-core 1.3.8 refuses to instantiate `unittest.mock` targets: `test_build_masks_from_postgis` replaces `PostgisGeoDF` with a plain function instead of a `MagicMock`.
+
 ## UNetFormer decoder on smp encoders (`UNetFormerBackbone`)
 
 - New `custom_models/unetformer.py`: UNetFormer decoder (Wang et al., 2022; ported from GeoSeg, GPL-3.0) on any smp encoder, exposing the smp `encoder`/`decoder`/`segmentation_head` interface so context can be injected into the encoder features before decoding. Optional GeoSeg auxiliary head (`use_aux_head`).
