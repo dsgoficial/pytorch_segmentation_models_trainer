@@ -1,0 +1,14 @@
+# Loaders for the per-tile auxiliary raster caches built by
+#   pytorch-smt-tools download-gem15 --manifest manifest.csv --output-dir /data/cache_gem15
+#   pytorch-smt-tools download-forest-typology --manifest manifest.csv --output-dir /data/cache_forty
+# Both expose load_batch(mask_paths, device, size), like AefCacheLoader.
+# See website/docs/user-guide/auxiliary-rasters.md.
+
+gem15_loader:
+  _target_: pytorch_segmentation_models_trainer.tools.aux_rasters.gem15.Gem15CacheLoader
+  cache_dir: /data/cache_gem15
+  tpi_radius: 5  # TPI window radius in pixels (5 px = ~50 m on a 10 m grid)
+
+forty_loader:
+  _target_: pytorch_segmentation_models_trainer.tools.aux_rasters.forest_typology.ForTyCacheLoader
+  cache_dir: /data/cache_forty

@@ -640,6 +640,98 @@ def download_aef_embeddings_cmd(
     click.echo("Download complete.")
 
 
+def _echo_aux_report(report) -> None:
+    """Prints the per-status tile counts of an aux-raster batch download."""
+    for key in ("written", "skipped", "no_data", "failed"):
+        click.echo(f"{key}: {len(report[key])}")
+    for tile_id, msg in report["failed"]:
+        click.echo(f"  failed {tile_id}: {msg}")
+
+
+_AUX_MANIFEST_OPTIONS = [
+    click.option(
+        "--manifest",
+        required=True,
+        type=click.Path(exists=True, dir_okay=False),
+        help="CSV with one row per tile: id, bbox_west, bbox_south, bbox_east, bbox_north (WGS84).",
+    ),
+    click.option(
+        "--output-dir",
+        required=True,
+        type=click.Path(file_okay=False),
+        help="Cache directory; one <id>.npz per tile.",
+    ),
+    click.option("--size", default=64, show_default=True, type=int, help="Output grid side (pixels)."),
+    click.option("--max-workers", default=8, show_default=True, type=int, help="Download threads."),
+    click.option("--overwrite", is_flag=True, help="Re-download tiles that already have a cache file."),
+]
+
+
+def _aux_manifest_options(fn):
+    for opt in reversed(_AUX_MANIFEST_OPTIONS):
+        fn = opt(fn)
+    return fn
+
+
+@cli.command("download-gem15")
+@_aux_manifest_options
+def download_gem15_cmd(manifest, output_dir, size, max_workers, overwrite):
+    """Cache GEM-15 surface/terrain elevation (15 m, public COGs) per tile.
+
+    Each <id>.npz holds 'dsm' (5, size, size), 'dtm' (size, size) and
+    'pixel_size_m'; see tools.aux_rasters.gem15.terrain_features.
+    """
+    import pandas as pd
+    from pytorch_segmentation_models_trainer.tools.aux_rasters import common, gem15
+
+    tiles = common.tiles_from_manifest(pd.read_csv(manifest))
+    report = common.download_tiles(
+        tiles,
+        output_dir,
+        lambda b, p: gem15.download_tile(b, p, size=(size, size)),
+        max_workers=max_workers,
+        overwrite=overwrite,
+        desc="GEM-15",
+    )
+    _echo_aux_report(report)
+
+
+@cli.command("download-forest-typology")
+@_aux_manifest_options
+@click.option(
+    "--index-cache",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="JSON cache of the ForTy file footprints (default: <output-dir>/forty_index.json).",
+)
+def download_forest_typology_cmd(manifest, output_dir, size, max_workers, overwrite, index_cache):
+    """Cache Forest Typology (ForTy) 2020 v1.0 probabilities (10 m) per tile.
+
+    Each <id>.npz holds 'forty' (5, size, size) uint8 (x250, 255 = nodata);
+    see tools.aux_rasters.forest_typology.forty_probabilities.
+    """
+    from pathlib import Path
+    import pandas as pd
+    from pytorch_segmentation_models_trainer.tools.aux_rasters import common
+    from pytorch_segmentation_models_trainer.tools.aux_rasters import forest_typology as ft
+
+    tiles = common.tiles_from_manifest(pd.read_csv(manifest))
+    index = ft.build_index(
+        ft.gzds_for_bounds(tiles.values()),
+        cache_path=Path(index_cache or Path(output_dir) / "forty_index.json"),
+        max_workers=max_workers,
+    )
+    report = common.download_tiles(
+        tiles,
+        output_dir,
+        lambda b, p: ft.download_tile(b, p, index, size=(size, size)),
+        max_workers=max_workers,
+        overwrite=overwrite,
+        desc="ForTy",
+    )
+    _echo_aux_report(report)
+
+
 @cli.command("generate-training-csv")
 @click.argument("manifest_path", type=click.Path(exists=True, dir_okay=False))
 @click.option(

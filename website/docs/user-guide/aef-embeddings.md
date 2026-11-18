@@ -173,3 +173,5 @@ neighbor, then writes the result using the selected dtype.
 
 Use [soft-label training](./soft-label-training.md) to train with the generated
 `p_soft_path` and `w_conf_path` rasters.
+
+See also [Auxiliary Rasters (GEM-15, Forest Typology)](./auxiliary-rasters.md) for per-tile caches of terrain/height and forest-type rasters on the same tile grid.
